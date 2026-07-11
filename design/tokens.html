@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kodama — Design Tokens (P0-4 spec sheet)</title>
+
+<!-- The single source of truth. This page never redefines a token; it only
+     consumes design/tokens.css, so it cannot drift from the real values. -->
+<link rel="stylesheet" href="tokens.css">
+
+<style>
+  /* Page chrome only — every value below is a token from tokens.css. */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: var(--fs-body);
+    line-height: var(--lh-body);
+    font-weight: var(--fw-regular);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    transition: background .5s ease, color .5s ease;
+  }
+  body.grey { filter: grayscale(1); }
+
+  .wrap { max-width: var(--wide); margin: 0 auto; padding: 0 var(--flow-gutter); }
+  section { padding-block: var(--flow-section); }
+  .col { max-width: var(--content); }
+  .prose { max-width: var(--measure); }
+
+  .eyebrow {
+    font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: var(--ls-eyebrow);
+    font-weight: var(--fw-medium); color: var(--text-faint); margin: 0 0 var(--space-md);
+  }
+  h1, h2, h3 { text-wrap: balance; font-weight: var(--fw-medium); margin: 0; }
+  h2 { font-size: var(--fs-h2); line-height: var(--lh-h2); letter-spacing: var(--ls-h2); margin-bottom: var(--space-sm); }
+  h3 { font-size: var(--fs-h3); line-height: var(--lh-h3); letter-spacing: var(--ls-h3); }
+  p  { margin: 0 0 var(--space-sm); }
+  p:last-child { margin-bottom: 0; }
+  .lead { font-size: var(--fs-read); color: var(--text-soft); line-height: var(--lh-read); }
+  .soft { color: var(--text-soft); }
+  .faint { color: var(--text-faint); }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  a { color: var(--accent); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: var(--radius-focus); }
+
+  /* masthead */
+  .top { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm);
+         padding-block: var(--space-lg); color: var(--text-faint); flex-wrap: wrap; }
+  .brand { display: flex; align-items: baseline; gap: var(--space-2xs); font-size: var(--fs-cap); letter-spacing: .04em; }
+  .brand b { color: var(--text); font-weight: var(--fw-semibold); letter-spacing: .01em; }
+  .controls { display: flex; gap: var(--space-md); }
+  .btn {
+    font: inherit; font-size: var(--fs-eyebrow); letter-spacing: .16em; text-transform: uppercase;
+    color: var(--text-faint); background: transparent; border: 0; cursor: pointer;
+    padding: var(--space-2xs) var(--space-3xs); display: inline-flex; align-items: center; gap: var(--space-2xs);
+  }
+  .btn:hover { color: var(--text-soft); }
+  .btn .swatch { width: .7rem; height: .7rem; border-radius: 50%; background: var(--text-soft); }
+
+  /* swatches */
+  .swatches { display: grid; grid-template-columns: repeat(7, 1fr); gap: var(--space-sm); margin-top: var(--space-lg); }
+  @media (max-width: 46rem) { .swatches { grid-template-columns: repeat(4, 1fr); } }
+  @media (max-width: 30rem) { .swatches { grid-template-columns: repeat(2, 1fr); } }
+  .chip .well { aspect-ratio: 4/5; border-radius: var(--radius-sm);
+                box-shadow: var(--lift-soft), var(--hairline); margin-bottom: var(--space-2xs); }
+  .chip .name { font-size: var(--fs-cap); font-weight: var(--fw-medium); }
+  .chip .hex { font-size: var(--fs-eyebrow); color: var(--text-faint); letter-spacing: .02em; }
+
+  /* contrast table */
+  .contrast { margin-top: var(--space-lg); }
+  .crow { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: var(--space-md); padding: var(--space-sm) 0; }
+  .crow + .crow { box-shadow: inset 0 1px 0 var(--edge-faint); }
+  .crow .demo { padding: var(--space-xs) var(--space-sm); border-radius: var(--radius-sm); }
+  .crow .demo .big { font-size: var(--fs-h3); }
+  .crow .demo .small { font-size: var(--fs-cap); }
+  .crow .pair { font-size: var(--fs-cap); color: var(--text-faint); }
+  .crow .ratio { font-family: var(--mono); font-variant-numeric: tabular-nums; text-align: right; }
+  .grade { display: inline-block; font-size: var(--fs-eyebrow); letter-spacing: .12em; text-transform: uppercase;
+           color: var(--text-soft); }
+  .grade.warn { color: var(--accent); }
+  .grade.fail { color: #b4523f; }
+
+  /* semantic token list */
+  .toklist { margin-top: var(--space-lg); }
+  .tokrow { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--space-md); padding: var(--space-xs) 0; }
+  .tokrow + .tokrow { box-shadow: inset 0 1px 0 var(--edge-faint); }
+  .tokrow .dot { width: 1.5rem; height: 1.5rem; border-radius: var(--radius-sm); box-shadow: var(--hairline); flex: none; }
+  .tokrow code { font-family: var(--mono); font-size: var(--fs-cap); color: var(--text); }
+  .tokrow .desc { font-size: var(--fs-cap); color: var(--text-faint); text-align: right; }
+
+  /* type specimens */
+  .specimens { display: grid; grid-template-columns: 1fr 1fr; gap: var(--flow-gutter); align-items: start; margin-top: var(--space-lg); }
+  @media (max-width: 46rem) { .specimens { grid-template-columns: 1fr; gap: var(--space-lg); } }
+  .spec { padding: var(--space-lg); border-radius: var(--radius-md); background: var(--surface); box-shadow: var(--lift-soft); }
+  .spec .label { font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: .2em; color: var(--text-faint); margin-bottom: var(--space-sm); }
+  .spec .ui-title { font-size: var(--fs-h3); font-weight: var(--fw-semibold); letter-spacing: var(--ls-h3); }
+  .spec .ui-meta { font-size: var(--fs-cap); color: var(--text-faint); margin-top: var(--space-3xs); }
+  .spec .ui-row { display: flex; justify-content: space-between; gap: var(--space-sm); padding: var(--space-2xs) 0; color: var(--text-soft); }
+  .spec .ui-row + .ui-row { box-shadow: inset 0 1px 0 var(--edge-faint); }
+  .spec .ui-row .mono { color: var(--text); }
+  .spec .read { font-family: var(--serif); font-size: var(--fs-read); line-height: var(--lh-read); }
+  .spec .read + .read { margin-top: var(--space-sm); }
+
+  /* type scale ramp */
+  .ramp { margin-top: var(--space-lg); }
+  .rrow { display: grid; grid-template-columns: 9rem 1fr; align-items: baseline; gap: var(--space-md); padding: var(--space-xs) 0; }
+  .rrow + .rrow { box-shadow: inset 0 1px 0 var(--edge-faint); }
+  .rrow .meta { font-family: var(--mono); font-size: var(--fs-eyebrow); color: var(--text-faint); }
+  .rrow .sample { text-wrap: balance; }
+
+  /* spacing ramp */
+  .space-ramp { margin-top: var(--space-lg); }
+  .srow { display: grid; grid-template-columns: 6rem 1fr; align-items: center; gap: var(--space-md); padding: var(--space-2xs) 0; }
+  .srow .meta { font-family: var(--mono); font-size: var(--fs-eyebrow); color: var(--text-faint); }
+  .srow .bar { height: .9rem; border-radius: 2px; background: var(--text-soft); }
+
+  /* radii + surfaces */
+  .samples { display: flex; flex-wrap: wrap; gap: var(--space-lg); margin-top: var(--space-lg); align-items: flex-end; }
+  .sample-card { display: flex; flex-direction: column; gap: var(--space-2xs); font-size: var(--fs-eyebrow); color: var(--text-faint); font-family: var(--mono); }
+  .sample-card .box { width: 6rem; height: 4rem; background: var(--surface); }
+  .box.r-sm { border-radius: var(--radius-sm); box-shadow: var(--hairline); }
+  .box.r-md { border-radius: var(--radius-md); box-shadow: var(--hairline); }
+  .box.lift { border-radius: var(--radius-md); box-shadow: var(--lift); }
+  .box.lift-soft { border-radius: var(--radius-md); box-shadow: var(--lift-soft); }
+  .box.edge { border-radius: var(--radius-md); box-shadow: inset 0 0 0 1px var(--edge-strong); }
+
+  footer { padding-block: var(--space-2xl) var(--space-xl); color: var(--text-faint); font-size: var(--fs-cap); }
+  footer .rule { height: 1px; background: var(--edge); margin-bottom: var(--space-md); max-width: var(--content); }
+  footer a { color: var(--text-soft); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand"><b>kodama</b><span>design tokens · spec sheet · P0-4</span></div>
+    <div class="controls">
+      <button class="btn" id="greyToggle" type="button" aria-pressed="false">
+        <span class="swatch" aria-hidden="true"></span><span id="greyName">colour</span>
+      </button>
+      <button class="btn" id="themeToggle" type="button" aria-label="Toggle light and dark">
+        <span class="swatch" aria-hidden="true"></span><span id="themeName">day</span>
+      </button>
+    </div>
+  </header>
+</div>
+
+<!-- ===================== INTRO ===================== -->
+<div class="wrap">
+  <section class="col" style="padding-top: var(--flow-hero);">
+    <p class="eyebrow">the locked tokens</p>
+    <h1 style="font-size: var(--fs-display); font-weight: var(--fw-light); line-height: var(--lh-display); letter-spacing: var(--ls-display); max-width: 18ch; margin: 0 0 var(--space-md);">
+      The material, not the mood.</h1>
+    <p class="lead prose">Every value here reads live from <span class="mono">design/tokens.css</span> — swatches,
+      type, spacing, contrast. Toggle <b>day/night</b> to check both themes, and <b>colour/greyscale</b> to prove
+      the hierarchy holds with hue removed.</p>
+    <p class="faint prose" style="font-size: var(--fs-cap); margin-top: var(--space-sm);">Typefaces render as system
+      fallbacks until <span class="mono">feat/scaffold-tauri-app</span> bundles the real faces (Source Sans&nbsp;3 /
+      Source Serif&nbsp;4 / Source Code Pro). The chosen faces lead every font stack already.</p>
+  </section>
+</div>
+
+<!-- ===================== PALETTE ===================== -->
+<div class="wrap">
+  <section class="col">
+    <p class="eyebrow">colour · pigments</p>
+    <h2>Six near-neutrals and one green.</h2>
+    <p class="prose soft">A desaturated grey-green value ladder. Both greens stay quiet — a soft interactive accent,
+      and the brighter one reserved for the listening state.</p>
+    <div class="swatches">
+      <div class="chip"><div class="well" style="background:var(--k-washi)"></div><span class="name">Washi</span><br><span class="hex mono">#F1EFE6</span></div>
+      <div class="chip"><div class="well" style="background:var(--k-mist)"></div><span class="name">Mist</span><br><span class="hex mono">#DCE1D8</span></div>
+      <div class="chip"><div class="well" style="background:var(--k-stone)"></div><span class="name">Stone</span><br><span class="hex mono">#8B8F86</span></div>
+      <div class="chip"><div class="well" style="background:var(--k-moss)"></div><span class="name">Moss</span><br><span class="hex mono">#59654F</span></div>
+      <div class="chip"><div class="well" style="background:var(--k-fern)"></div><span class="name">Fern</span><br><span class="hex mono">#3B4636</span></div>
+      <div class="chip"><div class="well" style="background:var(--k-sumi)"></div><span class="name">Sumi</span><br><span class="hex mono">#23261F</span></div>
+      <div class="chip"><div class="well" style="background:var(--k-green)"></div><span class="name">Green</span><br><span class="hex mono">#5F7E5A</span></div>
+    </div>
+  </section>
+</div>
+
+<!-- ===================== SEMANTIC TOKENS ===================== -->
+<div class="wrap">
+  <section class="col">
+    <p class="eyebrow">colour · semantic tokens</p>
+    <h2>What components consume.</h2>
+    <p class="prose soft">These re-map per theme; the pigments above stay fixed. Swatches update live with the toggle.</p>
+    <div class="toklist" id="toklist"><!-- filled by script --></div>
+  </section>
+</div>
+
+<!-- ===================== CONTRAST ===================== -->
+<div class="wrap">
+  <section class="col">
+    <p class="eyebrow">colour · contrast (live)</p>
+    <h2>Value carries the hierarchy — and clears AA.</h2>
+    <p class="prose soft">WCAG ratios computed from the resolved token values in the current theme. Recomputed on
+      every toggle. Text pairs target AA (4.5:1); the listening dot is a graphical mark (3:1).</p>
+    <div class="contrast" id="contrast"><!-- filled by script --></div>
+  </section>
+</div>
+
+<!-- ===================== TYPOGRAPHY ===================== -->
+<div class="wrap">
+  <section class="col">
+    <p class="eyebrow">type · roles</p>
+    <h2>One sans for the interface, one serif for reading.</h2>
+    <p class="prose soft">Hierarchy from scale, weight, and space — almost never colour.</p>
+
+    <div class="specimens">
+      <div class="spec">
+        <p class="label">interface · humanist sans</p>
+        <div class="ui-title">Weekly sync — Growth</div>
+        <div class="ui-meta">Thu · 42 min · 3 speakers</div>
+        <div style="margin-top: var(--space-md);">
+          <div class="ui-row"><span>Decisions</span><span class="mono">4</span></div>
+          <div class="ui-row"><span>Open items</span><span class="mono">7</span></div>
+          <div class="ui-row"><span>Routed to</span><span>Growth / Q3</span></div>
+        </div>
+      </div>
+      <div class="spec">
+        <p class="label">reading view · serif</p>
+        <p class="read">The distilled note reads like something written, not generated — generous line height, a
+          comfortable measure, and quiet warmth.</p>
+        <p class="read">This is where a serif earns its place: the transcript becomes a page you actually want to read.</p>
+      </div>
+    </div>
+
+    <div class="ramp">
+      <p class="eyebrow" style="margin-top: var(--space-xl);">the scale</p>
+      <div class="rrow"><span class="meta">--fs-display<br>fw 300</span><span class="sample" style="font-size:var(--fs-display); font-weight:var(--fw-light); line-height:var(--lh-display); letter-spacing:var(--ls-display);">Calm you notice</span></div>
+      <div class="rrow"><span class="meta">--fs-h2</span><span class="sample" style="font-size:var(--fs-h2); font-weight:var(--fw-medium); line-height:var(--lh-h2); letter-spacing:var(--ls-h2);">Section heading</span></div>
+      <div class="rrow"><span class="meta">--fs-h3</span><span class="sample" style="font-size:var(--fs-h3); font-weight:var(--fw-medium); line-height:var(--lh-h3); letter-spacing:var(--ls-h3);">Subsection heading</span></div>
+      <div class="rrow"><span class="meta">--fs-read<br>serif</span><span class="sample" style="font-size:var(--fs-read); font-family:var(--serif); line-height:var(--lh-read);">Reading measure, in the serif.</span></div>
+      <div class="rrow"><span class="meta">--fs-body</span><span class="sample" style="font-size:var(--fs-body);">Body copy at a comfortable default size.</span></div>
+      <div class="rrow"><span class="meta">--fs-cap</span><span class="sample soft" style="font-size:var(--fs-cap);">Caption and secondary metadata.</span></div>
+      <div class="rrow"><span class="meta">--fs-eyebrow</span><span class="sample faint" style="font-size:var(--fs-eyebrow); text-transform:uppercase; letter-spacing:var(--ls-eyebrow);">Eyebrow / kicker</span></div>
+      <div class="rrow"><span class="meta">--mono<br>tabular</span><span class="sample mono" style="font-size:var(--fs-body);">1,204 · 09:42 · 0.85 — figures align</span></div>
+    </div>
+  </section>
+</div>
+
+<!-- ===================== SPACING ===================== -->
+<div class="wrap">
+  <section class="col">
+    <p class="eyebrow">space · numeric scale</p>
+    <h2>A 4px base, accelerating toward generous.</h2>
+    <p class="prose soft">Component-internal spacing uses these fixed steps; page-level rhythm uses the fluid
+      <span class="mono">--flow-*</span> tokens; layout uses <span class="mono">--measure/--content/--wide</span>.</p>
+    <div class="space-ramp">
+      <div class="srow"><span class="meta">3xs · 4</span><span class="bar" style="width:var(--space-3xs)"></span></div>
+      <div class="srow"><span class="meta">2xs · 8</span><span class="bar" style="width:var(--space-2xs)"></span></div>
+      <div class="srow"><span class="meta">xs · 12</span><span class="bar" style="width:var(--space-xs)"></span></div>
+      <div class="srow"><span class="meta">sm · 16</span><span class="bar" style="width:var(--space-sm)"></span></div>
+      <div class="srow"><span class="meta">md · 24</span><span class="bar" style="width:var(--space-md)"></span></div>
+      <div class="srow"><span class="meta">lg · 40</span><span class="bar" style="width:var(--space-lg)"></span></div>
+      <div class="srow"><span class="meta">xl · 64</span><span class="bar" style="width:var(--space-xl)"></span></div>
+      <div class="srow"><span class="meta">2xl · 96</span><span class="bar" style="width:var(--space-2xl)"></span></div>
+      <div class="srow"><span class="meta">3xl · 144</span><span class="bar" style="width:var(--space-3xl)"></span></div>
+    </div>
+  </section>
+</div>
+
+<!-- ===================== RADII / SURFACES ===================== -->
+<div class="wrap">
+  <section class="col">
+    <p class="eyebrow">surface · radii, hairlines, lift</p>
+    <h2>Warm, matte planes — hairlines, never borders.</h2>
+    <p class="prose soft">Edges are translucent inset shadows; elevation is soft and paper-like.</p>
+    <div class="samples">
+      <div class="sample-card"><span class="box r-sm"></span>radius-sm · 5px</div>
+      <div class="sample-card"><span class="box r-md"></span>radius-md · 8px</div>
+      <div class="sample-card"><span class="box edge"></span>--edge-strong</div>
+      <div class="sample-card"><span class="box lift-soft"></span>--lift-soft</div>
+      <div class="sample-card"><span class="box lift"></span>--lift</div>
+    </div>
+  </section>
+</div>
+
+<!-- ===================== FOOTER ===================== -->
+<div class="wrap">
+  <footer>
+    <div class="rule"></div>
+    <p style="max-width:var(--measure)">Locked in <span class="mono">P0-4</span>. Source of truth:
+      <a href="tokens.css">design/tokens.css</a>. Intent: <a href="../DESIGN.md">DESIGN.md</a>. Mood:
+      <a href="moodboard.html">moodboard.html</a>.</p>
+    <p class="faint" style="margin-top: var(--space-sm);">kodama · phase 0 · lock the aesthetic before building screens</p>
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+
+    /* ---- theme + greyscale toggles ---- */
+    var themeBtn = document.getElementById("themeToggle");
+    var themeName = document.getElementById("themeName");
+    function currentTheme() {
+      var set = root.getAttribute("data-theme");
+      if (set) return set;
+      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+    function paintTheme() { themeName.textContent = currentTheme() === "dark" ? "night" : "day"; }
+    themeBtn.addEventListener("click", function () {
+      root.setAttribute("data-theme", currentTheme() === "dark" ? "light" : "dark");
+      paintTheme();
+      render();
+    });
+
+    var greyBtn = document.getElementById("greyToggle");
+    var greyName = document.getElementById("greyName");
+    greyBtn.addEventListener("click", function () {
+      var on = document.body.classList.toggle("grey");
+      greyBtn.setAttribute("aria-pressed", on ? "true" : "false");
+      greyName.textContent = on ? "greyscale" : "colour";
+    });
+
+    /* ---- colour resolution + WCAG contrast ---- */
+    var probe = document.createElement("span");
+    probe.style.cssText = "position:absolute;width:0;height:0;opacity:0;pointer-events:none;";
+    document.body.appendChild(probe);
+    function resolve(varName) {
+      probe.style.color = "";
+      probe.style.color = "var(" + varName + ")";
+      var m = getComputedStyle(probe).color.match(/[\d.]+/g);
+      return [ +m[0], +m[1], +m[2] ];
+    }
+    function toHex(rgb) {
+      return "#" + rgb.map(function (v) { return ("0" + Math.round(v).toString(16)).slice(-2); }).join("").toUpperCase();
+    }
+    function lin(c) { c /= 255; return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4); }
+    function lum(rgb) { return 0.2126 * lin(rgb[0]) + 0.7152 * lin(rgb[1]) + 0.0722 * lin(rgb[2]); }
+    function ratio(a, b) { var L1 = lum(a), L2 = lum(b), hi = Math.max(L1, L2), lo = Math.min(L1, L2); return (hi + 0.05) / (lo + 0.05); }
+
+    /* semantic tokens shown in the list */
+    var TOKENS = [
+      ["--bg", "page ground"], ["--bg-sink", "recessed ground"], ["--surface", "raised plane"],
+      ["--text", "primary ink"], ["--text-soft", "soft text"], ["--text-faint", "faint / micro-text"],
+      ["--accent", "interactive accent"], ["--accent-dot", "listening state"]
+    ];
+    /* contrast pairs: [foreground, background, target, note] */
+    var PAIRS = [
+      ["--text", "--bg", 4.5, ""], ["--text-soft", "--bg", 4.5, ""],
+      ["--text-faint", "--bg", 4.5, ""], ["--text-faint", "--bg-sink", 4.5, "tight — micro-text only"],
+      ["--text", "--surface", 4.5, ""], ["--accent", "--bg", 4.5, ""],
+      ["--accent-dot", "--bg", 3.0, "graphical mark"]
+    ];
+
+    var tokEl = document.getElementById("toklist");
+    var conEl = document.getElementById("contrast");
+
+    function render() {
+      /* semantic token swatches */
+      tokEl.innerHTML = TOKENS.map(function (t) {
+        return '<div class="tokrow">' +
+          '<span class="dot" style="background:var(' + t[0] + ')"></span>' +
+          '<code>' + t[0] + '</code>' +
+          '<span class="desc">' + t[1] + ' · <span class="mono">' + toHex(resolve(t[0])) + '</span></span>' +
+          '</div>';
+      }).join("");
+
+      /* contrast rows */
+      conEl.innerHTML = PAIRS.map(function (p) {
+        var fg = resolve(p[0]), bg = resolve(p[1]);
+        var r = ratio(fg, bg), rr = r.toFixed(2);
+        var grade, cls;
+        if (p[2] === 3.0) { grade = r >= 3 ? "PASS 3:1" : "FAIL"; cls = r >= 3 ? "" : "fail"; }
+        else if (r >= 7) { grade = "AAA"; cls = ""; }
+        else if (r >= 4.5) { grade = "AA"; cls = r < 5.2 ? "warn" : ""; }
+        else { grade = "FAIL"; cls = "fail"; }
+        return '<div class="crow">' +
+          '<div>' +
+            '<div class="demo" style="background:var(' + p[1] + '); color:var(' + p[0] + ');">' +
+              '<span class="big">Ag</span> <span class="small">' + p[0] + ' on ' + p[1] + '</span>' +
+            '</div>' +
+            (p[3] ? '<div class="pair" style="margin-top:.4rem;">' + p[3] + '</div>' : '') +
+          '</div>' +
+          '<span class="ratio">' + rr + ':1</span>' +
+          '<span class="grade ' + cls + '">' + grade + '</span>' +
+          '</div>';
+      }).join("");
+    }
+
+    paintTheme();
+    render();
+    if (window.matchMedia) {
+      window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function () {
+        if (!root.getAttribute("data-theme")) { paintTheme(); render(); }
+      });
+    }
+  })();
+</script>
+</body>
+</html>
