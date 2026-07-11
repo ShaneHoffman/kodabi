@@ -182,7 +182,7 @@
      breathing pulse, so the two never fight over one property.  */
   .mark .aura {
     position: absolute; inset: calc(-1 * var(--halo-spread)); border-radius: 50%;
-    opacity: 0; transition: opacity .55s ease, transform .12s ease-out;
+    opacity: 0; transition: opacity .45s ease, transform .12s ease-out;
     transform: scale(calc(1 + var(--amp, 0) * .18));
   }
   .mark .aura .bloom {
@@ -198,14 +198,15 @@
     position: absolute; inset: 0; border-radius: 50%;
     background-color: var(--mark-ink, var(--text));
     background-image: radial-gradient(circle at 42% 38%, rgba(255,255,255,.16), rgba(255,255,255,0) 52%);
-    transition: background-color .55s ease;
+    /* transform is transitioned too, so the breath eases back to rest on settle instead of snapping */
+    transition: background-color .45s ease, transform .45s ease;
   }
 
   .mark.is-listening .core { background-color: var(--accent-dot); animation: breathe 4.2s ease-in-out infinite; }
   .mark.is-listening .aura { opacity: 1; }
   .mark.is-listening .aura .bloom { animation: halo 4.2s ease-in-out infinite; }
 
-  @keyframes breathe { 0%,100% { transform: scale(1); opacity: .85; } 50% { transform: scale(1.12); opacity: 1; } }
+  @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.12); } }
   @keyframes halo    { 0%,100% { transform: scale(.86); opacity: .14; } 50% { transform: scale(1.14); opacity: .30; } }
 
   /* ---------- state comparison (idle vs listening) ---------- */
@@ -279,7 +280,7 @@
   .avoid li + li { box-shadow: inset 0 1px 0 rgba(128,128,120,.12); }
   .avoid .no { color: var(--text-faint); text-decoration: line-through; text-decoration-thickness: 1px; text-decoration-color: var(--text-faint); }
   .avoid .yes { color: var(--text); }
-  .avoid .yes::before { content: "→ "; color: var(--accent); }
+  .avoid .yes::before { content: "→ " / ""; color: var(--accent); }
   @media (max-width: 40rem) { .avoid li { grid-template-columns: 1fr; gap: .2rem; } }
 
   /* ---------- footer ---------- */
@@ -542,13 +543,20 @@
 
     function setCap(t) { cap.innerHTML = t; }
 
+    /* caption for the "listening but not voicing" resting state, honouring reduced-motion */
+    function listenCap() {
+      return reduce.matches
+        ? "Listening — a <b>still green mark</b> (reduced motion is on)."
+        : "Listening — the one green, breathing in silence.";
+    }
+
     function setListening(on) {
       listening = on;
       mark.classList.toggle("is-listening", on);
       wakeBtn.setAttribute("aria-pressed", on ? "true" : "false");
       wakeLbl.textContent = on ? "Settle" : "Wake";
       if (!on) { stopVoice(); setCap("Idle — a still ink mark. Press <b>Wake</b> to start listening."); }
-      else if (!voicing) { setCap("Listening — the one green, breathing in silence."); }
+      else if (!voicing) { setCap(listenCap()); }
     }
 
     /* a smoothed, speech-like amplitude envelope (no microphone):
@@ -587,15 +595,16 @@
       voiceLbl.textContent = "Simulated voice";
       if (raf) { cancelAnimationFrame(raf); raf = null; }
       amp = 0; mark.style.setProperty("--amp", "0");
+      if (listening) setCap(listenCap());   /* muting while still listening: revert the stale swell caption */
     }
 
     wakeBtn.addEventListener("click", function () { setListening(!listening); });
     voiceBtn.addEventListener("click", function () { voicing ? stopVoice() : startVoice(); });
 
-    /* if the user flips reduced-motion on mid-swell, drop the animated amplitude */
+    /* re-evaluate the swell whenever reduced-motion flips, in either direction */
     if (reduce.addEventListener) {
       reduce.addEventListener("change", function () {
-        if (reduce.matches && voicing) { stopVoice(); startVoice(); }
+        if (voicing) { stopVoice(); startVoice(); }
       });
     }
   })();
