@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "columns": [
+    {
+      "id": "1305c0e4-ef23-4e06-8900-b384e0c0c45d",
+      "name": "Backlog",
+      "role": "todo",
+      "icon": "layers",
+      "color": "#6b7280"
+    },
+    {
+      "id": "3924b1d3-0aaf-497d-9d4e-20bff33559c9",
+      "name": "Planning",
+      "icon": "map",
+      "color": "#8b5cf6",
+      "autoSpawn": true,
+      "permissionMode": "plan",
+      "modelOverride": "claude-opus-4-8",
+      "effortOverride": "xhigh",
+      "planExitTarget": "Executing"
+    },
+    {
+      "id": "b25eacc0-b2ec-4d04-93f6-c9c53684ec22",
+      "name": "Executing",
+      "icon": "square-terminal",
+      "autoSpawn": true
+    },
+    {
+      "id": "047acd2f-5918-478b-96cc-e2756c690b6a",
+      "name": "Code Review",
+      "icon": "code",
+      "color": "#f59e0b",
+      "autoSpawn": true
+    },
+    {
+      "id": "56552d89-9ca9-4abd-a22f-8a84943f2f43",
+      "name": "Tests",
+      "icon": "flask-conical",
+      "color": "#06b6d4",
+      "autoSpawn": true
+    },
+    {
+      "id": "d881d7dc-4fed-4d43-8d12-01978afd8248",
+      "name": "Ship It",
+      "icon": "sailboat",
+      "color": "#F97316",
+      "autoSpawn": true
+    },
+    {
+      "id": "f0eb001f-bb69-40b2-81cb-b1b3382b7def",
+      "name": "Done",
+      "role": "done",
+      "icon": "circle-check-big",
+      "color": "#10b981"
+    }
+  ],
+  "actions": [
+    {
+      "id": "e19cdbdf-d9b3-433c-9f4c-4f18bfc95c45",
+      "name": "Kill Session",
+      "type": "kill_session",
+      "config": {}
+    },
+    {
+      "id": "60c9c207-1d5b-432f-a418-4d3ec9e86716",
+      "name": "Start Planning Agent",
+      "type": "spawn_agent",
+      "config": {
+        "promptTemplate": "{{task_xml}}{{attachments}}"
+      }
+    }
+  ],
+  "transitions": [
+    {
+      "from": "*",
+      "to": "Planning",
+      "actions": [
+        "Kill Session",
+        "Start Planning Agent"
+      ]
+    },
+    {
+      "from": "*",
+      "to": "Done",
+      "actions": [
+        "Kill Session"
+      ]
+    }
+  ],
+  "_modifiedBy": "0f56072ae904"
+}
