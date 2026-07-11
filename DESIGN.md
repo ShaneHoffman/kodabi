@@ -122,6 +122,12 @@ never copy their imagery.
   breathes. The mark itself is designed in P0-5 — this document only reserves the color and the
   feeling.
 
+**Locked in P0-4:** the design tokens now live in [`design/tokens.css`](design/tokens.css)
+(demonstrated by [`design/tokens.html`](design/tokens.html)). Typefaces are **Source Sans 3**
+(interface) + **Source Serif 4** (reading views) + **Source Code Pro** (mono). The palette adopts the
+moodboard's a11y-tuned values as final; both greens are kept — a quiet interactive accent and the
+brighter listening green. Web-font binaries are bundled later in `feat/scaffold-tauri-app`.
+
 ---
 
 *Indicative, not final: the exact tokens are locked in P0-4 and the mark is designed in P0-5.*
