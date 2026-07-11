@@ -9,10 +9,14 @@
    Nothing here redefines a value — design/tokens.css stays the single source
    of truth. This file documents the mapping so the scaffold ticket is a
    copy-in, not a rewrite.
+
+   The tokens import below is written relative to the repo-root design/ folder
+   (correct both from this file's own location and from an app entry CSS at
+   e.g. src/index.css). Adjust the relative path if the entry CSS lands elsewhere.
    ============================================================ */
 
 @import "tailwindcss";
-@import "./tokens.css";
+@import "../design/tokens.css";
 
 /* `@theme inline` is the critical keyword: it makes Tailwind emit utilities
    that REFERENCE var(--bg) at runtime rather than baking the light value in at

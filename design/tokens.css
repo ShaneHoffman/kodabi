@@ -13,11 +13,15 @@
    accent, and the brighter one reserved for the listening state.
 
    Layers
-     1. pigments  (--k-*)          the six forest neutrals + the green; theme-independent "paints"
-     2. semantic  (--bg, --text …) redefined per theme; what components actually consume
+     1. pigments  (--k-*, --lift-*)  forest neutrals, the green, the tuned day/night shades and
+                                     elevation — every literal is defined here EXACTLY ONCE
+     2. semantic  (--bg, --text …)   remapped per theme (references only, never new literals);
+                                     what components actually consume
      3. scales    (--fs-/--fw-/--lh-/--ls-/--space-/--flow-/--radius-/--edge-) theme-independent
 
-   Theming — same triple-selector mechanism as the moodboard:
+   Theming — same triple-selector mechanism as the moodboard. The dark mapping is stated twice
+   (a media query cannot be merged with a plain selector), but both copies only *reference* the
+   Layer-1 primitives, so no value can drift between the OS-dark and forced-dark paths:
      :root                                                  → light (washi day), the default
      @media (prefers-color-scheme: dark) :root:not([data-theme="light"]) → dark when the OS asks
      :root[data-theme="dark"]                               → dark, forced
@@ -35,6 +39,31 @@
   --k-fern:  #3B4636;   /* deep neutral      */
   --k-sumi:  #23261F;   /* ink / primary text */
   --k-green: #5F7E5A;   /* the one living green — listening */
+
+  /* ---------- Layer 1 — tuned functional shades & elevation ----------
+     Values that aren't one of the six pigments, defined ONCE here. The theme
+     blocks at the bottom only reference these, so an edit lands in one place. */
+
+  /* light-side shades (the ones that aren't a raw pigment) */
+  --k-washi-sink: #EAE8DD;   /* recessed washi (light bg-sink) */
+  --k-stone-ink:  #62665E;   /* darkened stone — a11y-tuned faint text */
+  --k-accent:     #526B4D;   /* desaturated green — interactive accent */
+
+  /* night palette */
+  --k-night:         #191B16;   /* night ground (deep sumi) */
+  --k-night-sink:    #131510;
+  --k-night-surface: #212419;   /* barely-there raised plane */
+  --k-paper:         #E9E8DE;   /* warm paper (dark text) */
+  --k-paper-soft:    #AEB3A7;
+  --k-paper-faint:   #868B81;   /* ≈ stone */
+  --k-accent-night:  #93B389;
+  --k-green-night:   #86A67E;
+
+  /* elevation — geometry differs per theme, so two full sets (each defined once) */
+  --lift-day:        0 1px 2px rgba(35,38,31,.06), 0 8px 24px rgba(35,38,31,.05);
+  --lift-soft-day:   0 1px 1px rgba(35,38,31,.05), 0 4px 14px rgba(35,38,31,.04);
+  --lift-night:      0 1px 2px rgba(0,0,0,.35), 0 10px 30px rgba(0,0,0,.30);
+  --lift-soft-night: 0 1px 1px rgba(0,0,0,.30), 0 5px 16px rgba(0,0,0,.22);
 
   /* ---------- Layer 3 — type ---------- */
 
@@ -108,59 +137,60 @@
   --edge-strong: rgba(128, 128, 120, 0.28);
   --hairline:    inset 0 0 0 1px var(--edge);
 
-  /* ---------- Layer 2 — semantic tokens: light (washi day) is the default ---------- */
+  /* ---------- Layer 2 — semantic tokens: light (washi day) is the default ----------
+     All four theme blocks below are pure references to Layer 1 — no literals here. */
   --bg:         var(--k-washi);
-  --bg-sink:    #EAE8DD;          /* derived: recessed washi */
-  --surface:    var(--k-mist);    /* one raised plane above bg */
+  --bg-sink:    var(--k-washi-sink);
+  --surface:    var(--k-mist);       /* one raised plane above bg */
   --text:       var(--k-sumi);
   --text-soft:  var(--k-moss);
-  --text-faint: #62665E;          /* derived: darkened stone — a11y-tuned (micro-text only) */
-  --accent:     #526B4D;          /* derived: desaturated green — interactive (links/focus) */
-  --accent-dot: var(--k-green);   /* listening state only */
-  --lift:       0 1px 2px rgba(35,38,31,.06), 0 8px 24px rgba(35,38,31,.05);
-  --lift-soft:  0 1px 1px rgba(35,38,31,.05), 0 4px 14px rgba(35,38,31,.04);
+  --text-faint: var(--k-stone-ink);  /* a11y-tuned; micro-text only */
+  --accent:     var(--k-accent);     /* interactive (links/focus) */
+  --accent-dot: var(--k-green);      /* listening state only */
+  --lift:       var(--lift-day);
+  --lift-soft:  var(--lift-soft-day);
 }
 
 /* ---------- Layer 2 — dark (night): auto when the OS asks and not forced light ---------- */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg:         #191B16;   /* derived: night ground (deep sumi) */
-    --bg-sink:    #131510;
-    --surface:    #212419;   /* derived: lifted sumi — a barely-there raised plane */
-    --text:       #E9E8DE;   /* derived: warm paper */
-    --text-soft:  #AEB3A7;
-    --text-faint: #868B81;   /* ≈ stone */
-    --accent:     #93B389;
-    --accent-dot: #86A67E;
-    --lift:       0 1px 2px rgba(0,0,0,.35), 0 10px 30px rgba(0,0,0,.30);
-    --lift-soft:  0 1px 1px rgba(0,0,0,.30), 0 5px 16px rgba(0,0,0,.22);
+    --bg:         var(--k-night);
+    --bg-sink:    var(--k-night-sink);
+    --surface:    var(--k-night-surface);
+    --text:       var(--k-paper);
+    --text-soft:  var(--k-paper-soft);
+    --text-faint: var(--k-paper-faint);
+    --accent:     var(--k-accent-night);
+    --accent-dot: var(--k-green-night);
+    --lift:       var(--lift-night);
+    --lift-soft:  var(--lift-soft-night);
   }
 }
 
-/* ---------- Layer 2 — dark (night): forced ---------- */
+/* ---------- Layer 2 — dark (night): forced (same references as the media block above) ---------- */
 :root[data-theme="dark"] {
-  --bg:         #191B16;
-  --bg-sink:    #131510;
-  --surface:    #212419;
-  --text:       #E9E8DE;
-  --text-soft:  #AEB3A7;
-  --text-faint: #868B81;
-  --accent:     #93B389;
-  --accent-dot: #86A67E;
-  --lift:       0 1px 2px rgba(0,0,0,.35), 0 10px 30px rgba(0,0,0,.30);
-  --lift-soft:  0 1px 1px rgba(0,0,0,.30), 0 5px 16px rgba(0,0,0,.22);
+  --bg:         var(--k-night);
+  --bg-sink:    var(--k-night-sink);
+  --surface:    var(--k-night-surface);
+  --text:       var(--k-paper);
+  --text-soft:  var(--k-paper-soft);
+  --text-faint: var(--k-paper-faint);
+  --accent:     var(--k-accent-night);
+  --accent-dot: var(--k-green-night);
+  --lift:       var(--lift-night);
+  --lift-soft:  var(--lift-soft-night);
 }
 
 /* ---------- Layer 2 — light (washi day): forced (wins over OS dark) ---------- */
 :root[data-theme="light"] {
   --bg:         var(--k-washi);
-  --bg-sink:    #EAE8DD;
+  --bg-sink:    var(--k-washi-sink);
   --surface:    var(--k-mist);
   --text:       var(--k-sumi);
   --text-soft:  var(--k-moss);
-  --text-faint: #62665E;
-  --accent:     #526B4D;
+  --text-faint: var(--k-stone-ink);
+  --accent:     var(--k-accent);
   --accent-dot: var(--k-green);
-  --lift:       0 1px 2px rgba(35,38,31,.06), 0 8px 24px rgba(35,38,31,.05);
-  --lift-soft:  0 1px 1px rgba(35,38,31,.05), 0 4px 14px rgba(35,38,31,.04);
+  --lift:       var(--lift-day);
+  --lift-soft:  var(--lift-soft-day);
 }

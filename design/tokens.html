@@ -324,11 +324,20 @@
     var probe = document.createElement("span");
     probe.style.cssText = "position:absolute;width:0;height:0;opacity:0;pointer-events:none;";
     document.body.appendChild(probe);
+    // Normalise whatever getComputedStyle serialises the colour as — rgb(), rgba(),
+    // or color(srgb …) in newer engines — to concrete 0-255 channels by painting one
+    // pixel: the canvas parses any valid CSS colour string and getImageData is always 0-255.
+    var swatchCtx = document.createElement("canvas").getContext("2d");
     function resolve(varName) {
       probe.style.color = "";
       probe.style.color = "var(" + varName + ")";
-      var m = getComputedStyle(probe).color.match(/[\d.]+/g);
-      return [ +m[0], +m[1], +m[2] ];
+      var css = getComputedStyle(probe).color;
+      swatchCtx.clearRect(0, 0, 1, 1);
+      swatchCtx.fillStyle = "#000";     // fallback if `css` is somehow unparseable
+      swatchCtx.fillStyle = css;
+      swatchCtx.fillRect(0, 0, 1, 1);
+      var d = swatchCtx.getImageData(0, 0, 1, 1).data;
+      return [ d[0], d[1], d[2] ];
     }
     function toHex(rgb) {
       return "#" + rgb.map(function (v) { return ("0" + Math.round(v).toString(16)).slice(-2); }).join("").toUpperCase();
