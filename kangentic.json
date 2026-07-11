@@ -32,7 +32,7 @@
     {
       "id": "047acd2f-5918-478b-96cc-e2756c690b6a",
       "name": "Code Review",
-      "description": "On entry, kills the executing session and spawns a fresh, independent reviewer that runs /code-review high on git diff main...HEAD and reports findings. Does NOT fix or push. Manual gate: a human sends it back to Executing (request changes) or drags it to Ship It. Never drag back to Backlog (that removes the worktree).",
+      "description": "On entry, kills the executing session and spawns a fresh, independent reviewer that runs /code-review high on git diff main...HEAD and reports findings. Does NOT fix or push. Manual gate: a human sends it back to Executing (request changes) or drags it to Open PR. Never drag back to Backlog (that removes the worktree).",
       "icon": "code",
       "color": "#f59e0b",
       "autoSpawn": true,
