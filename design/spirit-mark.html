@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kodama — Spirit-mark &amp; Listening Indicator</title>
+<style>
+  /* ============================================================
+     Kodama spirit-mark — self-contained, no external requests.
+     Tokens are inherited verbatim from design/moodboard.html and
+     remain INDICATIVE (mood, not final). P0-4 locks the real
+     tokens; this page (P0-5) designs the mark. P1-5 builds it.
+     ============================================================ */
+
+  :root {
+    /* --- palette pigments (same in both themes) --- */
+    --pig-washi:  #F1EFE6;
+    --pig-mist:   #DCE1D8;
+    --pig-stone:  #8B8F86;
+    --pig-moss:   #59654F;
+    --pig-fern:   #3B4636;
+    --pig-sumi:   #23261F;
+    --pig-green:  #5F7E5A;   /* the one living green — listening only */
+
+    /* --- functional tokens: light (washi day) is the default --- */
+    --bg:        #F1EFE6;
+    --bg-sink:   #EAE8DD;
+    --text:      #23261F;
+    --text-soft: #59654F;
+    --text-faint:#62665E;
+    --accent:    #526B4D;
+    --accent-dot:#5F7E5A;
+    --lift:      0 1px 2px rgba(35,38,31,.06), 0 8px 24px rgba(35,38,31,.05);
+    --lift-soft: 0 1px 1px rgba(35,38,31,.05), 0 4px 14px rgba(35,38,31,.04);
+
+    /* --- type --- */
+    --sans: "Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+    --mono: "Cascadia Code","Cascadia Mono",ui-monospace,"SF Mono",Consolas,"Liberation Mono",monospace;
+
+    --measure: 33rem;
+    --content: 46rem;
+    --wide:    62rem;
+
+    --fs-eyebrow: .72rem;
+    --fs-cap:     .8rem;
+    --fs-body:    1.06rem;
+    --fs-read:    1.18rem;
+    --fs-h3:      1.35rem;
+    --fs-h2:      clamp(1.55rem, 1.2rem + 1.4vw, 2.05rem);
+    --fs-display: clamp(2.35rem, 1.6rem + 3.6vw, 3.9rem);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:        #191B16;
+      --bg-sink:   #131510;
+      --text:      #E9E8DE;
+      --text-soft: #AEB3A7;
+      --text-faint:#868B81;
+      --accent:    #93B389;
+      --accent-dot:#86A67E;
+      --lift:      0 1px 2px rgba(0,0,0,.35), 0 10px 30px rgba(0,0,0,.30);
+      --lift-soft: 0 1px 1px rgba(0,0,0,.30), 0 5px 16px rgba(0,0,0,.22);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:        #191B16;
+    --bg-sink:   #131510;
+    --text:      #E9E8DE;
+    --text-soft: #AEB3A7;
+    --text-faint:#868B81;
+    --accent:    #93B389;
+    --accent-dot:#86A67E;
+    --lift:      0 1px 2px rgba(0,0,0,.35), 0 10px 30px rgba(0,0,0,.30);
+    --lift-soft: 0 1px 1px rgba(0,0,0,.30), 0 5px 16px rgba(0,0,0,.22);
+  }
+  :root[data-theme="light"] {
+    --bg:        #F1EFE6;
+    --bg-sink:   #EAE8DD;
+    --text:      #23261F;
+    --text-soft: #59654F;
+    --text-faint:#62665E;
+    --accent:    #526B4D;
+    --accent-dot:#5F7E5A;
+    --lift:      0 1px 2px rgba(35,38,31,.06), 0 8px 24px rgba(35,38,31,.05);
+    --lift-soft: 0 1px 1px rgba(35,38,31,.05), 0 4px 14px rgba(35,38,31,.04);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: var(--fs-body);
+    line-height: 1.72;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    transition: background .5s ease, color .5s ease;
+  }
+
+  .page { animation: rise .7s ease forwards; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  /* ---------- layout ---------- */
+  .wrap { max-width: var(--wide); margin: 0 auto; padding: 0 clamp(1.5rem, 5vw, 4rem); }
+  .col  { max-width: var(--content); }
+  .prose { max-width: var(--measure); }
+  section { padding-block: clamp(4.5rem, 9vw, 8.5rem); }
+
+  /* ---------- type roles ---------- */
+  .eyebrow {
+    font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: .22em;
+    font-weight: 500; color: var(--text-faint); margin: 0 0 1.6rem;
+  }
+  h1, h2, h3 { text-wrap: balance; font-weight: 500; margin: 0; }
+  h2 { font-size: var(--fs-h2); line-height: 1.12; letter-spacing: -0.01em; margin-bottom: 1.1rem; }
+  h3 { font-size: var(--fs-h3); line-height: 1.2; letter-spacing: -0.005em; }
+  p  { margin: 0 0 1.1rem; }
+  p:last-child { margin-bottom: 0; }
+  .lead { font-size: var(--fs-read); color: var(--text-soft); line-height: 1.6; }
+  .soft { color: var(--text-soft); }
+  .faint { color: var(--text-faint); }
+  .serif { font-family: var(--serif); }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  a { color: var(--accent); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+  /* ---------- masthead ---------- */
+  .top {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 1rem; padding-block: 1.9rem; color: var(--text-faint);
+  }
+  .brand { display: flex; align-items: baseline; gap: .7rem; font-size: var(--fs-cap); letter-spacing: .04em; }
+  .brand b { color: var(--text); font-weight: 600; letter-spacing: .01em; }
+  .toggle {
+    font: inherit; font-size: var(--fs-eyebrow); letter-spacing: .16em; text-transform: uppercase;
+    color: var(--text-faint); background: transparent; border: 0; cursor: pointer;
+    padding: .5rem .2rem; display: inline-flex; align-items: center; gap: .55rem;
+  }
+  .toggle:hover { color: var(--text-soft); }
+  .toggle .swatch { width: .7rem; height: .7rem; border-radius: 50%; background: var(--text-soft); }
+
+  .hero { padding-top: clamp(3rem, 7vw, 6rem); padding-bottom: clamp(5rem, 11vw, 10rem); }
+  .hero .display {
+    font-size: var(--fs-display); font-weight: 300; line-height: 1.04;
+    letter-spacing: -0.022em; max-width: 16ch; margin: 0 0 2rem; text-wrap: balance;
+  }
+  .hero .lead { max-width: 42ch; }
+
+  .lead-mark { display: flex; align-items: center; gap: 1.4rem; margin-bottom: 2.6rem; }
+
+  /* ---------- generic two-column ---------- */
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(1.5rem, 4vw, 3.5rem); align-items: start; }
+  @media (max-width: 46rem) { .duo { grid-template-columns: 1fr; gap: 2.4rem; } }
+
+  .list { list-style: none; margin: 0; padding: 0; }
+  .list li { padding: .55rem 0; color: var(--text-soft); }
+  .list li b { color: var(--text); font-weight: 500; }
+
+  /* ============================================================
+     THE SPIRIT-MARK
+     A crisp ink core (the silhouette / logo) held in a soft field
+     of ma (the aura). Idle: neutral, still, no aura, no green.
+     Listening: the one green arrives, the core breathes, the aura
+     blooms — and voice gently swells it (the "waveform whisper").
+     ============================================================ */
+  .mark {
+    --mark-size: 1.15rem;
+    --halo-spread: 1rem;
+    position: relative; flex: none; display: inline-block;
+    width: var(--mark-size); height: var(--mark-size);
+  }
+  /* the aura — a field of ma; present only while listening.
+     .aura is the "wake gate" (opacity 0→1, transitioned) and also
+     carries the voice swell (--amp). Its child .bloom carries the
+     breathing pulse, so the two never fight over one property.  */
+  .mark .aura {
+    position: absolute; inset: calc(-1 * var(--halo-spread)); border-radius: 50%;
+    opacity: 0; transition: opacity .45s ease, transform .12s ease-out;
+    transform: scale(calc(1 + var(--amp, 0) * .18));
+  }
+  /* The aura is a small field of ma. Rather than one static, lopsided glow,
+     two soft blobs slowly counter-rotate and morph, so the edge gently
+     undulates — a living presence. .bloom carries the breath (scale + opacity);
+     its two pseudo-layers carry the wavy edge. The core stays a crisp disc. */
+  .mark .aura .bloom { position: absolute; inset: 0; opacity: .26; }
+  .mark .aura .bloom::before,
+  .mark .aura .bloom::after {
+    content: ""; position: absolute; inset: 4%;
+    background: radial-gradient(circle, var(--accent-dot) 0%, transparent 72%);
+    filter: blur(4px);
+    border-radius: 48% 52% 53% 47% / 52% 47% 53% 48%;
+  }
+  .mark .aura .bloom::after { inset: 11%; opacity: .8; border-radius: 52% 48% 47% 53% / 48% 53% 47% 52%; }
+  /* the core — a clean disc so the mark survives at 16px and in one
+     ink value; a faint caught-light sheen keeps it from reading as a
+     mechanical LED. background-color is transitioned for the wake. */
+  .mark .core {
+    position: absolute; inset: 0; border-radius: 50%;
+    background-color: var(--mark-ink, var(--text));
+    background-image: radial-gradient(circle at 42% 38%, rgba(255,255,255,.16), rgba(255,255,255,0) 52%);
+    /* transform is transitioned too, so the breath eases back to rest on settle instead of snapping */
+    transition: background-color .45s ease, transform .45s ease;
+  }
+
+  .mark.is-listening .core { background-color: var(--accent-dot); animation: breathe 4.2s ease-in-out infinite; }
+  .mark.is-listening .aura { opacity: 1; }
+  .mark.is-listening .aura .bloom { animation: halo 4.2s ease-in-out infinite; }
+  .mark.is-listening .aura .bloom::before { animation: blobA 15s linear infinite; }
+  .mark.is-listening .aura .bloom::after  { animation: blobB 21s linear infinite; }
+
+  @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.12); } }
+  @keyframes halo    { 0%,100% { transform: scale(.9); opacity: .16; } 50% { transform: scale(1.12); opacity: .30; } }
+  /* two counter-rotating morphs — the aura's wavy, living edge */
+  @keyframes blobA {
+    0%   { border-radius: 48% 52% 53% 47% / 52% 47% 53% 48%; transform: rotate(0deg); }
+    50%  { border-radius: 53% 47% 46% 54% / 47% 53% 48% 52%; transform: rotate(180deg); }
+    100% { border-radius: 48% 52% 53% 47% / 52% 47% 53% 48%; transform: rotate(360deg); }
+  }
+  @keyframes blobB {
+    0%   { border-radius: 52% 48% 47% 53% / 48% 53% 47% 52%; transform: rotate(0deg); }
+    50%  { border-radius: 45% 55% 56% 44% / 55% 45% 53% 47%; transform: rotate(-180deg); }
+    100% { border-radius: 52% 48% 47% 53% / 48% 53% 47% 52%; transform: rotate(-360deg); }
+  }
+
+  /* ---------- state comparison (idle vs listening) ---------- */
+  .states { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(1.5rem, 4vw, 3.2rem); margin-top: 2.8rem; }
+  @media (max-width: 40rem) { .states { grid-template-columns: 1fr; gap: 2rem; } }
+  .state-card {
+    background: var(--bg-sink); border-radius: 10px; box-shadow: var(--lift-soft);
+    padding: clamp(2rem, 4vw, 3rem) 1.6rem 1.7rem;
+    display: flex; flex-direction: column; align-items: center; text-align: center; gap: 1.3rem;
+  }
+  .state-card .stage { display: grid; place-items: center; min-height: 6rem; }
+  .state-card .stage .mark { --mark-size: 1.6rem; --halo-spread: 1.5rem; }
+  .state-name { font-size: var(--fs-cap); text-transform: uppercase; letter-spacing: .18em; color: var(--text-faint); }
+  .state-name b { color: var(--text); font-weight: 600; }
+  .state-desc { font-size: var(--fs-cap); color: var(--text-soft); max-width: 22ch; line-height: 1.55; }
+
+  /* ---------- the living mark (interactive) ---------- */
+  .demo {
+    background: var(--bg-sink); border-radius: 12px; box-shadow: var(--lift);
+    padding: clamp(2.8rem, 6vw, 4.5rem) 1.6rem clamp(1.8rem, 4vw, 2.6rem);
+    margin-top: 2.8rem; display: flex; flex-direction: column; align-items: center; gap: 2.2rem;
+  }
+  .demo .stage { display: grid; place-items: center; min-height: 8.5rem; }
+  .demo .stage .mark { --mark-size: 2.5rem; --halo-spread: 2.4rem; }
+  .controls { display: flex; flex-wrap: wrap; gap: .8rem; justify-content: center; }
+  .btn {
+    font: inherit; font-size: var(--fs-cap); letter-spacing: .02em;
+    color: var(--text-soft); background: var(--bg); cursor: pointer;
+    border: 1px solid rgba(128,128,120,.28); border-radius: 999px;
+    padding: .5rem 1.15rem; display: inline-flex; align-items: center; gap: .55rem;
+    transition: color .3s ease, border-color .3s ease, background .3s ease;
+  }
+  .btn:hover { color: var(--text); border-color: rgba(128,128,120,.5); }
+  .btn[aria-pressed="true"] { color: var(--accent); border-color: var(--accent); }
+  .btn .tick { width: .55rem; height: .55rem; border-radius: 50%; background: currentColor; opacity: .55; }
+  .demo-cap { font-size: var(--fs-cap); color: var(--text-faint); max-width: 34ch; text-align: center; line-height: 1.55; }
+  .demo-cap b { color: var(--text-soft); font-weight: 500; }
+
+  /* ---------- animation-intent cards ---------- */
+  .intent { display: grid; grid-template-columns: repeat(2, 1fr); gap: clamp(1rem, 2.5vw, 1.8rem); margin-top: 2.8rem; }
+  @media (max-width: 40rem) { .intent { grid-template-columns: 1fr; } }
+  .intent .card { padding: 1.5rem 1.5rem 1.6rem; border-radius: 9px; background: var(--bg-sink); box-shadow: var(--lift-soft); }
+  .intent .card .k { font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: .18em; color: var(--text-faint); }
+  .intent .card h3 { margin: .7rem 0 .5rem; font-size: 1.12rem; }
+  .intent .card p { font-size: var(--fs-cap); color: var(--text-soft); margin: 0; line-height: 1.6; }
+  .intent .card .num { font-family: var(--mono); color: var(--accent); font-variant-numeric: tabular-nums; }
+
+  /* ---------- one mark, three jobs (lockups) ---------- */
+  .lockups { margin-top: 2.6rem; display: flex; flex-direction: column; gap: 2.4rem; }
+  .lockup-row { display: flex; align-items: center; gap: clamp(1.4rem, 4vw, 3rem); flex-wrap: wrap; }
+  .lockup { display: inline-flex; align-items: center; gap: .8rem; }
+  .lockup .wordmark { font-size: 1.55rem; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
+  .sizes { display: flex; align-items: flex-end; gap: clamp(1.2rem, 3vw, 2.4rem); flex-wrap: wrap; }
+  .size-cell { display: flex; flex-direction: column; align-items: center; gap: .7rem; }
+  .size-cell .size-cap { font-size: var(--fs-eyebrow); color: var(--text-faint); font-family: var(--mono); }
+  .mono-row { display: flex; gap: clamp(1rem, 3vw, 1.6rem); flex-wrap: wrap; }
+  .mono-chip {
+    display: flex; align-items: center; gap: .9rem;
+    padding: 1.1rem 1.4rem; border-radius: 9px; box-shadow: var(--lift-soft);
+  }
+  .mono-chip .mark { --mark-size: 1.5rem; }
+  .mono-chip .mark .core { background-image: none; background-color: currentColor; }
+  .mono-chip .lbl { font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: .16em; opacity: .7; }
+  .mono-chip.on-light { background: var(--pig-washi); color: var(--pig-sumi); }
+  .mono-chip.on-dark  { background: var(--pig-sumi);  color: var(--pig-washi); }
+  .caption { font-size: var(--fs-cap); color: var(--text-faint); margin-top: 1.4rem; max-width: var(--measure); }
+
+  /* ---------- guardrail (evoke, never trace) ---------- */
+  .avoid { list-style: none; margin: 2.4rem 0 0; padding: 0; }
+  .avoid li { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; padding: 1rem 0; align-items: baseline; }
+  .avoid li + li { box-shadow: inset 0 1px 0 rgba(128,128,120,.12); }
+  .avoid .no { color: var(--text-faint); text-decoration: line-through; text-decoration-thickness: 1px; text-decoration-color: var(--text-faint); }
+  .avoid .yes { color: var(--text); }
+  .avoid .yes::before { content: "→ " / ""; color: var(--accent); }
+  @media (max-width: 40rem) { .avoid li { grid-template-columns: 1fr; gap: .2rem; } }
+
+  /* ---------- footer ---------- */
+  footer { padding-block: clamp(4rem, 8vw, 7rem) 4rem; color: var(--text-faint); font-size: var(--fs-cap); }
+  footer .rule { height: 1px; background: rgba(128,128,120,.18); margin-bottom: 2rem; max-width: var(--content); }
+  footer a { color: var(--text-soft); }
+
+  /* ---------- accessibility: motion off → a still green mark ---------- */
+  @media (prefers-reduced-motion: reduce) {
+    .page { animation: none; opacity: 1; }
+    .mark .core, .mark .aura .bloom,
+    .mark .aura .bloom::before, .mark .aura .bloom::after { animation: none !important; }
+    .mark .aura .bloom::before, .mark .aura .bloom::after { border-radius: 50%; transform: none; }
+    .mark .aura { transform: none; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="wrap">
+    <header class="top">
+      <div class="brand"><b>kodama</b><span>spirit-mark · listening indicator · P0-5</span></div>
+      <button class="toggle" id="themeToggle" type="button" aria-label="Toggle light and dark">
+        <span class="swatch" aria-hidden="true"></span><span id="themeName">day</span>
+      </button>
+    </header>
+  </div>
+
+  <!-- ===================== HERO ===================== -->
+  <div class="wrap">
+    <section class="hero col">
+      <p class="eyebrow">the listening indicator is the kodama</p>
+      <div class="lead-mark">
+        <span class="mark is-listening" style="--mark-size:2rem;--halo-spread:1.9rem" aria-hidden="true"><span class="aura"><span class="bloom"></span></span><span class="core"></span></span>
+      </div>
+      <h1 class="display">One green. One breath.</h1>
+      <p class="lead">The kodama is never drawn — no face, no leaf, no character. It is a single quiet
+        mark: a still ink point when Kodama is idle, and one living green that breathes when it is
+        listening. The same mark is the logo, the consent signal, and the moment a screenshot sells.</p>
+    </section>
+  </div>
+
+  <!-- ===================== THE TWO STATES ===================== -->
+  <div class="wrap">
+    <section class="col">
+      <p class="eyebrow">two states · nothing in between to misread</p>
+      <h2>Still when idle. Breathing when it listens.</h2>
+      <p class="prose soft">The green is the entire budget for saturated color in the whole app —
+        spent nowhere else. So its presence is unambiguous: green means Kodama is recording, and its
+        absence means it is not. That single reserved color is what lets one small mark carry consent.</p>
+
+      <div class="states">
+        <div class="state-card">
+          <div class="stage">
+            <span class="mark" aria-hidden="true"><span class="aura"><span class="bloom"></span></span><span class="core"></span></span>
+          </div>
+          <p class="state-name"><b>Idle</b> · not recording</p>
+          <p class="state-desc">A quiet ink point. Still, hue-silent, no aura. This is the resting
+            logo — present, but plainly not listening.</p>
+        </div>
+        <div class="state-card">
+          <div class="stage">
+            <span class="mark is-listening" aria-hidden="true"><span class="aura"><span class="bloom"></span></span><span class="core"></span></span>
+          </div>
+          <p class="state-name"><b>Listening</b> · recording</p>
+          <p class="state-desc">The one green arrives and the mark breathes inside a soft field of ma
+            — a small living presence, attending.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== THE LIVING MARK (interactive) ===================== -->
+  <div class="wrap">
+    <section class="col">
+      <p class="eyebrow">the living mark · try it</p>
+      <h2>Wake it, then let it hear a voice.</h2>
+      <p class="prose soft">Waking warms the ink to green and draws the first breath. On top of that
+        slow breath, a voice gently swells the aura — a whisper of a waveform, never a meter with
+        bars. The envelope below is <b>simulated</b>; there is no microphone on this page.</p>
+
+      <div class="demo">
+        <div class="stage">
+          <span class="mark" id="demoMark" aria-hidden="true"><span class="aura"><span class="bloom"></span></span><span class="core"></span></span>
+        </div>
+        <div class="controls">
+          <button class="btn" id="wakeBtn" type="button" aria-pressed="false">
+            <span class="tick" aria-hidden="true"></span><span id="wakeLbl">Wake</span>
+          </button>
+          <button class="btn" id="voiceBtn" type="button" aria-pressed="false">
+            <span class="tick" aria-hidden="true"></span><span id="voiceLbl">Simulated voice</span>
+          </button>
+        </div>
+        <p class="demo-cap" id="demoCap" role="status">Idle — a still ink mark. Press <b>Wake</b> to
+          start listening.</p>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== ANIMATION INTENT ===================== -->
+  <div class="wrap">
+    <section class="col">
+      <p class="eyebrow">animation intent · for P1-5</p>
+      <h2>One breath, quietly modulated.</h2>
+      <p class="prose soft">Two layered motions and one firm accessibility floor. Values here are
+        indicative — a starting point the runtime ticket refines against real audio.</p>
+
+      <div class="intent">
+        <div class="card">
+          <p class="k">baseline</p>
+          <h3>Breathing</h3>
+          <p>A slow <span class="num">~4.2s</span> ease-in-out swell of the core and its aura — the
+            resting rhythm of a presence that is simply listening. This runs whenever recording,
+            even in silence.</p>
+        </div>
+        <div class="card">
+          <p class="k">overlay</p>
+          <h3>Waveform whisper</h3>
+          <p>Voice amplitude gently perturbs the aura's bloom — heavily smoothed and capped, so speech
+            makes the breath swell rather than draw a scope. Never bars, never a level meter.</p>
+        </div>
+        <div class="card">
+          <p class="k">transition</p>
+          <h3>Wake &amp; settle</h3>
+          <p>Idle→listening warms ink to green and blooms the aura over <span class="num">~450ms</span>;
+            settling reverses it. One deliberate motion — the "it woke up" beat, not a flourish.</p>
+        </div>
+        <div class="card">
+          <p class="k">accessibility floor</p>
+          <h3>Reduced motion</h3>
+          <p>Under <span class="mono">prefers-reduced-motion</span> every animation stops and listening
+            becomes a <b>still green mark</b> — unmistakably on-air by reserved color and presence
+            alone. <span class="faint">(Toggle it in your OS to see this page obey.)</span></p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== ONE MARK, THREE JOBS ===================== -->
+  <div class="wrap">
+    <section class="col">
+      <p class="eyebrow">one mark, three jobs</p>
+      <h2>Logo, consent, and the screenshot — the same element.</h2>
+      <p class="prose soft">Because the core is a clean disc carried by value, not hue, it holds up as
+        a brand mark at any size and in a single ink. The green layer is what turns that same logo
+        into a live trust signal.</p>
+
+      <div class="lockups">
+        <div class="lockup-row">
+          <div class="lockup">
+            <span class="mark" style="--mark-size:2rem;--halo-spread:1.6rem" aria-hidden="true"><span class="aura"><span class="bloom"></span></span><span class="core"></span></span>
+            <span class="wordmark">kodama</span>
+          </div>
+          <div class="lockup">
+            <span class="mark is-listening" style="--mark-size:2rem;--halo-spread:1.6rem" aria-hidden="true"><span class="aura"><span class="bloom"></span></span><span class="core"></span></span>
+            <span class="wordmark">kodama</span>
+          </div>
+        </div>
+
+        <div>
+          <p class="eyebrow" style="margin-bottom:1.2rem">holds at any size — down to the tray</p>
+          <div class="sizes">
+            <div class="size-cell">
+              <span class="mark" style="--mark-size:2.5rem" aria-hidden="true"><span class="aura"><span class="bloom"></span></span><span class="core"></span></span>
+              <span class="size-cap">40px</span>
+            </div>
+            <div class="size-cell">
+              <span class="mark" style="--mark-size:1.5rem" aria-hidden="true"><span class="aura"><span class="bloom"></span></span><span class="core"></span></span>
+              <span class="size-cap">24px</span>
+            </div>
+            <div class="size-cell">
+              <span class="mark" style="--mark-size:1.25rem" aria-hidden="true"><span class="aura"><span class="bloom"></span></span><span class="core"></span></span>
+              <span class="size-cap">20px</span>
+            </div>
+            <div class="size-cell">
+              <span class="mark" style="--mark-size:16px" aria-hidden="true"><span class="aura"><span class="bloom"></span></span><span class="core"></span></span>
+              <span class="size-cap">16px · tray</span>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <p class="eyebrow" style="margin-bottom:1.2rem">survives in a single ink · inverse</p>
+          <div class="mono-row">
+            <div class="mono-chip on-light">
+              <span class="mark" aria-hidden="true"><span class="aura"><span class="bloom"></span></span><span class="core"></span></span>
+              <span class="lbl">on washi</span>
+            </div>
+            <div class="mono-chip on-dark">
+              <span class="mark" aria-hidden="true"><span class="aura"><span class="bloom"></span></span><span class="core"></span></span>
+              <span class="lbl">on sumi</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <p class="caption">Clear space is measured in <em>ma</em>: keep an empty margin of at least the
+        core's own diameter on every side. The aura's reach is generous by design — never crop it.</p>
+    </section>
+  </div>
+
+  <!-- ===================== GUARDRAIL ===================== -->
+  <div class="wrap">
+    <section class="col">
+      <p class="eyebrow">guardrail · evoke, never trace</p>
+      <h2>What the mark is not.</h2>
+      <p class="prose soft">The kodama archetype — a small, quiet forest presence — is suggested by
+        calm, space, warmth, and one green. Every literal reading is refused.</p>
+      <ul class="avoid">
+        <li><span class="no">A face, eyes, or a little body</span><span class="yes">a point and its breath</span></li>
+        <li><span class="no">Ghibli's character, traced or softened</span><span class="yes">an original mark</span></li>
+        <li><span class="no">Leaf, sprout, or tree glyph</span><span class="yes">a clean disc</span></li>
+        <li><span class="no">A level meter or waveform scope</span><span class="yes">a breath that swells</span></li>
+        <li><span class="no">Green sprinkled through the UI</span><span class="yes">one reserved green, listening only</span></li>
+      </ul>
+    </section>
+  </div>
+
+  <!-- ===================== FOOTER ===================== -->
+  <div class="wrap">
+    <footer>
+      <div class="rule"></div>
+      <p style="max-width:var(--measure)">Concept, not final — <span class="mono">P0-5</span> designs
+        the mark; <span class="mono">P0-4</span> locks the exact green and geometry;
+        <span class="mono">P1-5</span> wires it to real capture state. The written concept lives in
+        <a href="../SPIRIT_MARK.md">SPIRIT_MARK.md</a>; the aesthetic it descends from is in
+        <a href="../DESIGN.md">DESIGN.md</a>.</p>
+      <p class="faint" style="margin-top:1rem">kodama · P0-5 · phase 0 · the listening indicator is the kodama</p>
+    </footer>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+
+    /* --- theme toggle (mirrors moodboard.html) --- */
+    var btn = document.getElementById("themeToggle");
+    var name = document.getElementById("themeName");
+    function current() {
+      var set = root.getAttribute("data-theme");
+      if (set) return set;
+      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+    function paint() { name.textContent = current() === "dark" ? "night" : "day"; }
+    btn.addEventListener("click", function () {
+      root.setAttribute("data-theme", current() === "dark" ? "light" : "dark");
+      paint();
+    });
+    paint();
+
+    /* --- interactive spirit-mark demo --- */
+    var mark   = document.getElementById("demoMark");
+    var wakeBtn = document.getElementById("wakeBtn");
+    var voiceBtn = document.getElementById("voiceBtn");
+    var wakeLbl = document.getElementById("wakeLbl");
+    var voiceLbl = document.getElementById("voiceLbl");
+    var cap = document.getElementById("demoCap");
+
+    var reduce = window.matchMedia("(prefers-reduced-motion: reduce)");
+    var listening = false, voicing = false, raf = null, amp = 0;
+
+    function setCap(t) { cap.innerHTML = t; }
+
+    /* caption for the "listening but not voicing" resting state, honouring reduced-motion */
+    function listenCap() {
+      return reduce.matches
+        ? "Listening — a <b>still green mark</b> (reduced motion is on)."
+        : "Listening — the one green, breathing in silence.";
+    }
+
+    function setListening(on) {
+      listening = on;
+      mark.classList.toggle("is-listening", on);
+      wakeBtn.setAttribute("aria-pressed", on ? "true" : "false");
+      wakeLbl.textContent = on ? "Settle" : "Wake";
+      if (!on) { stopVoice(); setCap("Idle — a still ink mark. Press <b>Wake</b> to start listening."); }
+      else if (!voicing) { setCap(listenCap()); }
+    }
+
+    /* a smoothed, speech-like amplitude envelope (no microphone):
+       a slow "phrase gate" (speaking vs pausing) times a faster
+       syllabic wobble, low-passed for inertia. Capped and gentle. */
+    function envelope(tSec) {
+      var gateRaw = 0.5 + 0.5 * Math.sin(tSec * 0.62 + 0.4);
+      var gate = Math.max(0, Math.min(1, (gateRaw - 0.32) / 0.5));
+      var syll = 0.55 + 0.30 * Math.sin(tSec * 7.7) + 0.15 * Math.sin(tSec * 4.3 + 1.6);
+      return gate * Math.max(0, Math.min(1, syll));
+    }
+
+    function loop() {
+      var target = envelope(performance.now() / 1000);
+      amp += (target - amp) * 0.14;                 /* inertia / low-pass */
+      mark.style.setProperty("--amp", amp.toFixed(3));
+      raf = requestAnimationFrame(loop);
+    }
+
+    function startVoice() {
+      if (!listening) setListening(true);
+      voicing = true;
+      voiceBtn.setAttribute("aria-pressed", "true");
+      voiceLbl.textContent = "Mute";
+      if (reduce.matches) {
+        setCap("Listening — a <b>still green mark</b> (reduced motion is on; the breath and swell are hushed).");
+        return;                                     /* respect the a11y floor: no animated swell */
+      }
+      setCap("Listening — the aura swells with a <b>simulated</b> voice. Not a meter; a breath.");
+      if (!raf) loop();
+    }
+
+    function stopVoice() {
+      voicing = false;
+      voiceBtn.setAttribute("aria-pressed", "false");
+      voiceLbl.textContent = "Simulated voice";
+      if (raf) { cancelAnimationFrame(raf); raf = null; }
+      amp = 0; mark.style.setProperty("--amp", "0");
+      if (listening) setCap(listenCap());   /* muting while still listening: revert the stale swell caption */
+    }
+
+    wakeBtn.addEventListener("click", function () { setListening(!listening); });
+    voiceBtn.addEventListener("click", function () { voicing ? stopVoice() : startVoice(); });
+
+    /* re-evaluate the swell whenever reduced-motion flips, in either direction */
+    if (reduce.addEventListener) {
+      reduce.addEventListener("change", function () {
+        if (voicing) { stopVoice(); startVoice(); }
+      });
+    }
+  })();
+</script>
+</body>
+</html>
