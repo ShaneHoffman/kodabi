@@ -5,7 +5,7 @@ This file holds the **later phases as unrefined planning material** — goals, m
 checklists that get broken into tickets when their phase comes up. Vision + architecture source
 of truth is `FOUNDING_DOC.md`; this is the working roadmap derived from it.
 
-**Decisions already locked that affect later phases:** License = AGPL-3.0 · Frontend = React +
+**Decisions already locked that affect later phases:** License = AGPL-3.0-only · Frontend = React +
 Tailwind · Transcription = per-channel (you/them attribution) · Glossary-cleanup post-pass pulled
 forward into Phase 1.
 
