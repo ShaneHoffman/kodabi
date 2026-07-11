@@ -185,12 +185,19 @@
     opacity: 0; transition: opacity .45s ease, transform .12s ease-out;
     transform: scale(calc(1 + var(--amp, 0) * .18));
   }
-  .mark .aura .bloom {
-    position: absolute; inset: 0; border-radius: 50%;
-    /* gradient centred a touch off-true — a deliberate wabi-sabi asymmetry */
-    background: radial-gradient(circle at 47% 43%, var(--accent-dot) 0%, transparent 62%);
-    opacity: .26;
+  /* The aura is a small field of ma. Rather than one static, lopsided glow,
+     two soft blobs slowly counter-rotate and morph, so the edge gently
+     undulates — a living presence. .bloom carries the breath (scale + opacity);
+     its two pseudo-layers carry the wavy edge. The core stays a crisp disc. */
+  .mark .aura .bloom { position: absolute; inset: 0; opacity: .26; }
+  .mark .aura .bloom::before,
+  .mark .aura .bloom::after {
+    content: ""; position: absolute; inset: 4%;
+    background: radial-gradient(circle, var(--accent-dot) 0%, transparent 72%);
+    filter: blur(4px);
+    border-radius: 48% 52% 53% 47% / 52% 47% 53% 48%;
   }
+  .mark .aura .bloom::after { inset: 11%; opacity: .8; border-radius: 52% 48% 47% 53% / 48% 53% 47% 52%; }
   /* the core — a clean disc so the mark survives at 16px and in one
      ink value; a faint caught-light sheen keeps it from reading as a
      mechanical LED. background-color is transitioned for the wake. */
@@ -205,9 +212,22 @@
   .mark.is-listening .core { background-color: var(--accent-dot); animation: breathe 4.2s ease-in-out infinite; }
   .mark.is-listening .aura { opacity: 1; }
   .mark.is-listening .aura .bloom { animation: halo 4.2s ease-in-out infinite; }
+  .mark.is-listening .aura .bloom::before { animation: blobA 15s linear infinite; }
+  .mark.is-listening .aura .bloom::after  { animation: blobB 21s linear infinite; }
 
   @keyframes breathe { 0%,100% { transform: scale(1); } 50% { transform: scale(1.12); } }
-  @keyframes halo    { 0%,100% { transform: scale(.86); opacity: .14; } 50% { transform: scale(1.14); opacity: .30; } }
+  @keyframes halo    { 0%,100% { transform: scale(.9); opacity: .16; } 50% { transform: scale(1.12); opacity: .30; } }
+  /* two counter-rotating morphs — the aura's wavy, living edge */
+  @keyframes blobA {
+    0%   { border-radius: 48% 52% 53% 47% / 52% 47% 53% 48%; transform: rotate(0deg); }
+    50%  { border-radius: 53% 47% 46% 54% / 47% 53% 48% 52%; transform: rotate(180deg); }
+    100% { border-radius: 48% 52% 53% 47% / 52% 47% 53% 48%; transform: rotate(360deg); }
+  }
+  @keyframes blobB {
+    0%   { border-radius: 52% 48% 47% 53% / 48% 53% 47% 52%; transform: rotate(0deg); }
+    50%  { border-radius: 45% 55% 56% 44% / 55% 45% 53% 47%; transform: rotate(-180deg); }
+    100% { border-radius: 52% 48% 47% 53% / 48% 53% 47% 52%; transform: rotate(-360deg); }
+  }
 
   /* ---------- state comparison (idle vs listening) ---------- */
   .states { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(1.5rem, 4vw, 3.2rem); margin-top: 2.8rem; }
@@ -291,7 +311,9 @@
   /* ---------- accessibility: motion off → a still green mark ---------- */
   @media (prefers-reduced-motion: reduce) {
     .page { animation: none; opacity: 1; }
-    .mark .core, .mark .aura .bloom { animation: none !important; }
+    .mark .core, .mark .aura .bloom,
+    .mark .aura .bloom::before, .mark .aura .bloom::after { animation: none !important; }
+    .mark .aura .bloom::before, .mark .aura .bloom::after { border-radius: 50%; transform: none; }
     .mark .aura { transform: none; }
   }
 </style>
