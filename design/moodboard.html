@@ -26,7 +26,7 @@
     --bg-sink:   #EAE8DD;
     --text:      #23261F;
     --text-soft: #59654F;
-    --text-faint:#676B62;
+    --text-faint:#62665E;
     --accent:    #526B4D;
     --accent-dot:#5F7E5A;
     --lift:      0 1px 2px rgba(35,38,31,.06), 0 8px 24px rgba(35,38,31,.05);
@@ -79,7 +79,7 @@
     --bg-sink:   #EAE8DD;
     --text:      #23261F;
     --text-soft: #59654F;
-    --text-faint:#676B62;
+    --text-faint:#62665E;
     --accent:    #526B4D;
     --accent-dot:#5F7E5A;
     --lift:      0 1px 2px rgba(35,38,31,.06), 0 8px 24px rgba(35,38,31,.05);
@@ -224,7 +224,7 @@
   .plates { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: clamp(1rem, 2.2vw, 1.6rem); }
   .plate-card { display: flex; flex-direction: column; }
   .plate-img { border-radius: 8px; overflow: hidden; box-shadow: var(--lift-soft); aspect-ratio: 4 / 3; }
-  .plate { display: block; width: 100%; height: 100%; }
+  .plate { display: block; width: 100%; height: auto; }
   .plate-card .name { margin-top: .95rem; font-weight: 500; color: var(--text); font-size: 1rem; }
   .plate-card .take { font-size: var(--fs-cap); color: var(--text-faint); margin-top: .2rem; line-height: 1.5; }
   .plates-note { font-size: var(--fs-cap); color: var(--text-faint); margin-top: 2rem; }
@@ -235,7 +235,7 @@
   .avoid li + li { box-shadow: inset 0 1px 0 rgba(128,128,120,.12); }
   .avoid .no { color: var(--text-faint); text-decoration: line-through; text-decoration-thickness: 1px; text-decoration-color: var(--text-faint); }
   .avoid .yes { color: var(--text); }
-  .avoid .yes::before { content: "→ "; color: var(--accent); }
+  .avoid .yes::before { content: "→ " / ""; color: var(--accent); }
   @media (max-width: 40rem) { .avoid li { grid-template-columns: 1fr; gap: .2rem; } }
 
   /* ---------- listening moment ---------- */
