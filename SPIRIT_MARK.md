@@ -60,7 +60,7 @@ carry consent.
 
 ## Animation intent
 
-Two layered motions over one firm accessibility floor. Values are indicative starting points for
+Three layered motions over one firm accessibility floor. Values are indicative starting points for
 P1-5 to refine against real audio; the moodboard's `breathe` / `halo` keyframes are the seed.
 
 - **Baseline — breathing.** A slow **~4.2 s** ease-in-out swell of the core and aura (core `scale
@@ -71,6 +71,10 @@ P1-5 to refine against real audio; the moodboard's `breathe` / `halo` keyframes 
   breath *swell* rather than draw a scope. Explicitly **not** an EQ meter, bars, or an oscilloscope.
   Intended mapping: a low-passed amplitude envelope drives aura scale within a small bounded range
   (roughly +0–18%); quiet rooms read as pure breath.
+- **Living aura — a gentle undulation.** The aura is not a static glow: two soft, blurred layers
+  slowly counter-rotate and morph their shape, so its edge quietly undulates — a living presence
+  rather than a status light. Kept whisper-subtle so it *evokes* life without tipping into an
+  illustrated character; it freezes to a still, symmetric glow under reduced motion.
 - **Accessibility floor — reduced motion.** Under `prefers-reduced-motion: reduce`, all animation
   stops and listening becomes a **still green mark** — still unmistakably on-air by the reserved
   color and presence alone. This mirrors the locked behavior already in `design/moodboard.html`.
