@@ -68,8 +68,9 @@
   /* ---------- Layer 3 — type ---------- */
 
   /* families — chosen faces first, system stand-ins retained as fallback.
-     TODO(feat/scaffold-tauri-app): bundle subset woff2 + @font-face for the
-     Source trio so these render offline; until then the fallbacks apply. */
+     The Source trio is self-hosted (src/fonts.ts, feat/scaffold-tauri-app)
+     so these render offline; the fallbacks below only apply if that import
+     is ever removed. */
   --sans:  "Source Sans 3","Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
   --serif: "Source Serif 4","Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
   --mono:  "Source Code Pro","Cascadia Mono",ui-monospace,"SF Mono",Consolas,"Liberation Mono",monospace;
