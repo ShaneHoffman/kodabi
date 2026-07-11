@@ -5,12 +5,14 @@
       "id": "1305c0e4-ef23-4e06-8900-b384e0c0c45d",
       "name": "Backlog",
       "role": "todo",
+      "description": "To Do. Branch convention: type/slug (feat|fix|chore|docs|refactor|ci), no ticket ID — set branchName at task creation, never rename later. WARNING: dragging a card here kills the session and removes its worktree.",
       "icon": "layers",
       "color": "#6b7280"
     },
     {
       "id": "3924b1d3-0aaf-497d-9d4e-20bff33559c9",
       "name": "Planning",
+      "description": "Auto-spawns an opus/xhigh agent in plan mode. On plan approval it auto-advances to Executing (plan approval is the gate here).",
       "icon": "map",
       "color": "#8b5cf6",
       "autoSpawn": true,
@@ -22,44 +24,59 @@
     {
       "id": "b25eacc0-b2ec-4d04-93f6-c9c53684ec22",
       "name": "Executing",
+      "description": "Auto-spawns an agent that implements the plan and commits on the task branch (no push). Stops on completion; a human drags the card to Code Review.",
       "icon": "square-terminal",
       "autoSpawn": true
     },
     {
       "id": "047acd2f-5918-478b-96cc-e2756c690b6a",
       "name": "Code Review",
+      "description": "On entry, kills the executing session and spawns a fresh, independent reviewer that runs /code-review high on git diff main...HEAD and reports findings. Does NOT fix or push. Manual gate: a human sends it back to Executing (request changes) or drags it to Ship It. Never drag back to Backlog (that removes the worktree).",
       "icon": "code",
       "color": "#f59e0b",
-      "autoSpawn": true
-    },
-    {
-      "id": "56552d89-9ca9-4abd-a22f-8a84943f2f43",
-      "name": "Tests",
-      "icon": "flask-conical",
-      "color": "#06b6d4",
-      "autoSpawn": true
+      "autoSpawn": true,
+      "autoCommand": "/code-review high"
     },
     {
       "id": "d881d7dc-4fed-4d43-8d12-01978afd8248",
-      "name": "Ship It",
+      "name": "Open PR",
+      "description": "On entry, kills the session and spawns a release agent that pushes the branch, opens a PR (gh pr create --base main), and links it via kangentic_link_pr. Does NOT merge. A human merges, then drags the card to Done.",
       "icon": "sailboat",
       "color": "#F97316",
-      "autoSpawn": true
+      "autoSpawn": true,
+      "autoCommand": "/pull-request"
     },
     {
       "id": "f0eb001f-bb69-40b2-81cb-b1b3382b7def",
       "name": "Done",
       "role": "done",
+      "description": "Merged / complete. Moving a card here kills its session.",
       "icon": "circle-check-big",
       "color": "#10b981"
     }
   ],
   "actions": [
     {
+      "id": "a7d1f2c0-1102-4b3a-9c21-0000000000c2",
+      "name": "Create PR",
+      "type": "spawn_agent",
+      "config": {
+        "promptTemplate": "{{task_xml}}{{attachments}}"
+      }
+    },
+    {
       "id": "e19cdbdf-d9b3-433c-9f4c-4f18bfc95c45",
       "name": "Kill Session",
       "type": "kill_session",
       "config": {}
+    },
+    {
+      "id": "a7d1f2c0-1101-4b3a-9c21-0000000000c1",
+      "name": "Start Code Review",
+      "type": "spawn_agent",
+      "config": {
+        "promptTemplate": "{{task_xml}}{{attachments}}"
+      }
     },
     {
       "id": "60c9c207-1d5b-432f-a418-4d3ec9e86716",
@@ -73,10 +90,26 @@
   "transitions": [
     {
       "from": "*",
+      "to": "Code Review",
+      "actions": [
+        "Kill Session",
+        "Start Code Review"
+      ]
+    },
+    {
+      "from": "*",
       "to": "Planning",
       "actions": [
         "Kill Session",
         "Start Planning Agent"
+      ]
+    },
+    {
+      "from": "*",
+      "to": "Open PR",
+      "actions": [
+        "Kill Session",
+        "Create PR"
       ]
     },
     {
