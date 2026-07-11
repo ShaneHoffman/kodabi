@@ -27,7 +27,7 @@
       "description": "Auto-spawns an agent that implements the plan and commits on the task branch (no push). Stops on completion; a human drags the card to Code Review.",
       "icon": "square-terminal",
       "autoSpawn": true,
-      "autoCommand": "Implement the approved plan (or, if this card was sent back from Code Review, the requested changes) exactly as scoped — no scope creep, no extra files. When the change is complete and the working tree is clean, commit it ON THIS BRANCH: git add -A && git commit -m \"<type>: <summary>\" using the Conventional-Commit <type> that matches the branch prefix ({{branchName}}). Do NOT push, open a PR, rename the branch, or move the card. Post a short summary of what you changed and STOP — a human reviews the commit and drags the card to Code Review."
+      "autoCommand": "Implement this task exactly as scoped, incorporating any Code Review feedback — no scope creep, no extra files. When the working tree is clean, commit it ON THIS BRANCH: git add -A && git commit -m \"<type>: <summary>\" using the Conventional-Commit <type> that matches the branch prefix ({{branchName}}). Do NOT push, open a PR, rename the branch, or move the card. Post a short summary of what you changed and STOP — a human reviews the commit and drags the card to Code Review."
     },
     {
       "id": "047acd2f-5918-478b-96cc-e2756c690b6a",
