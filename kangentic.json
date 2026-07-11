@@ -26,16 +26,18 @@
       "name": "Executing",
       "description": "Auto-spawns an agent that implements the plan and commits on the task branch (no push). Stops on completion; a human drags the card to Code Review.",
       "icon": "square-terminal",
-      "autoSpawn": true
+      "autoSpawn": true,
+      "autoCommand": "Implement this task exactly as scoped, incorporating any Code Review feedback — no scope creep, no extra files. When the working tree is clean, commit it ON THIS BRANCH: git add -A && git commit -m \"<type>: <summary>\" using the Conventional-Commit <type> that matches the branch prefix ({{branchName}}). Do NOT push, open a PR, rename the branch, or move the card. Post a short summary of what you changed and STOP — a human reviews the commit and drags the card to Code Review."
     },
     {
       "id": "047acd2f-5918-478b-96cc-e2756c690b6a",
       "name": "Code Review",
-      "description": "On entry, kills the executing session and spawns a fresh, independent reviewer that runs /code-review high on git diff main...HEAD and reports findings. Does NOT fix or push. Manual gate: a human sends it back to Executing (request changes) or drags it to Ship It. Never drag back to Backlog (that removes the worktree).",
+      "description": "On entry, kills the executing session and spawns a fresh, independent reviewer that runs /code-review high on git diff main...HEAD and reports findings. Does NOT fix or push. Manual gate: a human sends it back to Executing (request changes) or drags it to Open PR. Never drag back to Backlog (that removes the worktree).",
       "icon": "code",
       "color": "#f59e0b",
       "autoSpawn": true,
-      "autoCommand": "/code-review high"
+      "autoCommand": "/code-review high",
+      "permissionMode": "default"
     },
     {
       "id": "d881d7dc-4fed-4d43-8d12-01978afd8248",
