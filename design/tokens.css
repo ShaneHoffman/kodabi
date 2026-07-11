@@ -1,0 +1,196 @@
+/* ============================================================
+   Kodama — design tokens  (P0-4, Phase 0)
+
+   The locked, machine-consumable source of truth for the whole
+   app. Promoted from the INDICATIVE values in design/moodboard.html
+   (P0-3) into final tokens. Read DESIGN.md for the intent;
+   this file is the material.
+
+   Discipline (DESIGN.md): value carries the hierarchy, hue stays
+   almost silent. Space instead of borders/boxes. One deliberate
+   motion. The palette is one desaturated grey-green value ladder;
+   there are two greens and both are quiet — a soft interactive
+   accent, and the brighter one reserved for the listening state.
+
+   Layers
+     1. pigments  (--k-*, --lift-*)  forest neutrals, the green, the tuned day/night shades and
+                                     elevation — every literal is defined here EXACTLY ONCE
+     2. semantic  (--bg, --text …)   remapped per theme (references only, never new literals);
+                                     what components actually consume
+     3. scales    (--fs-/--fw-/--lh-/--ls-/--space-/--flow-/--radius-/--edge-) theme-independent
+
+   Theming — same triple-selector mechanism as the moodboard. The dark mapping is stated twice
+   (a media query cannot be merged with a plain selector), but both copies only *reference* the
+   Layer-1 primitives, so no value can drift between the OS-dark and forced-dark paths:
+     :root                                                  → light (washi day), the default
+     @media (prefers-color-scheme: dark) :root:not([data-theme="light"]) → dark when the OS asks
+     :root[data-theme="dark"]                               → dark, forced
+     :root[data-theme="light"]                              → light, forced (wins over OS dark)
+
+   Consuming in Tailwind v4 later: see design/tailwind-theme.example.css.
+   ============================================================ */
+
+:root {
+  /* ---------- Layer 1 — pigments (the "paints"; same in both themes) ---------- */
+  --k-washi: #F1EFE6;   /* paper ground      */
+  --k-mist:  #DCE1D8;   /* recessive tone    */
+  --k-stone: #8B8F86;   /* quiet, secondary  */
+  --k-moss:  #59654F;   /* grounded mid      */
+  --k-fern:  #3B4636;   /* deep neutral      */
+  --k-sumi:  #23261F;   /* ink / primary text */
+  --k-green: #5F7E5A;   /* the one living green — listening */
+
+  /* ---------- Layer 1 — tuned functional shades & elevation ----------
+     Values that aren't one of the six pigments, defined ONCE here. The theme
+     blocks at the bottom only reference these, so an edit lands in one place. */
+
+  /* light-side shades (the ones that aren't a raw pigment) */
+  --k-washi-sink: #EAE8DD;   /* recessed washi (light bg-sink) */
+  --k-stone-ink:  #62665E;   /* darkened stone — a11y-tuned faint text */
+  --k-accent:     #526B4D;   /* desaturated green — interactive accent */
+
+  /* night palette */
+  --k-night:         #191B16;   /* night ground (deep sumi) */
+  --k-night-sink:    #131510;
+  --k-night-surface: #212419;   /* barely-there raised plane */
+  --k-paper:         #E9E8DE;   /* warm paper (dark text) */
+  --k-paper-soft:    #AEB3A7;
+  --k-paper-faint:   #868B81;   /* ≈ stone */
+  --k-accent-night:  #93B389;
+  --k-green-night:   #86A67E;
+
+  /* elevation — geometry differs per theme, so two full sets (each defined once) */
+  --lift-day:        0 1px 2px rgba(35,38,31,.06), 0 8px 24px rgba(35,38,31,.05);
+  --lift-soft-day:   0 1px 1px rgba(35,38,31,.05), 0 4px 14px rgba(35,38,31,.04);
+  --lift-night:      0 1px 2px rgba(0,0,0,.35), 0 10px 30px rgba(0,0,0,.30);
+  --lift-soft-night: 0 1px 1px rgba(0,0,0,.30), 0 5px 16px rgba(0,0,0,.22);
+
+  /* ---------- Layer 3 — type ---------- */
+
+  /* families — chosen faces first, system stand-ins retained as fallback.
+     TODO(feat/scaffold-tauri-app): bundle subset woff2 + @font-face for the
+     Source trio so these render offline; until then the fallbacks apply. */
+  --sans:  "Source Sans 3","Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+  --serif: "Source Serif 4","Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+  --mono:  "Source Code Pro","Cascadia Mono",ui-monospace,"SF Mono",Consolas,"Liberation Mono",monospace;
+
+  /* size scale (rem; the big two are fluid) */
+  --fs-eyebrow: .72rem;
+  --fs-cap:     .8rem;
+  --fs-body:    1.06rem;
+  --fs-read:    1.18rem;
+  --fs-h3:      1.35rem;
+  --fs-h2:      clamp(1.55rem, 1.2rem + 1.4vw, 2.05rem);
+  --fs-display: clamp(2.35rem, 1.6rem + 3.6vw, 3.9rem);
+
+  /* weights */
+  --fw-light:    300;
+  --fw-regular:  400;
+  --fw-medium:   500;
+  --fw-semibold: 600;
+
+  /* line-heights (per role) */
+  --lh-display: 1.04;
+  --lh-h2:      1.12;
+  --lh-h3:      1.2;
+  --lh-body:    1.72;
+  --lh-read:    1.6;
+
+  /* letter-spacing (per role) */
+  --ls-display: -0.022em;
+  --ls-h2:      -0.01em;
+  --ls-h3:      -0.005em;
+  --ls-eyebrow: 0.22em;
+
+  /* ---------- Layer 3 — spacing ---------- */
+
+  /* numeric step scale on a 4px (0.25rem) base; top-accelerating so the
+     bigger gap is the path of least resistance (Ma). Component-internal spacing. */
+  --space-3xs: 0.25rem;  /*  4px */
+  --space-2xs: 0.5rem;   /*  8px */
+  --space-xs:  0.75rem;  /* 12px */
+  --space-sm:  1rem;     /* 16px */
+  --space-md:  1.5rem;   /* 24px */
+  --space-lg:  2.5rem;   /* 40px */
+  --space-xl:  4rem;     /* 64px */
+  --space-2xl: 6rem;     /* 96px */
+  --space-3xl: 9rem;     /* 144px */
+
+  /* fluid page-rhythm ("flow") — responsive, for page-level vertical rhythm and gutters */
+  --flow-section: clamp(4.5rem, 9vw, 8.5rem);
+  --flow-hero:    clamp(3rem, 7vw, 6rem);
+  --flow-gutter:  clamp(1.5rem, 5vw, 4rem);
+
+  /* ---------- Layer 3 — layout widths ---------- */
+  --measure: 33rem;   /* prose reading measure */
+  --content: 46rem;   /* content column        */
+  --wide:    62rem;   /* max page width        */
+
+  /* ---------- Layer 3 — radii & edges ---------- */
+  --radius-focus: 2px;
+  --radius-sm:    5px;
+  --radius-md:    8px;
+
+  /* hairlines are translucent inset shadows, never borders (DESIGN.md) */
+  --edge-faint:  rgba(128, 128, 120, 0.12);
+  --edge:        rgba(128, 128, 120, 0.20);
+  --edge-strong: rgba(128, 128, 120, 0.28);
+  --hairline:    inset 0 0 0 1px var(--edge);
+
+  /* ---------- Layer 2 — semantic tokens: light (washi day) is the default ----------
+     All four theme blocks below are pure references to Layer 1 — no literals here. */
+  --bg:         var(--k-washi);
+  --bg-sink:    var(--k-washi-sink);
+  --surface:    var(--k-mist);       /* one raised plane above bg */
+  --text:       var(--k-sumi);
+  --text-soft:  var(--k-moss);
+  --text-faint: var(--k-stone-ink);  /* a11y-tuned; micro-text only */
+  --accent:     var(--k-accent);     /* interactive (links/focus) */
+  --accent-dot: var(--k-green);      /* listening state only */
+  --lift:       var(--lift-day);
+  --lift-soft:  var(--lift-soft-day);
+}
+
+/* ---------- Layer 2 — dark (night): auto when the OS asks and not forced light ---------- */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:         var(--k-night);
+    --bg-sink:    var(--k-night-sink);
+    --surface:    var(--k-night-surface);
+    --text:       var(--k-paper);
+    --text-soft:  var(--k-paper-soft);
+    --text-faint: var(--k-paper-faint);
+    --accent:     var(--k-accent-night);
+    --accent-dot: var(--k-green-night);
+    --lift:       var(--lift-night);
+    --lift-soft:  var(--lift-soft-night);
+  }
+}
+
+/* ---------- Layer 2 — dark (night): forced (same references as the media block above) ---------- */
+:root[data-theme="dark"] {
+  --bg:         var(--k-night);
+  --bg-sink:    var(--k-night-sink);
+  --surface:    var(--k-night-surface);
+  --text:       var(--k-paper);
+  --text-soft:  var(--k-paper-soft);
+  --text-faint: var(--k-paper-faint);
+  --accent:     var(--k-accent-night);
+  --accent-dot: var(--k-green-night);
+  --lift:       var(--lift-night);
+  --lift-soft:  var(--lift-soft-night);
+}
+
+/* ---------- Layer 2 — light (washi day): forced (wins over OS dark) ---------- */
+:root[data-theme="light"] {
+  --bg:         var(--k-washi);
+  --bg-sink:    var(--k-washi-sink);
+  --surface:    var(--k-mist);
+  --text:       var(--k-sumi);
+  --text-soft:  var(--k-moss);
+  --text-faint: var(--k-stone-ink);
+  --accent:     var(--k-accent);
+  --accent-dot: var(--k-green);
+  --lift:       var(--lift-day);
+  --lift-soft:  var(--lift-soft-day);
+}

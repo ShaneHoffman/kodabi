@@ -94,33 +94,22 @@
     {
       "from": "*",
       "to": "Code Review",
-      "actions": [
-        "Kill Session",
-        "Start Code Review"
-      ]
+      "actions": ["Kill Session", "Start Code Review"]
     },
     {
       "from": "*",
       "to": "Planning",
-      "actions": [
-        "Kill Session",
-        "Start Planning Agent"
-      ]
+      "actions": ["Kill Session", "Start Planning Agent"]
     },
     {
       "from": "*",
       "to": "Open PR",
-      "actions": [
-        "Kill Session",
-        "Create PR"
-      ]
+      "actions": ["Kill Session", "Create PR"]
     },
     {
       "from": "*",
       "to": "Done",
-      "actions": [
-        "Kill Session"
-      ]
+      "actions": ["Kill Session"]
     }
   ],
   "_modifiedBy": "0f56072ae904"
