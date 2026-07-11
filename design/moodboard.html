@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kodama — Moodboard &amp; Aesthetic Direction</title>
+<style>
+  /* ============================================================
+     Kodama moodboard — self-contained, no external requests.
+     Palette values are INDICATIVE (mood, not final tokens).
+     P0-4 locks the real tokens; P0-5 designs the mark.
+     ============================================================ */
+
+  :root {
+    /* --- palette pigments (shown as swatches; same in both themes) --- */
+    --pig-washi:  #F1EFE6;
+    --pig-mist:   #DCE1D8;
+    --pig-stone:  #8B8F86;
+    --pig-moss:   #59654F;
+    --pig-fern:   #3B4636;
+    --pig-sumi:   #23261F;
+    --pig-green:  #5F7E5A;   /* the one living green — listening only */
+
+    /* --- functional tokens: light (washi day) is the default --- */
+    --bg:        #F1EFE6;
+    --bg-sink:   #EAE8DD;
+    --text:      #23261F;
+    --text-soft: #59654F;
+    --text-faint:#62665E;
+    --accent:    #526B4D;
+    --accent-dot:#5F7E5A;
+    --lift:      0 1px 2px rgba(35,38,31,.06), 0 8px 24px rgba(35,38,31,.05);
+    --lift-soft: 0 1px 1px rgba(35,38,31,.05), 0 4px 14px rgba(35,38,31,.04);
+
+    /* --- type --- */
+    --sans: "Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
+    --serif:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
+    --mono: "Cascadia Code","Cascadia Mono",ui-monospace,"SF Mono",Consolas,"Liberation Mono",monospace;
+
+    --measure: 33rem;
+    --content: 46rem;
+    --wide:    62rem;
+
+    --fs-eyebrow: .72rem;
+    --fs-cap:     .8rem;
+    --fs-body:    1.06rem;
+    --fs-read:    1.18rem;
+    --fs-h3:      1.35rem;
+    --fs-h2:      clamp(1.55rem, 1.2rem + 1.4vw, 2.05rem);
+    --fs-display: clamp(2.35rem, 1.6rem + 3.6vw, 3.9rem);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:        #191B16;
+      --bg-sink:   #131510;
+      --text:      #E9E8DE;
+      --text-soft: #AEB3A7;
+      --text-faint:#868B81;
+      --accent:    #93B389;
+      --accent-dot:#86A67E;
+      --lift:      0 1px 2px rgba(0,0,0,.35), 0 10px 30px rgba(0,0,0,.30);
+      --lift-soft: 0 1px 1px rgba(0,0,0,.30), 0 5px 16px rgba(0,0,0,.22);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg:        #191B16;
+    --bg-sink:   #131510;
+    --text:      #E9E8DE;
+    --text-soft: #AEB3A7;
+    --text-faint:#868B81;
+    --accent:    #93B389;
+    --accent-dot:#86A67E;
+    --lift:      0 1px 2px rgba(0,0,0,.35), 0 10px 30px rgba(0,0,0,.30);
+    --lift-soft: 0 1px 1px rgba(0,0,0,.30), 0 5px 16px rgba(0,0,0,.22);
+  }
+  :root[data-theme="light"] {
+    --bg:        #F1EFE6;
+    --bg-sink:   #EAE8DD;
+    --text:      #23261F;
+    --text-soft: #59654F;
+    --text-faint:#62665E;
+    --accent:    #526B4D;
+    --accent-dot:#5F7E5A;
+    --lift:      0 1px 2px rgba(35,38,31,.06), 0 8px 24px rgba(35,38,31,.05);
+    --lift-soft: 0 1px 1px rgba(35,38,31,.05), 0 4px 14px rgba(35,38,31,.04);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+
+  html { -webkit-text-size-adjust: 100%; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: var(--fs-body);
+    line-height: 1.72;
+    font-weight: 400;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    transition: background .5s ease, color .5s ease;
+  }
+
+  .page { animation: rise .7s ease forwards; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+  /* ---------- layout ---------- */
+  .wrap { max-width: var(--wide); margin: 0 auto; padding: 0 clamp(1.5rem, 5vw, 4rem); }
+  .col  { max-width: var(--content); }
+  .prose { max-width: var(--measure); }
+
+  section { padding-block: clamp(4.5rem, 9vw, 8.5rem); }
+
+  /* ---------- type roles ---------- */
+  .eyebrow {
+    font-size: var(--fs-eyebrow);
+    text-transform: uppercase;
+    letter-spacing: .22em;
+    font-weight: 500;
+    color: var(--text-faint);
+    margin: 0 0 1.6rem;
+  }
+  h1, h2, h3 { text-wrap: balance; font-weight: 500; margin: 0; }
+  h2 { font-size: var(--fs-h2); line-height: 1.12; letter-spacing: -0.01em; margin-bottom: 1.1rem; }
+  h3 { font-size: var(--fs-h3); line-height: 1.2; letter-spacing: -0.005em; }
+  p  { margin: 0 0 1.1rem; }
+  p:last-child { margin-bottom: 0; }
+  .lead { font-size: var(--fs-read); color: var(--text-soft); line-height: 1.6; }
+  .soft { color: var(--text-soft); }
+  .faint { color: var(--text-faint); }
+  .serif { font-family: var(--serif); }
+  .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  a { color: var(--accent); text-underline-offset: 3px; text-decoration-thickness: 1px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+
+  /* ---------- masthead ---------- */
+  .top {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 1rem; padding-block: 1.9rem; color: var(--text-faint);
+  }
+  .brand { display: flex; align-items: baseline; gap: .7rem; font-size: var(--fs-cap); letter-spacing: .04em; }
+  .brand b { color: var(--text); font-weight: 600; letter-spacing: .01em; }
+
+  .toggle {
+    font: inherit; font-size: var(--fs-eyebrow); letter-spacing: .16em; text-transform: uppercase;
+    color: var(--text-faint); background: transparent; border: 0; cursor: pointer;
+    padding: .5rem .2rem; display: inline-flex; align-items: center; gap: .55rem;
+  }
+  .toggle:hover { color: var(--text-soft); }
+  .toggle .swatch { width: .7rem; height: .7rem; border-radius: 50%; background: var(--text-soft); }
+
+  .hero { padding-top: clamp(3rem, 7vw, 6rem); padding-bottom: clamp(5rem, 11vw, 10rem); }
+  .hero .display {
+    font-size: var(--fs-display); font-weight: 300; line-height: 1.04;
+    letter-spacing: -0.022em; max-width: 18ch; margin: 0 0 2rem; text-wrap: balance;
+  }
+  .hero .lead { max-width: 40ch; }
+
+  /* ---------- generic two-column ---------- */
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: clamp(1.5rem, 4vw, 3.5rem); align-items: start; }
+  @media (max-width: 46rem) { .duo { grid-template-columns: 1fr; gap: 2.4rem; } }
+
+  .list { list-style: none; margin: 0; padding: 0; }
+  .list li { padding: .55rem 0; color: var(--text-soft); }
+  .list li b { color: var(--text); font-weight: 500; }
+
+  /* ---------- principles ---------- */
+  .principle + .principle { margin-top: clamp(3rem, 6vw, 5rem); }
+  .principle .kicker { font-size: var(--fs-eyebrow); letter-spacing: .2em; text-transform: uppercase; color: var(--text-faint); }
+  .principle .kicker .ideo { font-family: var(--serif); font-size: 1.05rem; letter-spacing: 0; margin-left: .5rem; color: var(--text-soft); }
+  .principle h3 { margin: .9rem 0 .8rem; }
+
+  /* ---------- palette swatches ---------- */
+  .swatches { display: grid; grid-template-columns: repeat(6, 1fr); gap: clamp(.6rem, 1.5vw, 1rem); }
+  @media (max-width: 46rem) { .swatches { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 26rem) { .swatches { grid-template-columns: repeat(2, 1fr); } }
+  .chip { display: flex; flex-direction: column; gap: .1rem; }
+  .chip .well {
+    aspect-ratio: 4 / 5; border-radius: 5px;
+    box-shadow: var(--lift-soft), inset 0 0 0 1px rgba(128,128,120,.28);
+    margin-bottom: .7rem;
+  }
+  .chip .name { font-size: var(--fs-cap); font-weight: 500; color: var(--text); }
+  .chip .role { font-size: var(--fs-eyebrow); color: var(--text-faint); line-height: 1.4; }
+  .chip .hex  { font-size: var(--fs-eyebrow); color: var(--text-faint); letter-spacing: .02em; margin-top: .15rem; }
+
+  .green-note { display: flex; align-items: center; gap: 1.1rem; margin-top: 2.6rem; }
+  .green-note .well { width: 3.2rem; height: 3.2rem; border-radius: 50%; background: var(--pig-green); box-shadow: var(--lift-soft); flex: none; }
+
+  /* hierarchy-from-value demo */
+  .value-demo { margin-top: 2.8rem; }
+  .value-demo .d-h { font-size: 1.5rem; font-weight: 500; letter-spacing: -0.01em; color: var(--text); }
+  .value-demo .d-sub { font-size: 1.06rem; color: var(--text-soft); margin-top: .3rem; }
+  .value-demo .d-body { font-size: var(--fs-cap); color: var(--text-soft); margin-top: .9rem; max-width: 30rem; }
+  .value-demo .d-cap { font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: .18em; color: var(--text-faint); margin-top: 1.1rem; }
+
+  /* ---------- typography specimen ---------- */
+  .spec { padding: clamp(1.6rem,3vw,2.4rem) clamp(1.6rem,3vw,2.4rem); border-radius: 8px; background: var(--bg-sink); box-shadow: var(--lift-soft); }
+  .spec .spec-label { font-size: var(--fs-eyebrow); text-transform: uppercase; letter-spacing: .2em; color: var(--text-faint); margin-bottom: 1.1rem; }
+  .spec .ui-title { font-size: 1.32rem; font-weight: 600; letter-spacing: -0.01em; }
+  .spec .ui-meta { font-size: var(--fs-cap); color: var(--text-faint); margin-top: .3rem; }
+  .spec .ui-row { display: flex; justify-content: space-between; gap: 1rem; padding: .75rem 0; color: var(--text-soft); font-size: 1rem; }
+  .spec .ui-row + .ui-row { box-shadow: inset 0 1px 0 rgba(128,128,120,.12); }
+  .spec .read-first { font-family: var(--serif); font-size: var(--fs-read); line-height: 1.7; }
+
+  /* ---------- Ma study ---------- */
+  .ma-panel { border-radius: 8px; box-shadow: var(--lift-soft); overflow: hidden; }
+  .ma-cramped { background: var(--bg-sink); padding: .9rem 1rem; font-size: .8rem; }
+  .ma-cramped .bar { display: flex; justify-content: space-between; padding: .28rem .5rem; border: 1px solid rgba(128,128,120,.28); margin-bottom: -1px; color: var(--text-soft); line-height: 1.35; }
+  .ma-cramped .bar b { color: var(--text); font-weight: 600; }
+  .ma-cramped .hd { font-weight: 700; font-size: .82rem; padding: .3rem .5rem; background: rgba(128,128,120,.16); border: 1px solid rgba(128,128,120,.28); }
+  .ma-airy { background: var(--bg-sink); padding: 2.4rem 1.9rem; }
+  .ma-airy .row { padding: 1.15rem 0; }
+  .ma-airy .row + .row { box-shadow: inset 0 1px 0 rgba(128,128,120,.10); }
+  .ma-airy .who { font-weight: 500; color: var(--text); }
+  .ma-airy .what { font-size: var(--fs-cap); color: var(--text-faint); margin-top: .15rem; }
+  .study-cap { font-size: var(--fs-cap); color: var(--text-faint); margin-top: 1rem; }
+  .study-cap b { color: var(--text-soft); font-weight: 500; }
+
+  /* ---------- reference plates (generated) ---------- */
+  .plates { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: clamp(1rem, 2.2vw, 1.6rem); }
+  .plate-card { display: flex; flex-direction: column; }
+  .plate-img { border-radius: 8px; overflow: hidden; box-shadow: var(--lift-soft); aspect-ratio: 4 / 3; }
+  .plate { display: block; width: 100%; height: auto; }
+  .plate-card .name { margin-top: .95rem; font-weight: 500; color: var(--text); font-size: 1rem; }
+  .plate-card .take { font-size: var(--fs-cap); color: var(--text-faint); margin-top: .2rem; line-height: 1.5; }
+  .plates-note { font-size: var(--fs-cap); color: var(--text-faint); margin-top: 2rem; }
+
+  /* ---------- guardrail ---------- */
+  .avoid { list-style: none; margin: 0; padding: 0; }
+  .avoid li { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; padding: 1rem 0; align-items: baseline; }
+  .avoid li + li { box-shadow: inset 0 1px 0 rgba(128,128,120,.12); }
+  .avoid .no { color: var(--text-faint); text-decoration: line-through; text-decoration-thickness: 1px; text-decoration-color: var(--text-faint); }
+  .avoid .yes { color: var(--text); }
+  .avoid .yes::before { content: "→ " / ""; color: var(--accent); }
+  @media (max-width: 40rem) { .avoid li { grid-template-columns: 1fr; gap: .2rem; } }
+
+  /* ---------- listening moment ---------- */
+  .listen { text-align: left; }
+  .dotwrap { display: flex; align-items: center; gap: 1.5rem; margin: 2rem 0 2.4rem; }
+  .dot { position: relative; width: 1.05rem; height: 1.05rem; flex: none; }
+  .dot span {
+    position: absolute; inset: 0; border-radius: 50%; background: var(--accent-dot);
+    animation: breathe 4.2s ease-in-out infinite;
+  }
+  .dot::after {
+    content: ""; position: absolute; inset: -0.9rem; border-radius: 50%;
+    background: radial-gradient(circle, var(--accent-dot) 0%, transparent 62%);
+    opacity: .28; animation: halo 4.2s ease-in-out infinite;
+  }
+  @keyframes breathe { 0%,100% { transform: scale(1); opacity: .82; } 50% { transform: scale(1.14); opacity: 1; } }
+  @keyframes halo    { 0%,100% { transform: scale(.85); opacity: .14; } 50% { transform: scale(1.15); opacity: .32; } }
+  .dot-label { font-size: var(--fs-cap); color: var(--text-faint); }
+  .dot-label b { color: var(--accent); font-weight: 500; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .page { animation: none; opacity: 1; }
+    .dot span, .dot::after { animation: none; }
+  }
+
+  /* ---------- footer ---------- */
+  footer { padding-block: clamp(4rem, 8vw, 7rem) 4rem; color: var(--text-faint); font-size: var(--fs-cap); }
+  footer .rule { height: 1px; background: rgba(128,128,120,.18); margin-bottom: 2rem; max-width: var(--content); }
+  footer a { color: var(--text-soft); }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="wrap">
+    <header class="top">
+      <div class="brand"><b>kodama</b><span>moodboard · aesthetic direction · P0-3</span></div>
+      <button class="toggle" id="themeToggle" type="button" aria-label="Toggle light and dark">
+        <span class="swatch" aria-hidden="true"></span><span id="themeName">day</span>
+      </button>
+    </header>
+  </div>
+
+  <!-- ===================== HERO ===================== -->
+  <div class="wrap">
+    <section class="hero col">
+      <p class="eyebrow">the aesthetic, before the screens</p>
+      <h1 class="display">Calm you notice before you notice why.</h1>
+      <p class="lead">Kodama records your meetings and quietly organizes them. It should feel
+        unusually calm and beautiful — and never once announce a forest. The theme is an undertone,
+        not a costume.</p>
+    </section>
+  </div>
+
+  <!-- ===================== THE BAR ===================== -->
+  <div class="wrap">
+    <section class="col">
+      <p class="eyebrow">the bar</p>
+      <h2>Linear and Things&nbsp;3 — not an admin panel.</h2>
+      <p class="prose soft">The reference isn't a productivity app wearing a nature skin. It's the
+        class of software that feels considered in the hand: typography-first, chrome-last, fast,
+        and quiet. Every screen clears that bar before it ships.</p>
+      <div class="duo" style="margin-top:2.6rem">
+        <div>
+          <p class="eyebrow">we hold to</p>
+          <ul class="list">
+            <li><b>Typography</b> carries the hierarchy</li>
+            <li><b>Space</b> instead of borders and boxes</li>
+            <li><b>One motion</b>, used deliberately</li>
+            <li><b>Precision</b> in the small things</li>
+            <li><b>Restraint</b> as the default</li>
+          </ul>
+        </div>
+        <div>
+          <p class="eyebrow">we refuse</p>
+          <ul class="list">
+            <li>Dense data tables and grids</li>
+            <li>Boxes nested inside boxes</li>
+            <li>Motion and color used to shout</li>
+            <li>Chrome competing with content</li>
+            <li>Decorative theming</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== PRINCIPLES ===================== -->
+  <div class="wrap">
+    <section class="col">
+      <p class="eyebrow">the four principles</p>
+
+      <div class="principle">
+        <p class="kicker">principle<span class="ideo">間 · ma</span></p>
+        <h3>Negative space is a material, not a leftover.</h3>
+        <p class="prose soft">Ma is the charged interval between things. We compose with emptiness
+          on purpose: rank comes from how much room something is given — not from rules, fills,
+          badges, or borders. When a layout feels busy, the fix is almost always to remove
+          something and add space.</p>
+      </div>
+
+      <div class="principle">
+        <p class="kicker">principle<span class="ideo">森 · forest palette</span></p>
+        <h3>A forest you feel, not a forest you see.</h3>
+        <p class="prose soft">Quiet neutrals drawn from moss, fern, mist, stone, washi, and sumi ink
+          — desaturated nearly to grey, so the mood reads as calm rather than green. Value carries
+          the hierarchy; hue stays almost silent. Exactly one living green exists, and it is spent
+          only on the listening state.</p>
+      </div>
+
+      <div class="principle">
+        <p class="kicker">principle<span class="ideo">侘寂 · wabi-sabi</span></p>
+        <h3>Quiet, warm, and unfinished on purpose.</h3>
+        <p class="prose soft">Wabi-sabi prefers the plain and weathered to the glossy and complete.
+          We favor warmth over polish, let a little asymmetry stand, and treat "done" as the point
+          where removing one more thing would break it. Nothing is decorative; everything earns its
+          place.</p>
+      </div>
+
+      <div class="principle">
+        <p class="kicker">principle<span class="ideo">restraint · guardrail</span></p>
+        <h3>Evoke the archetype. Never trace it.</h3>
+        <p class="prose soft">The theme is expressed by what we leave out. The kodama is suggested
+          through calm, space, warmth, and a single green — never drawn. No leaf icons, no
+          wood-grain, no spirit illustrations. If a choice makes the forest obvious, it's wrong.</p>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== PALETTE STUDY ===================== -->
+  <div class="wrap">
+    <section class="col">
+      <p class="eyebrow">palette · indicative</p>
+      <h2>The paints — mood, not tokens.</h2>
+      <p class="prose soft">Indicative values, chosen to feel the range. The final ramp and the
+        light/dark tokens are locked in <span class="mono">P0-4</span>.</p>
+
+      <div class="swatches" style="margin-top:2.6rem">
+        <div class="chip"><div class="well" style="background:var(--pig-washi)"></div><span class="name">Washi</span><span class="role">paper ground</span><span class="hex mono">#F1EFE6</span></div>
+        <div class="chip"><div class="well" style="background:var(--pig-mist)"></div><span class="name">Mist</span><span class="role">recessive tone</span><span class="hex mono">#DCE1D8</span></div>
+        <div class="chip"><div class="well" style="background:var(--pig-stone)"></div><span class="name">Stone</span><span class="role">quiet, secondary</span><span class="hex mono">#8B8F86</span></div>
+        <div class="chip"><div class="well" style="background:var(--pig-moss)"></div><span class="name">Moss</span><span class="role">grounded mid</span><span class="hex mono">#59654F</span></div>
+        <div class="chip"><div class="well" style="background:var(--pig-fern)"></div><span class="name">Fern</span><span class="role">deep neutral</span><span class="hex mono">#3B4636</span></div>
+        <div class="chip"><div class="well" style="background:var(--pig-sumi)"></div><span class="name">Sumi</span><span class="role">ink / primary text</span><span class="hex mono">#23261F</span></div>
+      </div>
+
+      <div class="green-note">
+        <div class="well" aria-hidden="true"></div>
+        <div>
+          <p style="margin:0"><b>The one green</b> <span class="faint mono">#5F7E5A</span></p>
+          <p class="soft" style="margin:.15rem 0 0; font-size:var(--fs-cap)">Reserved entirely for the listening state. It appears nowhere else.</p>
+        </div>
+      </div>
+
+      <div class="value-demo">
+        <p class="eyebrow">hierarchy without hue</p>
+        <div class="d-h">This heading leads</div>
+        <div class="d-sub">a supporting line sits just beneath it,</div>
+        <p class="d-body">and the body settles into a softer value still — three ranks established
+          by tone and type alone, before a single accent is spent. Strip the color out entirely and
+          the order still holds.</p>
+        <p class="d-cap">caption / metadata</p>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== TYPOGRAPHY ===================== -->
+  <div class="wrap">
+    <section class="col">
+      <p class="eyebrow">typography · roles</p>
+      <h2>One sans for the interface, one serif for reading.</h2>
+      <p class="prose soft">The interface speaks in a humanist sans; long-form reading views switch
+        to a warm serif. Hierarchy comes from scale, weight, and space — almost never from color.
+        (Faces shown are system stand-ins; <span class="mono">P0-4</span> chooses the real pair.)</p>
+
+      <div class="duo" style="margin-top:2.6rem">
+        <div class="spec">
+          <p class="spec-label">interface · humanist sans</p>
+          <div class="ui-title">Weekly sync — Growth</div>
+          <div class="ui-meta">Thu · 42 min · 3 speakers</div>
+          <div style="margin-top:1.4rem">
+            <div class="ui-row"><span>Decisions</span><span class="mono">4</span></div>
+            <div class="ui-row"><span>Open items</span><span class="mono">7</span></div>
+            <div class="ui-row"><span>Routed to</span><span>Growth / Q3</span></div>
+          </div>
+        </div>
+        <div class="spec">
+          <p class="spec-label">reading view · serif</p>
+          <p class="read-first">The distilled note reads like something written, not generated —
+            generous line height, a comfortable measure, and quiet warmth. This is where a serif
+            earns its place: the transcript becomes a page you actually want to read.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== MA STUDY ===================== -->
+  <div class="wrap">
+    <section class="col">
+      <p class="eyebrow">study · ma</p>
+      <h2>The same content, two philosophies.</h2>
+      <p class="prose soft">The information is identical. Only the space changes — and with it,
+        the entire feeling of the software.</p>
+
+      <div class="duo" style="margin-top:2.6rem">
+        <div>
+          <div class="ma-panel">
+            <div class="ma-cramped">
+              <div class="hd">Outstanding items</div>
+              <div class="bar"><span><b>Send Q3 deck</b> · you</span><span>due Fri</span></div>
+              <div class="bar"><span><b>Confirm budget</b> · Dana</span><span>due Mon</span></div>
+              <div class="bar"><span><b>Reply to vendor</b> · you</span><span>overdue</span></div>
+              <div class="bar"><span><b>Share notes</b> · Sam</span><span>due Wed</span></div>
+            </div>
+          </div>
+          <p class="study-cap"><b>Admin panel.</b> Boxes, hairlines, tight rows. Correct — and airless.</p>
+        </div>
+        <div>
+          <div class="ma-panel">
+            <div class="ma-airy">
+              <div class="row"><div class="who">Send Q3 deck</div><div class="what">you · due Friday</div></div>
+              <div class="row"><div class="who">Confirm budget</div><div class="what">Dana · due Monday</div></div>
+              <div class="row"><div class="who">Reply to vendor</div><div class="what">you · overdue</div></div>
+              <div class="row"><div class="who">Share notes</div><div class="what">Sam · due Wednesday</div></div>
+            </div>
+          </div>
+          <p class="study-cap"><b>Kodama.</b> Same rows, given room. Hierarchy from space, not chrome.</p>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ===================== REFERENCE PLATES (generated) ===================== -->
+  <div class="wrap">
+    <section class="col">
+      <p class="eyebrow">references · mood plates</p>
+      <h2>Five sources, rendered — not borrowed.</h2>
+      <p class="prose soft">The moodboard is assembled from the named reference categories. Rather
+        than paste in copyrighted photos, each is redrawn here as an original plate that keeps the
+        discipline and drops the imagery — warmth and value, never literal nature.</p>
+
+      <div class="plates" style="margin-top:2.8rem">
+
+        <!-- 1 · Japanese stationery -->
+        <div class="plate-card">
+          <div class="plate-img">
+            <svg class="plate" viewBox="0 0 320 240" role="img" aria-label="A blank sheet of fine stationery with a single margin rule and one ink mark">
+              <defs>
+                <linearGradient id="p1-bg" x1="0" y1="0" x2="0.3" y2="1"><stop offset="0" stop-color="#F3EFE4"/><stop offset="1" stop-color="#ECE7D9"/></linearGradient>
+                <linearGradient id="p1-sheen" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FFFFFF" stop-opacity="0.4"/><stop offset="0.45" stop-color="#FFFFFF" stop-opacity="0"/></linearGradient>
+              </defs>
+              <rect width="320" height="240" fill="url(#p1-bg)"/>
+              <rect width="320" height="240" fill="url(#p1-sheen)"/>
+              <line x1="70" y1="30" x2="70" y2="210" stroke="#8B8F86" stroke-opacity="0.45" stroke-width="1.25"/>
+              <g stroke="#9AA093" stroke-opacity="0.32" stroke-width="1">
+                <line x1="90" y1="150" x2="256" y2="150"/>
+                <line x1="90" y1="172" x2="256" y2="172"/>
+                <line x1="90" y1="194" x2="232" y2="194"/>
+              </g>
+              <rect x="90" y="62" width="11" height="11" fill="#2A2C24" opacity="0.82"/>
+              <line x1="112" y1="68" x2="176" y2="68" stroke="#2A2C24" stroke-opacity="0.4" stroke-width="2.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <span class="name">Japanese stationery</span>
+          <span class="take">The discipline of a beautifully made <em>blank</em> page.</span>
+        </div>
+
+        <!-- 2 · Ghibli backgrounds -->
+        <div class="plate-card">
+          <div class="plate-img">
+            <svg class="plate" viewBox="0 0 320 240" role="img" aria-label="Soft light and air — a luminous sky with no scenery">
+              <defs>
+                <linearGradient id="p2-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EFE8D2"/><stop offset="0.5" stop-color="#D8DDCC"/><stop offset="1" stop-color="#A9B6A7"/></linearGradient>
+                <radialGradient id="p2-sun" cx="0.8" cy="0.2" r="0.62"><stop offset="0" stop-color="#F9F2DC" stop-opacity="0.95"/><stop offset="0.45" stop-color="#F3EAD0" stop-opacity="0.32"/><stop offset="1" stop-color="#F3EAD0" stop-opacity="0"/></radialGradient>
+              </defs>
+              <rect width="320" height="240" fill="url(#p2-sky)"/>
+              <rect x="0" y="152" width="320" height="26" fill="#E9E5D0" opacity="0.3"/>
+              <g fill="#F9F2DC" opacity="0.14">
+                <polygon points="210,-20 222,-20 150,260 112,260"/>
+                <polygon points="236,-20 256,-20 176,260 120,260"/>
+                <polygon points="272,-20 288,-20 226,260 182,260"/>
+              </g>
+              <rect width="320" height="240" fill="url(#p2-sun)"/>
+            </svg>
+          </div>
+          <span class="name">Ghibli backgrounds</span>
+          <span class="take">The light and air of the scene — never the characters.</span>
+        </div>
+
+        <!-- 3 · Muji -->
+        <div class="plate-card">
+          <div class="plate-img">
+            <svg class="plate" viewBox="0 0 320 240" role="img" aria-label="A minimal still life of plain, unbranded objects">
+              <defs>
+                <linearGradient id="p3-bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#EAE6DA"/><stop offset="1" stop-color="#DDD8CA"/></linearGradient>
+                <filter id="p3-sh" x="-60%" y="-60%" width="220%" height="220%"><feGaussianBlur stdDeviation="5.5"/></filter>
+              </defs>
+              <rect width="320" height="240" fill="url(#p3-bg)"/>
+              <line x1="0" y1="178" x2="320" y2="178" stroke="#B6B1A2" stroke-opacity="0.5" stroke-width="1"/>
+              <g fill="#807E71" opacity="0.26" filter="url(#p3-sh)">
+                <ellipse cx="150" cy="184" rx="52" ry="8"/>
+                <ellipse cx="214" cy="184" rx="30" ry="6"/>
+                <ellipse cx="96" cy="184" rx="18" ry="5"/>
+              </g>
+              <rect x="120" y="84" width="42" height="94" rx="7" fill="#8E958A"/>
+              <rect x="120" y="84" width="15" height="94" rx="7" fill="#9DA497" opacity="0.55"/>
+              <rect x="133" y="70" width="16" height="20" rx="4" fill="#8E958A"/>
+              <rect x="190" y="122" width="48" height="56" rx="5" fill="#5E6A53"/>
+              <ellipse cx="214" cy="122" rx="24" ry="6" fill="#6B7760"/>
+              <circle cx="96" cy="166" r="12" fill="#A6AC9F"/>
+              <ellipse cx="92" cy="162" rx="4" ry="3" fill="#C4C8BD" opacity="0.6"/>
+            </svg>
+          </div>
+          <span class="name">Muji</span>
+          <span class="take">Everything unbranded, down to its function; anonymous quality.</span>
+        </div>
+
+        <!-- 4 · Washi paper -->
+        <div class="plate-card">
+          <div class="plate-img">
+            <svg class="plate" viewBox="0 0 320 240" role="img" aria-label="Washi paper — warmth and tactile tooth">
+              <defs>
+                <linearGradient id="p4-bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#F0EBDD"/><stop offset="1" stop-color="#E5DFCE"/></linearGradient>
+                <radialGradient id="p4-hi" cx="0.34" cy="0.28" r="0.85"><stop offset="0" stop-color="#FBF7EC" stop-opacity="0.55"/><stop offset="1" stop-color="#FBF7EC" stop-opacity="0"/></radialGradient>
+                <filter id="p4-fiber"><feTurbulence type="fractalNoise" baseFrequency="0.015 0.16" numOctaves="2" seed="5" result="n"/><feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 0.96  0 0 0 0.5 0"/></filter>
+                <filter id="p4-tooth"><feTurbulence type="fractalNoise" baseFrequency="0.7 0.11" numOctaves="2" seed="11" result="n"/><feColorMatrix in="n" type="matrix" values="0 0 0 0 0.30  0 0 0 0 0.28  0 0 0 0 0.23  0 0 0 0.7 0"/></filter>
+              </defs>
+              <rect width="320" height="240" fill="url(#p4-bg)"/>
+              <rect width="320" height="240" fill="url(#p4-hi)"/>
+              <rect width="320" height="240" filter="url(#p4-fiber)" opacity="0.4"/>
+              <rect width="320" height="240" filter="url(#p4-tooth)" opacity="0.2"/>
+            </svg>
+          </div>
+          <span class="name">Washi paper</span>
+          <span class="take">Warmth and tactile tooth, with no ornament.</span>
+        </div>
+
+        <!-- 5 · Misty forest photography -->
+        <div class="plate-card">
+          <div class="plate-img">
+            <svg class="plate" viewBox="0 0 320 240" role="img" aria-label="Layered planes receding into mist — depth from value, no trees">
+              <defs>
+                <linearGradient id="p5-sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#DBE0D5"/><stop offset="1" stop-color="#C3CCBF"/></linearGradient>
+                <filter id="p5-blur"><feGaussianBlur stdDeviation="3.2"/></filter>
+                <filter id="p5-fog" x="-20%" y="-20%" width="140%" height="140%"><feTurbulence type="fractalNoise" baseFrequency="0.011" numOctaves="3" seed="9" result="n"/><feColorMatrix in="n" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 0.99  0 0 0 0.75 0"/><feGaussianBlur stdDeviation="2.4"/></filter>
+              </defs>
+              <rect width="320" height="240" fill="url(#p5-sky)"/>
+              <g filter="url(#p5-blur)">
+                <path d="M0,116 C70,102 150,126 226,110 C276,100 320,114 320,114 L320,240 L0,240 Z" fill="#B2BCAD"/>
+                <path d="M0,148 C80,138 156,160 236,144 C288,134 320,148 320,148 L320,240 L0,240 Z" fill="#8C9786"/>
+                <path d="M0,180 C74,170 158,192 244,178 C298,170 320,182 320,182 L320,240 L0,240 Z" fill="#606C54"/>
+                <path d="M0,208 C86,201 168,215 250,207 C300,202 320,211 320,211 L320,240 L0,240 Z" fill="#3D4935"/>
+              </g>
+              <rect width="320" height="150" fill="#E6EAE0" opacity="0.3"/>
+              <rect width="320" height="240" filter="url(#p5-fog)" opacity="0.42"/>
+            </svg>
+          </div>
+          <span class="name">Misty forest photography</span>
+          <span class="take">Depth built from value, not from detail — no trees drawn.</span>
+        </div>
+
+      </div>
+
+      <p class="plates-note">Original, generated art — the references are studied, never copied.
+        Same principle the product follows: evoke the archetype, never trace it.</p>
+    </section>
+  </div>
+
+  <!-- ===================== GUARDRAIL ===================== -->
+  <div class="wrap">
+    <section class="col">
+      <p class="eyebrow">guardrail · theme as restraint</p>
+      <h2>What we don't do.</h2>
+      <p class="prose soft">The theme is expressed by what we leave out. Each temptation, and what
+        we reach for instead.</p>
+
+      <ul class="avoid" style="margin-top:2.4rem">
+        <li><span class="no">Leaf &amp; tree icons</span><span class="yes">space and type</span></li>
+        <li><span class="no">Wood-grain textures</span><span class="yes">washi and mist</span></li>
+        <li><span class="no">Spirit / mascot illustrations</span><span class="yes">a single breathing dot</span></li>
+        <li><span class="no">Literal forest scenery</span><span class="yes">atmosphere from value</span></li>
+        <li><span class="no">Color-coded UI</span><span class="yes">hierarchy from value &amp; spacing</span></li>
+        <li><span class="no">Dense admin tables</span><span class="yes">generous, quiet rows</span></li>
+      </ul>
+    </section>
+  </div>
+
+  <!-- ===================== LISTENING MOMENT ===================== -->
+  <div class="wrap">
+    <section class="col listen">
+      <p class="eyebrow">the one green</p>
+      <h2>It appears only when kodama is listening.</h2>
+      <div class="dotwrap">
+        <span class="dot" aria-hidden="true"><span></span></span>
+        <span class="dot-label">idle is absent · <b>listening breathes</b></span>
+      </div>
+      <p class="prose soft">This is the entire budget for saturated color. Everywhere else the
+        palette stays near-neutral; here, one quiet green marks that the app is recording — its
+        consent signal and its logo in a single mark. The mark itself is designed in
+        <span class="mono">P0-5</span>; here we only reserve the green and the feeling.</p>
+    </section>
+  </div>
+
+  <!-- ===================== FOOTER ===================== -->
+  <div class="wrap">
+    <footer>
+      <div class="rule"></div>
+      <p style="max-width:var(--measure)">Indicative, not final — <span class="mono">P0-4</span>
+        locks the tokens and <span class="mono">P0-5</span> designs the mark. The full written
+        direction lives in <a href="../DESIGN.md">DESIGN.md</a>.</p>
+      <p class="faint" style="margin-top:1rem">kodama · P0-3 · phase 0 · lock the aesthetic before building screens</p>
+    </footer>
+  </div>
+</div>
+
+<script>
+  (function () {
+    var root = document.documentElement;
+    var btn = document.getElementById("themeToggle");
+    var name = document.getElementById("themeName");
+    function current() {
+      var set = root.getAttribute("data-theme");
+      if (set) return set;
+      return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    }
+    function paint() { name.textContent = current() === "dark" ? "night" : "day"; }
+    btn.addEventListener("click", function () {
+      root.setAttribute("data-theme", current() === "dark" ? "light" : "dark");
+      paint();
+    });
+    paint();
+  })();
+</script>
+</body>
+</html>
