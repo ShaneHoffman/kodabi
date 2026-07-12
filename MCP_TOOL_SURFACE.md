@@ -51,12 +51,17 @@ Claude Code MCP reference (`code.claude.com/docs/en/mcp`) and the MCP tool speci
 - Every tool definition carries `name`, `title`, `description`, `inputSchema`, `outputSchema`, and
   `annotations` — the fields the MCP spec defines for a `Tool` object.
 - Every successful call returns **`structuredContent`** conforming to the tool's `outputSchema`,
-  plus a one-line human-readable summary in a `content` text block (the spec's backward-compatible
-  rendering path).
-- Plain objects use `"additionalProperties": false`. Objects composed via `allOf` (`SearchHit`,
-  `MeetingMeta`) use **`"unevaluatedProperties": false"` instead** — under draft 2020-12,
-  `additionalProperties` cannot see properties brought in through a `$ref`, so it would incorrectly
-  reject the inherited fields.
+  and — per the MCP spec's backward-compatibility requirement — the same result **serialized as JSON
+  in a `content` text block**, so clients that don't parse `structuredContent` still receive the full
+  data. A short human-readable summary may precede it in the block, but must not replace the
+  serialized payload.
+- Plain objects use `"additionalProperties": false`. Any object that participates in `allOf`
+  composition — both the composed schemas (`SearchHit`, `MeetingMeta`) **and the base they extend**
+  (`NoteSummary`) — uses **`"unevaluatedProperties": false` instead**. Under draft 2020-12,
+  `additionalProperties` only sees properties declared in its own schema object: a base with
+  `additionalProperties: false` would reject the extending schema's added fields, and a composed
+  schema's `additionalProperties` cannot see the base's `$ref`'d fields either. `unevaluatedProperties`
+  sees across `allOf`/`$ref`, so it is the correct keyword for every schema in a composition chain.
 - Nullability uses draft 2020-12 union types (`"type": ["string", "null"]`) or
   `"oneOf": [{"$ref": "..."}, {"type": "null"}]` for `$ref`'d types.
 - Errors follow the [Cross-cutting contract](#cross-cutting-contract) below, not ad hoc shapes.
@@ -171,12 +176,11 @@ read a hit in full.
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
   "additionalProperties": false,
-  "required": ["note", "body_markdown", "decisions", "action_items"],
+  "required": ["note", "meeting", "body_markdown", "action_items"],
   "properties": {
     "note": { "$ref": "#/$defs/NoteSummary", "description": "Note metadata (frontmatter-derived)." },
-    "meeting": { "oneOf": [ { "$ref": "#/$defs/MeetingMeta" }, { "type": "null" } ], "description": "Meeting metadata when type is meeting; null otherwise." },
+    "meeting": { "oneOf": [ { "$ref": "#/$defs/MeetingMeta" }, { "type": "null" } ], "description": "Meeting metadata (including extracted decisions) when type is meeting; null otherwise. Always present." },
     "body_markdown": { "type": ["string", "null"], "description": "The note's distilled markdown body, or null when include_body is false." },
-    "decisions": { "type": "array", "items": { "type": "string" }, "description": "Extracted decisions (meetings; empty otherwise)." },
     "action_items": { "type": "array", "items": { "$ref": "#/$defs/ActionItem" }, "description": "Extracted action items (empty for non-meetings or when include_action_items is false)." }
   }
 }
@@ -597,7 +601,7 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
     },
     "NoteSummary": {
       "type": "object",
-      "additionalProperties": false,
+      "unevaluatedProperties": false,
       "required": ["id", "path", "title", "type", "project", "date", "tags"],
       "properties": {
         "id": { "$ref": "#/$defs/NoteId" },
@@ -716,7 +720,12 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
    no data loss.
 4. **Pagination.** Uniform **cursor-based** pagination (`limit` + opaque `cursor` in, `PageInfo` out)
    on every list-returning tool. Cursors are chosen over offsets because the knowledge base mutates
-   under a file watcher and re-routing; an offset would skip or duplicate rows across pages.
+   under a file watcher and re-routing; an offset would skip or duplicate rows across pages. The sole
+   exception is `get_project_context`, a deliberately bounded single-call briefing: its sections are
+   hard-capped by their `*_limit` params and carry no cursor. Its `counts` report the true totals, so
+   a caller that hits a cap falls back to the paginated tool for that slice (`list_outstanding_items`
+   for outstanding items, `search_notes` for notes); standalone glossary pagination is deferred (see
+   [Deferred / not in v1](#deferred--not-in-v1)).
 5. **Dates & time.** ISO 8601 throughout: `date` (`YYYY-MM-DD`) for note dates and due dates; RFC
    3339 `date-time` in UTC for `last_activity`. Transcript positions are **integer millisecond
    offsets** (`start_ms`/`end_ms`) from meeting start, not wall-clock, because per-channel segments
