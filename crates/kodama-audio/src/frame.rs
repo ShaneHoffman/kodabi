@@ -17,21 +17,25 @@ pub enum SegmentReason {
 }
 
 /// One cpal callback's worth of interleaved `f32` samples, tagged with the
-/// segment it belongs to.
+/// segment it belongs to and the `format` that applies to it. Carrying the
+/// format on every frame keeps a frame self-describing even if the
+/// `SegmentStarted` marker for its segment was dropped by a saturated
+/// channel — the format is never lost.
 #[derive(Clone, Debug)]
 pub struct AudioFrame {
     pub segment_id: u32,
     pub samples: Vec<f32>,
-    pub channels: u16,
+    pub format: AudioFormat,
 }
 
 impl AudioFrame {
     /// Number of complete sample frames (samples / channels).
     pub fn frames(&self) -> usize {
-        if self.channels == 0 {
+        let channels = self.format.channels;
+        if channels == 0 {
             0
         } else {
-            self.samples.len() / self.channels as usize
+            self.samples.len() / channels as usize
         }
     }
 }
@@ -54,12 +58,20 @@ mod tests {
     use super::*;
     use crate::format::SampleTag;
 
+    fn format_with(channels: u16) -> AudioFormat {
+        AudioFormat {
+            sample_rate: 48_000,
+            channels,
+            source_format: SampleTag::F32,
+        }
+    }
+
     #[test]
     fn frame_count_divides_by_channels() {
         let frame = AudioFrame {
             segment_id: 0,
             samples: vec![0.0; 8],
-            channels: 2,
+            format: format_with(2),
         };
         assert_eq!(frame.frames(), 4);
     }
@@ -69,7 +81,7 @@ mod tests {
         let frame = AudioFrame {
             segment_id: 0,
             samples: vec![0.0; 8],
-            channels: 0,
+            format: format_with(0),
         };
         assert_eq!(frame.frames(), 0);
     }

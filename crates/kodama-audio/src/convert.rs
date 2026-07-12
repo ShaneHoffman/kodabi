@@ -15,18 +15,20 @@ where
     samples.iter().map(|&s| f32::from_sample(s)).collect()
 }
 
-/// Peak absolute amplitude in a buffer of f32 samples (0.0 for empty).
-pub fn peak(samples: &[f32]) -> f32 {
-    samples.iter().fold(0.0_f32, |acc, &s| acc.max(s.abs()))
-}
-
-/// Root-mean-square amplitude in a buffer of f32 samples (0.0 for empty).
-pub fn rms(samples: &[f32]) -> f32 {
+/// Peak absolute amplitude and RMS of a buffer of f32 samples, computed in a
+/// single pass (both `0.0` for an empty buffer). One pass matters here: this
+/// runs in the capture RT callback on every buffer.
+pub fn levels(samples: &[f32]) -> (f32, f32) {
     if samples.is_empty() {
-        return 0.0;
+        return (0.0, 0.0);
     }
-    let sum_sq: f32 = samples.iter().map(|&s| s * s).sum();
-    (sum_sq / samples.len() as f32).sqrt()
+    let mut peak = 0.0_f32;
+    let mut sum_sq = 0.0_f32;
+    for &s in samples {
+        peak = peak.max(s.abs());
+        sum_sq += s * s;
+    }
+    (peak, (sum_sq / samples.len() as f32).sqrt())
 }
 
 #[cfg(test)]
@@ -58,32 +60,25 @@ mod tests {
     }
 
     #[test]
-    fn peak_of_silence_is_zero() {
-        assert_eq!(peak(&[0.0, 0.0, 0.0]), 0.0);
+    fn levels_of_silence_are_zero() {
+        assert_eq!(levels(&[0.0, 0.0, 0.0]), (0.0, 0.0));
     }
 
     #[test]
-    fn peak_finds_largest_absolute_value() {
-        assert_eq!(peak(&[-1.0, 0.5, 0.3]), 1.0);
+    fn levels_peak_finds_largest_absolute_value() {
+        let (peak, _rms) = levels(&[-1.0, 0.5, 0.3]);
+        assert_eq!(peak, 1.0);
     }
 
     #[test]
-    fn peak_of_empty_is_zero() {
-        assert_eq!(peak(&[]), 0.0);
+    fn levels_rms_of_full_scale_square_wave_is_one() {
+        let (peak, rms) = levels(&[1.0, -1.0, 1.0, -1.0]);
+        assert_eq!(peak, 1.0);
+        assert!(approx_eq(rms, 1.0, 0.0001), "got {rms}");
     }
 
     #[test]
-    fn rms_of_silence_is_zero() {
-        assert_eq!(rms(&[0.0, 0.0, 0.0]), 0.0);
-    }
-
-    #[test]
-    fn rms_of_full_scale_square_wave_is_one() {
-        assert!(approx_eq(rms(&[1.0, -1.0, 1.0, -1.0]), 1.0, 0.0001));
-    }
-
-    #[test]
-    fn rms_of_empty_is_zero() {
-        assert_eq!(rms(&[]), 0.0);
+    fn levels_of_empty_are_zero() {
+        assert_eq!(levels(&[]), (0.0, 0.0));
     }
 }

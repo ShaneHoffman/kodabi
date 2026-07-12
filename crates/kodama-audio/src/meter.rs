@@ -31,8 +31,7 @@ impl LevelMeter {
     /// `peak` is a running max over the whole session (not a decaying
     /// window) — enough to answer "was there any real audio captured?".
     pub fn observe(&self, samples: &[f32]) {
-        let peak = convert::peak(samples);
-        let rms = convert::rms(samples);
+        let (peak, rms) = convert::levels(samples);
         self.frames.fetch_add(1, Ordering::Relaxed);
         // Safe to compare f32 bit patterns with fetch_max: peak/rms are
         // always >= 0, and non-negative IEEE-754 floats order the same as
