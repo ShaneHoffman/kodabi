@@ -23,6 +23,15 @@ moment the task leaves To Do** (its worktree materializes) and **cannot be renam
 without desyncing PR tracking — `kangentic_link_pr` resolves PRs via `gh pr list --head <branch>`,
 so a rename permanently breaks the link. Set it correctly up front; there is no clean fix later.
 
+**Passing `branchName` is not enough — the `column: "Backlog"` argument silently drops it.**
+`kangentic_create_task` routes `column: "Backlog"` (case-insensitive) through its backlog-creation
+path, which **ignores `branchName`**, leaving `branch_name` NULL — the auto-default trap above. To
+put a branch-bearing card in the Backlog column, **omit `column`**: the board's To Do lane *is*
+"Backlog", so the task lands there as a proper board task with the branch honored. The create
+response never echoes the branch, so verify with
+`SELECT branch_name FROM tasks WHERE display_id = <N>` (via `kangentic_query_db`) — and note that
+`kangentic_update_task` has no `branchName` field, so the only fix is delete + recreate.
+
 ## Board flow
 
 `Backlog → Planning → Executing → Code Review → Open PR → Done`
