@@ -5,7 +5,9 @@
 //! surface will live, kept out of the desktop shell.
 
 pub mod device;
+pub mod glossary;
 pub mod naming;
+pub mod transcription;
 
 /// Crate version — a trivial placeholder proving the crate compiles, links,
 /// and is unit-testable from the Tauri binary and from `cargo test`.
