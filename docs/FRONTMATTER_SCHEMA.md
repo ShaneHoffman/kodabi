@@ -58,8 +58,10 @@ Canonical key order the writer emits: **`id, type, project, date, tags, source, 
 - **`source`** — identifies *how* a note came to exist. For `type: meeting` and `type: chat` notes
   that have a corresponding raw session artifact (per the Phase 1 raw session store), `source` is
   a relative path to that artifact, giving direct traceback from the distilled note to its raw
-  recording without adding a seventh field. When no raw artifact exists — a quick-capture note, an
-  imported file, a hand-written note — `source` falls back to the closest keyword.
+  recording without adding a seventh field. Raw artifact filenames follow the timestamp+device-ID
+  scheme in [`FILENAME_SCHEME.md`](FILENAME_SCHEME.md), so simultaneous capture on two devices
+  never collides. When no raw artifact exists — a quick-capture note, an imported file, a
+  hand-written note — `source` falls back to the closest keyword.
 - **`confidence`** — present whenever a routing score backs the current `project` value: notes
   confidence-split routing auto-filed, **including** low-score notes that land in `Inbox` (the score
   is *why* it landed there), and notes the Inbox re-route re-scored into a project. The trigger is
@@ -83,7 +85,7 @@ type: meeting
 project: Paradise Golf
 date: 2026-07-09T14:00:00-07:00
 tags: [budgeting, phase-2]
-source: raw/2026-07-09-paradise-golf-sync.jsonl
+source: raw/20260709T210000000Z-k4m2xp7q-paradise-golf-sync.jsonl
 confidence: 0.94
 ---
 
@@ -131,7 +133,7 @@ type: chat
 project: Paradise Golf
 date: 2026-07-10T09:15:00-07:00
 tags: [research]
-source: raw/2026-07-10-irrigation-contractor-comparison.jsonl
+source: raw/20260710T161500000Z-k4m2xp7q-irrigation-contractor-comparison.jsonl
 ---
 
 # Chat: irrigation contractor comparison
