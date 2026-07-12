@@ -24,6 +24,13 @@ use crate::meter::{LevelMeter, MeterSnapshot};
 /// device-switch storm (or a device still settling) doesn't spin.
 const REBUILD_BACKOFF: Duration = Duration::from_millis(200);
 
+/// How often a parked capture thread re-checks its control flags. The
+/// real-time error callback must not touch the control lock/condvar, so it
+/// only sets the `rebuild` flag; this poll interval bounds how long that
+/// request waits to be noticed (a `stop()` still wakes the thread at once
+/// via the condvar, since it runs off the audio thread).
+const WAKE_POLL: Duration = Duration::from_millis(250);
+
 struct Control {
     lock: Mutex<()>,
     cv: Condvar,
@@ -55,17 +62,19 @@ enum WakeReason {
 }
 
 fn wait_for_wake(ctrl: &Control) -> WakeReason {
-    let guard = ctrl.lock.lock().unwrap();
-    let _guard = ctrl
-        .cv
-        .wait_while(guard, |_| {
-            !ctrl.stop.load(Ordering::Acquire) && !ctrl.rebuild.load(Ordering::Acquire)
-        })
-        .unwrap();
-    if ctrl.stop.load(Ordering::Acquire) {
-        WakeReason::Stop
-    } else {
-        WakeReason::Rebuild
+    let mut guard = ctrl.lock.lock().unwrap();
+    loop {
+        if ctrl.stop.load(Ordering::Acquire) {
+            return WakeReason::Stop;
+        }
+        if ctrl.rebuild.load(Ordering::Acquire) {
+            return WakeReason::Rebuild;
+        }
+        // Timed wait so a `rebuild` set from the RT error callback (which
+        // never notifies) is still picked up within one poll interval; a
+        // `stop()` notify wakes us immediately.
+        let (next, _timeout) = ctrl.cv.wait_timeout(guard, WAKE_POLL).unwrap();
+        guard = next;
     }
 }
 
@@ -121,8 +130,11 @@ impl LoopbackCapture {
     }
 
     /// A cloned receiver for the item stream (segment markers + frames).
-    /// The channel is MPMC, so multiple downstream consumers (persistence,
-    /// interleaving) will each be able to hold their own clone later.
+    /// The channel is MPMC: each item is delivered to exactly one receiver,
+    /// so cloned receivers *compete* for items rather than each seeing the
+    /// full stream. A consumer that needs to fan the stream out to several
+    /// independent sinks (e.g. persistence *and* interleaving) must add its
+    /// own broadcast layer — one clone per sink will not do it.
     pub fn items(&self) -> Receiver<CaptureItem> {
         self.items_rx.clone()
     }
@@ -187,16 +199,24 @@ fn capture_thread(
                 };
                 // Best-effort: a saturated channel (no consumer draining
                 // yet) drops the marker rather than blocking this thread.
+                // Dropping it is non-fatal — every AudioFrame carries its
+                // own format, so a consumer can still tell what applies to
+                // the frames that follow (and detect the boundary from the
+                // segment_id change).
                 let _ = items_tx.try_send(CaptureItem::SegmentStarted {
                     segment_id,
                     format,
                     reason,
                 });
                 meter.inc_segments();
+                // Publish `running` before the handshake: `start()` unblocks
+                // the instant the handshake arrives and immediately reads
+                // status, so this store must be visible by then or a live
+                // session is reported as not-running.
+                ctrl.running.store(true, Ordering::Release);
                 if let Some(tx) = handshake_tx.take() {
                     let _ = tx.send(Ok(format));
                 }
-                ctrl.running.store(true, Ordering::Release);
 
                 let wake = wait_for_wake(&ctrl);
                 drop(stream);
@@ -261,26 +281,53 @@ fn build_loopback_stream(
 
     let error_callback = move |err: cpal::Error| {
         if is_device_change(&err) {
+            // Set the flag only — do NOT touch the control lock or condvar
+            // here, since cpal may invoke this callback on the real-time
+            // audio thread. The capture thread's parked wait polls this flag
+            // (see WAKE_POLL) and rebuilds within one poll interval.
             ctrl.rebuild.store(true, Ordering::Release);
-            ctrl.notify();
         }
         // Other errors (e.g. transient xruns) are non-fatal — swallow them
         // rather than ever panic in the RT error path.
     };
 
     let stream = match sample_format {
-        SampleFormat::F32 => {
-            build_typed_stream::<f32>(&device, config, segment_id, tx, meter, error_callback)
-        }
-        SampleFormat::I16 => {
-            build_typed_stream::<i16>(&device, config, segment_id, tx, meter, error_callback)
-        }
-        SampleFormat::U16 => {
-            build_typed_stream::<u16>(&device, config, segment_id, tx, meter, error_callback)
-        }
-        SampleFormat::I32 => {
-            build_typed_stream::<i32>(&device, config, segment_id, tx, meter, error_callback)
-        }
+        SampleFormat::F32 => build_typed_stream::<f32>(
+            &device,
+            config,
+            segment_id,
+            format,
+            tx,
+            meter,
+            error_callback,
+        ),
+        SampleFormat::I16 => build_typed_stream::<i16>(
+            &device,
+            config,
+            segment_id,
+            format,
+            tx,
+            meter,
+            error_callback,
+        ),
+        SampleFormat::U16 => build_typed_stream::<u16>(
+            &device,
+            config,
+            segment_id,
+            format,
+            tx,
+            meter,
+            error_callback,
+        ),
+        SampleFormat::I32 => build_typed_stream::<i32>(
+            &device,
+            config,
+            segment_id,
+            format,
+            tx,
+            meter,
+            error_callback,
+        ),
         other => return Err(AudioError::UnsupportedFormat(other)),
     }
     .map_err(|e| AudioError::BuildStream(e.to_string()))?;
@@ -301,6 +348,7 @@ fn build_typed_stream<T>(
     device: &cpal::Device,
     config: StreamConfig,
     segment_id: u32,
+    format: AudioFormat,
     tx: Sender<CaptureItem>,
     meter: Arc<LevelMeter>,
     error_callback: impl FnMut(cpal::Error) + Send + 'static,
@@ -309,7 +357,6 @@ where
     T: SizedSample,
     f32: cpal::FromSample<T>,
 {
-    let channels = config.channels;
     device.build_input_stream::<T, _, _>(
         config,
         move |data: &[T], _: &InputCallbackInfo| {
@@ -318,7 +365,7 @@ where
             let frame = AudioFrame {
                 segment_id,
                 samples,
-                channels,
+                format,
             };
             if tx.try_send(CaptureItem::Frame(frame)).is_err() {
                 meter.inc_dropped();

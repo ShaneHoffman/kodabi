@@ -52,17 +52,37 @@ fn status_of(capture: &LoopbackCapture) -> CaptureStatus {
 /// Idempotent: if capture is already running, returns its current status
 /// instead of starting a second stream.
 fn start_capture_impl(state: &CaptureState) -> Result<CaptureStatus, String> {
+    {
+        let guard = state
+            .0
+            .lock()
+            .map_err(|_| "capture state poisoned".to_string())?;
+        if let Some(capture) = guard.as_ref() {
+            if capture.is_running() {
+                return Ok(status_of(capture));
+            }
+        }
+    }
+    // Negotiate the device *without* holding the state lock: `start()` blocks
+    // until the first segment is live, and concurrent `capture_status` /
+    // `stop_capture` commands must not stall behind that negotiation.
+    let capture = LoopbackCapture::start(FRAME_CAPACITY).map_err(|e| e.to_string())?;
+    let status = status_of(&capture);
+
     let mut guard = state
         .0
         .lock()
         .map_err(|_| "capture state poisoned".to_string())?;
-    if let Some(capture) = guard.as_ref() {
-        if capture.is_running() {
-            return Ok(status_of(capture));
+    // A concurrent start may have won the race while we were unlocked; if a
+    // live session already exists, keep it and discard the one we just built.
+    if let Some(existing) = guard.as_ref() {
+        if existing.is_running() {
+            let existing_status = status_of(existing);
+            drop(guard);
+            capture.stop();
+            return Ok(existing_status);
         }
     }
-    let capture = LoopbackCapture::start(FRAME_CAPACITY).map_err(|e| e.to_string())?;
-    let status = status_of(&capture);
     *guard = Some(capture);
     Ok(status)
 }
@@ -76,8 +96,12 @@ fn stop_capture_impl(state: &CaptureState) -> Result<CaptureStatus, String> {
         .map_err(|_| "capture state poisoned".to_string())?;
     match guard.take() {
         Some(capture) => {
-            let status = status_of(&capture);
+            // Report the session's final counts, but with `running: false` —
+            // we are stopping it, so the returned status must not claim it is
+            // still live.
+            let mut status = status_of(&capture);
             capture.stop();
+            status.running = false;
             Ok(status)
         }
         None => Ok(CaptureStatus::idle()),
