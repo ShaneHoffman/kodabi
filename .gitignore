@@ -13,3 +13,6 @@ kangentic.local.json
 
 # Tauri generated capability schemas
 /src-tauri/gen/schemas
+
+# TypeScript incremental build cache
+/tsconfig.tsbuildinfo

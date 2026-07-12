@@ -59,7 +59,8 @@
   --container-content: var(--content);
   --container-wide:    var(--wide);
 
-  /* radii */
-  --radius-sm: var(--radius-sm);
-  --radius-md: var(--radius-md);
+  /* radii — intentionally NOT re-mapped. tokens.css defines --radius-sm /
+     --radius-md at :root (unlayered), overriding Tailwind's same-named theme
+     defaults, so `rounded-sm` / `rounded-md` already resolve to our tokens.
+     Re-declaring `--radius-sm: var(--radius-sm)` here would be a self-cycle. */
 }
