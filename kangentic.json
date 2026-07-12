@@ -3,7 +3,7 @@
   "columns": [
     {
       "id": "1305c0e4-ef23-4e06-8900-b384e0c0c45d",
-      "name": "Backlog",
+      "name": "Ready",
       "role": "todo",
       "icon": "layers",
       "color": "#6b7280"
@@ -33,7 +33,7 @@
       "icon": "code",
       "color": "#f59e0b",
       "autoSpawn": true,
-      "permissionMode": "default",
+      "permissionMode": "auto",
       "autoCommand": "/code-review high",
       "modelOverride": "claude-opus-4-8",
       "effortOverride": "high",
@@ -60,26 +60,10 @@
   ],
   "actions": [
     {
-      "id": "a7d1f2c0-1102-4b3a-9c21-0000000000c2",
-      "name": "Create PR",
-      "type": "spawn_agent",
-      "config": {
-        "promptTemplate": "{{task_xml}}{{attachments}}"
-      }
-    },
-    {
       "id": "e19cdbdf-d9b3-433c-9f4c-4f18bfc95c45",
       "name": "Kill Session",
       "type": "kill_session",
       "config": {}
-    },
-    {
-      "id": "a7d1f2c0-1101-4b3a-9c21-0000000000c1",
-      "name": "Start Code Review",
-      "type": "spawn_agent",
-      "config": {
-        "promptTemplate": "{{task_xml}}{{attachments}}"
-      }
     },
     {
       "id": "60c9c207-1d5b-432f-a418-4d3ec9e86716",
@@ -93,23 +77,18 @@
   "transitions": [
     {
       "from": "*",
-      "to": "Code Review",
-      "actions": ["Kill Session", "Start Code Review"]
-    },
-    {
-      "from": "*",
       "to": "Planning",
-      "actions": ["Kill Session", "Start Planning Agent"]
-    },
-    {
-      "from": "*",
-      "to": "Open PR",
-      "actions": ["Kill Session", "Create PR"]
+      "actions": [
+        "Kill Session",
+        "Start Planning Agent"
+      ]
     },
     {
       "from": "*",
       "to": "Done",
-      "actions": ["Kill Session"]
+      "actions": [
+        "Kill Session"
+      ]
     }
   ],
   "_modifiedBy": "0f56072ae904"
