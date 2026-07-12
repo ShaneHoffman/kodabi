@@ -2,7 +2,8 @@
 
 Kodama is a Windows desktop app (Tauri + Rust backend, React + Tailwind frontend, AGPL-3.0) that
 turns meeting transcripts into routed, searchable Markdown notes, with Claude Code / MCP over the
-knowledge base. Vision + architecture live in `FOUNDING_DOC.md`; the working roadmap is `ROADMAP.md`.
+knowledge base. Vision + architecture live in `docs/FOUNDING_DOC.md`; the working roadmap is
+`docs/ROADMAP.md`.
 
 Development runs on a **Kangentic board**, so how you create work and name branches matters.
 
@@ -36,6 +37,9 @@ response never echoes the branch, so verify with
 
 `Backlog → Planning → Executing → Code Review → Open PR → Done`
 
+(The Executing column is literally named **"Write Me Code"** on the board — use that name in any
+`kangentic_move_task` call; "Executing" below refers to that column.)
+
 - **Manual gate between every stage** — a human drags each card onward. The one exception:
   **Planning → Executing auto-advances on plan approval** (plan approval *is* the gate there).
 - **Executing** implements the task and **commits on the task branch — but never pushes.**
@@ -47,3 +51,22 @@ response never echoes the branch, so verify with
 
 Commit subjects follow Conventional Commits: `<type>: <imperative summary>`, matching the branch's
 `type` (branch `feat/scaffold-tauri-app` → `feat: scaffold Tauri app shell`).
+
+## Engineering rules
+
+- **Pre-commit gates (mirror CI exactly):** `cargo fmt --all --check`,
+  `cargo clippy --workspace --all-targets --locked -- -D warnings`, and
+  `cargo test --workspace --locked` must pass before every commit that touches Rust;
+  `pnpm exec eslint . --max-warnings=0` and `pnpm build` before commits that touch the frontend.
+  The clippy/test gates need `dist/` to exist — `src-tauri` embeds it via
+  `tauri::generate_context!`, which fails the compile when it's missing — so in a fresh worktree
+  run `pnpm install --frozen-lockfile && pnpm build` first (CI's Rust jobs do the same).
+- **Core vs shell:** logic lives in `crates/kodama-core` (pure, UI-agnostic, unit-testable);
+  `src-tauri` commands stay thin wrappers around it. If a Tauri command grows a body, the body
+  belongs in kodama-core.
+- **Design tokens:** never hard-code a color, font, or spacing value. `design/tokens.css` is the
+  single source of truth, bridged into Tailwind by `src/index.css` — consume tokens, never
+  duplicate them.
+- **Spec agreement:** `docs/FRONTMATTER_SCHEMA.md` and `docs/MCP_TOOL_SURFACE.md` mirror each
+  other (frontmatter fields ≡ the MCP `NoteSummary` shape). Editing one requires checking the
+  other in the same change.

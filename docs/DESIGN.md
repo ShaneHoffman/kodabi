@@ -4,7 +4,7 @@
 measured against — the "locked system" referenced by Phase 4, and the source the design tokens
 (P0-4) and the listening indicator (P0-5) descend from.
 
-The visual companion to this document is [`design/moodboard.html`](design/moodboard.html) — a
+The visual companion to this document is [`design/moodboard.html`](../design/moodboard.html) — a
 self-contained page that *demonstrates* everything below in real material. Read this for the
 intent; open that to feel it.
 
@@ -122,8 +122,8 @@ never copy their imagery.
   breathes. The mark itself is designed in P0-5 — this document only reserves the color and the
   feeling.
 
-**Locked in P0-4:** the design tokens now live in [`design/tokens.css`](design/tokens.css)
-(demonstrated by [`design/tokens.html`](design/tokens.html)). Typefaces are **Source Sans 3**
+**Locked in P0-4:** the design tokens now live in [`design/tokens.css`](../design/tokens.css)
+(demonstrated by [`design/tokens.html`](../design/tokens.html)). Typefaces are **Source Sans 3**
 (interface) + **Source Serif 4** (reading views) + **Source Code Pro** (mono). The palette adopts the
 moodboard's a11y-tuned values as final; both greens are kept — a quiet interactive accent and the
 brighter listening green. Web-font binaries are bundled later in `feat/scaffold-tauri-app`.

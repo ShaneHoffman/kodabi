@@ -3,7 +3,7 @@
 Phases 0 and 1 are tracked as individual, agent-actionable tickets in the Kangentic backlog.
 This file holds the **later phases as unrefined planning material** — goals, milestones, and
 checklists that get broken into tickets when their phase comes up. Vision + architecture source
-of truth is `FOUNDING_DOC.md`; this is the working roadmap derived from it.
+of truth is `docs/FOUNDING_DOC.md`; this is the working roadmap derived from it.
 
 **Decisions already locked that affect later phases:** License = AGPL-3.0-only · Frontend = React +
 Tailwind · Transcription = per-channel (you/them attribution) · Glossary-cleanup post-pass pulled
@@ -19,6 +19,7 @@ forward into Phase 1.
 - [ ] Confidence-split routing; Inbox UI; one-click re-route feeding the correction loop
 - [ ] Quick-capture window (global hotkey → text box → same routing pipeline) + basic note create/edit within a project
 - [ ] Markdown writer (frontmatter schema from Phase 0)
+- [ ] Frontmatter-validator Claude Code skill (check emitted notes against `docs/FRONTMATTER_SCHEMA.md`) — build alongside the markdown writer, its first real consumer
 - [ ] SQLite schema: FTS5 + sqlite-vec; local embedding pipeline; file watcher; full rebuild command
 - [ ] Hybrid retrieval (RRF merge) exposed as `search_notes` MCP tool
 - [ ] Retention policy setting + consent nudge
@@ -34,7 +35,7 @@ forward into Phase 1.
 
 ## Phase 4 — Polish & open-source launch
 **Goal:** Production polish + public open-source launch.
-**Milestone:** *Undefined in the founding doc — needs a "launch-ready" definition.* Implied: a signed, onboarded, documented Windows release, launched publicly.
+**Milestone:** a signed, onboarded, documented Windows release, launched publicly.
 
 - [ ] Design pass on every screen against the locked system; the distill-and-route transition
 - [ ] Onboarding: first project, glossary seeding, hotkey setup, consent nudge
@@ -43,7 +44,7 @@ forward into Phase 1.
 - [ ] Launch: GitHub, relevant communities
 
 ## Phase 5 — Parking Lot (growth candidates)
-Pulled by daily use, not pushed by roadmap. Each earns its place only after the core loop proves reliable. Names only:
+Pulled by daily use, not pushed by roadmap. Each earns its place only after the core loop proves reliable. Names only — the full detail behind each candidate lives in `FOUNDING_DOC.md` §6:
 
 - Commitment ledger (flagship)
 - Azure DevOps board integration
