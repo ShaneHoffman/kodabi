@@ -28,8 +28,10 @@ on backend-touching changes.
 
 ## 2. What "healthy" looks like
 
-- The dev command reaches Vite "ready" with **no Rust compile errors and no eslint/TS errors**
-  in the output.
+- The dev command reaches Vite "ready" with **no Rust compile errors** in the output. (Dev mode
+  transpiles without typechecking and runs no linter, so a clean console says nothing about
+  TS/eslint errors — those are only caught by the pre-commit gates: `pnpm build` and
+  `pnpm exec eslint . --max-warnings=0`.)
 - The app window opens and renders the UI (not a blank/white webview — a blank window usually
   means the frontend crashed; check the webview devtools console).
 - No panic or error spam in the terminal while idling.
