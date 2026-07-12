@@ -6,11 +6,10 @@
 //! the same value and defeat the collision-avoidance the filename scheme
 //! relies on (see `docs/FILENAME_SCHEME.md`).
 
-use std::ffi::OsString;
 use std::fmt;
 use std::fs;
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -41,14 +40,31 @@ impl DeviceId {
     }
 
     /// Generates a fresh random device ID from OS entropy.
-    pub fn generate() -> Self {
-        let mut raw = [0u8; ID_LEN];
-        getrandom::getrandom(&mut raw).expect("OS RNG unavailable");
-        let id: String = raw
-            .iter()
-            .map(|byte| ALPHABET[(*byte as usize) % ALPHABET.len()] as char)
-            .collect();
-        Self(id)
+    ///
+    /// Returns an error rather than panicking if the OS RNG is unavailable, so
+    /// callers (e.g. app startup) can surface it through their normal error
+    /// path. Uses rejection sampling so every base36 symbol is equally likely —
+    /// a plain `byte % 36` would over-weight `0`–`3` (256 = 7·36 + 4).
+    pub fn generate() -> io::Result<Self> {
+        // Largest multiple of the alphabet size that fits in a byte (7·36 = 252);
+        // bytes at or above it are discarded to keep the distribution uniform.
+        const REJECT_THRESHOLD: u8 = (256 / ALPHABET.len() * ALPHABET.len()) as u8;
+
+        let mut id = String::with_capacity(ID_LEN);
+        let mut buf = [0u8; ID_LEN];
+        while id.len() < ID_LEN {
+            getrandom::getrandom(&mut buf)
+                .map_err(|err| io::Error::other(format!("OS RNG unavailable: {err}")))?;
+            for &byte in &buf {
+                if byte < REJECT_THRESHOLD {
+                    id.push(ALPHABET[(byte % ALPHABET.len() as u8) as usize] as char);
+                    if id.len() == ID_LEN {
+                        break;
+                    }
+                }
+            }
+        }
+        Ok(Self(id))
     }
 }
 
@@ -81,11 +97,18 @@ struct DeviceConfig {
 /// Loads the device ID stored at `config_path`, generating and persisting a
 /// new one on first run. Idempotent: subsequent calls return the same ID.
 pub fn load_or_create(config_path: &Path) -> io::Result<DeviceId> {
-    if let Some(existing) = read(config_path)? {
-        return Ok(existing);
+    match read(config_path) {
+        Ok(Some(existing)) => return Ok(existing),
+        Ok(None) => {}
+        // A corrupt or invalid config (bad TOML, malformed ID — e.g. from a
+        // partial sync or manual edit) must not brick startup forever: discard
+        // it and mint a fresh ID, overwriting the bad file. Genuine I/O errors
+        // (permissions, disk) still propagate.
+        Err(err) if err.kind() == io::ErrorKind::InvalidData => {}
+        Err(err) => return Err(err),
     }
 
-    let id = DeviceId::generate();
+    let id = DeviceId::generate()?;
     write_atomic(config_path, &id)?;
     Ok(id)
 }
@@ -115,13 +138,32 @@ fn write_atomic(config_path: &Path, id: &DeviceId) -> io::Result<()> {
     let serialized = toml::to_string_pretty(&config)
         .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?;
 
-    let mut tmp_name = OsString::from(config_path.as_os_str());
-    tmp_name.push(".tmp");
-    let tmp_path = config_path.with_file_name(tmp_name);
-
+    // A unique temp name per attempt: two concurrent first-run launches must not
+    // write the same temp file, or their contents would interleave and one could
+    // rename a file the other is still writing — defeating the atomic guarantee.
+    let tmp_path = unique_temp_path(config_path)?;
     fs::write(&tmp_path, serialized)?;
     fs::rename(&tmp_path, config_path)?;
     Ok(())
+}
+
+/// Builds a sibling temp path unique to this process and attempt, e.g.
+/// `device.toml.4821-a3f19c02.tmp`.
+fn unique_temp_path(config_path: &Path) -> io::Result<PathBuf> {
+    let file_name = config_path.file_name().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "config path has no file name")
+    })?;
+    let mut rand = [0u8; 4];
+    getrandom::getrandom(&mut rand)
+        .map_err(|err| io::Error::other(format!("OS RNG unavailable: {err}")))?;
+
+    let mut tmp_name = file_name.to_os_string();
+    tmp_name.push(format!(
+        ".{}-{:08x}.tmp",
+        std::process::id(),
+        u32::from_le_bytes(rand)
+    ));
+    Ok(config_path.with_file_name(tmp_name))
 }
 
 #[cfg(test)]
@@ -130,7 +172,7 @@ mod tests {
 
     #[test]
     fn generated_id_is_eight_lowercase_base36_chars() {
-        let id = DeviceId::generate();
+        let id = DeviceId::generate().unwrap();
         assert_eq!(id.as_str().len(), ID_LEN);
         assert!(id.as_str().bytes().all(|b| ALPHABET.contains(&b)));
     }
@@ -145,7 +187,10 @@ mod tests {
 
     #[test]
     fn load_or_create_generates_once_and_persists() {
-        let dir = std::env::temp_dir().join(format!("kodama-device-test-{}", DeviceId::generate()));
+        let dir = std::env::temp_dir().join(format!(
+            "kodama-device-test-{}",
+            DeviceId::generate().unwrap()
+        ));
         fs::create_dir_all(&dir).unwrap();
         let config_path = dir.join("device.toml");
 
@@ -158,6 +203,28 @@ mod tests {
         let contents = fs::read_to_string(&config_path).unwrap();
         let parsed: DeviceConfig = toml::from_str(&contents).unwrap();
         assert!(DeviceId::parse(&parsed.device_id).is_ok());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn load_or_create_regenerates_from_corrupt_config() {
+        let dir = std::env::temp_dir().join(format!(
+            "kodama-device-corrupt-{}",
+            DeviceId::generate().unwrap()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        let config_path = dir.join("device.toml");
+
+        // Invalid contents (not TOML / no valid device_id) must not brick
+        // startup: load_or_create should overwrite with a fresh, valid ID.
+        fs::write(&config_path, "}} not toml {{").unwrap();
+
+        let id = load_or_create(&config_path).unwrap();
+        assert!(DeviceId::parse(id.as_str()).is_ok());
+
+        // The healed file now round-trips on the next load.
+        assert_eq!(load_or_create(&config_path).unwrap(), id);
 
         fs::remove_dir_all(&dir).unwrap();
     }
