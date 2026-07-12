@@ -36,17 +36,15 @@ jobs:
       - name: Build (typecheck + Vite)
         run: pnpm build
 
-  # fmt/clippy/test and the Tauri build share one job so the checkout, pnpm
-  # install, frontend build, and rust-cache scope are paid once instead of
-  # twice. The `--locked` clippy/test steps run before the Tauri build, so any
-  # Cargo.lock drift fails here before the (unlocked) build ever runs.
-  rust:
-    name: Rust (fmt + clippy + test + Tauri build)
+  # clippy and test each force a full dependency recompile (clippy compiles
+  # through the clippy-driver wrapper, which doesn't share a cache fingerprint
+  # with a plain rustc build), so they run as separate parallel jobs instead
+  # of sequential steps in one job — otherwise every run pays for both full
+  # compiles back-to-back instead of overlapping them.
+  lint:
+    name: Rust (fmt + clippy)
     runs-on: windows-latest
-    # Cold-cache Tauri builds on Windows compile the full dependency tree twice
-    # (dev for clippy/test, release for the build) — 30 min was too tight and a
-    # timeout would leave the cache unsaved, stranding every later run too.
-    timeout-minutes: 60
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust (stable) + rustfmt + clippy
@@ -68,15 +66,53 @@ jobs:
         run: cargo fmt --all --check
       - name: Clippy (strict — warnings fail)
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
+
+  test:
+    name: Rust (test)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build frontend (generate dist/ for generate_context!)
+        run: pnpm build
       - name: Test
         run: cargo test --workspace --locked
-      # Tauri build only runs on push to main — the release compile is the
-      # slowest step, and fmt/clippy/test already gate PRs on code correctness.
-      - name: Build app + installer (main only)
-        if: github.event_name == 'push'
+
+  # Only runs on push to main — the release compile is the slowest step, and
+  # fmt/clippy/test already gate PR correctness. Runs in parallel with lint/
+  # test rather than after them: on the rare case main itself fails lint/test,
+  # this job's compute is wasted, but that's cheaper than always serializing
+  # the release build behind two full dev-profile compiles.
+  tauri:
+    name: Tauri build (Windows)
+    if: github.event_name == 'push'
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build app + installer
         run: pnpm tauri build
-      - name: Upload installer artifact (main only)
-        if: github.event_name == 'push'
+      - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
           name: kodama-windows-installer
