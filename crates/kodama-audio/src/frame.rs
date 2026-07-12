@@ -11,8 +11,8 @@ use crate::format::AudioFormat;
 pub enum SegmentReason {
     /// The first segment of a capture session.
     Start,
-    /// The default output device changed mid-capture and the stream was
-    /// rebuilt on the new device.
+    /// The default device for this stream changed mid-capture and the
+    /// stream was rebuilt on the new device.
     DeviceChanged,
 }
 
