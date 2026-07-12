@@ -9,8 +9,14 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use serde::{Deserialize, Serialize};
+
+/// Per-process counter that, combined with the process id, gives each in-flight
+/// `save` a unique temp filename so concurrent saves can't clobber each other's
+/// scratch file.
+static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Filename of a project's glossary file, relative to the project folder root.
 pub const GLOSSARY_FILE: &str = "_glossary.yml";
@@ -60,6 +66,8 @@ pub enum GlossaryError {
     },
     #[error("glossary term {term:?} already exists")]
     Conflict { term: String },
+    #[error("glossary at {path} has duplicate term {term:?}")]
+    Duplicate { path: PathBuf, term: String },
 }
 
 /// Normalizes a term for case-insensitive matching (used consistently by
@@ -67,6 +75,39 @@ pub enum GlossaryError {
 /// same term").
 fn normalize(term: &str) -> String {
     term.trim().to_lowercase()
+}
+
+/// Whether `candidate` matches an already-`normalize`d `key`, applying the same
+/// trim + case-fold semantics without allocating a `String` per comparison (the
+/// hot path when scanning a whole glossary on every `get`/`upsert`).
+fn normalized_eq(candidate: &str, key: &str) -> bool {
+    candidate
+        .trim()
+        .chars()
+        .flat_map(char::to_lowercase)
+        .eq(key.chars())
+}
+
+impl GlossaryTerm {
+    /// Trims surrounding whitespace from the term and its aliases and drops
+    /// blank aliases, so the persisted data matches the normalized text used
+    /// for lookups instead of carrying stray whitespace into exports.
+    fn normalized(mut self) -> GlossaryTerm {
+        self.term = self.term.trim().to_string();
+        self.aliases = self
+            .aliases
+            .into_iter()
+            .map(|a| a.trim().to_string())
+            .filter(|a| !a.is_empty())
+            .collect();
+        self
+    }
+
+    /// True when `key` (already `normalize`d) matches this entry's term or any
+    /// of its aliases — aliases are alternate spellings that resolve to it.
+    fn matches(&self, key: &str) -> bool {
+        normalized_eq(&self.term, key) || self.aliases.iter().any(|a| normalized_eq(a, key))
+    }
 }
 
 impl Glossary {
@@ -81,7 +122,32 @@ impl Glossary {
             }
             Err(source) => return Err(GlossaryError::Io { path, source }),
         };
-        serde_yaml_ng::from_str(&raw).map_err(|source| GlossaryError::Yaml { path, source })
+        let glossary: Glossary =
+            serde_yaml_ng::from_str(&raw).map_err(|source| GlossaryError::Yaml {
+                path: path.clone(),
+                source,
+            })?;
+        glossary.check_no_duplicate_terms(&path)?;
+        Ok(glossary)
+    }
+
+    /// Rejects a glossary whose entries collide on the normalized term text.
+    /// Without this a hand-authored file with two `MERIDIAN` entries would parse
+    /// fine, but every lookup and in-place update would silently only ever
+    /// touch the first, leaving the second as unreachable shadow data.
+    fn check_no_duplicate_terms(&self, path: &Path) -> Result<(), GlossaryError> {
+        let mut seen: Vec<String> = Vec::with_capacity(self.terms.len());
+        for entry in &self.terms {
+            let key = normalize(&entry.term);
+            if seen.contains(&key) {
+                return Err(GlossaryError::Duplicate {
+                    path: path.to_path_buf(),
+                    term: entry.term.clone(),
+                });
+            }
+            seen.push(key);
+        }
+        Ok(())
     }
 
     /// Persists the glossary to `project_dir`, writing to a temp file first
@@ -89,7 +155,14 @@ impl Glossary {
     /// partially written file.
     pub fn save(&self, project_dir: &Path) -> Result<(), GlossaryError> {
         let path = glossary_path(project_dir);
-        let tmp_path = project_dir.join(format!("{GLOSSARY_FILE}.tmp"));
+        // A per-process/per-call unique temp name keeps two concurrent saves to
+        // the same project from writing over the same scratch file and racing
+        // their renames into a corrupt result.
+        let tmp_path = project_dir.join(format!(
+            "{GLOSSARY_FILE}.{}.{}.tmp",
+            std::process::id(),
+            TMP_COUNTER.fetch_add(1, Ordering::Relaxed)
+        ));
 
         let yaml = serde_yaml_ng::to_string(self).map_err(|source| GlossaryError::Yaml {
             path: path.clone(),
@@ -99,7 +172,13 @@ impl Glossary {
             path: tmp_path.clone(),
             source,
         })?;
-        fs::rename(&tmp_path, &path).map_err(|source| GlossaryError::Io { path, source })
+        if let Err(source) = fs::rename(&tmp_path, &path) {
+            // Don't leave a stray temp file behind in a folder that syncs and
+            // exports with the rest of the knowledge base.
+            let _ = fs::remove_file(&tmp_path);
+            return Err(GlossaryError::Io { path, source });
+        }
+        Ok(())
     }
 
     /// Inserts a new term, or updates an existing one matched by
@@ -110,8 +189,11 @@ impl Glossary {
         term: GlossaryTerm,
         on_conflict: OnConflict,
     ) -> Result<bool, GlossaryError> {
+        let term = term.normalized();
         let key = normalize(&term.term);
-        if let Some(existing) = self.terms.iter_mut().find(|t| normalize(&t.term) == key) {
+        // Identity is the primary term text only; aliases resolve on lookup but
+        // don't make one term "the same" as another for upsert purposes.
+        if let Some(existing) = self.terms.iter_mut().find(|t| normalized_eq(&t.term, &key)) {
             if on_conflict == OnConflict::Error {
                 return Err(GlossaryError::Conflict { term: term.term });
             }
@@ -122,10 +204,11 @@ impl Glossary {
         Ok(true)
     }
 
-    /// Looks up a term by case-insensitive, trimmed match.
+    /// Looks up a term by case-insensitive, trimmed match against its term text
+    /// or any of its aliases.
     pub fn get(&self, term: &str) -> Option<&GlossaryTerm> {
         let key = normalize(term);
-        self.terms.iter().find(|t| normalize(&t.term) == key)
+        self.terms.iter().find(|t| t.matches(&key))
     }
 
     pub fn is_empty(&self) -> bool {
@@ -305,5 +388,77 @@ terms:
         let result = Glossary::load(dir.path());
 
         assert!(matches!(result, Err(GlossaryError::Yaml { .. })));
+    }
+
+    #[test]
+    fn get_resolves_aliases() {
+        let mut glossary = Glossary::default();
+        glossary
+            .upsert(
+                term("TeeTrack", "Tee-sheet / POS vendor.", &["t-track", "tee-track"]),
+                OnConflict::Error,
+            )
+            .unwrap();
+
+        // An alias — including with different case and surrounding whitespace —
+        // resolves to its entry.
+        assert_eq!(glossary.get("t-track").unwrap().term, "TeeTrack");
+        assert_eq!(glossary.get("  Tee-Track ").unwrap().term, "TeeTrack");
+        assert!(glossary.get("nope").is_none());
+    }
+
+    #[test]
+    fn upsert_trims_term_and_aliases_and_drops_blanks() {
+        let mut glossary = Glossary::default();
+        glossary
+            .upsert(
+                term(
+                    "  MERIDIAN  ",
+                    "A regional systems-migration project.",
+                    &["  meridian ", "", "  "],
+                ),
+                OnConflict::Error,
+            )
+            .unwrap();
+
+        let stored = &glossary.terms()[0];
+        assert_eq!(stored.term, "MERIDIAN");
+        assert_eq!(stored.aliases, vec!["meridian".to_string()]);
+    }
+
+    #[test]
+    fn load_rejects_duplicate_terms() {
+        let dir = tempdir().unwrap();
+        let yaml = r#"
+terms:
+  - term: MERIDIAN
+    definition: First.
+  - term: meridian
+    definition: Second.
+"#;
+        fs::write(glossary_path(dir.path()), yaml).unwrap();
+
+        let result = Glossary::load(dir.path());
+
+        assert!(matches!(result, Err(GlossaryError::Duplicate { term, .. }) if term == "meridian"));
+    }
+
+    #[test]
+    fn save_leaves_no_temp_file_behind() {
+        let dir = tempdir().unwrap();
+        let mut glossary = Glossary::default();
+        glossary
+            .upsert(
+                term("MERIDIAN", "A regional systems-migration project.", &[]),
+                OnConflict::Error,
+            )
+            .unwrap();
+        glossary.save(dir.path()).unwrap();
+
+        let stray = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().ends_with(".tmp"));
+        assert!(!stray, "save should not leave a .tmp scratch file behind");
     }
 }
