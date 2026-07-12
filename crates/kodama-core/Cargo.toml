@@ -7,3 +7,12 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+getrandom = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_yaml_ng = "0.10"
+thiserror = "2"
+toml = "1"
+
+[dev-dependencies]
+tempfile = "3"

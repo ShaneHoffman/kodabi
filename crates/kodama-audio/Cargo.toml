@@ -1,0 +1,25 @@
+[package]
+name = "kodama-audio"
+description = "Kodama audio capture — WASAPI loopback (system audio) via cpal."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+cpal = "0.18"
+crossbeam-channel = "0.5"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+
+# cpal 0.18.1 declares its own `windows-core = ">=0.61,<=0.62"` dependency
+# separate from its `windows` dependency, which Tauri's stack pins to 0.61.2
+# transitively. Left unconstrained, Cargo resolves cpal's direct edge to the
+# newest allowed 0.62.2 instead of reusing 0.61.2, producing two
+# incompatible `windows-core` instances in the graph. Pin it so both edges
+# unify onto the version Tauri already uses.
+[target.'cfg(windows)'.dependencies]
+windows-core = "=0.61.2"
+
+[dev-dependencies]
+serde_json = "1"
