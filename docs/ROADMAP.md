@@ -3,7 +3,7 @@
 Phases 0 and 1 are tracked as individual, agent-actionable tickets in the Kangentic backlog.
 This file holds the **later phases as unrefined planning material** — goals, milestones, and
 checklists that get broken into tickets when their phase comes up. Vision + architecture source
-of truth is `FOUNDING_DOC.md`; this is the working roadmap derived from it.
+of truth is `docs/FOUNDING_DOC.md`; this is the working roadmap derived from it.
 
 **Decisions already locked that affect later phases:** License = AGPL-3.0-only · Frontend = React +
 Tailwind · Transcription = per-channel (you/them attribution) · Glossary-cleanup post-pass pulled
