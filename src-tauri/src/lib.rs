@@ -1,3 +1,5 @@
+mod audio_cmds;
+
 use kodama_core::device::DeviceId;
 use tauri::Manager;
 
@@ -15,7 +17,13 @@ pub fn run() {
             app.manage(device_id);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![device_id])
+        .manage(audio_cmds::CaptureState::default())
+        .invoke_handler(tauri::generate_handler![
+            device_id,
+            audio_cmds::start_capture,
+            audio_cmds::stop_capture,
+            audio_cmds::capture_status,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
