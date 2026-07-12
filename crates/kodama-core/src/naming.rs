@@ -1,10 +1,18 @@
-//! Collision-free filenames for captured sessions: `{timestamp}-{deviceID}[-{slug}].{ext}`.
+//! Filenames for captured sessions: `{timestamp}-{deviceID}[-{slug}].{ext}`.
 //!
-//! See `docs/FILENAME_SCHEME.md` for the full spec. Two devices capturing at
-//! the exact same instant still produce distinct filenames because the
-//! device ID differs. Neither the timestamp nor the device ID ever contains
-//! `-`, so [`parse_session_filename`] can losslessly split the pieces back
-//! apart.
+//! See `docs/FILENAME_SCHEME.md` for the full spec. The scheme guarantees
+//! filenames never collide *across devices*: two devices capturing at the
+//! exact same instant still produce distinct names because the device ID
+//! differs — which is what makes import safe (merge, never overwrite).
+//!
+//! The timestamp is only millisecond-precise, so it does **not** by itself
+//! disambiguate two captures on the *same* device within the same
+//! millisecond; a caller writing the raw store must treat a same-device name
+//! clash as a real collision to resolve (e.g. a distinct slug), not blindly
+//! overwrite.
+//!
+//! Neither the timestamp nor the device ID ever contains `-`, so
+//! [`parse_session_filename`] can losslessly split the pieces back apart.
 
 use chrono::{DateTime, NaiveDateTime, Utc};
 
