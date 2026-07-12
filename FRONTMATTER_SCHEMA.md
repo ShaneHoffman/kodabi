@@ -38,10 +38,14 @@ Canonical key order the writer emits: **`type, project, date, tags, source, conf
 
 - **`project`** — `Inbox` is not a real project; it is the sentinel value confidence-split routing
   uses when a note's score is too low to auto-file. The Inbox UI's one-click re-route corrects
-  `project` (and typically re-derives `confidence`) in place.
+  `project` and re-scores `confidence` for the chosen project, in place.
 - **`date`** — full timestamp+offset for anything with a real start time (a meeting, a chat
   session); date-only is acceptable for a quick-capture note jotted with no meaningful clock time.
-  Always sortable as a string.
+  Store the value exactly as written. A lexical string sort orders same-offset timestamps and
+  date-only values chronologically, but it compares wall-clock digits rather than the underlying
+  instant — so `2026-07-09T14:00:00-07:00` (21:00Z) sorts *before* `2026-07-09T15:00:00+00:00`
+  (15:00Z) even though it happened later. When notes span multiple offsets, the index must
+  normalize `date` to UTC before ordering; do not rely on raw string comparison across offsets.
 - **`tags`** — a plain YAML list, which Obsidian reads natively as note tags. Keep the key absent
   rather than an empty list when a note has none.
 - **`source`** — identifies *how* a note came to exist. For `type: meeting` and `type: chat` notes
@@ -49,10 +53,13 @@ Canonical key order the writer emits: **`type, project, date, tags, source, conf
   a relative path to that artifact, giving direct traceback from the distilled note to its raw
   recording without adding a seventh field. When no raw artifact exists — a quick-capture note, an
   imported file, a hand-written note — `source` falls back to the closest keyword.
-- **`confidence`** — present whenever confidence-split routing produced the `project` value,
-  **including** low-score notes that land in `Inbox` (the score is *why* it landed there). It is
-  **omitted** entirely when a human created or filed the note directly, since no routing score
-  exists to report.
+- **`confidence`** — present whenever a routing score backs the current `project` value: notes
+  confidence-split routing auto-filed, **including** low-score notes that land in `Inbox` (the score
+  is *why* it landed there), and notes the Inbox re-route re-scored into a project. The trigger is
+  that routing produced the score, not who authored the note — a human-jotted quick-capture note is
+  still auto-routed, so it carries `confidence`. It is **omitted** entirely only when a human chose
+  the `project` directly with no routing involved — a note filed by hand, or an import — since no
+  routing score exists to report.
 
 ---
 
@@ -114,7 +121,7 @@ type: chat
 project: Paradise Golf
 date: 2026-07-10T09:15:00-07:00
 tags: [research]
-source: chat
+source: raw/2026-07-10-irrigation-contractor-comparison.jsonl
 ---
 
 # Chat: irrigation contractor comparison
@@ -134,8 +141,9 @@ than auto-routed, so there is no routing score to record.
 - **→ Phase 2 markdown writer:** emits this frontmatter, in the canonical key order above, for
   every note it produces — end-of-meeting notes, quick-capture notes, and (later) distilled chat
   sessions.
-- **→ Phase 2 file watcher & full rebuild command:** parses `project`, `tags`, `type`, and
-  `confidence` out of frontmatter to populate the SQLite FTS5 + `sqlite-vec` index; because the
+- **→ Phase 2 file watcher & full rebuild command:** parses `project`, `date`, `tags`, `type`, and
+  `confidence` out of frontmatter to populate the SQLite FTS5 + `sqlite-vec` index (`date` is
+  indexed so results can be ordered and range-filtered by recency without re-reading files); because the
   files are the source of truth, a full rebuild can always reconstruct the index from them alone.
 - **→ Phase 3 MCP tools:** `search_notes`, `file_note_to_project`, `list_projects`, and
   `get_project_context` all route and filter over these fields (ticket P0-10, the MCP tool
