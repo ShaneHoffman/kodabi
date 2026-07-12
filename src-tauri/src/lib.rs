@@ -1,10 +1,25 @@
 mod audio_cmds;
 
+use kodama_core::device::DeviceId;
+use tauri::Manager;
+
+#[tauri::command]
+fn device_id(state: tauri::State<'_, DeviceId>) -> String {
+    state.as_str().to_string()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .setup(|app| {
+            let config_dir = app.path().app_config_dir()?;
+            let device_id = kodama_core::device::load_or_create(&config_dir.join("device.toml"))?;
+            app.manage(device_id);
+            Ok(())
+        })
         .manage(audio_cmds::CaptureState::default())
         .invoke_handler(tauri::generate_handler![
+            device_id,
             audio_cmds::start_capture,
             audio_cmds::stop_capture,
             audio_cmds::capture_status,
