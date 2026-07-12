@@ -5,7 +5,7 @@ searchable, chat-able knowledge base: **transcribe → distill → auto-route �
 
 ## Status
 
-Pre-alpha — early development, no releases yet. See [`ROADMAP.md`](ROADMAP.md) for the phased plan.
+Pre-alpha — early development, no releases yet. See [`ROADMAP.md`](docs/ROADMAP.md) for the phased plan.
 
 ## Stack
 
@@ -25,7 +25,8 @@ Pre-alpha — early development, no releases yet. See [`ROADMAP.md`](ROADMAP.md)
 ## Repository layout
 
 ```
-design/                # Locked design tokens — design/tokens.css is the single source of
+docs/                   # Strategy & spec docs — roadmap, aesthetic direction, founding doc.
+design/                 # Locked design tokens — design/tokens.css is the single source of
                         # truth for color, type, and spacing; imported by the app, never
                         # duplicated.
 src/                    # React + TypeScript frontend. src/index.css bridges the tokens

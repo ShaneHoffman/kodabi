@@ -3,7 +3,7 @@
 **Status:** Concept (Phase 0, ticket P0-5). Designs the mark that
 [`DESIGN.md`](DESIGN.md) reserves the green and the feeling for; the exact tokens are locked later
 in P0-4 and the runtime is built in P1-5. This document is the *intent*; its visual companion,
-[`design/spirit-mark.html`](design/spirit-mark.html), *demonstrates* it in real material — open that
+[`design/spirit-mark.html`](../design/spirit-mark.html), *demonstrates* it in real material — open that
 to feel the breath.
 
 The listening indicator **is** the kodama. It is one mark doing three jobs at once: the app's
@@ -135,5 +135,5 @@ noted here and deferred.
 ---
 
 *Concept, not final: the exact tokens are locked in P0-4 and the runtime is built in P1-5.*
-*This document and [`design/spirit-mark.html`](design/spirit-mark.html) together specify the mark
+*This document and [`design/spirit-mark.html`](../design/spirit-mark.html) together specify the mark
 that `DESIGN.md` reserved the green and the feeling for.*
