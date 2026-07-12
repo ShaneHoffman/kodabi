@@ -6,7 +6,7 @@ on:
   push:
     branches: [main]
 
-# Cancel superseded runs on the same ref to save Windows minutes.
+# Cancel superseded runs on the same ref to save runner minutes.
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -15,9 +15,13 @@ permissions:
   contents: read
 
 jobs:
+  # Pure Node work — runs on Linux (~half the billed rate of Windows, faster to
+  # boot). The Vite output is platform-independent, so dist/ is built once here
+  # and shared with the Rust jobs as an artifact instead of being rebuilt in
+  # each of them.
   frontend:
     name: Frontend (lint + build)
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -33,21 +37,30 @@ jobs:
         run: pnpm exec eslint . --max-warnings=0
       - name: Build (typecheck + Vite)
         run: pnpm build
+      - name: Upload dist/ for the Rust jobs (generate_context! embeds it)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: error
 
   # clippy and test each force a full dependency recompile (clippy compiles
   # through the clippy-driver wrapper, which doesn't share a cache fingerprint
   # with a plain rustc build), so they run as separate parallel jobs instead
   # of sequential steps in one job — otherwise every run pays for both full
-  # compiles back-to-back instead of overlapping them.
+  # compiles back-to-back instead of overlapping them. Both need dist/ to
+  # exist (src-tauri embeds it via tauri::generate_context!), downloaded from
+  # the frontend job rather than rebuilt.
   #
-  # CI does not build the Tauri app — the release compile is the slowest step
-  # and this workspace has no tests yet to justify it as a per-push cost.
+  # CI does not build the Tauri app — the release compile is the slowest step,
+  # and the workspace's two smoke tests don't justify paying it per push.
   # Whether the desktop app itself builds is verified by the /pull-request
   # skill before a PR is opened or updated (see .claude/skills/pull-request).
   lint:
     name: Rust (fmt + clippy)
     runs-on: windows-latest
     timeout-minutes: 20
+    needs: frontend
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust (stable) + rustfmt + clippy
@@ -55,16 +68,11 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - uses: pnpm/action-setup@v4
+      - name: Download dist/ (built by the frontend job)
+        uses: actions/download-artifact@v4
         with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Build frontend (generate dist/ for generate_context!)
-        run: pnpm build
+          name: dist
+          path: dist
       - name: Format check
         run: cargo fmt --all --check
       - name: Clippy (strict — warnings fail)
@@ -74,19 +82,15 @@ jobs:
     name: Rust (test)
     runs-on: windows-latest
     timeout-minutes: 20
+    needs: frontend
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - uses: pnpm/action-setup@v4
+      - name: Download dist/ (built by the frontend job)
+        uses: actions/download-artifact@v4
         with:
-          version: 9
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - name: Build frontend (generate dist/ for generate_context!)
-        run: pnpm build
+          name: dist
+          path: dist
       - name: Test
         run: cargo test --workspace --locked

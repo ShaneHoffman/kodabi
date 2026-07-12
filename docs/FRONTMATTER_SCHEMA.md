@@ -1,6 +1,7 @@
 # Kodama — Frontmatter Schema
 
-**Status:** Locked (Phase 0, ticket P0-9). Specifies the YAML frontmatter every note carries; the
+**Status:** Locked (Phase 0, ticket P0-9; amended by the Phase 0 readiness audit to absorb
+P0-10's stable-`id` recommendation). Specifies the YAML frontmatter every note carries; the
 Phase 2 markdown writer emits it, the Phase 2 file watcher and full rebuild command index it into
 SQLite, and the Phase 3 MCP tools (`search_notes`, `file_note_to_project`, `list_projects`,
 `get_project_context`) route and query over it.
@@ -23,10 +24,11 @@ base depends on Kodama continuing to exist).
 
 ## Fields
 
-Canonical key order the writer emits: **`type, project, date, tags, source, confidence`**.
+Canonical key order the writer emits: **`id, type, project, date, tags, source, confidence`**.
 
 | Field | Type | Required | Allowed values / format |
 | --- | --- | --- | --- |
+| `id` | string | yes | `n_` + base36 (`^n_[0-9a-z]{6,}$`), e.g. `n_a1b2c3`; generated once at creation, **never rewritten** on move or re-route |
 | `type` | string enum | yes | `meeting` \| `note` \| `chat` (closed set) |
 | `project` | string | yes | A project name; the sentinel `Inbox` when unrouted |
 | `date` | string (ISO 8601) | yes | Timestamp with offset when a time is known (`2026-07-09T14:00:00-07:00`); date-only (`2026-07-11`) otherwise |
@@ -36,6 +38,11 @@ Canonical key order the writer emits: **`type, project, date, tags, source, conf
 
 **Notes on individual fields:**
 
+- **`id`** — the note's **stable identity and the MCP write handle** (absorbed from
+  [`MCP_TOOL_SURFACE.md`](MCP_TOOL_SURFACE.md), "Recommendation to P0-9"). `file_note_to_project`,
+  `get_note`, and `get_meeting_transcript` all address notes by this value, so it survives every
+  move and re-route unchanged — the file path is informational and changes on move; the `id` never
+  does. Matches the `NoteId` schema (`^n_[0-9a-z]{6,}$`) in the MCP tool surface.
 - **`project`** — `Inbox` is not a real project; it is the sentinel value confidence-split routing
   uses when a note's score is too low to auto-file. The Inbox UI's one-click re-route corrects
   `project` and re-scores `confidence` for the chosen project, in place.
@@ -71,6 +78,7 @@ One example per `type`, each exercising a different combination of field states.
 
 ```markdown
 ---
+id: n_a1b2c3
 type: meeting
 project: Paradise Golf
 date: 2026-07-09T14:00:00-07:00
@@ -99,6 +107,7 @@ contractor shortlist.
 
 ```markdown
 ---
+id: n_d4e5f6
 type: note
 project: Inbox
 date: 2026-07-10
@@ -117,6 +126,7 @@ drainage — ask Priya next sync.
 
 ```markdown
 ---
+id: n_g7h8i9
 type: chat
 project: Paradise Golf
 date: 2026-07-10T09:15:00-07:00
@@ -141,8 +151,8 @@ than auto-routed, so there is no routing score to record.
 - **→ Phase 2 markdown writer:** emits this frontmatter, in the canonical key order above, for
   every note it produces — end-of-meeting notes, quick-capture notes, and (later) distilled chat
   sessions.
-- **→ Phase 2 file watcher & full rebuild command:** parses `project`, `date`, `tags`, `type`, and
-  `confidence` out of frontmatter to populate the SQLite FTS5 + `sqlite-vec` index (`date` is
+- **→ Phase 2 file watcher & full rebuild command:** parses `id`, `project`, `date`, `tags`,
+  `type`, and `confidence` out of frontmatter to populate the SQLite FTS5 + `sqlite-vec` index (`date` is
   indexed so results can be ordered and range-filtered by recency without re-reading files); because the
   files are the source of truth, a full rebuild can always reconstruct the index from them alone.
 - **→ Phase 3 MCP tools:** `search_notes`, `file_note_to_project`, `list_projects`, and
