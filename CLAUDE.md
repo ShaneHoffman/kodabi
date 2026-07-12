@@ -49,6 +49,9 @@ Commit subjects follow Conventional Commits: `<type>: <imperative summary>`, mat
   `cargo clippy --workspace --all-targets --locked -- -D warnings`, and
   `cargo test --workspace --locked` must pass before every commit that touches Rust;
   `pnpm exec eslint . --max-warnings=0` and `pnpm build` before commits that touch the frontend.
+  The clippy/test gates need `dist/` to exist — `src-tauri` embeds it via
+  `tauri::generate_context!`, which fails the compile when it's missing — so in a fresh worktree
+  run `pnpm install --frozen-lockfile && pnpm build` first (CI's Rust jobs do the same).
 - **Core vs shell:** logic lives in `crates/kodama-core` (pure, UI-agnostic, unit-testable);
   `src-tauri` commands stay thin wrappers around it. If a Tauri command grows a body, the body
   belongs in kodama-core.

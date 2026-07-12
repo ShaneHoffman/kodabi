@@ -3,10 +3,10 @@
 
    The locked, machine-consumable source of truth for the whole
    app. Promoted from the INDICATIVE values in design/moodboard.html
-   (P0-3) into final tokens. Read DESIGN.md for the intent;
+   (P0-3) into final tokens. Read docs/DESIGN.md for the intent;
    this file is the material.
 
-   Discipline (DESIGN.md): value carries the hierarchy, hue stays
+   Discipline (docs/DESIGN.md): value carries the hierarchy, hue stays
    almost silent. Space instead of borders/boxes. One deliberate
    motion. The palette is one desaturated grey-green value ladder;
    there are two greens and both are quiet — a soft interactive
@@ -132,7 +132,7 @@
   --radius-sm:    5px;
   --radius-md:    8px;
 
-  /* hairlines are translucent inset shadows, never borders (DESIGN.md) */
+  /* hairlines are translucent inset shadows, never borders (docs/DESIGN.md) */
   --edge-faint:  rgba(128, 128, 120, 0.12);
   --edge:        rgba(128, 128, 120, 0.20);
   --edge-strong: rgba(128, 128, 120, 0.28);

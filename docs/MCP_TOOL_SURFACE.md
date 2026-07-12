@@ -55,13 +55,15 @@ Claude Code MCP reference (`code.claude.com/docs/en/mcp`) and the MCP tool speci
   in a `content` text block**, so clients that don't parse `structuredContent` still receive the full
   data. A short human-readable summary may precede it in the block, but must not replace the
   serialized payload.
-- Plain objects use `"additionalProperties": false`. Any object that participates in `allOf`
-  composition — both the composed schemas (`SearchHit`, `MeetingMeta`) **and the base they extend**
-  (`NoteSummary`) — uses **`"unevaluatedProperties": false` instead**. Under draft 2020-12,
-  `additionalProperties` only sees properties declared in its own schema object: a base with
-  `additionalProperties: false` would reject the extending schema's added fields, and a composed
-  schema's `additionalProperties` cannot see the base's `$ref`'d fields either. `unevaluatedProperties`
-  sees across `allOf`/`$ref`, so it is the correct keyword for every schema in a composition chain.
+- Plain objects use `"additionalProperties": false`. Schemas that **extend** another via `allOf`
+  composition (`SearchHit`, `MeetingMeta`) use **`"unevaluatedProperties": false` instead** —
+  their own `additionalProperties` could not see the base's `$ref`'d fields, while
+  `unevaluatedProperties` sees across `allOf`/`$ref`. The **base being extended** (`NoteSummary`)
+  carries **neither keyword and stays open**: under draft 2020-12, annotations never flow from a
+  parent schema into a `$ref`'d subschema, so a base closed with either keyword would treat the
+  extension's added fields (`score`, `duration_seconds`, …) as unknown and reject every composed
+  instance. Strictness on standalone `NoteSummary` uses is deliberately traded away to keep the
+  composition valid; the extending schemas re-close the full shape.
 - Nullability uses draft 2020-12 union types (`"type": ["string", "null"]`) or
   `"oneOf": [{"$ref": "..."}, {"type": "null"}]` for `$ref`'d types.
 - Errors follow the [Cross-cutting contract](#cross-cutting-contract) below, not ad hoc shapes.
@@ -561,7 +563,7 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
     "IsoDateTime": {
       "type": "string",
       "format": "date-time",
-      "description": "Timestamp, RFC 3339 date-time in UTC, e.g. \"2026-07-11T14:03:00Z\"."
+      "description": "Timestamp, RFC 3339 date-time with offset (\"Z\" or numeric), e.g. \"2026-07-11T14:03:00Z\" or \"2026-07-09T14:00:00-07:00\"."
     },
     "NoteType": {
       "type": "string",
@@ -601,20 +603,19 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
     },
     "NoteSummary": {
       "type": "object",
-      "unevaluatedProperties": false,
-      "required": ["id", "path", "title", "type", "project", "date", "tags"],
+      "required": ["id", "path", "title", "type", "project", "date", "tags", "source"],
       "properties": {
         "id": { "$ref": "#/$defs/NoteId" },
         "path": { "type": "string", "description": "Current note path relative to the KB root." },
         "title": { "type": "string", "description": "Note title." },
         "type": { "$ref": "#/$defs/NoteType" },
         "project": { "oneOf": [ { "$ref": "#/$defs/ProjectSlug" }, { "type": "null" } ], "description": "Owning project slug, or null if unfiled (Inbox)." },
-        "date": { "oneOf": [ { "$ref": "#/$defs/IsoDate" }, { "type": "null" } ], "description": "Frontmatter date, or null." },
-        "tags": { "type": "array", "items": { "type": "string" }, "description": "Frontmatter tags." },
-        "source": { "type": ["string", "null"], "description": "Frontmatter source (e.g. how the note was captured), or null." },
-        "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Routing confidence 0..1, or null." }
+        "date": { "oneOf": [ { "$ref": "#/$defs/IsoDateTime" }, { "$ref": "#/$defs/IsoDate" } ], "description": "Frontmatter date, verbatim as stored: full timestamp with offset when a time is known, date-only otherwise." },
+        "tags": { "type": "array", "items": { "type": "string" }, "description": "Frontmatter tags; empty array when the frontmatter key is absent (the writer omits the key for untagged notes)." },
+        "source": { "type": "string", "description": "Frontmatter source: a capture keyword (transcript | quick-capture | chat | import | manual) or a repo-relative path to the raw artifact." },
+        "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Routing confidence 0..1, or null when no routing score exists (hand-filed or imported notes)." }
       },
-      "description": "Core note metadata shared by search hits, recent-notes lists, and routing results."
+      "description": "Core note metadata shared by search hits, recent-notes lists, and routing results. Deliberately open (no unevaluatedProperties) because SearchHit and MeetingMeta extend it — see Conventions."
     },
     "SearchHit": {
       "allOf": [ { "$ref": "#/$defs/NoteSummary" } ],
@@ -691,7 +692,7 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
         "parent": { "oneOf": [ { "$ref": "#/$defs/ProjectSlug" }, { "type": "null" } ], "description": "Parent project slug, or null for a top-level project." },
         "note_count": { "type": "integer", "minimum": 0, "description": "Notes directly in this project (not descendants)." },
         "meeting_count": { "type": "integer", "minimum": 0, "description": "Meeting-type notes directly in this project." },
-        "last_activity": { "oneOf": [ { "$ref": "#/$defs/IsoDateTime" }, { "type": "null" } ], "description": "Timestamp of the most recent note activity, or null if empty." }
+        "last_activity": { "oneOf": [ { "$ref": "#/$defs/IsoDateTime" }, { "type": "null" } ], "description": "UTC timestamp of the most recent note activity, or null if empty." }
       },
       "description": "A routing-target project (maps to a folder), with hierarchy and counts."
     }
@@ -726,10 +727,12 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
    a caller that hits a cap falls back to the paginated tool for that slice (`list_outstanding_items`
    for outstanding items, `search_notes` for notes); standalone glossary pagination is deferred (see
    [Deferred / not in v1](#deferred--not-in-v1)).
-5. **Dates & time.** ISO 8601 throughout: `date` (`YYYY-MM-DD`) for note dates and due dates; RFC
-   3339 `date-time` in UTC for `last_activity`. Transcript positions are **integer millisecond
-   offsets** (`start_ms`/`end_ms`) from meeting start, not wall-clock, because per-channel segments
-   are recorded relative to session start.
+5. **Dates & time.** ISO 8601 throughout: a note's `date` is passed through **verbatim as
+   frontmatter stores it** — a full RFC 3339 timestamp with offset when a time is known,
+   `YYYY-MM-DD` otherwise (per the frontmatter schema); due dates are `YYYY-MM-DD`;
+   `last_activity` is an RFC 3339 `date-time` in UTC. Transcript positions are **integer
+   millisecond offsets** (`start_ms`/`end_ms`) from meeting start, not wall-clock, because
+   per-channel segments are recorded relative to session start.
 6. **Identity handles.** The **note write handle is the stable `id`**; `path` is always returned but
    never accepted as a handle, since it changes on move. The **project handle is the `slug`**
    (`"Growth/Q3"`), which mirrors the on-disk folder path and is human-usable; `Project.id` is

@@ -25,16 +25,15 @@ Run and actually read these before writing anything:
 If the current branch **is** `main`, or there are **no** commits vs `main`, STOP and report that there's nothing to open a PR for.
 
 ## 2. Verify it builds
-CI only runs lint and tests — it does not build the Tauri app. This step is the one place that
-actually confirms the desktop app compiles and links on Windows, so it runs before anything is
-pushed:
-- `pnpm install --frozen-lockfile && pnpm build` — installs frontend deps and generates `dist/`
-  (required before Rust can compile `src-tauri`, which embeds it via `tauri::generate_context!`).
-- `cargo build --workspace --locked` — compiles the full Rust workspace.
+CI never builds the Tauri desktop app. This step is the one place that actually confirms it
+compiles and links on Windows, so it runs before anything is pushed:
+- `pnpm install --frozen-lockfile` — installs frontend deps (worktrees start without `node_modules`).
 - `pnpm tauri build --no-bundle` — release compile + link of the desktop app (no installer
-  packaging), confirming it actually builds on Windows.
+  packaging). This one command covers everything: it runs `pnpm build` itself (the
+  `beforeBuildCommand` in `tauri.conf.json`, generating the `dist/` that
+  `tauri::generate_context!` embeds) and release-compiles the full Rust workspace.
 
-If any of these fail, STOP — fix the build first. Do not push or open/update a PR for code that
+If this fails, STOP — fix the build first. Do not push or open/update a PR for code that
 doesn't build.
 
 ## 3. Push the branch
