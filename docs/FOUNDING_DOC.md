@@ -136,7 +136,7 @@ At meeting end (batch, not continuous — keeps token usage sane):
 - The knowledge base is a plain folder — sync it with anything: Syncthing (pure-local ethos), OneDrive/Dropbox (pragmatic), or a git repo.
 - **Each device rebuilds its own SQLite index locally** from the synced files. The database is never synced (synced SQLite corrupts; the index is rebuildable by design).
 - **Glossaries, project config, and routing examples live as files inside the folder** so they sync with the knowledge.
-- **Filenames include timestamp + device ID** so simultaneous capture on two machines can never collide; the append-mostly design makes conflicts nearly impossible.
+- **Filenames include timestamp + device ID** so simultaneous capture on two machines can never collide; the append-mostly design makes conflicts nearly impossible (scheme: [`FILENAME_SCHEME.md`](FILENAME_SCHEME.md)).
 - V1 ships zero sync code — one README paragraph. Built-in git-backed sync is a Phase 5 candidate.
 - **Import/export (settings):** export = zip of the knowledge base (or a single project) with notes, glossaries, config, routing examples + a version manifest; import = *merge*, never overwrite (timestamp+device-ID filenames prevent collisions; index rebuilds after). Import doubles as the schema-migration hook for old archives. Single-project scope covers the consulting cases: archive a finished engagement, hand a project to a colleague. Import-from-Obsidian/plain-markdown is a Phase 5 onboarding ramp.
 

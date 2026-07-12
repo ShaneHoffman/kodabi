@@ -7,3 +7,7 @@ license.workspace = true
 authors.workspace = true
 
 [dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+getrandom = "0.2"
+serde = { version = "1", features = ["derive"] }
+toml = "1"
