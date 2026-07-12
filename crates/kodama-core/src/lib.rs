@@ -4,6 +4,8 @@
 //! in isolation. This is where the future SQLite index and MCP-facing query
 //! surface will live, kept out of the desktop shell.
 
+pub mod transcription;
+
 /// Crate version — a trivial placeholder proving the crate compiles, links,
 /// and is unit-testable from the Tauri binary and from `cargo test`.
 pub fn version() -> &'static str {
