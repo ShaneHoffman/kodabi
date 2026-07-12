@@ -1,6 +1,8 @@
 # Kodama — Founding Document
 
-*This document is the source of truth for vision, architecture, and roadmap. It lives in the `docs/` folder and gets amended, not abandoned.*
+*This document is the source of truth for vision and architecture; the working roadmap derived
+from it is [`ROADMAP.md`](ROADMAP.md). It lives in the `docs/` folder and gets amended, not
+abandoned.*
 
 **Why "Kodama":** In Japanese folklore, the kodama is the forest spirit that hears you and echoes back. It lives entirely in its own forest (local-first), it's quiet and ambient (calm by default), and it answers when spoken to (chat with your knowledge). Ghibli's Princess Mononoke gave it gentle, watchful associations — good mascot energy for the listening indicator. Namespace check (July 2026): only small/dormant collisions (a Ruby gem, an R package, a static site generator); no consumer app or AI product owns the name.
 
@@ -202,62 +204,46 @@ Principles:
 
 ## 6. Roadmap
 
-### Phase 0 — Foundations (decisions + skeleton)
+*The **working roadmap** is [`ROADMAP.md`](ROADMAP.md); Phases 0–1 are broken into individual
+tickets on the Kangentic board. This section keeps only what lives nowhere else: each phase's goal
+and milestone, and the full detail behind the Phase 5 candidates.*
 
-- [x] Pick name → **Kodama** (namespace checked; only minor collisions)
-- [ ] Grab GitHub org/repo, domain variant (kodama.app / getkodama.dev / kodama.sh), crates.io + npm names
-- [ ] Pick license (MIT vs AGPL — decide before code exists; AGPL if preventing closed commercial wraps matters)
-- [ ] Design system first pass: moodboard, typeface, type scale, spacing tokens, color system, listening-indicator concept
-- [ ] Repo scaffold: Tauri + Rust backend + frontend toolchain, CI
-- [ ] Decide markdown frontmatter schema (project, date, type: meeting|note|chat, tags, source, confidence)
-- [ ] Define MCP tool surface v1 (names, inputs, outputs)
+### Phase 0 — Foundations (decisions + skeleton) — ✅ complete
+
+Shipped: license (**AGPL-3.0-only**), design system ([`DESIGN.md`](DESIGN.md),
+`design/tokens.css`, [`SPIRIT_MARK.md`](SPIRIT_MARK.md)), Tauri + Rust workspace scaffold with CI,
+the frontmatter schema ([`FRONTMATTER_SCHEMA.md`](FRONTMATTER_SCHEMA.md)), and the MCP tool
+surface ([`MCP_TOOL_SURFACE.md`](MCP_TOOL_SURFACE.md)). One item still open, tracked in the
+backlog: reserve the domain variant (kodama.app / getkodama.dev / kodama.sh) + crates.io/npm names
+(the GitHub repo exists: `github.com/ShaneHoffman/kodama`).
 
 ### Phase 1 — Capture & transcribe (the hard 20%)
 
-- [ ] WASAPI loopback capture via cpal (system audio)
-- [ ] Parallel mic capture; two-channel interleave/mix
-- [ ] Global hotkey + tray toggle + unambiguous listening indicator
-- [ ] `TranscriptionEngine` trait + Parakeet TDT engine via sherpa-onnx (default, includes VAD)
-- [ ] whisper.cpp engine (CUDA build) as fallback, paired with Silero VAD
-- [ ] Record one real meeting; benchmark both engines on it (accuracy on proper nouns, silence behavior, speed); lock the default
-- [ ] Per-project glossary storage + initial-prompt biasing (Whisper path) / post-pass-only (Parakeet path)
-- [ ] Raw session storage (audio optional, transcript + timestamps); filenames = timestamp + device ID
-- [ ] Resource budget measured and tuned on real hardware
+Capture (WASAPI loopback + mic, hotkey/tray, listening indicator), the `TranscriptionEngine`
+trait with Parakeet + whisper.cpp engines, the real-meeting benchmark that locks the default,
+glossaries, and raw session storage — tracked as individual tickets in the backlog.
 
 **Milestone:** a full Teams meeting produces a clean, timestamped transcript with correct project nouns, hands-free after one hotkey.
 
 ### Phase 2 — Distill, route, store, index
 
-- [ ] End-of-meeting pipeline: glossary cleanup → summary → action items/decisions extraction (via Claude Code headless or SDK call through the MCP loop)
-- [ ] Confidence-split routing; Inbox UI; one-click re-route feeding the correction loop
-- [ ] Quick-capture window (global hotkey → text box → same routing pipeline) + basic note create/edit within a project
-- [ ] Markdown writer (frontmatter schema from Phase 0)
-- [ ] SQLite schema: FTS5 + sqlite-vec; local embedding pipeline; file watcher; full rebuild command
-- [ ] Hybrid retrieval (RRF merge) exposed as `search_notes` MCP tool
-- [ ] Retention policy setting + consent nudge
-
+Checklist in [`ROADMAP.md`](ROADMAP.md).
 **Milestone:** the definition-of-done sentence is true, minus chat.
 
 ### Phase 3 — The brain (MCP + Claude Code)
 
-- [ ] MCP server (stdio) exposing the v1 tool surface
-- [ ] Embedded xterm.js terminal running Claude Code with the MCP server preconfigured
-- [ ] Chat sessions distilled + filed + indexed as first-class documents
-- [ ] Designed chat UI driving Claude Code headless (same stack, second skin)
-
+Checklist in [`ROADMAP.md`](ROADMAP.md).
 **Milestone:** "What's outstanding on Paradise Golf?" answered correctly in-app from real meeting history. **← Dogfood daily from here.**
 
 ### Phase 4 — Polish & open-source launch
 
-- [ ] Design pass on every screen against the locked system; the distill-and-route transition
-- [ ] Onboarding: first project, glossary seeding, hotkey setup, consent nudge
-- [ ] README with screenshots, architecture doc (this file, trimmed), contribution guide
-- [ ] Windows installer / signing; crash reporting decision (opt-in only)
-- [ ] Launch: GitHub, relevant communities
+Checklist in [`ROADMAP.md`](ROADMAP.md).
+**Milestone:** a signed, onboarded, documented Windows release, launched publicly.
 
 ### Phase 5 — Growth (pulled by daily use, not pushed by roadmap)
 
-Candidates, in rough order of expected value — each earns its place only after the core loop proves reliable:
+[`ROADMAP.md`](ROADMAP.md) lists these by name only; the detail lives here. Candidates, in rough
+order of expected value — each earns its place only after the core loop proves reliable:
 
 - **Commitment ledger (flagship)** — the self-writing, self-erasing to-do: extraction is already in the v1 pipeline; the ledger adds tracked state per project, closure by evidence (starting with GitHub MCP: commitments reconciled against PRs/commits — said vs. shipped), aging, and pre-meeting resurfacing
 - Azure DevOps board integration (per-project connectors, isolated; feeds ledger closure)
@@ -291,8 +277,8 @@ Candidates, in rough order of expected value — each earns its place only after
 | Decision | Options | Lean | Deadline |
 |---|---|---|---|
 | ~~Name~~ | — | **DECIDED: Kodama** | ✅ Closed |
-| License | MIT / AGPL | AGPL if anti-wrap matters, MIT for max adoption | Phase 0 |
-| Frontend stack | React / Svelte / Solid + Tailwind | Whatever serves the design system best | Phase 0 |
+| ~~License~~ | — | **DECIDED: AGPL-3.0-only** | ✅ Closed |
+| ~~Frontend stack~~ | — | **DECIDED: React + Tailwind** | ✅ Closed |
 | Default STT engine | Parakeet TDT (sherpa-onnx) / whisper.cpp large-v3-turbo | Parakeet (silence-safe, fast); confirm via real-meeting benchmark | Phase 1 |
 | Embedding model | bge-small / nomic-embed / other | Benchmark retrieval quality on real notes | Phase 2 |
 | Audio retention default | keep / discard after distill | Discard raw audio by default, keep transcript N days | Phase 2 |

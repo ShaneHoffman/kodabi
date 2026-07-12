@@ -2,9 +2,9 @@
 
 **Status:** Spec (Phase 0, ticket P0-10). Defines the stdio MCP tool surface the Phase 3 server
 implements and the Phase 2 `search_notes` retrieval builds against. Schemas are the contract;
-shapes descend from the [`Define markdown frontmatter schema`](#recommendation-to-p0-9) fields
-(project, date, type, tags, source, confidence). Provenance note: the §3.2 candidate list is taken
-verbatim from the P0-10 ticket — the `FOUNDING_DOC.md` it cites is not yet present in this repo.
+shapes descend from the [`FRONTMATTER_SCHEMA.md`](FRONTMATTER_SCHEMA.md) fields (id, type,
+project, date, tags, source, confidence). The candidate tool list originates in
+[`FOUNDING_DOC.md`](FOUNDING_DOC.md) §3.2.
 
 > **North star:** one small, sharp set of tools that lets Claude Code answer "what's outstanding
 > on \<project\>?" over real meeting history.
@@ -755,12 +755,13 @@ Out of scope for this spec, listed so Phase 3+ doesn't rediscover the gap from s
 
 ## Recommendation to P0-9
 
-Add a stable **`id`** field to the note frontmatter schema: generated once at note creation
-(prefix `n_` + base36, e.g. `n_a1b2c3`), **never rewritten on move or re-route**. This is the
-invariant the entire tool surface above depends on as its write handle — every write tool
-(`file_note_to_project`) and every id-addressed read (`get_note`, `get_meeting_transcript`) assumes
-it. Correspondingly, projects need a stable `p_…` id and action items an `a_…` id at the index
-layer (used in `Project.id` and `ActionItem.id` above), but those need not live in note frontmatter.
+**Adopted** — [`FRONTMATTER_SCHEMA.md`](FRONTMATTER_SCHEMA.md) now carries the stable **`id`**
+field this spec recommended: generated once at note creation (prefix `n_` + base36, e.g.
+`n_a1b2c3`), **never rewritten on move or re-route**. This is the invariant the entire tool
+surface above depends on as its write handle — every write tool (`file_note_to_project`) and
+every id-addressed read (`get_note`, `get_meeting_transcript`) assumes it. Correspondingly,
+projects need a stable `p_…` id and action items an `a_…` id at the index layer (used in
+`Project.id` and `ActionItem.id` above), but those need not live in note frontmatter.
 
 ---
 
@@ -786,9 +787,9 @@ All three calls are read-only and already in the v1 surface — no gap remains f
   above as its `inputSchema`/`outputSchema` and returns `structuredContent` conforming to them.
 - **→ Phase 2 (`search_notes` via hybrid retrieval):** the `search_notes` input filters and the
   `SearchHit`/`PageInfo` output shape that the FTS5 + `sqlite-vec` + RRF pipeline must produce.
-- **→ P0-9 (frontmatter schema):** the `id`-field recommendation above; the `NoteSummary` fields
-  (`project`, `date`, `type`, `tags`, `source`, `confidence`) mirror the frontmatter fields, so the
-  two specs must stay in agreement as P0-9 finalizes field types and allowed values.
+- **→ P0-9 (frontmatter schema):** the `id`-field recommendation above (adopted); the
+  `NoteSummary` fields (`id`, `project`, `date`, `type`, `tags`, `source`, `confidence`) mirror the
+  frontmatter fields, so the two specs must stay in agreement as either evolves.
 
 ---
 
