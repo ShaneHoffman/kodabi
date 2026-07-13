@@ -7,13 +7,13 @@
 //! the VAD finalises nothing, so the recognizer is never invoked and no
 //! phantom text is produced.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use kodama_core::transcription::{
     AudioChunk, Result, Segment, TranscriptionEngine, TranscriptionError,
 };
 
-use crate::validate::{segment_ms, validate_chunk, SAMPLE_RATE_HZ};
+use crate::validate::{path_to_string, require_file, segment_ms, validate_chunk, SAMPLE_RATE_HZ};
 
 /// Silero VAD processing window, in samples. Handed to sherpa-onnx as its
 /// `window_size`; the VAD buffers input internally and slices it into windows
@@ -86,6 +86,11 @@ impl ParakeetEngine {
             require_file(path)?;
         }
 
+        // Clamp to at least one thread: sherpa-onnx treats `num_threads` as a
+        // thread-pool size, and a zero or negative value from a future
+        // settings layer is nonsensical rather than a valid "use defaults".
+        let num_threads = cfg.num_threads.max(1);
+
         let vad_config = sherpa_onnx::VadModelConfig {
             silero_vad: sherpa_onnx::SileroVadModelConfig {
                 model: Some(path_to_string(&cfg.vad_model)?),
@@ -96,7 +101,7 @@ impl ParakeetEngine {
                 max_speech_duration: cfg.max_speech_duration,
             },
             sample_rate: SAMPLE_RATE_HZ as i32,
-            num_threads: cfg.num_threads,
+            num_threads,
             provider: cfg.provider.clone(),
             debug: cfg.debug,
             ..Default::default()
@@ -117,7 +122,7 @@ impl ParakeetEngine {
                 joiner: Some(path_to_string(&cfg.joiner)?),
             },
             tokens: Some(path_to_string(&cfg.tokens)?),
-            num_threads: cfg.num_threads,
+            num_threads,
             provider: cfg.provider,
             debug: cfg.debug,
             ..Default::default()
@@ -186,20 +191,4 @@ impl TranscriptionEngine for ParakeetEngine {
     // `set_bias` keeps the trait's no-op default: Parakeet has no
     // initial-prompt bias mechanism, so glossary correctness comes entirely
     // from the later engine-agnostic post-pass.
-}
-
-fn require_file(path: &Path) -> Result<()> {
-    if !path.is_file() {
-        return Err(TranscriptionError::ModelLoad(format!(
-            "missing model file: {}",
-            path.display()
-        )));
-    }
-    Ok(())
-}
-
-fn path_to_string(path: &Path) -> Result<String> {
-    path.to_str().map(str::to_owned).ok_or_else(|| {
-        TranscriptionError::ModelLoad(format!("model path is not valid UTF-8: {}", path.display()))
-    })
 }
