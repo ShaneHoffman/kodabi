@@ -8,8 +8,8 @@ pub enum AudioError {
     #[error("no default {} device available", .0.device_kind())]
     NoDefaultDevice(CaptureSource),
 
-    #[error("failed to query default device config: {0}")]
-    DefaultConfig(String),
+    #[error("failed to query default {kind} device config: {msg}", kind = .0.device_kind(), msg = .1)]
+    DefaultConfig(CaptureSource, String),
 
     #[error("unsupported device sample format: {0:?}")]
     UnsupportedFormat(cpal::SampleFormat),
@@ -39,6 +39,10 @@ mod tests {
         assert_eq!(
             AudioError::NoDefaultDevice(CaptureSource::Microphone).to_string(),
             "no default microphone device available"
+        );
+        assert_eq!(
+            AudioError::DefaultConfig(CaptureSource::Microphone, "boom".to_string()).to_string(),
+            "failed to query default microphone device config: boom"
         );
         assert_eq!(
             AudioError::BuildStream("boom".to_string()).to_string(),
