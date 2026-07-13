@@ -1,16 +1,17 @@
 //! Owns the `!Send` cpal `Stream` on a dedicated thread and exposes a
-//! `Send`-safe handle (`LoopbackCapture`) that Tauri can hold in managed
-//! state. WASAPI loopback works by building an *input* stream on the
-//! default *output* device — cpal's WASAPI backend detects the render
-//! endpoint and sets the loopback flag automatically; there is no separate
-//! "loopback device".
+//! `Send`-safe handle (`Capture`) that Tauri can hold in managed state.
+//! Device selection is the only thing that differs between capture sources
+//! (see `CaptureSource`): WASAPI loopback works by building an *input*
+//! stream on the default *output* device — cpal's WASAPI backend detects
+//! the render endpoint and sets the loopback flag automatically — while the
+//! microphone is a normal input stream on the default *input* device.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{InputCallbackInfo, SampleFormat, SizedSample, StreamConfig};
 use crossbeam_channel::{Receiver, Sender};
 
@@ -19,6 +20,7 @@ use crate::error::{AudioError, Result};
 use crate::format::{AudioFormat, SampleTag};
 use crate::frame::{AudioFrame, CaptureItem, SegmentReason};
 use crate::meter::{LevelMeter, MeterSnapshot};
+use crate::source::CaptureSource;
 
 /// How long to wait before retrying a stream rebuild, so a rapid
 /// device-switch storm (or a device still settling) doesn't spin.
@@ -78,21 +80,23 @@ fn wait_for_wake(ctrl: &Control) -> WakeReason {
     }
 }
 
-/// A running WASAPI loopback capture session. Holds no `!Send` cpal types —
-/// the `cpal::Stream` lives entirely on the dedicated capture thread — so
-/// this type is `Send` and safe to keep in Tauri managed state.
-pub struct LoopbackCapture {
+/// A running capture session for one source (system-audio loopback or the
+/// microphone). Holds no `!Send` cpal types — the `cpal::Stream` lives
+/// entirely on the dedicated capture thread — so this type is `Send` and
+/// safe to keep in Tauri managed state.
+pub struct Capture {
     ctrl: Arc<Control>,
     meter: Arc<LevelMeter>,
     items_rx: Receiver<CaptureItem>,
     format: AudioFormat,
+    source: CaptureSource,
     handle: Option<JoinHandle<()>>,
 }
 
-impl LoopbackCapture {
+impl Capture {
     /// Spawn the capture thread and block until the first segment is live,
     /// returning its negotiated format (or the error that prevented it).
-    pub fn start(item_capacity: usize) -> Result<LoopbackCapture> {
+    pub fn start(source: CaptureSource, item_capacity: usize) -> Result<Capture> {
         let ctrl = Arc::new(Control::new());
         let meter = Arc::new(LevelMeter::default());
         let (items_tx, items_rx) = crossbeam_channel::bounded(item_capacity);
@@ -101,16 +105,19 @@ impl LoopbackCapture {
         let thread_ctrl = ctrl.clone();
         let thread_meter = meter.clone();
         let handle = thread::Builder::new()
-            .name("kodama-audio-loopback".to_string())
-            .spawn(move || capture_thread(thread_ctrl, thread_meter, items_tx, handshake_tx))
+            .name(source.thread_name().to_string())
+            .spawn(move || {
+                capture_thread(source, thread_ctrl, thread_meter, items_tx, handshake_tx)
+            })
             .map_err(|_| AudioError::ThreadStart)?;
 
         match handshake_rx.recv() {
-            Ok(Ok(format)) => Ok(LoopbackCapture {
+            Ok(Ok(format)) => Ok(Capture {
                 ctrl,
                 meter,
                 items_rx,
                 format,
+                source,
                 handle: Some(handle),
             }),
             Ok(Err(err)) => {
@@ -122,6 +129,11 @@ impl LoopbackCapture {
                 Err(AudioError::ThreadStart)
             }
         }
+    }
+
+    /// Which source this session is capturing from.
+    pub fn source(&self) -> CaptureSource {
+        self.source
     }
 
     /// The format negotiated for the current segment.
@@ -161,7 +173,7 @@ impl LoopbackCapture {
     }
 }
 
-impl Drop for LoopbackCapture {
+impl Drop for Capture {
     // Guarantees the capture thread never outlives its handle, even if a
     // session is dropped without an explicit `stop()` call.
     fn drop(&mut self) {
@@ -170,6 +182,7 @@ impl Drop for LoopbackCapture {
 }
 
 fn capture_thread(
+    source: CaptureSource,
     ctrl: Arc<Control>,
     meter: Arc<LevelMeter>,
     items_tx: Sender<CaptureItem>,
@@ -186,6 +199,7 @@ fn capture_thread(
 
         match build_and_play(
             &host,
+            source,
             segment_id,
             items_tx.clone(),
             meter.clone(),
@@ -247,29 +261,26 @@ fn capture_thread(
 
 fn build_and_play(
     host: &cpal::Host,
+    source: CaptureSource,
     segment_id: u32,
     tx: Sender<CaptureItem>,
     meter: Arc<LevelMeter>,
     ctrl: Arc<Control>,
 ) -> Result<(cpal::Stream, AudioFormat)> {
-    let (stream, format) = build_loopback_stream(host, segment_id, tx, meter, ctrl)?;
+    let (stream, format) = build_stream(host, source, segment_id, tx, meter, ctrl)?;
     stream.play().map_err(|e| AudioError::Play(e.to_string()))?;
     Ok((stream, format))
 }
 
-fn build_loopback_stream(
+fn build_stream(
     host: &cpal::Host,
+    source: CaptureSource,
     segment_id: u32,
     tx: Sender<CaptureItem>,
     meter: Arc<LevelMeter>,
     ctrl: Arc<Control>,
 ) -> Result<(cpal::Stream, AudioFormat)> {
-    let device = host
-        .default_output_device()
-        .ok_or(AudioError::NoDefaultOutputDevice)?;
-    let supported = device
-        .default_output_config()
-        .map_err(|e| AudioError::DefaultConfig(e.to_string()))?;
+    let (device, supported) = source.resolve(host)?;
 
     let sample_format = supported.sample_format();
     let format = AudioFormat {
