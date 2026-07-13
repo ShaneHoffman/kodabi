@@ -137,3 +137,48 @@ jobs:
       - name: Clippy (feature parakeet — strict, warnings fail)
         if: steps.changed.outputs.run == 'true'
         run: cargo clippy -p kodama-transcribe --features parakeet --all-targets --locked -- -D warnings
+
+  # Mirrors the `parakeet` job above, but for the `whisper` feature (whisper.cpp
+  # via whisper-rs). Checks the CPU-only `whisper` feature, not `whisper-cuda` —
+  # runners have no NVIDIA GPU or CUDA toolkit, so the CUDA build can only be
+  # verified locally. Unlike sherpa-onnx's prebuilt static download, whisper-rs
+  # compiles whisper.cpp from source (CMake + bindgen/libclang), so this job
+  # needs the MSVC dev environment sourced (`ilammy/msvc-dev-cmd`) for bindgen
+  # to find the MSVC CRT headers, and points LIBCLANG_PATH at the LLVM install
+  # already bundled in the windows-latest runner image. Expect a slower first
+  # (uncached) run than `parakeet` since there's a real C++ compile involved.
+  whisper:
+    name: Rust (whisper engine)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for changes under crates/kodama-transcribe
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha || 'HEAD~1' }}"
+          changed="$(git diff --name-only "$base" HEAD -- crates/kodama-transcribe)"
+          if [ -n "$changed" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install Rust (stable) + clippy
+        if: steps.changed.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        if: steps.changed.outputs.run == 'true'
+      - name: Set up MSVC dev environment (needed for bindgen to find CRT headers)
+        if: steps.changed.outputs.run == 'true'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Clippy (feature whisper — strict, warnings fail)
+        if: steps.changed.outputs.run == 'true'
+        env:
+          LIBCLANG_PATH: C:\Program Files\LLVM\bin
+        run: cargo clippy -p kodama-transcribe --features whisper --all-targets --locked -- -D warnings
