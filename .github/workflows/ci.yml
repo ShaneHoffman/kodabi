@@ -94,3 +94,46 @@ jobs:
           path: dist
       - name: Test
         run: cargo test --workspace --locked
+
+  # kodama-transcribe's `parakeet` feature pulls in sherpa-onnx (a native ONNX
+  # dependency), so it's off by default and invisible to the `lint`/`test`
+  # jobs' `--workspace` runs above. This job clippy/build-checks it with the
+  # feature on instead, so the FFI glue can't silently rot between the rare
+  # times someone runs it locally. Path-filtered to only fire on changes to
+  # the crate, and skips `--locked`'s dist/ dependency — this crate never
+  # touches `tauri::generate_context!`. sherpa-onnx's default `static` feature
+  # downloads a prebuilt archive (no cmake/C++ toolchain needed), so the only
+  # extra cost here is that one-time (cached) download.
+  parakeet:
+    name: Rust (parakeet engine)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for changes under crates/kodama-transcribe
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha || 'HEAD~1' }}"
+          # Run git diff outside the `if` condition so a failure (e.g. an
+          # unreachable base commit) aborts the step under `set -e` instead of
+          # being read as "no changes" and silently skipping the parakeet gate.
+          changed="$(git diff --name-only "$base" HEAD -- crates/kodama-transcribe)"
+          if [ -n "$changed" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install Rust (stable) + clippy
+        if: steps.changed.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        if: steps.changed.outputs.run == 'true'
+      - name: Clippy (feature parakeet — strict, warnings fail)
+        if: steps.changed.outputs.run == 'true'
+        run: cargo clippy -p kodama-transcribe --features parakeet --all-targets --locked -- -D warnings
