@@ -3,6 +3,8 @@
 //! changed (e.g. the default output device was switched mid-capture), so
 //! consumers always know which format applies to the frames that follow it.
 
+use std::time::Instant;
+
 use crate::format::AudioFormat;
 
 /// Why a new segment started.
@@ -21,11 +23,18 @@ pub enum SegmentReason {
 /// format on every frame keeps a frame self-describing even if the
 /// `SegmentStarted` marker for its segment was dropped by a saturated
 /// channel — the format is never lost.
+///
+/// `capture_time` is stamped in the cpal callback, at capture, not when a
+/// downstream consumer dequeues the frame. The combiner aligns and
+/// drift-corrects against this so a backlog drained in a burst (e.g. the
+/// two-channel combiner attaching after both sources are already live) is
+/// placed on the real timeline rather than collapsed to one dequeue instant.
 #[derive(Clone, Debug)]
 pub struct AudioFrame {
     pub segment_id: u32,
     pub samples: Vec<f32>,
     pub format: AudioFormat,
+    pub capture_time: Instant,
 }
 
 impl AudioFrame {
@@ -72,6 +81,7 @@ mod tests {
             segment_id: 0,
             samples: vec![0.0; 8],
             format: format_with(2),
+            capture_time: Instant::now(),
         };
         assert_eq!(frame.frames(), 4);
     }
@@ -82,6 +92,7 @@ mod tests {
             segment_id: 0,
             samples: vec![0.0; 8],
             format: format_with(0),
+            capture_time: Instant::now(),
         };
         assert_eq!(frame.frames(), 0);
     }

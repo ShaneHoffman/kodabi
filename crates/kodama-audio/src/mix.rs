@@ -3,20 +3,25 @@
 //! without a real audio device (same split as `convert.rs`).
 
 /// Downmix interleaved multi-channel `f32` samples to mono by averaging each
-/// frame's channels. A `channels` of `0` yields an empty result (there is no
-/// frame to average); `1` returns the input unchanged (already mono).
-pub fn downmix_to_mono(interleaved: &[f32], channels: u16) -> Vec<f32> {
+/// frame's channels, appending the result to `out`. A `channels` of `0`
+/// appends nothing (there is no frame to average); `1` appends the input
+/// unchanged (already mono). This is the allocation-free form: a per-callback
+/// caller (the combiner) reuses one `out` buffer across frames rather than
+/// allocating a fresh `Vec` each time.
+pub fn downmix_to_mono_into(interleaved: &[f32], channels: u16, out: &mut Vec<f32>) {
     let channels = channels as usize;
     if channels == 0 {
-        return Vec::new();
+        return;
     }
     if channels == 1 {
-        return interleaved.to_vec();
+        out.extend_from_slice(interleaved);
+        return;
     }
-    interleaved
-        .chunks(channels)
-        .map(|frame| frame.iter().sum::<f32>() / frame.len() as f32)
-        .collect()
+    out.extend(
+        interleaved
+            .chunks(channels)
+            .map(|frame| frame.iter().sum::<f32>() / frame.len() as f32),
+    );
 }
 
 /// Interleave two mono `f32` channels into one stereo buffer: `L, R, L, R,
@@ -37,29 +42,37 @@ pub fn interleave_stereo(left: &[f32], right: &[f32]) -> Vec<f32> {
 mod tests {
     use super::*;
 
+    /// Collect [`downmix_to_mono_into`] into a fresh buffer, for terse
+    /// assertions on the downmix semantics.
+    fn downmix(interleaved: &[f32], channels: u16) -> Vec<f32> {
+        let mut out = Vec::new();
+        downmix_to_mono_into(interleaved, channels, &mut out);
+        out
+    }
+
     #[test]
     fn downmix_mono_passes_through_unchanged() {
         let samples = vec![0.5, -0.25, 0.0];
-        assert_eq!(downmix_to_mono(&samples, 1), samples);
+        assert_eq!(downmix(&samples, 1), samples);
     }
 
     #[test]
     fn downmix_zero_channels_is_empty() {
-        assert_eq!(downmix_to_mono(&[1.0, 2.0, 3.0], 0), Vec::<f32>::new());
+        assert_eq!(downmix(&[1.0, 2.0, 3.0], 0), Vec::<f32>::new());
     }
 
     #[test]
     fn downmix_stereo_averages_each_frame() {
         // L,R,L,R: (1.0,-1.0) -> 0.0; (0.5,0.5) -> 0.5
         let samples = vec![1.0, -1.0, 0.5, 0.5];
-        assert_eq!(downmix_to_mono(&samples, 2), vec![0.0, 0.5]);
+        assert_eq!(downmix(&samples, 2), vec![0.0, 0.5]);
     }
 
     #[test]
     fn downmix_multichannel_averages_all_channels_in_a_frame() {
         // One frame of 4 channels: (1.0, 1.0, 1.0, -1.0) -> 0.5
         let samples = vec![1.0, 1.0, 1.0, -1.0];
-        assert_eq!(downmix_to_mono(&samples, 4), vec![0.5]);
+        assert_eq!(downmix(&samples, 4), vec![0.5]);
     }
 
     #[test]

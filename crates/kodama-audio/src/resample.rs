@@ -32,6 +32,9 @@ pub struct MonoResampler {
     /// consulted again — trimming only ever applies once, at stream start.
     delay_remaining: usize,
     scratch_out: Vec<f32>,
+    /// Reused input-chunk buffer, so `push` doesn't heap-allocate a fresh
+    /// `Vec` per 1024-frame chunk on the audio path.
+    chunk_scratch: Vec<f32>,
 }
 
 impl MonoResampler {
@@ -59,6 +62,7 @@ impl MonoResampler {
             pending: Vec::new(),
             delay_remaining,
             scratch_out,
+            chunk_scratch: Vec::new(),
         })
     }
 
@@ -69,10 +73,16 @@ impl MonoResampler {
         self.pending.extend_from_slice(mono);
         let chunk_size = self.inner.input_frames_next();
         let mut produced = Vec::new();
+        // Take the reusable chunk buffer out so `process_chunk` can borrow
+        // `&mut self` without aliasing it; put it back (capacity retained)
+        // when done, so no per-chunk allocation happens on the audio path.
+        let mut chunk = std::mem::take(&mut self.chunk_scratch);
         while self.pending.len() >= chunk_size {
-            let chunk: Vec<f32> = self.pending.drain(..chunk_size).collect();
+            chunk.clear();
+            chunk.extend(self.pending.drain(..chunk_size));
             self.process_chunk(&chunk, None, &mut produced);
         }
+        self.chunk_scratch = chunk;
         produced
     }
 
