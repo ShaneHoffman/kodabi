@@ -1,4 +1,4 @@
-use kodama_audio::LoopbackCapture;
+use kodama_audio::{Capture, CaptureSource};
 
 /// Manual verification of the ticket's "Done when": capture a few seconds of
 /// whatever the speakers are playing and confirm non-silent samples arrive.
@@ -9,7 +9,8 @@ use kodama_audio::LoopbackCapture;
 #[test]
 #[ignore = "requires a real output device with audio playing (WASAPI loopback)"]
 fn loopback_captures_nonzero_audio() {
-    let capture = LoopbackCapture::start(256).expect("failed to start loopback capture");
+    let capture =
+        Capture::start(CaptureSource::Loopback, 256).expect("failed to start loopback capture");
 
     let format = capture.format();
     assert!(format.sample_rate >= 8_000, "unexpectedly low sample rate");

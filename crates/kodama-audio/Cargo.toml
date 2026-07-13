@@ -1,6 +1,6 @@
 [package]
 name = "kodama-audio"
-description = "Kodama audio capture — WASAPI loopback (system audio) via cpal."
+description = "Kodama audio capture — WASAPI loopback (system audio) and microphone via cpal."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
