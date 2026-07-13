@@ -2,10 +2,40 @@
 //! crate. Kept free of `sherpa-onnx` types so they compile and unit-test in
 //! the default (no native deps) build, without the `parakeet` feature.
 
+#[cfg(any(feature = "parakeet", feature = "whisper"))]
+use std::path::Path;
+
 use kodama_core::transcription::{Result, TranscriptionError};
 
 /// Sample rate every engine in this crate expects.
 pub const SAMPLE_RATE_HZ: u32 = 16_000;
+
+/// Assert a required model file exists on disk, surfacing a missing one as
+/// [`TranscriptionError::ModelLoad`]. Shared by every engine's constructor.
+///
+/// Gated on the native-engine features so it doesn't read as dead code in the
+/// default (no-engine) build that `clippy --workspace -D warnings` lints.
+#[cfg(any(feature = "parakeet", feature = "whisper"))]
+pub(crate) fn require_file(path: &Path) -> Result<()> {
+    if !path.is_file() {
+        return Err(TranscriptionError::ModelLoad(format!(
+            "missing model file: {}",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Render a model path as the UTF-8 `String` the native engines' FFI configs
+/// require, surfacing a non-UTF-8 path as [`TranscriptionError::ModelLoad`].
+///
+/// Gated on the native-engine features (see [`require_file`]).
+#[cfg(any(feature = "parakeet", feature = "whisper"))]
+pub(crate) fn path_to_string(path: &Path) -> Result<String> {
+    path.to_str().map(str::to_owned).ok_or_else(|| {
+        TranscriptionError::ModelLoad(format!("model path is not valid UTF-8: {}", path.display()))
+    })
+}
 
 /// Validate an incoming [`AudioChunk`](kodama_core::transcription::AudioChunk)
 /// before it reaches an engine.

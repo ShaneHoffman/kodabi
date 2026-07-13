@@ -9,14 +9,14 @@
 //! `accept` only buffers samples, and `finish` runs whisper.cpp once over
 //! the whole buffer, exactly as the trait's docs allow for batch engines.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use kodama_core::transcription::{
     AudioChunk, Result, Segment, TranscriptionEngine, TranscriptionError,
 };
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-use crate::validate::validate_chunk;
+use crate::validate::{path_to_string, require_file, validate_chunk};
 
 /// Local model file and tuning knobs for [`WhisperEngine`].
 ///
@@ -64,7 +64,10 @@ impl WhisperEngine {
 
         Ok(Self {
             ctx,
-            num_threads: cfg.num_threads,
+            // Clamp to at least one thread: whisper.cpp treats `n_threads` as a
+            // decoder thread-pool size, and a zero or negative value from a
+            // future settings layer is nonsensical rather than "use defaults".
+            num_threads: cfg.num_threads.max(1),
             language: cfg.language,
             buffer: Vec::new(),
             bias_prompt: None,
@@ -84,7 +87,12 @@ impl TranscriptionEngine for WhisperEngine {
     }
 
     fn finish(&mut self) -> Result<Vec<Segment>> {
-        if self.buffer.is_empty() {
+        // Take the buffer up front so this batch is consumed by this call
+        // whether inference succeeds or fails: a retry after an `Engine` error,
+        // or a reused engine driven through a second recording, then starts
+        // from an empty buffer instead of re-processing stale audio.
+        let audio = std::mem::take(&mut self.buffer);
+        if audio.is_empty() {
             return Ok(Vec::new());
         }
 
@@ -107,7 +115,7 @@ impl TranscriptionEngine for WhisperEngine {
         params.set_print_timestamps(false);
 
         state
-            .full(params, &self.buffer)
+            .full(params, &audio)
             .map_err(|err| TranscriptionError::Engine(err.to_string()))?;
 
         let mut segments = Vec::new();
@@ -130,37 +138,31 @@ impl TranscriptionEngine for WhisperEngine {
             });
         }
 
-        self.buffer.clear();
         Ok(segments)
     }
 
     /// Join the glossary terms into whisper.cpp's initial prompt — the
     /// strongest bias mechanism this engine offers (unlike Parakeet, which
     /// has no such hook and relies entirely on the post-pass).
+    ///
+    /// Interior NUL bytes are stripped from each term: `whisper-rs`'s
+    /// `set_initial_prompt` builds a `CString` and *panics* on an embedded NUL,
+    /// so a stray one in a glossary term would otherwise take down the whole
+    /// `finish` call rather than surfacing as an error.
     fn set_bias(&mut self, terms: &[String]) -> Result<()> {
         self.bias_prompt = if terms.is_empty() {
             None
         } else {
-            Some(terms.join(", "))
+            Some(
+                terms
+                    .iter()
+                    .map(|term| term.replace('\0', ""))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+            )
         };
         Ok(())
     }
-}
-
-fn require_file(path: &Path) -> Result<()> {
-    if !path.is_file() {
-        return Err(TranscriptionError::ModelLoad(format!(
-            "missing model file: {}",
-            path.display()
-        )));
-    }
-    Ok(())
-}
-
-fn path_to_string(path: &Path) -> Result<String> {
-    path.to_str().map(str::to_owned).ok_or_else(|| {
-        TranscriptionError::ModelLoad(format!("model path is not valid UTF-8: {}", path.display()))
-    })
 }
 
 /// whisper.cpp reports segment timestamps in centiseconds (10 ms units)
