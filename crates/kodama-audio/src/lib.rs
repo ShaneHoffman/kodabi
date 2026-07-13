@@ -15,6 +15,7 @@ mod frame;
 mod meter;
 mod mix;
 mod resample;
+mod session;
 mod source;
 
 pub use capture::Capture;
@@ -23,4 +24,5 @@ pub use error::{AudioError, Result};
 pub use format::{AudioFormat, SampleTag};
 pub use frame::{AudioFrame, CaptureItem, SegmentReason};
 pub use meter::MeterSnapshot;
+pub use session::{DualCapture, DualStatus, SourceStatus};
 pub use source::CaptureSource;

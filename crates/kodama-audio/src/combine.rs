@@ -19,7 +19,7 @@ use crossbeam_channel::{Receiver, Select};
 use crate::drift::{DriftController, GapCorrection};
 use crate::error::Result;
 use crate::frame::{AudioFrame, CaptureItem};
-use crate::mix::{downmix_to_mono, interleave_stereo};
+use crate::mix::{downmix_to_mono_into, interleave_stereo};
 use crate::resample::MonoResampler;
 
 /// How often (of wall-clock time) a source's drift is re-evaluated. See
@@ -96,6 +96,9 @@ struct SourcePipeline {
     /// origin `t0`.
     started: bool,
     last_drift_check: Option<Instant>,
+    /// Reused mono downmix buffer, so `handle_frame` doesn't allocate a
+    /// fresh `Vec` per captured frame.
+    mono_scratch: Vec<f32>,
 }
 
 impl SourcePipeline {
@@ -108,6 +111,7 @@ impl SourcePipeline {
             out: Vec::new(),
             started: false,
             last_drift_check: None,
+            mono_scratch: Vec::new(),
         }
     }
 
@@ -132,8 +136,12 @@ impl SourcePipeline {
 
     /// Process one captured frame: rebuild the resampler if the segment
     /// changed, align to the shared origin `t0` on the very first frame,
-    /// downmix + resample + accumulate, then re-evaluate drift.
-    fn handle_frame(&mut self, frame: AudioFrame, now: Instant, t0: Instant) {
+    /// downmix + resample + accumulate, then re-evaluate drift. All timing
+    /// is keyed off the frame's own `capture_time` (stamped in the cpal
+    /// callback), not the dequeue instant, so a burst-drained backlog lands
+    /// on the real timeline.
+    fn handle_frame(&mut self, frame: AudioFrame, t0: Instant) {
+        let now = frame.capture_time;
         self.ensure_resampler_for(frame.format.sample_rate, frame.segment_id);
 
         if !self.started {
@@ -146,9 +154,14 @@ impl SourcePipeline {
             self.out.resize(offset_samples, 0.0);
         }
 
-        let mono = downmix_to_mono(&frame.samples, frame.format.channels);
+        self.mono_scratch.clear();
+        downmix_to_mono_into(
+            &frame.samples,
+            frame.format.channels,
+            &mut self.mono_scratch,
+        );
         if let Some(resampler) = self.resampler.as_mut() {
-            let resampled = resampler.push(&mono);
+            let resampled = resampler.push(&self.mono_scratch);
             self.out.extend(resampled);
         }
 
@@ -182,10 +195,15 @@ impl SourcePipeline {
                 let new_len = self.out.len() + n;
                 self.out.resize(new_len, 0.0);
             }
-            Some(GapCorrection::TrimSamples(n)) => {
-                let new_len = self.out.len().saturating_sub(n);
-                self.out.truncate(new_len);
-            }
+            // A surplus (running ahead of real time) is left for the gentle
+            // ratio nudge above to claw back over the next checks. We do
+            // *not* truncate: `out`'s tail is the most recently captured
+            // audio, so trimming it would delete real samples and splice a
+            // discontinuity into the channel. Steady clock drift is tens of
+            // ppm — far inside the ±2% the ratio can absorb — so a true
+            // surplus is never destructive; only a deficit (a device-change
+            // gap, below) needs the one-off silence fill.
+            Some(GapCorrection::TrimSamples(_)) => {}
             None => {}
         }
     }
@@ -200,12 +218,7 @@ impl SourcePipeline {
     }
 }
 
-fn process_item(
-    pipeline: &mut SourcePipeline,
-    item: CaptureItem,
-    now: Instant,
-    t0: &mut Option<Instant>,
-) {
+fn process_item(pipeline: &mut SourcePipeline, item: CaptureItem, t0: &mut Option<Instant>) {
     match item {
         // Frames are self-describing (`frame.format`, `frame.segment_id`),
         // so a dropped `SegmentStarted` marker loses nothing — this
@@ -213,8 +226,11 @@ fn process_item(
         // the frames themselves.
         CaptureItem::SegmentStarted { .. } => {}
         CaptureItem::Frame(frame) => {
-            let origin = *t0.get_or_insert(now);
-            pipeline.handle_frame(frame, now, origin);
+            // The session origin is the first frame's capture time (whichever
+            // source produced it), so alignment is anchored to real capture,
+            // not to whenever this loop happened to dequeue it.
+            let origin = *t0.get_or_insert(frame.capture_time);
+            pipeline.handle_frame(frame, origin);
         }
     }
 }
@@ -259,16 +275,15 @@ fn coordinator_loop(
 
         let oper = select.select();
         let index = oper.index();
-        let now = Instant::now();
 
         if Some(index) == mic_index {
             match oper.recv(&mic_rx) {
-                Ok(item) => process_item(&mut mic_pipeline, item, now, &mut t0),
+                Ok(item) => process_item(&mut mic_pipeline, item, &mut t0),
                 Err(_) => mic_open = false,
             }
         } else if Some(index) == system_index {
             match oper.recv(&system_rx) {
-                Ok(item) => process_item(&mut system_pipeline, item, now, &mut t0),
+                Ok(item) => process_item(&mut system_pipeline, item, &mut t0),
                 Err(_) => system_open = false,
             }
         }
@@ -337,8 +352,9 @@ mod tests {
             segment_id: 0,
             samples: vec![0.5; 480],
             format: mono_format(48_000),
+            capture_time: t0,
         };
-        pipeline.handle_frame(frame, t0, t0);
+        pipeline.handle_frame(frame, t0);
         // 480 samples is short of the resampler's 1024-frame chunk, so
         // nothing has been produced yet — only the (zero-length) origin
         // padding applies.
@@ -354,8 +370,9 @@ mod tests {
             segment_id: 0,
             samples: vec![0.5; 480],
             format: mono_format(48_000),
+            capture_time: arrival,
         };
-        pipeline.handle_frame(frame, arrival, t0);
+        pipeline.handle_frame(frame, t0);
         // 50ms at 48kHz = 2400 samples of leading silence; the frame itself
         // produces no output yet (short of a full resample chunk).
         assert_eq!(pipeline.out.len(), 2_400);
@@ -371,8 +388,9 @@ mod tests {
             segment_id: 0,
             samples: vec![0.1; 2_000],
             format: mono_format(44_100),
+            capture_time: t0,
         };
-        pipeline.handle_frame(frame_a, t0, t0);
+        pipeline.handle_frame(frame_a, t0);
         assert_eq!(pipeline.segment_id, Some(0));
         let after_first_segment = pipeline.out.len();
         assert!(
@@ -381,13 +399,14 @@ mod tests {
         );
 
         // Device changed mid-session: new segment_id, new sample rate.
+        let later = t0 + Duration::from_millis(500);
         let frame_b = AudioFrame {
             segment_id: 1,
             samples: vec![0.2; 2_000],
             format: mono_format(48_000),
+            capture_time: later,
         };
-        let later = t0 + Duration::from_millis(500);
-        pipeline.handle_frame(frame_b, later, t0);
+        pipeline.handle_frame(frame_b, t0);
         assert_eq!(pipeline.segment_id, Some(1));
         assert!(
             pipeline.out.len() > after_first_segment,
@@ -416,12 +435,14 @@ mod tests {
         let (mic_tx, mic_rx) = crossbeam_channel::bounded(64);
         let (system_tx, system_rx) = crossbeam_channel::bounded(64);
 
+        let capture_time = Instant::now();
         for _ in 0..5 {
             mic_tx
                 .send(CaptureItem::Frame(AudioFrame {
                     segment_id: 0,
                     samples: vec![0.1; 480],
                     format: mono_format(48_000),
+                    capture_time,
                 }))
                 .unwrap();
         }
@@ -432,6 +453,7 @@ mod tests {
                     segment_id: 0,
                     samples: vec![0.2; 960],
                     format: stereo_format(48_000),
+                    capture_time,
                 }))
                 .unwrap();
         }
