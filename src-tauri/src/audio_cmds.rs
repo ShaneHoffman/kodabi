@@ -5,9 +5,15 @@
 
 use std::sync::Mutex;
 
-use kodama_audio::{AudioFormat, Capture, CaptureSource};
+use kodama_audio::{AlignedSession, AudioFormat, Capture, CaptureSource, Combiner};
 
 const FRAME_CAPACITY: usize = 256;
+
+/// Common rate the two-channel combiner aligns mic and system audio to.
+/// 48 kHz preserves fidelity (Windows loopback is almost always already
+/// 48 kHz, so resampling it is near-identity); a transcription engine's
+/// 16 kHz mono need is a downstream downsample, not this layer's concern.
+const TWO_CHANNEL_SAMPLE_RATE: u32 = 48_000;
 
 /// One source's live session plus the error (if any) from its last start
 /// attempt. `last_error` is retained after a failed `start` — with no
@@ -24,6 +30,10 @@ struct SessionSlot {
 struct Sessions {
     loopback: SessionSlot,
     microphone: SessionSlot,
+    /// The two-channel combiner for this session, spawned once both
+    /// sources are confirmed live (see `ensure_combiner_started`). Taken
+    /// and finalized in `stop_capture_impl`.
+    combiner: Option<Combiner>,
 }
 
 #[derive(Default)]
@@ -84,10 +94,36 @@ impl StreamStatus {
     }
 }
 
+/// A verification summary of a finalized two-channel [`AlignedSession`]:
+/// enough to confirm a stopped session produced one time-aligned artifact
+/// with both channels present, without exposing the raw PCM over IPC.
+#[derive(serde::Serialize)]
+pub struct AlignedSessionStats {
+    sample_rate: u32,
+    frames: usize,
+    duration_ms: u64,
+}
+
+impl From<&AlignedSession> for AlignedSessionStats {
+    fn from(session: &AlignedSession) -> Self {
+        AlignedSessionStats {
+            sample_rate: session.sample_rate(),
+            frames: session.frames(),
+            duration_ms: session.duration().as_millis() as u64,
+        }
+    }
+}
+
 #[derive(serde::Serialize)]
 pub struct CaptureStatus {
     loopback: StreamStatus,
     microphone: StreamStatus,
+    /// The finalized two-channel session, present only in `stop_capture`'s
+    /// response once both sources were live long enough for the combiner
+    /// to run — `None` while capture is starting/running, and `None` if
+    /// only one source ever came up (there's no two-channel session to
+    /// combine in that case).
+    aligned_session: Option<AlignedSessionStats>,
 }
 
 fn status_of(capture: &Capture) -> StreamStatus {
@@ -179,10 +215,39 @@ fn start_capture_impl(state: &CaptureState) -> Result<CaptureStatus, String> {
     });
     let loopback = loopback.map_err(|_| "loopback start thread panicked".to_string())??;
     let microphone = microphone?;
+
+    ensure_combiner_started(state)?;
+
     Ok(CaptureStatus {
         loopback,
         microphone,
+        aligned_session: None,
     })
+}
+
+/// Spawns the two-channel combiner once both sources are confirmed live, if
+/// one isn't already running. A partial failure (only one source live)
+/// never blocks capture from starting — there is simply no two-channel
+/// session to combine yet; a later successful start picks it up.
+fn ensure_combiner_started(state: &CaptureState) -> Result<(), String> {
+    let mut guard = state
+        .0
+        .lock()
+        .map_err(|_| "capture state poisoned".to_string())?;
+    if guard.combiner.is_some() {
+        return Ok(());
+    }
+    let (mic_items, loopback_items) = match (&guard.microphone.capture, &guard.loopback.capture) {
+        (Some(mic), Some(loopback)) => (mic.items(), loopback.items()),
+        _ => return Ok(()),
+    };
+    // A spawn failure is left as "no combiner this session" rather than
+    // failing the whole `start_capture` command — matching how a single
+    // source's own start failure never takes the other down.
+    if let Ok(combiner) = Combiner::start(mic_items, loopback_items, TWO_CHANNEL_SAMPLE_RATE) {
+        guard.combiner = Some(combiner);
+    }
+    Ok(())
 }
 
 /// Reports the session's final counts, but with `running: false` — we are
@@ -209,7 +274,7 @@ fn take_slot(slot: &mut SessionSlot) -> Option<Capture> {
 
 /// Idempotent: stopping a stream that is already idle is a no-op.
 fn stop_capture_impl(state: &CaptureState) -> Result<CaptureStatus, String> {
-    let (loopback, microphone) = {
+    let (loopback, microphone, combiner) = {
         let mut guard = state
             .0
             .lock()
@@ -217,13 +282,26 @@ fn stop_capture_impl(state: &CaptureState) -> Result<CaptureStatus, String> {
         (
             take_slot(&mut guard.loopback),
             take_slot(&mut guard.microphone),
+            guard.combiner.take(),
         )
     };
     // Stop off-lock: `Capture::stop` joins the capture thread, which must
-    // never happen while holding the state mutex.
+    // never happen while holding the state mutex. Both captures are fully
+    // stopped (and their frame-channel senders dropped) before the combiner
+    // is finalized below, so `Combiner::finish` — which also joins a thread
+    // and blocks until both of its receivers disconnect — cannot hang
+    // waiting on a stream that was never told to stop.
+    let loopback_status = stop_and_status(loopback);
+    let microphone_status = stop_and_status(microphone);
+    let aligned_session = combiner
+        .map(Combiner::finish)
+        .as_ref()
+        .map(AlignedSessionStats::from);
+
     Ok(CaptureStatus {
-        loopback: stop_and_status(loopback),
-        microphone: stop_and_status(microphone),
+        loopback: loopback_status,
+        microphone: microphone_status,
+        aligned_session,
     })
 }
 
@@ -245,6 +323,9 @@ fn capture_status_impl(state: &CaptureState) -> Result<CaptureStatus, String> {
             .as_ref()
             .map(status_of)
             .unwrap_or_else(|| idle_status(&guard.microphone)),
+        // The aligned session only exists once `stop_capture` finalizes it;
+        // a status poll while running has nothing to report yet.
+        aligned_session: None,
     })
 }
 
