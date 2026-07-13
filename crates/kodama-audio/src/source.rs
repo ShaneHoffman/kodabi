@@ -30,7 +30,7 @@ impl CaptureSource {
             CaptureSource::Loopback => device.default_output_config(),
             CaptureSource::Microphone => device.default_input_config(),
         }
-        .map_err(|e| AudioError::DefaultConfig(e.to_string()))?;
+        .map_err(|e| AudioError::DefaultConfig(self, e.to_string()))?;
 
         Ok((device, supported))
     }
