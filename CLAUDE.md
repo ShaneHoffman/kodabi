@@ -52,6 +52,9 @@ Commit subjects follow Conventional Commits: `<type>: <imperative summary>`, mat
   The clippy/test gates need `dist/` to exist — `src-tauri` embeds it via
   `tauri::generate_context!`, which fails the compile when it's missing — so in a fresh worktree
   run `pnpm install --frozen-lockfile && pnpm build` first (CI's Rust jobs do the same).
+  `kodama-transcribe`'s `parakeet` feature (sherpa-onnx) is off by default, so the gates above don't
+  compile or lint it — before committing a change under `crates/kodama-transcribe`, also run
+  `cargo clippy -p kodama-transcribe --features parakeet --all-targets --locked -- -D warnings`.
 - **Core vs shell:** logic lives in `crates/kodama-core` (pure, UI-agnostic, unit-testable);
   `src-tauri` commands stay thin wrappers around it. If a Tauri command grows a body, the body
   belongs in kodama-core.
