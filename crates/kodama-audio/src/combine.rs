@@ -134,9 +134,22 @@ impl SourcePipeline {
         self.resampler = MonoResampler::new(sample_rate, self.target_rate).ok();
     }
 
+    /// Prepend `n` samples of leading silence, shifting all existing output
+    /// later. Used when the shared session origin is lowered after this
+    /// pipeline was already placed against a later one (see
+    /// [`process_frame`]).
+    fn prepend_silence(&mut self, n: usize) {
+        if n == 0 {
+            return;
+        }
+        let mut shifted = vec![0.0; n];
+        shifted.extend_from_slice(&self.out);
+        self.out = shifted;
+    }
+
     /// Process one captured frame: rebuild the resampler if the segment
     /// changed, align to the shared origin `t0` on the very first frame,
-    /// downmix + resample + accumulate, then re-evaluate drift. All timing
+    /// re-evaluate drift, then downmix + resample + accumulate. All timing
     /// is keyed off the frame's own `capture_time` (stamped in the cpal
     /// callback), not the dequeue instant, so a burst-drained backlog lands
     /// on the real timeline.
@@ -154,6 +167,12 @@ impl SourcePipeline {
             self.out.resize(offset_samples, 0.0);
         }
 
+        // Re-evaluate drift *before* appending this frame's audio, so a
+        // one-off gap fill lands as leading silence ahead of the just-arrived
+        // frame — placing it at the offset real time implies — rather than
+        // splicing it in early and pushing the silence behind it.
+        self.apply_drift(now, t0);
+
         self.mono_scratch.clear();
         downmix_to_mono_into(
             &frame.samples,
@@ -164,8 +183,6 @@ impl SourcePipeline {
             let resampled = resampler.push(&self.mono_scratch);
             self.out.extend(resampled);
         }
-
-        self.apply_drift(now, t0);
     }
 
     /// On a coarse (~1s) cadence, compare this source's accumulated output
@@ -185,26 +202,32 @@ impl SourcePipeline {
         let elapsed = now.duration_since(t0);
         let output_written = self.out.len() as u64;
 
+        if let Some(GapCorrection::InsertSilence(n)) =
+            self.drift.gap_correction(elapsed, output_written)
+        {
+            // A deficit too large for the gentle nudge to close in reasonable
+            // time (e.g. the silent window while a source rebuilds after a
+            // device change): back-fill it in one shot as leading silence and
+            // leave the resample ratio neutral. Applying the proportional
+            // nudge on top of a full fill would double-correct the same error
+            // and overshoot into a surplus.
+            let new_len = self.out.len() + n;
+            self.out.resize(new_len, 0.0);
+            if let Some(resampler) = self.resampler.as_mut() {
+                resampler.set_ratio_relative(1.0);
+            }
+            return;
+        }
+
+        // Otherwise the gentle proportional nudge is the whole correction. A
+        // surplus (`TrimSamples`, running ahead of real time) is deliberately
+        // *not* truncated — `out`'s tail is the most recently captured audio,
+        // so trimming it would delete real samples and splice a discontinuity
+        // — it's left for this nudge to claw back over the next checks. Steady
+        // clock drift is tens of ppm, far inside the ±2% the ratio absorbs.
         let ratio = self.drift.correction(elapsed, output_written);
         if let Some(resampler) = self.resampler.as_mut() {
             resampler.set_ratio_relative(ratio);
-        }
-
-        match self.drift.gap_correction(elapsed, output_written) {
-            Some(GapCorrection::InsertSilence(n)) => {
-                let new_len = self.out.len() + n;
-                self.out.resize(new_len, 0.0);
-            }
-            // A surplus (running ahead of real time) is left for the gentle
-            // ratio nudge above to claw back over the next checks. We do
-            // *not* truncate: `out`'s tail is the most recently captured
-            // audio, so trimming it would delete real samples and splice a
-            // discontinuity into the channel. Steady clock drift is tens of
-            // ppm — far inside the ±2% the ratio can absorb — so a true
-            // surplus is never destructive; only a deficit (a device-change
-            // gap, below) needs the one-off silence fill.
-            Some(GapCorrection::TrimSamples(_)) => {}
-            None => {}
         }
     }
 
@@ -218,21 +241,47 @@ impl SourcePipeline {
     }
 }
 
-fn process_item(pipeline: &mut SourcePipeline, item: CaptureItem, t0: &mut Option<Instant>) {
-    match item {
-        // Frames are self-describing (`frame.format`, `frame.segment_id`),
-        // so a dropped `SegmentStarted` marker loses nothing — this
-        // coordinator only reacts to segment/format changes it observes on
-        // the frames themselves.
-        CaptureItem::SegmentStarted { .. } => {}
-        CaptureItem::Frame(frame) => {
-            // The session origin is the first frame's capture time (whichever
-            // source produced it), so alignment is anchored to real capture,
-            // not to whenever this loop happened to dequeue it.
-            let origin = *t0.get_or_insert(frame.capture_time);
-            pipeline.handle_frame(frame, origin);
+/// Route one drained item into `this` pipeline, maintaining the shared
+/// session origin `t0` as the *earliest* `capture_time` seen across both
+/// sources — not merely the first frame this loop happened to dequeue.
+///
+/// `Select` gives no ordering guarantee between the two receivers, so a
+/// source whose stream went live earlier can still have its first frame
+/// dequeued second. When that happens (`now < origin`), the origin is lowered
+/// to it and the shortfall is prepended as leading silence to `other`, which
+/// was already placed against the higher origin — keeping both channels on a
+/// common sample zero. A subsequent frame can never predate `t0` (frames are
+/// FIFO per source, so a source's own first frame is its earliest), so `this`
+/// here is always unstarted and needs no back-fill of its own.
+fn process_frame(
+    this: &mut SourcePipeline,
+    other: &mut SourcePipeline,
+    item: CaptureItem,
+    t0: &mut Option<Instant>,
+    target_rate: u32,
+) {
+    // Frames are self-describing (`frame.format`, `frame.segment_id`), so a
+    // dropped `SegmentStarted` marker loses nothing — this coordinator only
+    // reacts to segment/format changes it observes on the frames themselves.
+    let CaptureItem::Frame(frame) = item else {
+        return;
+    };
+    let now = frame.capture_time;
+    let origin = match *t0 {
+        Some(origin) if now < origin => {
+            let delta = origin.saturating_duration_since(now);
+            let delta_samples = (delta.as_secs_f64() * target_rate as f64).round() as usize;
+            other.prepend_silence(delta_samples);
+            *t0 = Some(now);
+            now
         }
-    }
+        Some(origin) => origin,
+        None => {
+            *t0 = Some(now);
+            now
+        }
+    };
+    this.handle_frame(frame, origin);
 }
 
 fn finalize(
@@ -278,12 +327,24 @@ fn coordinator_loop(
 
         if Some(index) == mic_index {
             match oper.recv(&mic_rx) {
-                Ok(item) => process_item(&mut mic_pipeline, item, &mut t0),
+                Ok(item) => process_frame(
+                    &mut mic_pipeline,
+                    &mut system_pipeline,
+                    item,
+                    &mut t0,
+                    target_rate,
+                ),
                 Err(_) => mic_open = false,
             }
         } else if Some(index) == system_index {
             match oper.recv(&system_rx) {
-                Ok(item) => process_item(&mut system_pipeline, item, &mut t0),
+                Ok(item) => process_frame(
+                    &mut system_pipeline,
+                    &mut mic_pipeline,
+                    item,
+                    &mut t0,
+                    target_rate,
+                ),
                 Err(_) => system_open = false,
             }
         }
@@ -377,6 +438,63 @@ mod tests {
         // produces no output yet (short of a full resample chunk).
         assert_eq!(pipeline.out.len(), 2_400);
         assert!(pipeline.out.iter().all(|&s| s == 0.0));
+    }
+
+    #[test]
+    fn origin_is_lowered_and_other_channel_backfilled_when_an_earlier_frame_arrives_second() {
+        let mut mic = SourcePipeline::new(48_000);
+        let mut system = SourcePipeline::new(48_000);
+        let mut t0: Option<Instant> = None;
+        let base = Instant::now();
+
+        // Mic's first frame is dequeued first, at +30ms: it provisionally
+        // anchors the session origin.
+        let mic_frame = AudioFrame {
+            segment_id: 0,
+            samples: vec![0.0; 480],
+            format: mono_format(48_000),
+            capture_time: base + Duration::from_millis(30),
+        };
+        process_frame(
+            &mut mic,
+            &mut system,
+            CaptureItem::Frame(mic_frame),
+            &mut t0,
+            48_000,
+        );
+        assert_eq!(t0, Some(base + Duration::from_millis(30)));
+        assert_eq!(
+            mic.out.len(),
+            0,
+            "the origin source gets no leading silence"
+        );
+
+        // System's stream actually went live earlier; its first frame's
+        // capture_time predates the provisional origin (Select just dequeued
+        // it second). The origin must drop to it, and the mic channel —
+        // already placed against +30ms — must be back-filled with 30ms of
+        // leading silence so both channels share sample zero.
+        let system_frame = AudioFrame {
+            segment_id: 0,
+            samples: vec![0.0; 480],
+            format: mono_format(48_000),
+            capture_time: base,
+        };
+        process_frame(
+            &mut system,
+            &mut mic,
+            CaptureItem::Frame(system_frame),
+            &mut t0,
+            48_000,
+        );
+        assert_eq!(t0, Some(base));
+        assert_eq!(mic.out.len(), 1_440, "mic back-filled with 30ms @ 48kHz");
+        assert!(mic.out.iter().all(|&s| s == 0.0));
+        assert_eq!(
+            system.out.len(),
+            0,
+            "system is now the origin — it gets no leading silence"
+        );
     }
 
     #[test]
