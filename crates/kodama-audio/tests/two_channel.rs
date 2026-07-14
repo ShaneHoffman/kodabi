@@ -20,8 +20,9 @@ fn two_channel_session_is_aligned_and_round_trips_through_wav() {
     let microphone =
         Capture::start(CaptureSource::Microphone, 256).expect("failed to start microphone capture");
 
-    let combiner = Combiner::start(microphone.items(), loopback.items(), 48_000)
-        .expect("failed to start combiner");
+    let combiner = Combiner::start(48_000).expect("failed to start combiner");
+    assert!(combiner.attach(SessionChannel::Mic, microphone.items()));
+    assert!(combiner.attach(SessionChannel::System, loopback.items()));
 
     let capture_duration = Duration::from_secs(3);
     std::thread::sleep(capture_duration);

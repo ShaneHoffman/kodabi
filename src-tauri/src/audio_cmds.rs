@@ -5,16 +5,15 @@
 
 use kodama_audio::{AlignedSession, AudioFormat, DualCapture, DualStatus, SourceStatus};
 
-/// Bounds each source's capture-item channel. This must also absorb the
-/// backlog a source buffers *before* the combiner attaches: the combiner only
-/// starts once *both* sources are live (`DualCapture::ensure_combiner_started`),
-/// so the first source to come up buffers frames for the whole time the second
-/// is still negotiating. At ~10 ms per cpal callback that is ~100 frames/s, so
-/// 256 (~2.5 s) is too tight if a device negotiates slowly — a full channel
-/// drops real audio (`try_send` fails) that then surfaces as a silence-filled
-/// gap at the session start. 1024 (~10 s) covers a realistic worst-case
-/// negotiation window with headroom.
-const FRAME_CAPACITY: usize = 1024;
+/// Bounds each source's capture-item channel — the slack between a cpal
+/// callback enqueuing a frame and the combiner's coordinator thread draining
+/// it. Each source is attached to the combiner the instant it goes live
+/// (`DualCapture::start_and_attach`), so a source is drained continuously and
+/// never has to buffer a whole slow-negotiation window — the channel only has
+/// to absorb ordinary scheduling jitter, for which a few frames is ample. 256
+/// leaves generous headroom while keeping the buffered PCM bounded; a full
+/// channel drops the frame (`try_send` fails) and bumps `frames_dropped`.
+const FRAME_CAPACITY: usize = 256;
 
 /// Common rate the two-channel combiner aligns mic and system audio to.
 /// 48 kHz preserves fidelity (Windows loopback is almost always already
