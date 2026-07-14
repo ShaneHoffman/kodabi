@@ -21,7 +21,7 @@ use kodama_core::transcription::{
 };
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-use crate::validate::{path_to_string, require_file, validate_chunk};
+use crate::validate::{clamp_threads, path_to_string, require_file, validate_chunk};
 use crate::{VadConfig, VadGate};
 
 /// Local model file and tuning knobs for [`WhisperEngine`].
@@ -70,10 +70,7 @@ impl WhisperEngine {
 
         Ok(Self {
             ctx,
-            // Clamp to at least one thread: whisper.cpp treats `n_threads` as a
-            // decoder thread-pool size, and a zero or negative value from a
-            // future settings layer is nonsensical rather than "use defaults".
-            num_threads: cfg.num_threads.max(1),
+            num_threads: clamp_threads(cfg.num_threads),
             language: cfg.language,
             buffer: Vec::new(),
             bias_prompt: None,

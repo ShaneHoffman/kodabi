@@ -16,36 +16,10 @@
 
 use std::path::PathBuf;
 
-use kodama_core::transcription::{
-    AudioChunk, Result, Segment, TranscriptionEngine, TranscriptionError,
-};
+use kodama_core::transcription::{AudioChunk, Result, Segment, TranscriptionEngine};
 
-use crate::validate::{
-    offset_into_span, path_to_string, require_file, segment_ms, validate_chunk, SAMPLE_RATE_HZ,
-};
-
-/// Silero VAD processing window, in samples. Handed to sherpa-onnx as its
-/// `window_size`; the VAD buffers input internally and slices it into windows
-/// itself, so callers may feed arbitrary-length chunks.
-///
-/// Keep in sync with the identical constant in `engine.rs` (`ParakeetEngine`
-/// builds its own Silero VAD the same way; this ticket didn't extract a
-/// shared `SileroVad` to avoid touching that working, CI-untested engine).
-const WINDOW_SIZE: usize = 512;
-
-/// Head-room added to `max_speech_duration` when sizing the VAD's internal
-/// sample buffer, so a maximal speech segment plus the trailing silence needed
-/// to finalise it always fits before the circular buffer starts dropping the
-/// oldest samples.
-///
-/// Keep in sync with the identical constant in `engine.rs`.
-const VAD_BUFFER_MARGIN_SECONDS: f32 = 10.0;
-
-/// Floor for the VAD's internal buffer, covering a tiny or disabled
-/// (`max_speech_duration <= 0`) force-finalise setting.
-///
-/// Keep in sync with the identical constant in `engine.rs`.
-const VAD_BUFFER_MIN_SECONDS: f32 = 30.0;
+use crate::silero::{build_silero_vad, SileroParams};
+use crate::validate::{offset_into_span, segment_ms, validate_chunk, SAMPLE_RATE_HZ};
 
 /// Silero VAD tuning knobs for [`VadGate`].
 ///
@@ -79,54 +53,47 @@ pub struct VadConfig {
 pub struct VadGate<E: TranscriptionEngine> {
     vad: sherpa_onnx::VoiceActivityDetector,
     inner: E,
+    /// Segments already transcribed (and popped from the VAD queue) but not
+    /// yet handed back to the caller, because a *later* span in the same
+    /// `drain` errored before the call could return. Re-emitted at the front
+    /// of the next successful drain, so a mid-drain inner-engine error never
+    /// loses already-decoded speech. Empty on the happy path.
+    pending: Vec<Segment>,
 }
 
 impl<E: TranscriptionEngine> VadGate<E> {
     /// Load the VAD and wrap `inner`. A missing model file or a sherpa-onnx
     /// init failure surfaces as [`kodama_core::transcription::TranscriptionError::ModelLoad`].
     pub fn new(cfg: VadConfig, inner: E) -> Result<Self> {
-        require_file(&cfg.vad_model)?;
-
-        // Clamp to at least one thread: sherpa-onnx treats `num_threads` as a
-        // thread-pool size, and a zero or negative value from a future
-        // settings layer is nonsensical rather than a valid "use defaults".
-        let num_threads = cfg.num_threads.max(1);
-
-        let vad_config = sherpa_onnx::VadModelConfig {
-            silero_vad: sherpa_onnx::SileroVadModelConfig {
-                model: Some(path_to_string(&cfg.vad_model)?),
-                threshold: cfg.vad_threshold,
-                min_silence_duration: cfg.min_silence_duration,
-                min_speech_duration: cfg.min_speech_duration,
-                window_size: WINDOW_SIZE as i32,
-                max_speech_duration: cfg.max_speech_duration,
-            },
-            sample_rate: SAMPLE_RATE_HZ as i32,
-            num_threads,
-            provider: cfg.provider,
+        let vad = build_silero_vad(SileroParams {
+            model: &cfg.vad_model,
+            num_threads: cfg.num_threads,
+            provider: cfg.provider.as_deref(),
+            threshold: cfg.vad_threshold,
+            min_silence_duration: cfg.min_silence_duration,
+            min_speech_duration: cfg.min_speech_duration,
+            max_speech_duration: cfg.max_speech_duration,
             debug: cfg.debug,
-            ..Default::default()
-        };
-        // Scale the VAD's internal buffer to the configured max segment length
-        // rather than a fixed constant: a caller raising `max_speech_duration`
-        // past a hardcoded size would otherwise silently lose the audio that
-        // overflows the circular buffer before force-finalisation kicks in.
-        let vad_buffer_seconds = (cfg.max_speech_duration.max(0.0) + VAD_BUFFER_MARGIN_SECONDS)
-            .max(VAD_BUFFER_MIN_SECONDS);
-        let vad = sherpa_onnx::VoiceActivityDetector::create(&vad_config, vad_buffer_seconds)
-            .ok_or_else(|| TranscriptionError::ModelLoad("failed to initialise VAD".to_owned()))?;
+        })?;
 
-        Ok(Self { vad, inner })
+        Ok(Self {
+            vad,
+            inner,
+            pending: Vec::new(),
+        })
     }
 
     /// Decode every VAD segment finalised so far, one at a time, re-mapping
     /// each result onto the absolute session clock, and drain the VAD queue.
     ///
-    /// On an inner-engine error this returns before popping the failing
-    /// segment, so it stays queued: the caller can retry `accept`/`finish`
-    /// without losing that span's audio. The segments collected earlier in
-    /// this call are discarded along with the error, matching the trait's
-    /// all-or-nothing per-call contract.
+    /// Decoded segments accumulate in `self.pending` — and a previous call's
+    /// `pending` is re-emitted first — so the drain is genuinely lossless
+    /// across an inner-engine error. The `sherpa` VAD queue only exposes
+    /// `front`/`pop`, so a span must be popped before the next can be decoded;
+    /// staging results in `pending` (rather than the caller's `out`) means a
+    /// later span's error leaves every already-decoded span buffered for the
+    /// next successful drain to return, while the *failing* span stays queued
+    /// (not popped) for retry. On success the whole batch moves to `out`.
     fn drain(&mut self, out: &mut Vec<Segment>) -> Result<()> {
         while let Some(seg) = self.vad.front() {
             let (span_start_ms, span_end_ms) = segment_ms(seg.start(), seg.n());
@@ -138,12 +105,13 @@ impl<E: TranscriptionEngine> VadGate<E> {
 
             for inner_segment in inner_segments {
                 if let Some(mapped) = offset_into_span(inner_segment, span_start_ms, span_end_ms) {
-                    out.push(mapped);
+                    self.pending.push(mapped);
                 }
             }
 
             self.vad.pop();
         }
+        out.append(&mut self.pending);
         Ok(())
     }
 }

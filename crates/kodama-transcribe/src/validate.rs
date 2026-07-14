@@ -38,6 +38,18 @@ pub(crate) fn path_to_string(path: &Path) -> Result<String> {
     })
 }
 
+/// Clamp an engine's configured thread count to at least one. sherpa-onnx and
+/// whisper.cpp both treat it as a thread-pool size, so a zero or negative
+/// value from a future settings layer is nonsensical rather than a valid "use
+/// defaults". Shared by every engine's constructor.
+///
+/// Gated on the native-engine features (see [`require_file`]); `whisper`
+/// co-enables `vad`, so it's covered without being named here.
+#[cfg(any(feature = "parakeet", feature = "vad"))]
+pub(crate) fn clamp_threads(num_threads: i32) -> i32 {
+    num_threads.max(1)
+}
+
 /// Validate an incoming [`AudioChunk`](kodama_core::transcription::AudioChunk)
 /// before it reaches an engine.
 ///
