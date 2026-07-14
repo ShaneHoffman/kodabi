@@ -9,7 +9,7 @@ use std::sync::Mutex;
 use std::thread;
 
 use crate::capture::Capture;
-use crate::combine::{AlignedSession, Combiner};
+use crate::combine::{AlignedSession, Combiner, SessionChannel};
 use crate::error::{AudioError, Result};
 use crate::format::AudioFormat;
 use crate::source::CaptureSource;
@@ -89,10 +89,46 @@ pub struct DualStatus {
 struct Inner {
     loopback: Slot,
     microphone: Slot,
-    /// The two-channel combiner, spawned once both sources are confirmed
-    /// live (see [`DualCapture::ensure_combiner_started`]). Taken and
-    /// finalized in [`DualCapture::stop`].
-    combiner: Option<Combiner>,
+    /// The two-channel combiner, spawned by the *first* source to go live and
+    /// then fed each source's item stream as it comes up (see
+    /// [`DualCapture::attach_source`]). Taken and finalized in
+    /// [`DualCapture::stop`].
+    combiner: Option<CombinerState>,
+}
+
+/// The running combiner plus which channels have been attached to it this
+/// session. Both flags gate two things: an attach happens at most once per
+/// channel (a mid-session device rebuild re-runs `start` without re-attaching
+/// an already-live source), and a two-channel [`AlignedSession`] is only
+/// returned from [`DualCapture::stop`] once *both* channels attached — a
+/// single source produces no two-channel artifact, matching the pre-existing
+/// contract.
+struct CombinerState {
+    combiner: Combiner,
+    mic_attached: bool,
+    system_attached: bool,
+}
+
+impl CombinerState {
+    fn attached_flag(&mut self, channel: SessionChannel) -> &mut bool {
+        match channel {
+            SessionChannel::Mic => &mut self.mic_attached,
+            SessionChannel::System => &mut self.system_attached,
+        }
+    }
+
+    fn both_attached(&self) -> bool {
+        self.mic_attached && self.system_attached
+    }
+}
+
+/// The aligned-session channel a capture source feeds: the microphone is the
+/// "you" channel, the system-audio loopback is the "them" channel.
+fn channel_of(source: CaptureSource) -> SessionChannel {
+    match source {
+        CaptureSource::Microphone => SessionChannel::Mic,
+        CaptureSource::Loopback => SessionChannel::System,
+    }
 }
 
 /// A two-channel capture session: loopback (system audio) + microphone,
@@ -118,31 +154,56 @@ impl DualCapture {
         self.inner.lock().map_err(|_| AudioError::StatePoisoned)
     }
 
-    /// Idempotently start both sources and, once both are live, the combiner.
+    /// Idempotently start both sources, attaching each to the combiner the
+    /// moment it goes live.
     ///
     /// The two sources are negotiated concurrently: each start blocks until
     /// its stream's first segment is live (WASAPI negotiation is not instant)
     /// and the two devices are independent, so overlapping the negotiations
-    /// keeps start latency at ~max(the two) instead of their sum. A single
-    /// source's failure (no mic, permission denied, unsupported format) is
-    /// retained on its slot and reported in the returned status rather than
-    /// failing the whole start — the two sources are independent, and one
-    /// must never take down the other.
+    /// keeps start latency at ~max(the two) instead of their sum. Each source
+    /// attaches to the combiner as soon as *it* is live rather than waiting for
+    /// its sibling, so the first source starts draining immediately and its
+    /// bounded item channel never backs up over the other's negotiation window
+    /// (which would drop real audio). A single source's failure (no mic,
+    /// permission denied, unsupported format) is retained on its slot and
+    /// reported in the returned status rather than failing the whole start —
+    /// the two sources are independent, and one must never take down the other.
     pub fn start(&self) -> Result<DualStatus> {
         let (loopback, microphone) = thread::scope(|scope| {
-            let loopback = scope.spawn(|| self.ensure_started(CaptureSource::Loopback));
-            let microphone = self.ensure_started(CaptureSource::Microphone);
+            let loopback = scope.spawn(|| self.start_and_attach(CaptureSource::Loopback));
+            let microphone = self.start_and_attach(CaptureSource::Microphone);
             (loopback.join(), microphone)
         });
         let loopback = loopback.map_err(|_| AudioError::StartThreadPanicked)??;
         let microphone = microphone?;
 
-        self.ensure_combiner_started()?;
+        // Reconcile any live-but-unattached source. The per-source path spawns
+        // the combiner lazily on the first source to reach `attach_source`, so
+        // if that spawn hit a transient failure the source ran before any
+        // combiner existed and left itself unattached — while a sibling may
+        // have since spawned one. `attach_source` is idempotent, so re-running
+        // it here attaches such a stranded source (now that the combiner
+        // exists) and is a no-op for an already-attached or failed source. This
+        // keeps a spawn hiccup on one source from silently dropping the other's
+        // stream (and, via `both_attached`, the whole session).
+        self.attach_source(CaptureSource::Loopback)?;
+        self.attach_source(CaptureSource::Microphone)?;
 
         Ok(DualStatus {
             loopback,
             microphone,
         })
+    }
+
+    /// Start one source and, if it came up live, attach its item stream to the
+    /// combiner right away. Runs in the per-source concurrent path so the
+    /// first source to negotiate begins draining into the combiner while the
+    /// other is still coming up — its bounded item channel never backs up
+    /// waiting for a shared "both live" barrier.
+    fn start_and_attach(&self, source: CaptureSource) -> Result<SourceStatus> {
+        let status = self.ensure_started(source)?;
+        self.attach_source(source)?;
+        Ok(status)
     }
 
     /// Idempotent per source: if that stream is already installed, return its
@@ -191,33 +252,57 @@ impl DualCapture {
         Ok(status)
     }
 
-    /// Spawn the two-channel combiner once both sources are confirmed live,
-    /// if one isn't already running. A partial start (only one source live)
-    /// leaves no combiner — there is simply no two-channel session to combine
-    /// yet; a later successful start picks it up. A spawn failure is likewise
-    /// left as "no combiner this session" rather than failing the whole
-    /// start, matching how a single source's own failure never takes the
-    /// other down.
-    fn ensure_combiner_started(&self) -> Result<()> {
+    /// Attach a freshly-live source's item stream to the combiner, spawning
+    /// the combiner on the first source to attach. Idempotent per source: a
+    /// source with no live capture (a failed start) has nothing to attach, and
+    /// an already-attached source (an idempotent re-`start` of a still-live
+    /// source) is not attached twice. A combiner spawn failure is left as "no
+    /// combiner this session" rather than failing the whole start, matching how
+    /// a single source's own failure never takes the other down.
+    fn attach_source(&self, source: CaptureSource) -> Result<()> {
         let mut guard = self.lock()?;
-        if guard.combiner.is_some() {
+        // A failed start left no capture in the slot — nothing to attach.
+        let Some(capture) = slot_mut(&mut guard, source).capture.as_ref() else {
+            return Ok(());
+        };
+        let items = capture.items();
+
+        // Spawn the combiner lazily on the first source; a spawn failure means
+        // no combiner this session (best-effort, as above).
+        if guard.combiner.is_none() {
+            match Combiner::start(self.target_rate) {
+                Ok(combiner) => {
+                    guard.combiner = Some(CombinerState {
+                        combiner,
+                        mic_attached: false,
+                        system_attached: false,
+                    });
+                }
+                Err(_) => return Ok(()),
+            }
+        }
+
+        let channel = channel_of(source);
+        let state = guard
+            .combiner
+            .as_mut()
+            .expect("combiner just ensured present");
+        if *state.attached_flag(channel) {
             return Ok(());
         }
-        let (mic_items, loopback_items) = match (&guard.microphone.capture, &guard.loopback.capture)
-        {
-            (Some(mic), Some(loopback)) => (mic.items(), loopback.items()),
-            _ => return Ok(()),
-        };
-        if let Ok(combiner) = Combiner::start(mic_items, loopback_items, self.target_rate) {
-            guard.combiner = Some(combiner);
+        // Record the channel as attached only once the hand-off actually lands,
+        // so `both_attached` never reports a stream the coordinator never
+        // received (and a failed hand-off stays retryable via `attached_flag`).
+        if state.combiner.attach(channel, items) {
+            *state.attached_flag(channel) = true;
         }
         Ok(())
     }
 
     /// Stop both sources and finalize the combiner, returning the aligned
-    /// two-channel session if one ran (both sources were live long enough for
-    /// the combiner to be spawned). Idempotent: stopping while idle is a
-    /// no-op that returns idle statuses and `None`.
+    /// two-channel session only when both sources attached to it (a lone
+    /// source yields no two-channel artifact). Idempotent: stopping while idle
+    /// is a no-op that returns idle statuses and `None`.
     pub fn stop(&self) -> Result<(DualStatus, Option<AlignedSession>)> {
         let (loopback, microphone, combiner) = {
             let mut guard = self.lock()?;
@@ -231,11 +316,18 @@ impl DualCapture {
         // never happen while holding the state mutex. Both captures are fully
         // stopped (and their frame-channel senders dropped) before the
         // combiner is finalized, so `Combiner::finish` — which also joins a
-        // thread and blocks until both of its receivers disconnect — cannot
+        // thread and blocks until every attached receiver disconnects — cannot
         // hang waiting on a stream that was never told to stop.
         let loopback_status = stop_and_status(loopback);
         let microphone_status = stop_and_status(microphone);
-        let aligned_session = combiner.map(Combiner::finish);
+        // Always finalize (to join the coordinator thread), but only surface a
+        // two-channel session when both sources actually attached — a lone
+        // source yields no two-channel artifact.
+        let aligned_session = combiner.and_then(|state| {
+            let both = state.both_attached();
+            let session = state.combiner.finish();
+            both.then_some(session)
+        });
 
         Ok((
             DualStatus {
