@@ -29,12 +29,17 @@ pub fn run() {
             let device_id = kodama_core::device::load_or_create(&config_dir.join("device.toml"))?;
             app.manage(device_id);
 
+            // Build the tray (which manages `CaptureController`) BEFORE
+            // registering the shortcut, so a hotkey firing in the first
+            // moments of launch can't reach the toggle before the controller
+            // it depends on exists.
+            capture_control::build_tray(app.handle())?;
+
             // A clashing OS-global shortcut must not prevent launch — the
             // tray toggle still works even if the hotkey couldn't bind.
             if let Err(err) = app.global_shortcut().register(toggle_shortcut) {
                 eprintln!("failed to register global capture-toggle shortcut: {err}");
             }
-            capture_control::build_tray(app.handle())?;
             Ok(())
         })
         .manage(audio_cmds::CaptureState::default())

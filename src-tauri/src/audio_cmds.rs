@@ -154,13 +154,23 @@ fn capture_phase_impl(state: &CaptureState) -> Result<CaptureStateEvent, String>
 }
 
 #[tauri::command]
-pub fn start_capture(state: tauri::State<'_, CaptureState>) -> Result<CaptureStatus, String> {
-    start_capture_impl(&state)
+pub fn start_capture(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CaptureState>,
+) -> Result<CaptureStatus, String> {
+    // Route through the shared toggle path so this serializes with the
+    // hotkey/tray toggle and broadcasts the resulting phase (relabelling the
+    // tray + emitting `capture:state`) — otherwise the UI would go stale
+    // whenever capture is driven over IPC instead of the toggle.
+    crate::capture_control::run_under_toggle_lock(&app, state.inner(), start_capture_impl)
 }
 
 #[tauri::command]
-pub fn stop_capture(state: tauri::State<'_, CaptureState>) -> Result<CaptureStatus, String> {
-    stop_capture_impl(&state)
+pub fn stop_capture(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CaptureState>,
+) -> Result<CaptureStatus, String> {
+    crate::capture_control::run_under_toggle_lock(&app, state.inner(), stop_capture_impl)
 }
 
 #[tauri::command]
