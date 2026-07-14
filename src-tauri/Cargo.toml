@@ -19,7 +19,8 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = [] }
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-global-shortcut = "2"
 kodama-core = { path = "../crates/kodama-core" }
 kodama-audio = { path = "../crates/kodama-audio" }
 serde = { version = "1", features = ["derive"] }
