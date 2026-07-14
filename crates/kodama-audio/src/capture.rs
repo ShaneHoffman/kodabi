@@ -9,7 +9,7 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::{InputCallbackInfo, SampleFormat, SizedSample, StreamConfig};
@@ -371,12 +371,18 @@ where
     device.build_input_stream::<T, _, _>(
         config,
         move |data: &[T], _: &InputCallbackInfo| {
+            // Stamp capture time here, in the RT callback, so the combiner
+            // aligns/drift-corrects against when audio was captured rather
+            // than when it was dequeued. `Instant::now()` is a monotonic
+            // clock read (no allocation, no lock), safe on the audio thread.
+            let capture_time = Instant::now();
             let samples = convert::to_f32(data);
             meter.observe(&samples);
             let frame = AudioFrame {
                 segment_id,
                 samples,
                 format,
+                capture_time,
             };
             if tx.try_send(CaptureItem::Frame(frame)).is_err() {
                 meter.inc_dropped();

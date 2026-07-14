@@ -11,6 +11,11 @@ cpal = "0.18"
 crossbeam-channel = "0.5"
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
+# Live resampling in the combiner (mic/system -> a common rate, with a
+# runtime-adjustable ratio for clock-drift correction).
+rubato = "4"
+# Zero-copy buffer views rubato's `process_into_buffer` reads/writes through.
+audioadapter-buffers = "4"
 
 # cpal 0.18.1 declares its own `windows-core = ">=0.61,<=0.62"` dependency
 # separate from its `windows` dependency, which Tauri's stack pins to 0.61.2
@@ -23,3 +28,8 @@ windows-core = "=0.61.2"
 
 [dev-dependencies]
 serde_json = "1"
+# Test-only stereo WAV write/read: the hardware-gated two-channel test's
+# tangible verification artifact. Runtime persistence is a separate ticket
+# (`feat/persist-raw-session`), so this stays a dev-dependency.
+hound = "3.5"
+tempfile = "3"

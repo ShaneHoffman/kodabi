@@ -22,6 +22,15 @@ pub enum AudioError {
 
     #[error("capture thread failed to start")]
     ThreadStart,
+
+    #[error("failed to build resampler: {0}")]
+    Resample(String),
+
+    #[error("capture state poisoned")]
+    StatePoisoned,
+
+    #[error("capture start thread panicked")]
+    StartThreadPanicked,
 }
 
 pub type Result<T> = std::result::Result<T, AudioError>;
