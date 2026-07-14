@@ -1893,6 +1893,7 @@ dependencies = [
  "hound",
  "kodama-core",
  "sherpa-onnx",
+ "tempfile",
  "whisper-rs",
 ]
 
