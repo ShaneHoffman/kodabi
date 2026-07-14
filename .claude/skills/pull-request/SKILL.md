@@ -106,9 +106,16 @@ from `main` (check `git log --oneline HEAD..origin/main` if you want that view d
 diverged and still conflict with it.
 
 - `git fetch origin main`
-- `gh pr view <number> --json mergeable,mergeStateStatus` — `mergeable` starts as `UNKNOWN` right
-  after a push while GitHub computes it; wait a few seconds and retry once if so.
-- If `mergeable` is `MERGEABLE`, nothing to do — continue to step 11.
+- `gh pr view --json mergeable,mergeStateStatus` (no argument — resolves the PR for the current
+  branch, so you don't need the PR number). `mergeable` starts as `UNKNOWN` right after a push
+  while GitHub computes it; wait a few seconds and retry. If it's still `UNKNOWN` after a couple of
+  retries, don't assume it's clean — fall through to the `CONFLICTING` steps below (a local
+  `git merge origin/main` will show the truth) or ask the user.
+- If `mergeable` is `MERGEABLE`: no textual conflict. Continue to step 11. Note that a clean
+  *textual* merge doesn't guarantee a clean *build* — if `main` has moved substantially since
+  step 3 (e.g. a signature or symbol this branch uses changed without touching the same lines), a
+  semantic break can slip through, and CI never builds the Tauri app (see step 3). When main has
+  advanced non-trivially, re-run step 3's build to be sure before continuing.
 - If `mergeable` is `CONFLICTING`:
   1. `git merge origin/main --no-edit` to surface the conflicting files locally.
   2. Resolve each conflict on its actual merits — don't blindly keep "ours" or "theirs". A conflict
@@ -117,12 +124,18 @@ diverged and still conflict with it.
      conflict where the same logic changed on both sides needs a real judgment call — if the right
      resolution isn't clear, ask the user rather than guessing.
   3. Stage each resolved file (`git add <file>`), then confirm no markers remain anywhere:
-     `grep -rn '^<<<<<<<\|^=======\|^>>>>>>>'` (excluding build output).
-  4. Re-run **step 3's full verification** (fmt, workspace clippy, workspace test, and the release
-     build) — conflict resolution can silently break something step 3 already validated once.
+     `grep -rn '^<<<<<<<\|^|||||||\|^=======\|^>>>>>>>'` (excluding build output). The `|||||||`
+     alternative catches the base-section marker left by `diff3`/`zdiff3` conflict styles.
+  4. Re-run **step 3's build verification** (`pnpm tauri build --no-bundle`) — conflict resolution
+     can silently break the compile/link step 3 already validated once. If your resolution touched
+     Rust, also run the pre-commit gates from the repo `CLAUDE.md` (`cargo fmt --all --check`,
+     `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace
+     --locked`) before committing, since step 3's build alone doesn't run fmt, clippy, or tests.
   5. `git commit --no-edit` to complete the merge, then `git push`.
-  6. Re-check `gh pr view` until `mergeable` reads `MERGEABLE`. A `mergeStateStatus` of `UNSTABLE`
-     afterward just means CI is still running on the fresh push — not a conflict.
+  6. Re-check `gh pr view --json mergeable` until `mergeable` reads `MERGEABLE`. If it flips back to
+     `CONFLICTING` (another PR can land on `main` between your fetch and push), return to sub-step 1
+     and resolve again. A `mergeStateStatus` of `UNSTABLE` once `mergeable` is `MERGEABLE` just
+     means CI is still running on the fresh push — not a conflict.
 
 ## 11. Stop
 Report the PR URL and a one-line summary of what shipped. Do not merge — a human reviews and merges.
