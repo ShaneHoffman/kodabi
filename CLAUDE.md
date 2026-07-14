@@ -61,6 +61,15 @@ Commit subjects follow Conventional Commits: `<type>: <imperative summary>`, mat
   The clippy/test gates need `dist/` to exist — `src-tauri` embeds it via
   `tauri::generate_context!`, which fails the compile when it's missing — so in a fresh worktree
   run `pnpm install --frozen-lockfile && pnpm build` first (CI's Rust jobs do the same).
+  `kodama-transcribe`'s `parakeet` feature (sherpa-onnx) and `whisper` feature (whisper.cpp via
+  whisper-rs) are off by default, so the gates above don't compile or lint them — before committing
+  a change under `crates/kodama-transcribe`, also run
+  `cargo clippy -p kodama-transcribe --features parakeet --all-targets --locked -- -D warnings` and
+  `cargo clippy -p kodama-transcribe --features whisper --all-targets --locked -- -D warnings`.
+  The `whisper` feature compiles whisper.cpp from source (CMake + bindgen/libclang), so it needs an
+  MSVC dev environment (`vcvars64.bat`) sourced and `LIBCLANG_PATH` set to an LLVM install — see
+  `crates/kodama-transcribe/src/whisper.rs`. `whisper-cuda` additionally needs the CUDA toolkit and
+  is local-only (CI only checks the CPU `whisper` feature).
 - **Core vs shell:** logic lives in `crates/kodama-core` (pure, UI-agnostic, unit-testable);
   `src-tauri` commands stay thin wrappers around it. If a Tauri command grows a body, the body
   belongs in kodama-core.
