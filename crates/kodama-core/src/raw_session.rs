@@ -17,7 +17,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::device::DeviceId;
-use crate::naming::session_filename;
+use crate::naming::{numbered_slug, session_filename};
 use crate::transcription::{Channel, Segment};
 
 /// Per-process counter that, combined with the process id, gives each
@@ -104,7 +104,9 @@ pub fn assemble(
 /// taken (e.g. a same-device capture in the same millisecond, or a repeat
 /// slug), an increasing numeric suffix is appended to the slug until a free
 /// name is found (see [`crate::naming`]'s module docs on same-device
-/// collisions).
+/// collisions). The claim is atomic — the destination is created by hard-
+/// linking, which fails rather than overwriting when the name exists — so
+/// two concurrent writers can never resolve to and clobber the same file.
 pub fn write_raw_session(
     dir: &Path,
     captured_at: DateTime<Utc>,
@@ -117,20 +119,31 @@ pub fn write_raw_session(
         source,
     })?;
 
-    let path = resolve_free_path(dir, captured_at, device, slug);
-
+    // Serialize the whole transcript before touching the filesystem, so a
+    // serialization error leaves neither a scratch file nor a claimed name
+    // behind.
     let mut body = String::new();
     for segment in segments {
         let line = serde_json::to_string(segment).map_err(|source| RawSessionError::Json {
-            path: path.clone(),
+            path: dir.to_path_buf(),
             source,
         })?;
         body.push_str(&line);
         body.push('\n');
     }
 
-    write_atomic(&path, &body)?;
-    Ok(path)
+    // Stage the full content in a scratch file, then atomically link it into
+    // the first free name. Linking (not renaming) makes the claim exclusive —
+    // it fails with `AlreadyExists` instead of clobbering an occupied name —
+    // which both resolves collisions and closes the check-then-write race a
+    // bare `exists()` test would leave open; a reader only ever sees the fully
+    // written file, never a partial one.
+    let tmp_path = stage_scratch(dir, &body)?;
+    let result = link_into_free_path(&tmp_path, dir, captured_at, device, slug);
+    // The linked destination now keeps the content alive; the scratch name is
+    // redundant on both success and failure.
+    let _ = fs::remove_file(&tmp_path);
+    result
 }
 
 /// Reads back a transcript written by [`write_raw_session`], independent of
@@ -154,69 +167,67 @@ pub fn read_raw_session(path: &Path) -> Result<Vec<TranscriptSegment>> {
         .collect()
 }
 
-/// Finds a filename under `dir` that doesn't already exist, following the
-/// session filename scheme.
-fn resolve_free_path(
+/// Writes `contents` to a fresh, process-unique scratch file in `dir` and
+/// returns its path. On a write error the partial scratch file is removed, so
+/// a failed write leaves nothing behind.
+fn stage_scratch(dir: &Path, contents: &str) -> Result<PathBuf> {
+    let tmp_path = unique_temp_path(dir);
+    if let Err(source) = fs::write(&tmp_path, contents) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(RawSessionError::Io {
+            path: tmp_path,
+            source,
+        });
+    }
+    Ok(tmp_path)
+}
+
+/// Hard-links the staged scratch file into the first session filename under
+/// `dir` that isn't already taken, and returns that path.
+///
+/// `fs::hard_link` fails with `AlreadyExists` rather than overwriting, so an
+/// occupied name is skipped, not clobbered — making the free-name claim
+/// atomic. The disambiguator comes from [`numbered_slug`], whose number
+/// survives the filename length cap, so distinct attempts always produce
+/// distinct names and the loop terminates.
+fn link_into_free_path(
+    tmp_path: &Path,
     dir: &Path,
     captured_at: DateTime<Utc>,
     device: &DeviceId,
     slug: Option<&str>,
-) -> PathBuf {
-    let candidate = dir.join(session_filename(captured_at, device, slug, "jsonl"));
-    if !candidate.exists() {
-        return candidate;
-    }
-
-    let mut attempt: u32 = 2;
+) -> Result<PathBuf> {
+    let mut attempt: Option<u32> = None;
     loop {
-        let numbered_slug = match slug {
-            Some(s) if !s.is_empty() => format!("{s}-{attempt}"),
-            _ => attempt.to_string(),
+        let name = match attempt {
+            None => session_filename(captured_at, device, slug, "jsonl"),
+            Some(n) => {
+                session_filename(captured_at, device, Some(&numbered_slug(slug, n)), "jsonl")
+            }
         };
-        let candidate = dir.join(session_filename(
-            captured_at,
-            device,
-            Some(&numbered_slug),
-            "jsonl",
-        ));
-        if !candidate.exists() {
-            return candidate;
+        let candidate = dir.join(name);
+        match fs::hard_link(tmp_path, &candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(source) if source.kind() == std::io::ErrorKind::AlreadyExists => {
+                attempt = Some(attempt.map_or(2, |n| n + 1));
+            }
+            Err(source) => {
+                return Err(RawSessionError::Io {
+                    path: candidate,
+                    source,
+                });
+            }
         }
-        attempt += 1;
     }
 }
 
-/// Writes `contents` to `path` via temp-file-then-rename, so a reader never
-/// observes a partially written transcript (mirrors `device.rs`/`glossary.rs`).
-fn write_atomic(path: &Path, contents: &str) -> Result<()> {
-    let tmp_path = unique_temp_path(path)?;
-    fs::write(&tmp_path, contents).map_err(|source| RawSessionError::Io {
-        path: tmp_path.clone(),
-        source,
-    })?;
-    if let Err(source) = fs::rename(&tmp_path, path) {
-        let _ = fs::remove_file(&tmp_path);
-        return Err(RawSessionError::Io {
-            path: path.to_path_buf(),
-            source,
-        });
-    }
-    Ok(())
-}
-
-/// Builds a sibling temp path unique to this process and attempt.
-fn unique_temp_path(path: &Path) -> Result<PathBuf> {
-    let file_name = path.file_name().ok_or_else(|| RawSessionError::Io {
-        path: path.to_path_buf(),
-        source: std::io::Error::new(std::io::ErrorKind::InvalidInput, "path has no file name"),
-    })?;
-    let mut tmp_name = file_name.to_os_string();
-    tmp_name.push(format!(
-        ".{}.{}.tmp",
+/// Builds a scratch path in `dir` unique to this process and call.
+fn unique_temp_path(dir: &Path) -> PathBuf {
+    dir.join(format!(
+        ".raw-session.{}.{}.tmp",
         std::process::id(),
         TMP_COUNTER.fetch_add(1, Ordering::Relaxed)
-    ));
-    Ok(path.with_file_name(tmp_name))
+    ))
 }
 
 #[cfg(test)]
@@ -333,6 +344,27 @@ mod tests {
             write_raw_session(dir.path(), instant(), &device(), Some("standup"), &first).unwrap();
         let second_path =
             write_raw_session(dir.path(), instant(), &device(), Some("standup"), &second).unwrap();
+
+        assert_ne!(first_path, second_path);
+        assert_eq!(read_raw_session(&first_path).unwrap(), first);
+        assert_eq!(read_raw_session(&second_path).unwrap(), second);
+    }
+
+    #[test]
+    fn colliding_writes_with_an_overlong_slug_terminate_and_stay_distinct() {
+        // A slug at/over the filename length cap once made collision
+        // resolution loop forever, because the "-2", "-3", … disambiguator
+        // was truncated back to the same name. Two writes must now still
+        // resolve to two distinct, readable files.
+        let dir = tempdir().unwrap();
+        let long_slug = "meeting-title-".repeat(5); // well over the 40-char cap
+        let first = assemble([(Channel::You, vec![segment(0, 500, "first")])]);
+        let second = assemble([(Channel::You, vec![segment(0, 500, "second")])]);
+
+        let first_path =
+            write_raw_session(dir.path(), instant(), &device(), Some(&long_slug), &first).unwrap();
+        let second_path =
+            write_raw_session(dir.path(), instant(), &device(), Some(&long_slug), &second).unwrap();
 
         assert_ne!(first_path, second_path);
         assert_eq!(read_raw_session(&first_path).unwrap(), first);
