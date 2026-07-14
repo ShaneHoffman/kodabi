@@ -21,6 +21,34 @@ impl Default for CaptureState {
     }
 }
 
+impl CaptureState {
+    /// True while either capture source is live. Delegates to
+    /// `DualCapture::is_active` — the true backend state a toggle must act
+    /// on, not a UI guess.
+    pub(crate) fn is_active(&self) -> Result<bool, String> {
+        self.0.is_active().map_err(|e| e.to_string())
+    }
+}
+
+/// Unambiguous capture state broadcast to the frontend on every start/stop —
+/// also the consent signal (a meeting is only ever recorded while
+/// `Listening`).
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CapturePhase {
+    Idle,
+    Listening,
+}
+
+/// Event payload for [`crate::capture_control::CAPTURE_STATE_EVENT`], and the
+/// response of [`capture_phase`]. An object rather than a bare string so a
+/// future field (per-source breakdown, a since-timestamp) can be added
+/// without breaking the contract `feat/listening-indicator` depends on.
+#[derive(Clone, serde::Serialize)]
+pub struct CaptureStateEvent {
+    pub phase: CapturePhase,
+}
+
 /// Serializable per-source status for IPC. Mirrors `kodama_audio::SourceStatus`
 /// — this crate owns the wire shape (serde) so the audio crate stays free of a
 /// serialization concern.
@@ -96,12 +124,14 @@ impl CaptureStatus {
     }
 }
 
-fn start_capture_impl(state: &CaptureState) -> Result<CaptureStatus, String> {
+/// `pub(crate)` so `capture_control`'s shared toggle can drive start/stop
+/// through the same path `start_capture`/`stop_capture` use over IPC.
+pub(crate) fn start_capture_impl(state: &CaptureState) -> Result<CaptureStatus, String> {
     let status = state.0.start().map_err(|e| e.to_string())?;
     Ok(CaptureStatus::from_parts(status, None))
 }
 
-fn stop_capture_impl(state: &CaptureState) -> Result<CaptureStatus, String> {
+pub(crate) fn stop_capture_impl(state: &CaptureState) -> Result<CaptureStatus, String> {
     let (status, session) = state.0.stop().map_err(|e| e.to_string())?;
     let aligned_session = session.as_ref().map(AlignedSessionStats::from);
     Ok(CaptureStatus::from_parts(status, aligned_session))
@@ -114,19 +144,47 @@ fn capture_status_impl(state: &CaptureState) -> Result<CaptureStatus, String> {
     Ok(CaptureStatus::from_parts(status, None))
 }
 
-#[tauri::command]
-pub fn start_capture(state: tauri::State<'_, CaptureState>) -> Result<CaptureStatus, String> {
-    start_capture_impl(&state)
+fn capture_phase_impl(state: &CaptureState) -> Result<CaptureStateEvent, String> {
+    let phase = if state.is_active()? {
+        CapturePhase::Listening
+    } else {
+        CapturePhase::Idle
+    };
+    Ok(CaptureStateEvent { phase })
 }
 
 #[tauri::command]
-pub fn stop_capture(state: tauri::State<'_, CaptureState>) -> Result<CaptureStatus, String> {
-    stop_capture_impl(&state)
+pub fn start_capture(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CaptureState>,
+) -> Result<CaptureStatus, String> {
+    // Route through the shared toggle path so this serializes with the
+    // hotkey/tray toggle and broadcasts the resulting phase (relabelling the
+    // tray + emitting `capture:state`) — otherwise the UI would go stale
+    // whenever capture is driven over IPC instead of the toggle.
+    crate::capture_control::run_under_toggle_lock(&app, state.inner(), start_capture_impl)
+}
+
+#[tauri::command]
+pub fn stop_capture(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CaptureState>,
+) -> Result<CaptureStatus, String> {
+    crate::capture_control::run_under_toggle_lock(&app, state.inner(), stop_capture_impl)
 }
 
 #[tauri::command]
 pub fn capture_status(state: tauri::State<'_, CaptureState>) -> Result<CaptureStatus, String> {
     capture_status_impl(&state)
+}
+
+/// The unambiguous idle/listening phase, derived from the true backend
+/// state. The frontend calls this once on mount to seed its state before
+/// subscribing to [`crate::capture_control::CAPTURE_STATE_EVENT`], so it
+/// can't miss a transition that happened before the listener attached.
+#[tauri::command]
+pub fn capture_phase(state: tauri::State<'_, CaptureState>) -> Result<CaptureStateEvent, String> {
+    capture_phase_impl(&state)
 }
 
 #[cfg(test)]
@@ -150,5 +208,29 @@ mod tests {
         assert!(!status.loopback.running);
         assert!(!status.microphone.running);
         assert!(status.aligned_session.is_none());
+    }
+
+    #[test]
+    fn capture_phase_is_idle_before_any_start() {
+        let state = CaptureState::default();
+        let event = capture_phase_impl(&state).unwrap();
+        assert!(matches!(event.phase, CapturePhase::Idle));
+    }
+
+    #[test]
+    fn capture_state_event_wire_contract() {
+        // Locks the JSON shape `feat/listening-indicator` depends on: an
+        // object with a lowercase `phase` string, not a bare string.
+        let idle = serde_json::to_string(&CaptureStateEvent {
+            phase: CapturePhase::Idle,
+        })
+        .unwrap();
+        assert_eq!(idle, r#"{"phase":"idle"}"#);
+
+        let listening = serde_json::to_string(&CaptureStateEvent {
+            phase: CapturePhase::Listening,
+        })
+        .unwrap();
+        assert_eq!(listening, r#"{"phase":"listening"}"#);
     }
 }

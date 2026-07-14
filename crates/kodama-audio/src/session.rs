@@ -254,6 +254,15 @@ impl DualCapture {
             microphone: status_of_slot(&guard.microphone),
         })
     }
+
+    /// True while either source has a live capture installed (started, not
+    /// yet stopped). Keys off slot *presence*, not `is_running()`, matching
+    /// `ensure_started`'s idempotency — a mid-session device-rebuild window
+    /// still reports active rather than being mistaken for "stopped".
+    pub fn is_active(&self) -> Result<bool> {
+        let guard = self.lock()?;
+        Ok(guard.loopback.capture.is_some() || guard.microphone.capture.is_some())
+    }
 }
 
 fn slot_mut(inner: &mut Inner, source: CaptureSource) -> &mut Slot {
@@ -321,6 +330,12 @@ mod tests {
     }
 
     #[test]
+    fn is_active_is_false_before_any_start() {
+        let dual = DualCapture::new(4, 48_000);
+        assert!(!dual.is_active().unwrap());
+    }
+
+    #[test]
     fn persisted_start_error_is_reported_by_status_until_stopped() {
         let dual = DualCapture::new(4, 48_000);
         // Simulate a failed start: the source has no live capture, only the
@@ -358,9 +373,11 @@ mod tests {
 
         assert_eq!(first.loopback.running, second.loopback.running);
         assert_eq!(first.microphone.running, second.microphone.running);
+        assert!(dual.is_active().unwrap());
 
         let (stopped, _) = dual.stop().unwrap();
         assert!(!stopped.loopback.running);
         assert!(!stopped.microphone.running);
+        assert!(!dual.is_active().unwrap());
     }
 }
