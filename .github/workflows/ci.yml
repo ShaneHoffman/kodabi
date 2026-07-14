@@ -94,3 +94,83 @@ jobs:
           path: dist
       - name: Test
         run: cargo test --workspace --locked
+
+  # kodama-transcribe's native-engine features are off by default, so the
+  # `lint`/`test` jobs' `--workspace` runs above never compile or lint them.
+  # This matrixed job clippy-checks each feature with it turned on, so the FFI
+  # glue can't silently rot between the rare times someone runs it locally:
+  #
+  #   * parakeet — sherpa-onnx, whose default `static` feature downloads a
+  #     prebuilt archive (no cmake/C++ toolchain needed), so the only extra
+  #     cost is that one-time (cached) download.
+  #   * whisper  — whisper.cpp via whisper-rs, compiled from source (CMake +
+  #     bindgen/libclang), so it additionally needs the MSVC dev environment
+  #     sourced (`ilammy/msvc-dev-cmd`, so bindgen finds the CRT headers) and
+  #     LIBCLANG_PATH pointed at the runner image's bundled LLVM. Checks the
+  #     CPU-only `whisper` feature, not `whisper-cuda` — runners have no NVIDIA
+  #     GPU or CUDA toolkit, so the CUDA build can only be verified locally.
+  #     Expect a slower first (uncached) run than parakeet since there's a real
+  #     C++ compile involved.
+  #
+  # Path-filtered to only fire on changes to the crate, and skips `--locked`'s
+  # dist/ dependency — this crate never touches `tauri::generate_context!`.
+  transcribe:
+    name: Rust (${{ matrix.engine }} engine)
+    runs-on: windows-latest
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      # Report both engines' results independently: a parakeet failure must not
+      # cancel the (slower, source-compiled) whisper check or vice versa.
+      fail-fast: false
+      matrix:
+        include:
+          - engine: parakeet
+            timeout: 25
+            needs_msvc: false
+          - engine: whisper
+            timeout: 40
+            needs_msvc: true
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for changes under crates/kodama-transcribe
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          # For a PR, diff against the PR base. For a push, diff against the
+          # commit the push replaced (`github.event.before`), which covers every
+          # commit in a multi-commit push — HEAD~1 would only look at the tip and
+          # miss crate changes in earlier commits, silently skipping this gate.
+          # Fall back to HEAD~1 only when neither is available (e.g. a brand-new
+          # branch, whose `before` is the all-zero SHA). Run git diff outside the
+          # `if` so a failure (e.g. an unreachable base) aborts under `set -e`
+          # instead of being read as "no changes".
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            base="HEAD~1"
+          fi
+          changed="$(git diff --name-only "$base" HEAD -- crates/kodama-transcribe)"
+          if [ -n "$changed" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install Rust (stable) + clippy
+        if: steps.changed.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        if: steps.changed.outputs.run == 'true'
+      - name: Set up MSVC dev environment (needed for bindgen to find CRT headers)
+        if: matrix.needs_msvc && steps.changed.outputs.run == 'true'
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Clippy (feature ${{ matrix.engine }} — strict, warnings fail)
+        if: steps.changed.outputs.run == 'true'
+        env:
+          # Harmless for the parakeet leg (nothing reads it); required by
+          # whisper-rs's bindgen build to locate libclang.
+          LIBCLANG_PATH: C:\Program Files\LLVM\bin
+        run: cargo clippy -p kodama-transcribe --features ${{ matrix.engine }} --all-targets --locked -- -D warnings
