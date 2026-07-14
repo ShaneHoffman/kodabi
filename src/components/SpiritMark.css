@@ -1,0 +1,152 @@
+/* ============================================================
+   Kodama spirit-mark — the runtime listening indicator.
+
+   A crisp ink core (the silhouette / logo) held in a soft field of ma
+   (the aura). Idle: neutral, still, no aura, no green. Listening: the
+   one reserved green arrives, the core breathes, and the aura blooms.
+
+   Ported from design/spirit-mark.html (P0-5 reference); colors are
+   sourced from design/tokens.css (--text, --accent-dot) rather than
+   the reference's local pigment values, so the mark auto-themes.
+   ============================================================ */
+
+.spirit-mark {
+  --mark-size: 1.15rem;
+  --halo-spread: 1rem;
+  position: relative;
+  flex: none;
+  display: inline-block;
+  width: var(--mark-size);
+  height: var(--mark-size);
+}
+
+/* the aura — a field of ma; present only while listening.
+   .spirit-mark__aura is the "wake gate": opacity 0→1, transitioned. Its child
+   __bloom carries the breathing pulse and the wavy edge, so the wake fade and
+   the breath never fight over one property. */
+.spirit-mark__aura {
+  position: absolute;
+  inset: calc(-1 * var(--halo-spread));
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity 0.45s ease;
+}
+
+/* The aura is a small field of ma. Rather than one static, lopsided glow,
+   two soft, asymmetric blobs slowly counter-rotate, so the edge gently
+   undulates — a living presence. __bloom carries the breath (scale +
+   opacity); its two pseudo-layers carry the wavy edge. Only transform is
+   animated on the blurred layers (border-radius stays fixed), so the blur is
+   rasterized once and the rotation rides the compositor — no per-frame
+   repaint. The core stays a crisp disc. */
+.spirit-mark__bloom {
+  position: absolute;
+  inset: 0;
+  opacity: 0.26;
+}
+.spirit-mark__bloom::before,
+.spirit-mark__bloom::after {
+  content: "";
+  position: absolute;
+  inset: 4%;
+  background: radial-gradient(circle, var(--accent-dot) 0%, transparent 72%);
+  filter: blur(4px);
+  border-radius: 48% 52% 53% 47% / 52% 47% 53% 48%;
+  will-change: transform;
+}
+.spirit-mark__bloom::after {
+  inset: 11%;
+  opacity: 0.8;
+  border-radius: 52% 48% 47% 53% / 48% 53% 47% 52%;
+}
+
+/* the core — a clean disc so the mark survives at 16px and in one ink
+   value; a faint caught-light sheen keeps it from reading as a
+   mechanical LED. background-color is transitioned for the wake. */
+.spirit-mark__core {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background-color: var(--text);
+  background-image: radial-gradient(
+    circle at 42% 38%,
+    var(--sheen),
+    transparent 52%
+  );
+  /* transform is transitioned too, so the breath eases back to rest on settle instead of snapping */
+  transition: background-color 0.45s ease, transform 0.45s ease;
+}
+
+.spirit-mark.is-listening .spirit-mark__core {
+  background-color: var(--accent-dot);
+  animation: spirit-mark-breathe 4.2s ease-in-out infinite;
+}
+.spirit-mark.is-listening .spirit-mark__aura {
+  opacity: 1;
+}
+.spirit-mark.is-listening .spirit-mark__bloom {
+  animation: spirit-mark-halo 4.2s ease-in-out infinite;
+}
+.spirit-mark.is-listening .spirit-mark__bloom::before {
+  animation: spirit-mark-blob-a 15s linear infinite;
+}
+.spirit-mark.is-listening .spirit-mark__bloom::after {
+  animation: spirit-mark-blob-b 21s linear infinite;
+}
+
+@keyframes spirit-mark-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.12);
+  }
+}
+@keyframes spirit-mark-halo {
+  0%,
+  100% {
+    transform: scale(0.9);
+    opacity: 0.16;
+  }
+  50% {
+    transform: scale(1.12);
+    opacity: 0.3;
+  }
+}
+/* two counter-rotating blobs — the aura's wavy, living edge. Each pseudo-layer
+   holds a fixed asymmetric border-radius; rotating that lopsided, blurred shape
+   sweeps the bulge around so the edge undulates, without ever repainting the
+   blur. */
+@keyframes spirit-mark-blob-a {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes spirit-mark-blob-b {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+/* accessibility floor: motion off → a still green mark, never a blank
+   or ambiguous state. Listening stays legible by reserved color alone. */
+@media (prefers-reduced-motion: reduce) {
+  .spirit-mark__core,
+  .spirit-mark__bloom,
+  .spirit-mark__bloom::before,
+  .spirit-mark__bloom::after {
+    animation: none !important;
+  }
+  .spirit-mark__bloom::before,
+  .spirit-mark__bloom::after {
+    border-radius: 50%;
+    transform: none;
+  }
+}
