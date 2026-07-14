@@ -1916,6 +1916,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "kodama-llm"
+version = "0.1.0"
+dependencies = [
+ "kodama-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "kodama-transcribe"
 version = "0.1.0"
 dependencies = [

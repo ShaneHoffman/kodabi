@@ -29,10 +29,22 @@
 //!
 //! [`apply_glossary_bias`] bridges a project's [`crate::glossary::Glossary`]
 //! into [`TranscriptionEngine::set_bias`].
+//!
+//! # Glossary cleanup post-pass
+//!
+//! [`clean_transcript`] is the engine-agnostic second half of that split: a
+//! headless Claude Code call, run on the already-assembled transcript at
+//! meeting end, that fixes obvious glossary misrecognitions bias couldn't
+//! (or, on an engine with no bias hook, the only glossary defense at all).
 
+mod cleanup;
 mod glossary_bias;
 mod mock;
 
+pub use cleanup::{
+    apply_corrections, build_request, clean_transcript, clean_transcript_for_project,
+    CleanupRequest, CleanupRunError, HeadlessClaude,
+};
 pub use glossary_bias::{apply_glossary_bias, glossary_bias_terms, GlossaryBiasError};
 pub use mock::MockEngine;
 
