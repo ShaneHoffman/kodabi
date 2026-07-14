@@ -134,20 +134,37 @@ fn parse_corrections(model_output: &str) -> Option<Vec<Correction>> {
         return Some(corrections);
     }
     // Models sometimes wrap the array in prose or a markdown fence despite
-    // being told not to; fall back to the first balanced top-level `[...]`.
-    let array = extract_json_array(trimmed)?;
-    serde_json::from_str(array).ok()
+    // being told not to; fall back to any balanced top-level `[...]` embedded
+    // in the output. Prefer the first one that both parses *and* carries
+    // corrections, so a decoy empty `[]` sitting in the prose can't mask the
+    // real array that follows; only fall back to an empty result if that is
+    // genuinely all the model produced.
+    let mut saw_empty = false;
+    for array in extract_json_arrays(trimmed) {
+        if let Ok(corrections) = serde_json::from_str::<Vec<Correction>>(array) {
+            if corrections.is_empty() {
+                saw_empty = true;
+            } else {
+                return Some(corrections);
+            }
+        }
+    }
+    saw_empty.then(Vec::new)
 }
 
-/// Finds the first top-level, balanced `[...]` span in `text`, respecting
-/// (and not miscounting brackets inside) quoted strings.
-fn extract_json_array(text: &str) -> Option<&str> {
-    let start = text.find('[')?;
+/// Collects every top-level, balanced `[...]` span in `text`, in order,
+/// respecting (and not miscounting brackets inside) quoted strings.
+fn extract_json_arrays(text: &str) -> Vec<&str> {
+    let mut arrays = Vec::new();
     let mut depth = 0i32;
     let mut in_string = false;
     let mut escape = false;
+    let mut start = None;
 
-    for (i, ch) in text.char_indices().skip(start) {
+    // `char_indices` yields byte offsets, so the returned slices always fall
+    // on char boundaries even when `text` contains multibyte characters (a
+    // `skip`-by-byte-count approach silently overshoots past the first `[`).
+    for (i, ch) in text.char_indices() {
         if in_string {
             match ch {
                 _ if escape => escape = false,
@@ -159,17 +176,24 @@ fn extract_json_array(text: &str) -> Option<&str> {
         }
         match ch {
             '"' => in_string = true,
-            '[' => depth += 1,
-            ']' => {
+            '[' => {
+                if depth == 0 {
+                    start = Some(i);
+                }
+                depth += 1;
+            }
+            ']' if depth > 0 => {
                 depth -= 1;
                 if depth == 0 {
-                    return Some(&text[start..=i]);
+                    if let Some(s) = start.take() {
+                        arrays.push(&text[s..=i]);
+                    }
                 }
             }
             _ => {}
         }
     }
-    None
+    arrays
 }
 
 /// Runs the glossary cleanup post-pass: builds the request, invokes `runner`,
@@ -365,5 +389,28 @@ mod tests {
         let result = apply_corrections(segments, output);
 
         assert_eq!(result[0].text, "see [note] for detail");
+    }
+
+    #[test]
+    fn apply_corrections_recovers_when_prose_before_the_array_is_non_ascii() {
+        let segments = vec![segment(0, "broken")];
+        // A multibyte char before the `[` used to make span extraction
+        // overshoot past the array and drop the correction entirely.
+        let output = "café — corrections: [{\"index\":0,\"text\":\"fixed\"}]";
+
+        let result = apply_corrections(segments, output);
+
+        assert_eq!(result[0].text, "fixed");
+    }
+
+    #[test]
+    fn apply_corrections_skips_a_decoy_empty_array_before_the_real_one() {
+        let segments = vec![segment(0, "broken")];
+        let output = "nothing removed [] but here are the fixes: \
+                      [{\"index\":0,\"text\":\"fixed\"}]";
+
+        let result = apply_corrections(segments, output);
+
+        assert_eq!(result[0].text, "fixed");
     }
 }
