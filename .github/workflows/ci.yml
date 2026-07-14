@@ -103,14 +103,20 @@ jobs:
   #   * parakeet — sherpa-onnx, whose default `static` feature downloads a
   #     prebuilt archive (no cmake/C++ toolchain needed), so the only extra
   #     cost is that one-time (cached) download.
+  #   * vad      — also sherpa-onnx (its bundled Silero VAD), standalone from
+  #     parakeet's transducer bits. Checked as its own leg because `whisper`
+  #     always co-enables `vad` (see Cargo.toml), which would otherwise mask a
+  #     `vad`-only build ever failing to compile on its own.
   #   * whisper  — whisper.cpp via whisper-rs, compiled from source (CMake +
   #     bindgen/libclang), so it additionally needs the MSVC dev environment
   #     sourced (`ilammy/msvc-dev-cmd`, so bindgen finds the CRT headers) and
   #     LIBCLANG_PATH pointed at the runner image's bundled LLVM. Checks the
   #     CPU-only `whisper` feature, not `whisper-cuda` — runners have no NVIDIA
   #     GPU or CUDA toolkit, so the CUDA build can only be verified locally.
-  #     Expect a slower first (uncached) run than parakeet since there's a real
-  #     C++ compile involved.
+  #     Expect a slower first (uncached) run than parakeet/vad since there's a
+  #     real C++ compile involved, plus it now also links sherpa-onnx (`vad` is
+  #     a dependency of `whisper`, so this leg pulls the onnxruntime archive
+  #     download on top of the whisper.cpp source build).
   #
   # Path-filtered to only fire on changes to the crate, and skips `--locked`'s
   # dist/ dependency — this crate never touches `tauri::generate_context!`.
@@ -119,12 +125,15 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: ${{ matrix.timeout }}
     strategy:
-      # Report both engines' results independently: a parakeet failure must not
-      # cancel the (slower, source-compiled) whisper check or vice versa.
+      # Report every engine's results independently: one leg failing must not
+      # cancel the others.
       fail-fast: false
       matrix:
         include:
           - engine: parakeet
+            timeout: 25
+            needs_msvc: false
+          - engine: vad
             timeout: 25
             needs_msvc: false
           - engine: whisper

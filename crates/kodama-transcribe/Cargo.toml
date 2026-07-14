@@ -8,12 +8,10 @@ authors.workspace = true
 
 [dependencies]
 kodama-core = { path = "../kodama-core" }
-# `static` (sherpa-onnx's default feature) links onnxruntime + sherpa-onnx into
-# the binary, so no runtime DLLs need bundling with the Tauri app. The first
-# build with `--features parakeet` downloads a prebuilt archive unless
-# SHERPA_ONNX_LIB_DIR points at libs already on disk; no cmake/C++ toolchain
-# is required either way.
-sherpa-onnx = { version = "1.13.4", optional = true }
+# `default-features = false`: this crate picks sherpa-onnx's link mode itself
+# (see the `parakeet`/`vad`/`whisper` features below) rather than inheriting
+# its `static` default unconditionally.
+sherpa-onnx = { version = "1.13.4", optional = true, default-features = false }
 # Unlike sherpa-onnx, whisper-rs compiles whisper.cpp from source (CMake +
 # bindgen/libclang) rather than downloading a prebuilt archive. The base
 # `whisper` feature builds on CPU; `whisper-cuda` additionally needs the CUDA
@@ -23,8 +21,41 @@ whisper-rs = { version = "0.16.0", optional = true }
 
 [features]
 default = []
-parakeet = ["dep:sherpa-onnx"]
-whisper = ["dep:whisper-rs"]
+# sherpa-onnx's `static` mode links onnxruntime + sherpa-onnx into the binary,
+# so no runtime DLLs need bundling with the Tauri app. Unaffected by the
+# `vad`/`whisper` link-mode note below: this feature never coexists with
+# whisper-rs's own build.
+parakeet = ["dep:sherpa-onnx", "sherpa-onnx/static"]
+# `vad` is Silero VAD via sherpa-onnx, standalone from the `parakeet` engine
+# feature so a Whisper-only build doesn't need Parakeet's transducer bits. No
+# link mode is requested here — see `whisper` below for why, and for what
+# picks the mode when `vad` is enabled on its own (falls back to static; sherpa-
+# onnx-sys's `resolve_link_mode` defaults to static when neither `static` nor
+# `shared` is requested).
+vad = ["dep:sherpa-onnx"]
+# Whisper always brings its own VAD gate: whisper.cpp has no bundled VAD and
+# hallucinates over silence (FOUNDING_DOC §8 — "VAD mandatory on any Whisper
+# path"), so this is compile-enforced rather than left to caller convention.
+#
+# Forces sherpa-onnx's `shared` link mode (dynamic; copies its runtime DLLs
+# next to the build output automatically) instead of the `static` mode
+# `parakeet` uses. whisper-rs's CMake build of whisper.cpp links the MSVC C++
+# runtime dynamically (`/MD`); sherpa-onnx's prebuilt `static` archive links
+# it statically (`/MT`). Combining a `/MT`-linked static lib with `/MD`-linked
+# object files in the same binary trips `link.exe`'s LNK2038 CRT mismatch,
+# cascading into dozens of LNK2005 duplicate-symbol errors from the C++
+# runtime — `shared` sidesteps this because only an import library (no
+# embedded CRT startup objects) gets linked.
+#
+# Known limitation: `parakeet` and `whisper` cannot be enabled in the same
+# build — the resulting feature union would request sherpa-onnx's `static`
+# and `shared` modes at once, which its build.rs rejects outright. Nothing in
+# this crate or its callers combines them today (CI's `transcribe` matrix
+# builds each engine feature separately); a future ticket that needs both
+# engines compiled into one binary (e.g. to switch engines at runtime) will
+# need to resolve this, most likely by moving `parakeet` to `shared` too, at
+# the cost of bundling its DLLs.
+whisper = ["dep:whisper-rs", "vad", "sherpa-onnx/shared"]
 whisper-cuda = ["whisper", "whisper-rs/cuda"]
 
 [dev-dependencies]
