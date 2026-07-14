@@ -17,9 +17,9 @@
 //! (Use `--features whisper` instead for a CPU-only run.)
 //!
 //! There is deliberately no silence-safety test here: whisper.cpp has no
-//! bundled VAD and is known to hallucinate over silence. Pairing this
-//! engine with Silero VAD — and proving silence-safety — is
-//! `feat/silero-vad-whisper`, not this ticket.
+//! bundled VAD and is known to hallucinate over silence on its own. The
+//! VAD-gated production path (`whisper_with_vad`) and its silence-safety
+//! tests live in `tests/vad_whisper.rs`.
 
 #![cfg(feature = "whisper")]
 
