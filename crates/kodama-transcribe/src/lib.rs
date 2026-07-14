@@ -13,6 +13,12 @@
 
 pub mod validate;
 
+// Shared Silero-VAD construction for both the Parakeet engine (which builds
+// its own) and the `VadGate` (which fronts an arbitrary engine); `parakeet`
+// or `vad` — and `whisper`, which co-enables `vad` — pulls it in.
+#[cfg(any(feature = "parakeet", feature = "vad"))]
+mod silero;
+
 #[cfg(feature = "parakeet")]
 mod engine;
 
