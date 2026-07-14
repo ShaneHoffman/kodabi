@@ -1,9 +1,13 @@
 import { useCaptureState } from "./useCaptureState";
+import { useDebouncedValue } from "./useDebouncedValue";
 import { SpiritMark } from "./components/SpiritMark";
 
 function App() {
   const phase = useCaptureState();
-  const listening = phase === "listening";
+  // The mark reacts instantly for immediate visual feedback, but the text
+  // label — an aria-live region — follows a debounced phase so a flapping VAD
+  // doesn't spam screen readers (or flicker the label) on every toggle.
+  const settled = useDebouncedValue(phase, 400) === "listening";
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-md bg-bg text-text font-sans">
@@ -12,10 +16,10 @@ function App() {
       <p
         role="status"
         className={`text-cap uppercase tracking-wide ${
-          listening ? "text-accent-dot" : "text-text-soft"
+          settled ? "text-accent-dot" : "text-text-soft"
         }`}
       >
-        {listening ? "Listening" : "Idle"}
+        {settled ? "Listening" : "Idle"}
       </p>
     </main>
   );
