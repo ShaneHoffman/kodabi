@@ -24,9 +24,16 @@
 //! [`Segment`] carries only `start_ms`/`end_ms`/`text`. The wire
 //! `TranscriptSegment` fields `index`, `channel` (you/them) and `speaker` are
 //! added by outer layers (capture layer / post-v1 diarization), not the engine.
+//!
+//! # Glossary biasing
+//!
+//! [`apply_glossary_bias`] bridges a project's [`crate::glossary::Glossary`]
+//! into [`TranscriptionEngine::set_bias`].
 
+mod glossary_bias;
 mod mock;
 
+pub use glossary_bias::{apply_glossary_bias, glossary_bias_terms, GlossaryBiasError};
 pub use mock::MockEngine;
 
 /// Errors produced while loading a model or transcribing audio.
