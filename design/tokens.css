@@ -138,6 +138,11 @@
   --edge-strong: rgba(128, 128, 120, 0.28);
   --hairline:    inset 0 0 0 1px var(--edge);
 
+  /* caught-light sheen — a faint white specular highlight for glossy marks.
+     Off the pigment ladder by design (like the edges above): white, not a hue,
+     and identical in both themes, so it lives here once rather than per-theme. */
+  --sheen: rgba(255, 255, 255, 0.16);
+
   /* ---------- Layer 2 — semantic tokens: light (washi day) is the default ----------
      All four theme blocks below are pure references to Layer 1 — no literals here. */
   --bg:         var(--k-washi);
