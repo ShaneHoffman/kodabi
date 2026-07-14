@@ -21,25 +21,24 @@
 }
 
 /* the aura — a field of ma; present only while listening.
-   .spirit-mark__aura is the "wake gate" (opacity 0→1, transitioned) and
-   also carries the voice swell (--amp). Its child __bloom carries the
-   breathing pulse, so the two never fight over one property. --amp is
-   unwired today (no live amplitude feed yet) and defaults to 0, so this
-   resolves to pure breath; it's the seam a future voice overlay plugs into. */
+   .spirit-mark__aura is the "wake gate": opacity 0→1, transitioned. Its child
+   __bloom carries the breathing pulse and the wavy edge, so the wake fade and
+   the breath never fight over one property. */
 .spirit-mark__aura {
   position: absolute;
   inset: calc(-1 * var(--halo-spread));
   border-radius: 50%;
   opacity: 0;
-  transition: opacity 0.45s ease, transform 0.12s ease-out;
-  transform: scale(calc(1 + var(--amp, 0) * 0.18));
+  transition: opacity 0.45s ease;
 }
 
 /* The aura is a small field of ma. Rather than one static, lopsided glow,
-   two soft blobs slowly counter-rotate and morph, so the edge gently
+   two soft, asymmetric blobs slowly counter-rotate, so the edge gently
    undulates — a living presence. __bloom carries the breath (scale +
-   opacity); its two pseudo-layers carry the wavy edge. The core stays a
-   crisp disc. */
+   opacity); its two pseudo-layers carry the wavy edge. Only transform is
+   animated on the blurred layers (border-radius stays fixed), so the blur is
+   rasterized once and the rotation rides the compositor — no per-frame
+   repaint. The core stays a crisp disc. */
 .spirit-mark__bloom {
   position: absolute;
   inset: 0;
@@ -53,6 +52,7 @@
   background: radial-gradient(circle, var(--accent-dot) 0%, transparent 72%);
   filter: blur(4px);
   border-radius: 48% 52% 53% 47% / 52% 47% 53% 48%;
+  will-change: transform;
 }
 .spirit-mark__bloom::after {
   inset: 11%;
@@ -70,8 +70,8 @@
   background-color: var(--text);
   background-image: radial-gradient(
     circle at 42% 38%,
-    rgba(255, 255, 255, 0.16),
-    rgba(255, 255, 255, 0) 52%
+    var(--sheen),
+    transparent 52%
   );
   /* transform is transitioned too, so the breath eases back to rest on settle instead of snapping */
   transition: background-color 0.45s ease, transform 0.45s ease;
@@ -114,32 +114,23 @@
     opacity: 0.3;
   }
 }
-/* two counter-rotating morphs — the aura's wavy, living edge */
+/* two counter-rotating blobs — the aura's wavy, living edge. Each pseudo-layer
+   holds a fixed asymmetric border-radius; rotating that lopsided, blurred shape
+   sweeps the bulge around so the edge undulates, without ever repainting the
+   blur. */
 @keyframes spirit-mark-blob-a {
-  0% {
-    border-radius: 48% 52% 53% 47% / 52% 47% 53% 48%;
+  from {
     transform: rotate(0deg);
   }
-  50% {
-    border-radius: 53% 47% 46% 54% / 47% 53% 48% 52%;
-    transform: rotate(180deg);
-  }
-  100% {
-    border-radius: 48% 52% 53% 47% / 52% 47% 53% 48%;
+  to {
     transform: rotate(360deg);
   }
 }
 @keyframes spirit-mark-blob-b {
-  0% {
-    border-radius: 52% 48% 47% 53% / 48% 53% 47% 52%;
+  from {
     transform: rotate(0deg);
   }
-  50% {
-    border-radius: 45% 55% 56% 44% / 55% 45% 53% 47%;
-    transform: rotate(-180deg);
-  }
-  100% {
-    border-radius: 52% 48% 47% 53% / 48% 53% 47% 52%;
+  to {
     transform: rotate(-360deg);
   }
 }
@@ -156,9 +147,6 @@
   .spirit-mark__bloom::before,
   .spirit-mark__bloom::after {
     border-radius: 50%;
-    transform: none;
-  }
-  .spirit-mark__aura {
     transform: none;
   }
 }
