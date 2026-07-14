@@ -98,5 +98,31 @@ Add `--draft` only if the work is explicitly WIP. Capture and print the PR URL.
 ## 9. Link to the board task (if applicable)
 If you're running inside a Kangentic task, link the new PR to it with the `kangentic_link_pr` tool so the board tracks it. If that tool isn't available, skip silently.
 
-## 10. Stop
+## 10. Check for and resolve merge conflicts
+A clean-looking diff in step 1 does **not** guarantee the PR can merge: `git log --oneline main..HEAD`
+only shows commits unique to your branch — it says nothing about commits your branch is *missing*
+from `main` (check `git log --oneline HEAD..origin/main` if you want that view directly). A local
+`main` that hasn't been fetched recently hides this; other PRs can land on `main` after your branch
+diverged and still conflict with it.
+
+- `git fetch origin main`
+- `gh pr view <number> --json mergeable,mergeStateStatus` — `mergeable` starts as `UNKNOWN` right
+  after a push while GitHub computes it; wait a few seconds and retry once if so.
+- If `mergeable` is `MERGEABLE`, nothing to do — continue to step 11.
+- If `mergeable` is `CONFLICTING`:
+  1. `git merge origin/main --no-edit` to surface the conflicting files locally.
+  2. Resolve each conflict on its actual merits — don't blindly keep "ours" or "theirs". A conflict
+     where both sides purely *added* new, non-overlapping content (e.g. two new functions or test
+     modules appended at the same location) usually means keeping both, in a sensible order. A
+     conflict where the same logic changed on both sides needs a real judgment call — if the right
+     resolution isn't clear, ask the user rather than guessing.
+  3. Stage each resolved file (`git add <file>`), then confirm no markers remain anywhere:
+     `grep -rn '^<<<<<<<\|^=======\|^>>>>>>>'` (excluding build output).
+  4. Re-run **step 3's full verification** (fmt, workspace clippy, workspace test, and the release
+     build) — conflict resolution can silently break something step 3 already validated once.
+  5. `git commit --no-edit` to complete the merge, then `git push`.
+  6. Re-check `gh pr view` until `mergeable` reads `MERGEABLE`. A `mergeStateStatus` of `UNSTABLE`
+     afterward just means CI is still running on the fresh push — not a conflict.
+
+## 11. Stop
 Report the PR URL and a one-line summary of what shipped. Do not merge — a human reviews and merges.
