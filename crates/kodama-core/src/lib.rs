@@ -7,6 +7,7 @@
 pub mod device;
 pub mod glossary;
 pub mod naming;
+pub mod raw_session;
 pub mod transcription;
 
 /// Crate version — a trivial placeholder proving the crate compiles, links,

@@ -30,9 +30,33 @@ pub fn session_filename(
     ext: &str,
 ) -> String {
     let timestamp = captured_at.format(TIMESTAMP_FORMAT);
-    match slug.map(slugify).filter(|s| !s.is_empty()) {
+    match slug
+        .map(|s| slugify(s, MAX_SLUG_LEN))
+        .filter(|s| !s.is_empty())
+    {
         Some(slug) => format!("{timestamp}-{device}-{slug}.{ext}"),
         None => format!("{timestamp}-{device}.{ext}"),
+    }
+}
+
+/// Builds a slug of the form `base-n` (or a bare `n` when `base` has no
+/// usable characters) whose numeric disambiguator `n` is guaranteed to
+/// survive the filename scheme's length cap.
+///
+/// Appending `-n` to a raw slug and letting [`session_filename`] slugify the
+/// result is not safe: a base at or over [`MAX_SLUG_LEN`] would be truncated
+/// back to the same string for every `n`, so successive numbers collapse to
+/// one filename. This reserves room for the suffix *before* slugifying, so
+/// `n` always lands in the name and distinct `n` yield distinct filenames —
+/// the property a collision-resolution loop needs to terminate.
+pub fn numbered_slug(base: Option<&str>, n: u32) -> String {
+    let suffix = n.to_string();
+    // Reserve room for the "-{suffix}" the caller appends, so slugifying the
+    // combined slug in `session_filename` never truncates the number away.
+    let budget = MAX_SLUG_LEN.saturating_sub(suffix.len() + 1);
+    match base.map(|s| slugify(s, budget)).filter(|s| !s.is_empty()) {
+        Some(base) => format!("{base}-{suffix}"),
+        None => suffix,
     }
 }
 
@@ -70,8 +94,9 @@ pub fn parse_session_filename(name: &str) -> Option<ParsedSessionName> {
 }
 
 /// Lowercases, collapses runs of non-alphanumeric characters to a single
-/// `-`, trims leading/trailing `-`, and caps the result at [`MAX_SLUG_LEN`].
-fn slugify(input: &str) -> String {
+/// `-`, trims leading/trailing `-`, and caps the result at `max_len` bytes.
+/// The output is ASCII, so `max_len` counts characters and bytes alike.
+fn slugify(input: &str, max_len: usize) -> String {
     let mut slug = String::new();
     let mut last_was_dash = true; // suppresses a leading dash
     for ch in input.chars().flat_map(char::to_lowercase) {
@@ -87,8 +112,8 @@ fn slugify(input: &str) -> String {
         slug.pop();
     }
 
-    if slug.len() > MAX_SLUG_LEN {
-        let mut truncated = slug[..MAX_SLUG_LEN].to_string();
+    if slug.len() > max_len {
+        let mut truncated = slug[..max_len].to_string();
         while truncated.ends_with('-') {
             truncated.pop();
         }
@@ -161,14 +186,43 @@ mod tests {
 
     #[test]
     fn slugify_sanitizes_case_punctuation_and_length() {
-        assert_eq!(slugify("Briarwood Golf Sync!"), "briarwood-golf-sync");
-        assert_eq!(slugify("  leading & trailing  "), "leading-trailing");
-        assert_eq!(slugify("a___b"), "a-b");
+        assert_eq!(
+            slugify("Briarwood Golf Sync!", MAX_SLUG_LEN),
+            "briarwood-golf-sync"
+        );
+        assert_eq!(
+            slugify("  leading & trailing  ", MAX_SLUG_LEN),
+            "leading-trailing"
+        );
+        assert_eq!(slugify("a___b", MAX_SLUG_LEN), "a-b");
 
         let long_input = "word ".repeat(20);
-        let slug = slugify(&long_input);
+        let slug = slugify(&long_input, MAX_SLUG_LEN);
         assert!(slug.len() <= MAX_SLUG_LEN);
         assert!(!slug.ends_with('-'));
+    }
+
+    #[test]
+    fn numbered_slug_keeps_the_number_even_for_an_overlong_base() {
+        // A base already at the length cap must not swallow the suffix: each
+        // n has to yield a distinct, in-cap slug or a collision loop hangs.
+        let base = "a".repeat(MAX_SLUG_LEN + 5);
+        let two = numbered_slug(Some(&base), 2);
+        let three = numbered_slug(Some(&base), 3);
+
+        assert!(two.ends_with("-2"), "suffix lost: {two}");
+        assert!(three.ends_with("-3"), "suffix lost: {three}");
+        assert_ne!(two, three);
+        // The whole slug still fits, so `session_filename` won't re-truncate it.
+        assert!(two.len() <= MAX_SLUG_LEN);
+        assert!(three.len() <= MAX_SLUG_LEN);
+    }
+
+    #[test]
+    fn numbered_slug_falls_back_to_a_bare_number_without_a_base() {
+        assert_eq!(numbered_slug(None, 2), "2");
+        // A base that slugifies to nothing is treated the same as no base.
+        assert_eq!(numbered_slug(Some("!!!"), 7), "7");
     }
 
     #[test]
