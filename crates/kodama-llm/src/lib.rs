@@ -34,7 +34,13 @@ use kodama_core::transcription::{CleanupRequest, CleanupRunError, HeadlessClaude
 /// `KODAMA_CLEANUP_MODEL` env var ([`ClaudeConfig::from_env`]).
 pub const DEFAULT_MODEL: &str = "haiku";
 
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+/// Default cap on a single headless run. Long meeting transcripts can take a
+/// while for the cheap model to chew through, so this is generous — and
+/// overridable via [`ClaudeConfig::timeout`] or the `KODAMA_CLEANUP_TIMEOUT_SECS`
+/// env var ([`ClaudeConfig::from_env`]) when even this is too tight.
+pub const DEFAULT_TIMEOUT_SECS: u64 = 60;
+
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(DEFAULT_TIMEOUT_SECS);
 
 /// Configuration for a headless `claude` invocation.
 #[derive(Debug, Clone)]
@@ -59,10 +65,12 @@ impl Default for ClaudeConfig {
 }
 
 impl ClaudeConfig {
-    /// [`ClaudeConfig::default`] with a `KODAMA_CLEANUP_MODEL` override
-    /// applied, if set and non-blank.
+    /// [`ClaudeConfig::default`] with `KODAMA_CLEANUP_MODEL` and
+    /// `KODAMA_CLEANUP_TIMEOUT_SECS` overrides applied, if set and valid.
     pub fn from_env() -> Self {
-        apply_model_override(Self::default(), std::env::var("KODAMA_CLEANUP_MODEL").ok())
+        let config =
+            apply_model_override(Self::default(), std::env::var("KODAMA_CLEANUP_MODEL").ok());
+        apply_timeout_override(config, std::env::var("KODAMA_CLEANUP_TIMEOUT_SECS").ok())
     }
 }
 
@@ -70,6 +78,20 @@ fn apply_model_override(mut config: ClaudeConfig, model: Option<String>) -> Clau
     if let Some(model) = model {
         if !model.trim().is_empty() {
             config.model = model;
+        }
+    }
+    config
+}
+
+fn apply_timeout_override(mut config: ClaudeConfig, secs: Option<String>) -> ClaudeConfig {
+    if let Some(secs) = secs {
+        // Ignore blank or non-positive/garbage values: a zero timeout would
+        // kill every run before it started, so a bad override falls back to
+        // the default rather than silently disabling the pass.
+        if let Ok(secs) = secs.trim().parse::<u64>() {
+            if secs > 0 {
+                config.timeout = Duration::from_secs(secs);
+            }
         }
     }
     config
@@ -133,14 +155,11 @@ fn invoke(config: &ClaudeConfig, request: &CleanupRequest) -> Result<String, Cle
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let mut child = command
+    let child = command
         .spawn()
         .map_err(|err| CleanupRunError::Spawn(err.to_string()))?;
 
-    write_prompt(&mut child, &request.prompt)
-        .map_err(|err| CleanupRunError::Spawn(err.to_string()))?;
-
-    let output = wait_with_timeout(child, config.timeout)?;
+    let output = wait_with_timeout(child, &request.prompt, config.timeout)?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     if !stdout.trim().is_empty() {
         return Ok(stdout);
@@ -153,22 +172,33 @@ fn invoke(config: &ClaudeConfig, request: &CleanupRequest) -> Result<String, Cle
     Err(CleanupRunError::Spawn(stderr.trim().to_owned()))
 }
 
-fn write_prompt(child: &mut Child, prompt: &str) -> std::io::Result<()> {
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| std::io::Error::other("child stdin was not piped"))?;
-    stdin.write_all(prompt.as_bytes())
-}
-
-/// Waits for `child` to exit, killing it if `timeout` elapses first.
+/// Feeds `prompt` to `child`, waits for it to exit, and returns its captured
+/// output — killing it if `timeout` elapses first.
 ///
 /// No async runtime in this codebase (house style favors `std::thread` +
-/// channels — see `src-tauri/src/capture_control.rs`), so this offloads the
-/// blocking `wait_with_output` to a thread and races it against
-/// `recv_timeout`.
-fn wait_with_timeout(child: Child, timeout: Duration) -> Result<Output, CleanupRunError> {
+/// channels — see `src-tauri/src/capture_control.rs`), so this offloads both
+/// the blocking stdin write and the blocking `wait_with_output` to threads
+/// and races them against `recv_timeout`. Crucially the stdin write lives on
+/// its own thread: a prompt larger than the OS pipe buffer would otherwise
+/// deadlock against claude's own stdout/stderr writes, and — because it runs
+/// before the wait — escape the timeout entirely, hanging the caller forever.
+/// A failed write (e.g. claude exited early) is ignored here so the real
+/// diagnostic on stderr survives in the returned [`Output`].
+fn wait_with_timeout(
+    mut child: Child,
+    prompt: &str,
+    timeout: Duration,
+) -> Result<Output, CleanupRunError> {
     let pid = child.id();
+
+    if let Some(mut stdin) = child.stdin.take() {
+        let prompt = prompt.to_owned();
+        std::thread::spawn(move || {
+            let _ = stdin.write_all(prompt.as_bytes());
+            // `stdin` drops here, closing the pipe so claude sees EOF.
+        });
+    }
+
     let (tx, rx) = mpsc::channel();
     std::thread::spawn(move || {
         let _ = tx.send(child.wait_with_output());
@@ -262,6 +292,31 @@ mod tests {
         let config = apply_model_override(ClaudeConfig::default(), None);
 
         assert_eq!(config.model, DEFAULT_MODEL);
+    }
+
+    #[test]
+    fn timeout_override_replaces_the_default() {
+        let config = apply_timeout_override(ClaudeConfig::default(), Some("120".to_owned()));
+
+        assert_eq!(config.timeout, Duration::from_secs(120));
+    }
+
+    #[test]
+    fn timeout_override_ignores_zero_and_garbage() {
+        for bad in ["0", "", "  ", "-5", "abc"] {
+            let config = apply_timeout_override(ClaudeConfig::default(), Some(bad.to_owned()));
+            assert_eq!(
+                config.timeout, DEFAULT_TIMEOUT,
+                "input {bad:?} should be ignored"
+            );
+        }
+    }
+
+    #[test]
+    fn timeout_override_ignores_a_missing_value() {
+        let config = apply_timeout_override(ClaudeConfig::default(), None);
+
+        assert_eq!(config.timeout, DEFAULT_TIMEOUT);
     }
 
     #[test]
