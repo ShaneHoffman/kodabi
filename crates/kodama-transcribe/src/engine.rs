@@ -13,22 +13,10 @@ use kodama_core::transcription::{
     AudioChunk, Result, Segment, TranscriptionEngine, TranscriptionError,
 };
 
-use crate::validate::{path_to_string, require_file, segment_ms, validate_chunk, SAMPLE_RATE_HZ};
-
-/// Silero VAD processing window, in samples. Handed to sherpa-onnx as its
-/// `window_size`; the VAD buffers input internally and slices it into windows
-/// itself, so callers may feed arbitrary-length chunks.
-const WINDOW_SIZE: usize = 512;
-
-/// Head-room added to `max_speech_duration` when sizing the VAD's internal
-/// sample buffer, so a maximal speech segment plus the trailing silence needed
-/// to finalise it always fits before the circular buffer starts dropping the
-/// oldest samples.
-const VAD_BUFFER_MARGIN_SECONDS: f32 = 10.0;
-
-/// Floor for the VAD's internal buffer, covering a tiny or disabled
-/// (`max_speech_duration <= 0`) force-finalise setting.
-const VAD_BUFFER_MIN_SECONDS: f32 = 30.0;
+use crate::silero::{build_silero_vad, SileroParams};
+use crate::validate::{
+    clamp_threads, path_to_string, require_file, segment_ms, validate_chunk, SAMPLE_RATE_HZ,
+};
 
 /// Local model files and tuning knobs for [`ParakeetEngine`].
 ///
@@ -86,35 +74,18 @@ impl ParakeetEngine {
             require_file(path)?;
         }
 
-        // Clamp to at least one thread: sherpa-onnx treats `num_threads` as a
-        // thread-pool size, and a zero or negative value from a future
-        // settings layer is nonsensical rather than a valid "use defaults".
-        let num_threads = cfg.num_threads.max(1);
-
-        let vad_config = sherpa_onnx::VadModelConfig {
-            silero_vad: sherpa_onnx::SileroVadModelConfig {
-                model: Some(path_to_string(&cfg.vad_model)?),
-                threshold: cfg.vad_threshold,
-                min_silence_duration: cfg.min_silence_duration,
-                min_speech_duration: cfg.min_speech_duration,
-                window_size: WINDOW_SIZE as i32,
-                max_speech_duration: cfg.max_speech_duration,
-            },
-            sample_rate: SAMPLE_RATE_HZ as i32,
-            num_threads,
-            provider: cfg.provider.clone(),
+        let vad = build_silero_vad(SileroParams {
+            model: &cfg.vad_model,
+            num_threads: cfg.num_threads,
+            provider: cfg.provider.as_deref(),
+            threshold: cfg.vad_threshold,
+            min_silence_duration: cfg.min_silence_duration,
+            min_speech_duration: cfg.min_speech_duration,
+            max_speech_duration: cfg.max_speech_duration,
             debug: cfg.debug,
-            ..Default::default()
-        };
-        // Scale the VAD's internal buffer to the configured max segment length
-        // rather than a fixed constant: a caller raising `max_speech_duration`
-        // past a hardcoded size would otherwise silently lose the audio that
-        // overflows the circular buffer before force-finalisation kicks in.
-        let vad_buffer_seconds = (cfg.max_speech_duration.max(0.0) + VAD_BUFFER_MARGIN_SECONDS)
-            .max(VAD_BUFFER_MIN_SECONDS);
-        let vad = sherpa_onnx::VoiceActivityDetector::create(&vad_config, vad_buffer_seconds)
-            .ok_or_else(|| TranscriptionError::ModelLoad("failed to initialise VAD".to_owned()))?;
+        })?;
 
+        let num_threads = clamp_threads(cfg.num_threads);
         let model_config = sherpa_onnx::OfflineModelConfig {
             transducer: sherpa_onnx::OfflineTransducerModelConfig {
                 encoder: Some(path_to_string(&cfg.encoder)?),

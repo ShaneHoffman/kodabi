@@ -4,10 +4,15 @@
 //!
 //! Unlike Parakeet, whisper.cpp has no bundled VAD and is known to
 //! hallucinate phantom text over silence. This engine does **not** attempt
-//! silence-safety itself — pairing it with Silero VAD ahead of `accept` is a
-//! separate concern (see `feat/silero-vad-whisper`). It is a batch engine:
-//! `accept` only buffers samples, and `finish` runs whisper.cpp once over
-//! the whole buffer, exactly as the trait's docs allow for batch engines.
+//! silence-safety itself — it is a batch engine: `accept` only buffers
+//! samples, and `finish` runs whisper.cpp once over the whole buffer, exactly
+//! as the trait's docs allow for batch engines, with no gating of its own.
+//!
+//! Silence-safety is instead composed in front of it via [`whisper_with_vad`],
+//! which fronts a [`WhisperEngine`] with sherpa-onnx's bundled Silero VAD
+//! ([`crate::VadGate`]) so it only ever decodes VAD-finalised speech segments.
+//! Use `whisper_with_vad` for production wiring; construct a bare
+//! [`WhisperEngine`] directly only for engine-isolation tests.
 
 use std::path::PathBuf;
 
@@ -16,7 +21,8 @@ use kodama_core::transcription::{
 };
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-use crate::validate::{path_to_string, require_file, validate_chunk};
+use crate::validate::{clamp_threads, path_to_string, require_file, validate_chunk};
+use crate::{VadConfig, VadGate};
 
 /// Local model file and tuning knobs for [`WhisperEngine`].
 ///
@@ -64,10 +70,7 @@ impl WhisperEngine {
 
         Ok(Self {
             ctx,
-            // Clamp to at least one thread: whisper.cpp treats `n_threads` as a
-            // decoder thread-pool size, and a zero or negative value from a
-            // future settings layer is nonsensical rather than "use defaults".
-            num_threads: cfg.num_threads.max(1),
+            num_threads: clamp_threads(cfg.num_threads),
             language: cfg.language,
             buffer: Vec::new(),
             bias_prompt: None,
@@ -178,6 +181,16 @@ fn build_bias_prompt(terms: &[String]) -> Option<String> {
 /// relative to the start of the buffer passed to `full`.
 fn centiseconds_to_ms(cs: i64) -> u64 {
     (cs.max(0) as u64) * 10
+}
+
+/// Load a [`WhisperEngine`] fronted by a Silero VAD gate — the blessed
+/// production entry point for the Whisper path (FOUNDING_DOC §8: "VAD
+/// mandatory on any Whisper path"). Silence never reaches whisper.cpp: the
+/// VAD gate only decodes VAD-finalised speech segments and re-maps their
+/// timestamps onto the absolute session clock. See the module docs and
+/// [`crate::VadGate`].
+pub fn whisper_with_vad(whisper: WhisperConfig, vad: VadConfig) -> Result<VadGate<WhisperEngine>> {
+    VadGate::new(vad, WhisperEngine::new(whisper)?)
 }
 
 #[cfg(test)]
