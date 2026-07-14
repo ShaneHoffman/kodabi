@@ -60,3 +60,4 @@ whisper-cuda = ["whisper", "whisper-rs/cuda"]
 
 [dev-dependencies]
 hound = "3"
+tempfile = "3"
