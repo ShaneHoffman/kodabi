@@ -146,25 +146,34 @@ impl TranscriptionEngine for WhisperEngine {
 
     /// Join the glossary terms into whisper.cpp's initial prompt — the
     /// strongest bias mechanism this engine offers (unlike Parakeet, which
-    /// has no such hook and relies entirely on the post-pass).
-    ///
-    /// Interior NUL bytes are stripped from each term: `whisper-rs`'s
-    /// `set_initial_prompt` builds a `CString` and *panics* on an embedded NUL,
-    /// so a stray one in a glossary term would otherwise take down the whole
-    /// `finish` call rather than surfacing as an error.
+    /// has no such hook and relies entirely on the post-pass). See
+    /// [`build_bias_prompt`] for the exact formatting/sanitizing rules.
     fn set_bias(&mut self, terms: &[String]) -> Result<()> {
-        self.bias_prompt = if terms.is_empty() {
-            None
-        } else {
-            Some(
-                terms
-                    .iter()
-                    .map(|term| term.replace('\0', ""))
-                    .collect::<Vec<_>>()
-                    .join(", "),
-            )
-        };
+        self.bias_prompt = build_bias_prompt(terms);
         Ok(())
+    }
+}
+
+/// Build whisper.cpp's initial-prompt string from bias terms, or `None` when
+/// there is nothing to bias toward.
+///
+/// Blank/whitespace-only terms are dropped so a stray empty glossary entry
+/// can't leak `", ,"` noise into the prompt (and a list that is *entirely*
+/// blank collapses back to `None`, i.e. unbiased). Interior NUL bytes are
+/// stripped from each term first: `whisper-rs`'s `set_initial_prompt` builds a
+/// `CString` and *panics* on an embedded NUL, so a stray one in a glossary
+/// term would otherwise take down the whole `finish` call rather than
+/// surfacing as an error.
+fn build_bias_prompt(terms: &[String]) -> Option<String> {
+    let cleaned: Vec<String> = terms
+        .iter()
+        .map(|term| term.replace('\0', "").trim().to_owned())
+        .filter(|term| !term.is_empty())
+        .collect();
+    if cleaned.is_empty() {
+        None
+    } else {
+        Some(cleaned.join(", "))
     }
 }
 
@@ -182,4 +191,49 @@ fn centiseconds_to_ms(cs: i64) -> u64 {
 /// [`crate::VadGate`].
 pub fn whisper_with_vad(whisper: WhisperConfig, vad: VadConfig) -> Result<VadGate<WhisperEngine>> {
     VadGate::new(vad, WhisperEngine::new(whisper)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_bias_prompt;
+
+    #[test]
+    fn no_terms_yields_no_prompt() {
+        assert_eq!(build_bias_prompt(&[]), None);
+    }
+
+    #[test]
+    fn terms_join_with_comma_space() {
+        let terms = ["OKIES".to_owned(), "ForeUp".to_owned()];
+        assert_eq!(build_bias_prompt(&terms), Some("OKIES, ForeUp".to_owned()));
+    }
+
+    #[test]
+    fn blank_and_whitespace_terms_are_dropped() {
+        let terms = [
+            "OKIES".to_owned(),
+            String::new(),
+            "   ".to_owned(),
+            " ForeUp ".to_owned(),
+        ];
+        assert_eq!(build_bias_prompt(&terms), Some("OKIES, ForeUp".to_owned()));
+    }
+
+    #[test]
+    fn an_all_blank_list_collapses_to_no_prompt() {
+        let terms = [String::new(), "  ".to_owned()];
+        assert_eq!(build_bias_prompt(&terms), None);
+    }
+
+    #[test]
+    fn interior_nul_bytes_are_stripped() {
+        let terms = ["OK\0IES".to_owned()];
+        assert_eq!(build_bias_prompt(&terms), Some("OKIES".to_owned()));
+    }
+
+    #[test]
+    fn a_term_that_is_only_a_nul_byte_is_dropped() {
+        let terms = ["\0".to_owned(), "ForeUp".to_owned()];
+        assert_eq!(build_bias_prompt(&terms), Some("ForeUp".to_owned()));
+    }
 }

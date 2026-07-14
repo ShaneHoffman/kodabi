@@ -25,7 +25,10 @@
 
 use std::path::PathBuf;
 
-use kodama_core::transcription::{transcribe_all, TranscriptionEngine, TranscriptionError};
+use kodama_core::glossary::{Glossary, GlossaryTerm, OnConflict};
+use kodama_core::transcription::{
+    apply_glossary_bias, transcribe_all, TranscriptionEngine, TranscriptionError,
+};
 use kodama_transcribe::{WhisperConfig, WhisperEngine};
 
 const SAMPLE_RATE: u32 = 16_000;
@@ -121,4 +124,62 @@ fn accepts_an_initial_prompt() {
         !segments.is_empty(),
         "transcription with an initial-prompt bias should still yield segments"
     );
+}
+
+/// Proves the full project-glossary → engine-bias → transcription path: a
+/// glossary persisted on disk is loaded by [`apply_glossary_bias`], applied as
+/// the engine's initial-prompt bias, and the biased engine still transcribes
+/// the recording to well-formed segments.
+///
+/// This deliberately does *not* assert the model recognizes a specific proper
+/// noun. The shared `speech_16k_mono.wav` fixture doesn't utter the glossary
+/// terms, and Whisper's exact spelling/casing of any term isn't contractual,
+/// so a content assertion here would be either always-false or flaky. The
+/// runnable coverage of how terms are turned into a prompt (join order,
+/// blank-term dropping, NUL stripping) lives in `whisper::tests::build_bias_*`,
+/// which run without a model.
+#[test]
+#[ignore = "requires a real whisper.cpp model file (set WHISPER_MODEL env var)"]
+fn applies_a_glossary_from_a_project_dir_as_bias() {
+    let project_dir = tempfile::tempdir().expect("temp project dir");
+    let mut glossary = Glossary::default();
+    glossary
+        .upsert(
+            GlossaryTerm {
+                term: "OKIES".to_owned(),
+                definition: "Oklahoma migration project.".to_owned(),
+                aliases: Vec::new(),
+            },
+            OnConflict::Error,
+        )
+        .expect("upsert succeeds");
+    glossary
+        .upsert(
+            GlossaryTerm {
+                term: "ForeUp".to_owned(),
+                definition: "Tee-sheet / POS vendor.".to_owned(),
+                aliases: Vec::new(),
+            },
+            OnConflict::Error,
+        )
+        .expect("upsert succeeds");
+    glossary.save(project_dir.path()).expect("glossary saves");
+
+    let samples = read_speech_wav();
+
+    let mut engine = WhisperEngine::new(real_config()).expect("engine should load");
+    apply_glossary_bias(&mut engine, project_dir.path()).expect("glossary bias applies");
+    let segments =
+        transcribe_all(&mut engine, &samples, SAMPLE_RATE).expect("biased transcription succeeds");
+
+    assert!(
+        !segments.is_empty(),
+        "a glossary-biased transcription should still yield segments"
+    );
+    for segment in &segments {
+        assert!(
+            !segment.text.trim().is_empty(),
+            "segment text should not be empty"
+        );
+    }
 }
