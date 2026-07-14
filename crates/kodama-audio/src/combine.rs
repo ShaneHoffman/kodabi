@@ -7,14 +7,18 @@
 //! persistence would need its own broadcast layer; nothing needs one yet).
 //! A single coordinator thread drains both streams, downmixes each frame to
 //! mono, resamples it to a common target rate, and appends it to that
-//! source's timeline. `finish()` blocks until both `Capture`s have stopped
-//! (their senders drop, disconnecting these receivers) and returns the
-//! finalized [`AlignedSession`].
+//! source's timeline. Sources are handed to it one at a time via
+//! [`Combiner::attach`] — the moment each `Capture` goes live — so the first
+//! source starts draining immediately instead of letting its bounded item
+//! channel back up (and drop real audio) while its sibling is still
+//! negotiating. `finish()` closes the roster and blocks until every attached
+//! `Capture` has stopped (their senders drop, disconnecting these receivers),
+//! then returns the finalized [`AlignedSession`].
 
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use crossbeam_channel::{Receiver, Select};
+use crossbeam_channel::{Receiver, RecvError, Select, Sender};
 
 use crate::drift::{DriftController, GapCorrection};
 use crate::error::Result;
@@ -303,50 +307,92 @@ fn finalize(
     }
 }
 
-/// Drains both capture item streams until each disconnects (i.e. until both
-/// `Capture`s are stopped), aligning and resampling as it goes.
-fn coordinator_loop(
-    mic_rx: Receiver<CaptureItem>,
-    system_rx: Receiver<CaptureItem>,
-    target_rate: u32,
-) -> AlignedSession {
+/// A source's channel label plus its item-stream receiver, handed to the
+/// running coordinator so a source can be attached after the combiner has
+/// already started draining its sibling.
+type SourceAttach = (SessionChannel, Receiver<CaptureItem>);
+
+/// The ready operation a coordinator-loop `select` resolved to, lifted out of
+/// the `select` borrow scope so the receivers it borrowed can be reassigned
+/// before the operation is applied.
+enum Action {
+    Control(std::result::Result<SourceAttach, RecvError>),
+    Mic(std::result::Result<CaptureItem, RecvError>),
+    System(std::result::Result<CaptureItem, RecvError>),
+}
+
+/// Drains attached capture item streams until every stream disconnects (i.e.
+/// until each `Capture` is stopped) and no more sources can attach, aligning
+/// and resampling as it goes.
+///
+/// Sources arrive over `control_rx` rather than being passed up front: the
+/// combiner starts draining the first source the instant it goes live, so a
+/// slow-negotiating sibling never backs up that source's bounded item channel
+/// (which would drop real audio). A source arriving mid-flight is simply added
+/// to the select set; [`Combiner::finish`] drops the control sender to signal
+/// that the roster is closed.
+fn coordinator_loop(control_rx: Receiver<SourceAttach>, target_rate: u32) -> AlignedSession {
     let mut mic_pipeline = SourcePipeline::new(target_rate);
     let mut system_pipeline = SourcePipeline::new(target_rate);
     let mut t0: Option<Instant> = None;
 
-    let mut mic_open = true;
-    let mut system_open = true;
+    let mut mic_rx: Option<Receiver<CaptureItem>> = None;
+    let mut system_rx: Option<Receiver<CaptureItem>> = None;
+    let mut control_open = true;
 
-    while mic_open || system_open {
+    // Keep going while a source could still attach (control open) or an
+    // attached source is still delivering. Once the roster is closed and both
+    // source channels have disconnected there is nothing left to select on.
+    while control_open || mic_rx.is_some() || system_rx.is_some() {
         let mut select = Select::new();
-        let mic_index = mic_open.then(|| select.recv(&mic_rx));
-        let system_index = system_open.then(|| select.recv(&system_rx));
+        let control_index = control_open.then(|| select.recv(&control_rx));
+        let mic_index = mic_rx.as_ref().map(|rx| select.recv(rx));
+        let system_index = system_rx.as_ref().map(|rx| select.recv(rx));
 
+        // Resolve the ready operation into an owned `Action`, then drop
+        // `select` so its borrows of the receivers end before the match below
+        // reassigns them.
         let oper = select.select();
         let index = oper.index();
-
-        if Some(index) == mic_index {
-            match oper.recv(&mic_rx) {
-                Ok(item) => process_frame(
-                    &mut mic_pipeline,
-                    &mut system_pipeline,
-                    item,
-                    &mut t0,
-                    target_rate,
-                ),
-                Err(_) => mic_open = false,
-            }
+        let action = if Some(index) == control_index {
+            Action::Control(oper.recv(&control_rx))
+        } else if Some(index) == mic_index {
+            Action::Mic(oper.recv(mic_rx.as_ref().expect("mic op registered only when Some")))
         } else if Some(index) == system_index {
-            match oper.recv(&system_rx) {
-                Ok(item) => process_frame(
-                    &mut system_pipeline,
-                    &mut mic_pipeline,
-                    item,
-                    &mut t0,
-                    target_rate,
+            Action::System(
+                oper.recv(
+                    system_rx
+                        .as_ref()
+                        .expect("system op registered only when Some"),
                 ),
-                Err(_) => system_open = false,
-            }
+            )
+        } else {
+            unreachable!("select returned an index that was never registered")
+        };
+        drop(select);
+
+        match action {
+            Action::Control(Ok((SessionChannel::Mic, rx))) => mic_rx = Some(rx),
+            Action::Control(Ok((SessionChannel::System, rx))) => system_rx = Some(rx),
+            // `finish()` dropped the control sender: no more sources attach.
+            Action::Control(Err(_)) => control_open = false,
+            Action::Mic(Ok(item)) => process_frame(
+                &mut mic_pipeline,
+                &mut system_pipeline,
+                item,
+                &mut t0,
+                target_rate,
+            ),
+            // This source's `Capture` stopped and dropped its sender.
+            Action::Mic(Err(_)) => mic_rx = None,
+            Action::System(Ok(item)) => process_frame(
+                &mut system_pipeline,
+                &mut mic_pipeline,
+                item,
+                &mut t0,
+                target_rate,
+            ),
+            Action::System(Err(_)) => system_rx = None,
         }
     }
 
@@ -355,32 +401,51 @@ fn coordinator_loop(
 
 /// Combines a mic and a system-audio capture stream into one time-aligned
 /// two-channel [`AlignedSession`]. Owns one `items()` receiver from each
-/// `Capture` and is the sole consumer of both.
+/// `Capture` (handed over via [`Combiner::attach`]) and is the sole consumer
+/// of both.
 pub struct Combiner {
     handle: JoinHandle<AlignedSession>,
+    /// Delivers a source's receiver to the running coordinator. Dropped by
+    /// [`Combiner::finish`] to close the roster so the coordinator terminates.
+    control_tx: Sender<SourceAttach>,
 }
 
 impl Combiner {
-    /// Spawn the coordinator thread and start draining both streams
-    /// immediately.
-    pub fn start(
-        mic: Receiver<CaptureItem>,
-        system: Receiver<CaptureItem>,
-        target_rate: u32,
-    ) -> Result<Combiner> {
+    /// Spawn the coordinator thread. It starts with no sources attached —
+    /// each is added by [`Combiner::attach`] the moment it goes live, so the
+    /// first source begins draining immediately instead of buffering until
+    /// its sibling finishes negotiating.
+    pub fn start(target_rate: u32) -> Result<Combiner> {
+        let (control_tx, control_rx) = crossbeam_channel::unbounded();
         let handle = thread::Builder::new()
             .name("kodama-audio-combiner".to_string())
-            .spawn(move || coordinator_loop(mic, system, target_rate))
+            .spawn(move || coordinator_loop(control_rx, target_rate))
             .map_err(|_| crate::error::AudioError::ThreadStart)?;
-        Ok(Combiner { handle })
+        Ok(Combiner { handle, control_tx })
     }
 
-    /// Block until both capture streams disconnect (i.e. after both
-    /// `Capture`s are stopped) and return the finalized aligned session.
+    /// Attach one source's item stream, labelled with the channel it feeds.
+    /// The coordinator adds it to its select set on the next iteration and
+    /// begins draining it. Returns `true` when the stream was handed off, and
+    /// `false` if the coordinator has already finished (the source is then
+    /// simply not combined) — so a caller tracking which channels attached
+    /// records only confirmed hand-offs. In practice `attach` only ever runs
+    /// between `start` and `finish`, so it returns `true`.
+    #[must_use]
+    pub fn attach(&self, channel: SessionChannel, items: Receiver<CaptureItem>) -> bool {
+        self.control_tx.send((channel, items)).is_ok()
+    }
+
+    /// Close the roster and block until every attached stream disconnects
+    /// (i.e. after each `Capture` is stopped), then return the finalized
+    /// aligned session.
     pub fn finish(self) -> AlignedSession {
-        self.handle
-            .join()
-            .expect("combiner coordinator thread panicked")
+        let Combiner { handle, control_tx } = self;
+        // Drop the control sender first so the coordinator learns the roster
+        // is closed; otherwise it would keep selecting on `control_rx` and
+        // never terminate.
+        drop(control_tx);
+        handle.join().expect("combiner coordinator thread panicked")
     }
 }
 
@@ -578,7 +643,9 @@ mod tests {
         drop(mic_tx);
         drop(system_tx);
 
-        let combiner = Combiner::start(mic_rx, system_rx, 48_000).expect("combiner should start");
+        let combiner = Combiner::start(48_000).expect("combiner should start");
+        assert!(combiner.attach(SessionChannel::Mic, mic_rx));
+        assert!(combiner.attach(SessionChannel::System, system_rx));
         let session = combiner.finish();
 
         assert_eq!(session.sample_rate(), 48_000);
@@ -594,13 +661,68 @@ mod tests {
     }
 
     #[test]
+    fn combiner_drains_a_source_attached_before_its_sibling() {
+        // Mic goes live first and streams a burst while system is still
+        // "negotiating"; system attaches only afterwards. The mic audio
+        // captured during that window must survive into the aligned session —
+        // this is the regression the incremental-attach design fixes.
+        let combiner = Combiner::start(48_000).expect("combiner should start");
+
+        let capture_time = Instant::now();
+        let (mic_tx, mic_rx) = crossbeam_channel::bounded(64);
+        assert!(combiner.attach(SessionChannel::Mic, mic_rx));
+        for _ in 0..5 {
+            mic_tx
+                .send(CaptureItem::Frame(AudioFrame {
+                    segment_id: 0,
+                    samples: vec![0.3; 480],
+                    format: mono_format(48_000),
+                    capture_time,
+                }))
+                .unwrap();
+        }
+
+        let (system_tx, system_rx) = crossbeam_channel::bounded(64);
+        assert!(combiner.attach(SessionChannel::System, system_rx));
+        for _ in 0..3 {
+            system_tx
+                .send(CaptureItem::Frame(AudioFrame {
+                    segment_id: 0,
+                    samples: vec![0.2; 960],
+                    format: stereo_format(48_000),
+                    capture_time,
+                }))
+                .unwrap();
+        }
+
+        drop(mic_tx);
+        drop(system_tx);
+        let session = combiner.finish();
+
+        assert!(session.frames() > 0, "no aligned audio was produced");
+        assert_eq!(
+            session.channel(SessionChannel::Mic).len(),
+            session.channel(SessionChannel::System).len()
+        );
+        assert!(
+            session
+                .channel(SessionChannel::Mic)
+                .iter()
+                .any(|&s| s != 0.0),
+            "the mic burst captured before system attached was lost"
+        );
+    }
+
+    #[test]
     fn combiner_with_no_frames_produces_an_empty_session() {
         let (mic_tx, mic_rx) = crossbeam_channel::bounded::<CaptureItem>(1);
         let (system_tx, system_rx) = crossbeam_channel::bounded::<CaptureItem>(1);
         drop(mic_tx);
         drop(system_tx);
 
-        let combiner = Combiner::start(mic_rx, system_rx, 48_000).expect("combiner should start");
+        let combiner = Combiner::start(48_000).expect("combiner should start");
+        assert!(combiner.attach(SessionChannel::Mic, mic_rx));
+        assert!(combiner.attach(SessionChannel::System, system_rx));
         let session = combiner.finish();
 
         assert_eq!(session.frames(), 0);
