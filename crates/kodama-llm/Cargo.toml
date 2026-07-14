@@ -1,0 +1,12 @@
+[package]
+name = "kodama-llm"
+description = "Kodama's headless Claude Code runner — the MCP-inversion loop's subprocess boundary."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+kodama-core = { path = "../kodama-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
