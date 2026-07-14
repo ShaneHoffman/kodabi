@@ -62,6 +62,26 @@ pub struct AudioChunk<'a> {
     pub sample_rate: u32,
 }
 
+/// Per-channel attribution for a transcript segment: local mic = `You`,
+/// system-audio loopback = `Them` (FOUNDING_DOC §3.3's two-channel bonus;
+/// mirrors the `Channel` enum in `docs/MCP_TOOL_SURFACE.md`). `Unknown`
+/// covers audio that never went through the two-channel split (e.g. a
+/// single-channel import). Diarization within a channel — telling apart
+/// multiple people on the same side — is v1 anti-scope (§5); this is the
+/// whole of v1's speaker attribution.
+///
+/// The capture layer (`kodama_audio::SessionChannel`) is positional — `Mic`
+/// / `System` — and stays free of a dependency on this crate; outer layers
+/// map `Mic -> You` and `System -> Them` when they assign this label to a
+/// transcribed [`Segment`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Channel {
+    You,
+    Them,
+    Unknown,
+}
+
 /// A finalised, timestamped span of recognised text.
 ///
 /// Timestamps are integer millisecond offsets from the first sample fed to the
@@ -122,4 +142,28 @@ pub fn transcribe_all(
         samples,
         sample_rate,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channel_serializes_to_snake_case() {
+        assert_eq!(serde_json::to_string(&Channel::You).unwrap(), r#""you""#);
+        assert_eq!(serde_json::to_string(&Channel::Them).unwrap(), r#""them""#);
+        assert_eq!(
+            serde_json::to_string(&Channel::Unknown).unwrap(),
+            r#""unknown""#
+        );
+    }
+
+    #[test]
+    fn channel_round_trips_through_json() {
+        for channel in [Channel::You, Channel::Them, Channel::Unknown] {
+            let json = serde_json::to_string(&channel).unwrap();
+            let parsed: Channel = serde_json::from_str(&json).unwrap();
+            assert_eq!(parsed, channel);
+        }
+    }
 }
