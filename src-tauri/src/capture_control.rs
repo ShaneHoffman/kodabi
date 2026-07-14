@@ -59,7 +59,11 @@ fn next_action(active: bool) -> ToggleAction {
 pub fn toggle_capture(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
-        let controller = app.state::<CaptureController>();
+        // `try_state` (not `state`) so a hotkey firing before the tray/
+        // controller finished initializing is a no-op rather than a panic.
+        let Some(controller) = app.try_state::<CaptureController>() else {
+            return;
+        };
         let Ok(_guard) = controller.toggle_lock.try_lock() else {
             return;
         };
@@ -75,24 +79,62 @@ pub fn toggle_capture(app: &AppHandle) {
             eprintln!("capture toggle failed: {err}");
         }
 
-        // Re-derive the resulting phase from the backend, not the intended
-        // action — a start where both devices failed must still report idle.
-        let phase = if state.is_active().unwrap_or(false) {
-            CapturePhase::Listening
-        } else {
-            CapturePhase::Idle
-        };
-
-        let (label, tooltip) = match phase {
-            CapturePhase::Listening => ("Stop capture", "Kodama — listening"),
-            CapturePhase::Idle => ("Start capture", "Kodama — idle"),
-        };
-        let _ = controller.toggle_item.set_text(label);
-        if let Some(tray) = app.tray_by_id("main") {
-            let _ = tray.set_tooltip(Some(tooltip));
-        }
-        let _ = app.emit(CAPTURE_STATE_EVENT, CaptureStateEvent { phase });
+        // Re-derive the resulting phase from the backend (not the intended
+        // action — a start where both devices failed must still report idle)
+        // and push it to the frontend + tray.
+        broadcast_capture_phase(&app, state.inner());
     });
+}
+
+/// Run `action` (a start/stop) under the toggle lock and broadcast the
+/// resulting phase. The `start_capture`/`stop_capture` IPC commands go
+/// through here so they serialize with the hotkey/tray toggle (which holds
+/// the same lock) and every path that changes capture state keeps the UI and
+/// tray in sync. Unlike the toggle's `try_lock` coalescing, an explicit IPC
+/// command blocks for an in-flight toggle rather than being dropped.
+pub fn run_under_toggle_lock<T>(
+    app: &AppHandle,
+    state: &CaptureState,
+    action: impl FnOnce(&CaptureState) -> Result<T, String>,
+) -> Result<T, String> {
+    // Serialize against the toggle when the controller is available; if it
+    // isn't yet (very early startup), just act — there is no concurrent
+    // toggle to race.
+    let result = match app.try_state::<CaptureController>() {
+        Some(controller) => {
+            let _guard = controller
+                .toggle_lock
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            action(state)
+        }
+        None => action(state),
+    };
+    broadcast_capture_phase(app, state);
+    result
+}
+
+/// Broadcast the current capture phase to the frontend and sync the tray
+/// (menu label + tooltip) to it. Derives the phase from the true backend
+/// state so it can never disagree with what is actually being captured.
+fn broadcast_capture_phase(app: &AppHandle, state: &CaptureState) {
+    let phase = if state.is_active().unwrap_or(false) {
+        CapturePhase::Listening
+    } else {
+        CapturePhase::Idle
+    };
+
+    let (label, tooltip) = match phase {
+        CapturePhase::Listening => ("Stop capture", "Kodama — listening"),
+        CapturePhase::Idle => ("Start capture", "Kodama — idle"),
+    };
+    if let Some(controller) = app.try_state::<CaptureController>() {
+        let _ = controller.toggle_item.set_text(label);
+    }
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_tooltip(Some(tooltip));
+    }
+    let _ = app.emit(CAPTURE_STATE_EVENT, CaptureStateEvent { phase });
 }
 
 /// Build the tray icon, its Start/Stop + Show + Quit menu, and manage the
