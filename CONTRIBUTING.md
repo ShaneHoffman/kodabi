@@ -1,6 +1,6 @@
-# Contributing to Kodama
+# Contributing to Kodabi
 
-Thanks for helping build Kodama. The project is developed through a **Kangentic board** with a
+Thanks for helping build Kodabi. The project is developed through a **Kangentic board** with a
 lightweight git-flow. Please follow the conventions below — AI agents get the same rules from the
 repo's root `CLAUDE.md`.
 

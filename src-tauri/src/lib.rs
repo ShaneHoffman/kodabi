@@ -1,9 +1,14 @@
 mod audio_cmds;
 mod capture_control;
 
-use kodama_core::device::DeviceId;
+use kodabi_core::device::DeviceId;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+
+/// The app's pre-rename bundle identifier. `app_config_dir()` resolves to
+/// `<config-root>/<identifier>`, so device config from a Kodama-era install
+/// lives under this sibling directory — see the migration in [`run`]'s setup.
+const LEGACY_CONFIG_DIR: &str = "com.kodama.app";
 
 #[tauri::command]
 fn device_id(state: tauri::State<'_, DeviceId>) -> String {
@@ -26,7 +31,24 @@ pub fn run() {
         )
         .setup(move |app| {
             let config_dir = app.path().app_config_dir()?;
-            let device_id = kodama_core::device::load_or_create(&config_dir.join("device.toml"))?;
+            let device_config = config_dir.join("device.toml");
+            // One-time migration for the Kodama → Kodabi rename: the bundle
+            // identifier changed (com.kodama.app → com.kodabi.app), which moves
+            // `app_config_dir()`. Adopt an existing device identity from the
+            // legacy location so the rename doesn't silently reset it.
+            // `app_config_dir()` is `<config-root>/<identifier>`, so the legacy
+            // dir is the sibling named after the old identifier. Best-effort: a
+            // failure here just falls through to `load_or_create` minting a
+            // fresh id, exactly as before this migration.
+            if let Some(config_root) = config_dir.parent() {
+                let legacy_config = config_root.join(LEGACY_CONFIG_DIR).join("device.toml");
+                if let Err(err) =
+                    kodabi_core::device::migrate_legacy_config(&legacy_config, &device_config)
+                {
+                    eprintln!("failed to migrate legacy device config: {err}");
+                }
+            }
+            let device_id = kodabi_core::device::load_or_create(&device_config)?;
             app.manage(device_id);
 
             // Build the tray (which manages `CaptureController`) BEFORE
@@ -63,12 +85,12 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-// Proves src-tauri actually links kodama-core (the data-layer dependency),
+// Proves src-tauri actually links kodabi-core (the data-layer dependency),
 // exercised by `cargo test`. No runtime feature is added.
 #[cfg(test)]
 mod tests {
     #[test]
     fn depends_on_core() {
-        assert!(!kodama_core::version().is_empty());
+        assert!(!kodabi_core::version().is_empty());
     }
 }

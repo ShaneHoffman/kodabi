@@ -1,4 +1,4 @@
-# Kodama — Aesthetic Direction
+# Kodabi — Aesthetic Direction
 
 **Status:** Locked (Phase 0, ticket P0-3). This is the design system every later screen is
 measured against — the "locked system" referenced by Phase 4, and the source the design tokens
@@ -14,7 +14,7 @@ intent; open that to feel it.
 
 > **Calm you notice before you notice why.**
 
-Kodama records your meetings and quietly organizes them. The interface should feel *unusually
+Kodabi records your meetings and quietly organizes them. The interface should feel *unusually
 calm and beautiful* — and a person should feel that calm **without ever consciously registering
 "forest."** The theme is an undertone, never a costume. If a first-time user thinks *"this is
 peaceful and well-made"* and not *"oh, a nature app,"* we succeeded.
