@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["src-tauri", "crates/kodama-core", "crates/kodama-audio", "crates/kodama-transcribe"]
+members = [
+    "src-tauri",
+    "crates/kodama-core",
+    "crates/kodama-audio",
+    "crates/kodama-transcribe",
+    "crates/kodama-llm",
+]
 
 [workspace.package]
 version = "0.1.0"
