@@ -12,7 +12,7 @@ function App() {
   return (
     <main className="flex min-h-screen flex-col items-center justify-center gap-md bg-bg text-text font-sans">
       <SpiritMark phase={phase} size="2.5rem" halo="2.4rem" />
-      <h1 className="font-serif text-display tracking-tight">kodama</h1>
+      <h1 className="font-serif text-display tracking-tight">kodabi</h1>
       <p
         role="status"
         className={`text-cap uppercase tracking-wide ${

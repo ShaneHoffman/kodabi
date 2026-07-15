@@ -1,4 +1,4 @@
-# Kodama — Frontmatter Schema
+# Kodabi — Frontmatter Schema
 
 **Status:** Locked (Phase 0, ticket P0-9; amended by the Phase 0 readiness audit to absorb
 P0-10's stable-`id` recommendation). Specifies the YAML frontmatter every note carries; the
@@ -18,7 +18,7 @@ index (FTS5 + `sqlite-vec`) is a cache, rebuildable from these files at any time
 Choosing files over a database buys three things directly: **Obsidian compatibility** (the vault
 opens and renders correctly in a plain folder of `.md` files, no plugin required), **git backups**
 (notes diff and version like any other text), and **zero lock-in** (nothing about the knowledge
-base depends on Kodama continuing to exist).
+base depends on Kodabi continuing to exist).
 
 ---
 

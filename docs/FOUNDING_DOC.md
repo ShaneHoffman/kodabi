@@ -1,20 +1,30 @@
-# Kodama — Founding Document
+# Kodabi — Founding Document
 
 *This document is the source of truth for vision and architecture; the working roadmap derived
 from it is [`ROADMAP.md`](ROADMAP.md). It lives in the `docs/` folder and gets amended, not
 abandoned.*
 
-**Why "Kodama":** In Japanese folklore, the kodama is the forest spirit that hears you and echoes back. It lives entirely in its own forest (local-first), it's quiet and ambient (calm by default), and it answers when spoken to (chat with your knowledge). Ghibli's Princess Mononoke gave it gentle, watchful associations — good mascot energy for the listening indicator. Namespace check (July 2026): only small/dormant collisions (a Ruby gem, an R package, a static site generator); no consumer app or AI product owns the name.
+**Why "Kodabi":** Kodabi (ko-DAH-bee) is coined from *kodama* (木霊, the forest spirit that hears
+you and echoes back) and *yamabiko* (山彦, the mountain's answering voice — its `-biko` suffix is
+the "one who answers" morpheme). It names a small spirit that lives in the trees of your own
+forest: it listens quietly (ambient capture), remembers everything it hears (local transcription
+memory), and answers when you speak to it (chat with your knowledge) — and it never leaves its
+forest (local-first). Ghibli's Princess Mononoke gave the kodama gentle, watchful associations —
+good mascot energy for the listening indicator, carried over unchanged (see §4). Namespace check
+(July 2026): "Kodama" is heavily claimed — the bare crates.io and npm names are squatted, most
+kodama.\* domains are gone, and Kodama Systems is a funded startup holding kodama.ai — so we
+switched to the Kodabi coinage pre-launch, while it's cheap. Availability verified 2026-07-14:
+crates.io, npm, kodabi.app, and kodabi.dev are all free.
 
 ---
 
 ## 1. Vision
 
-A fully local, open-source desktop app for **personal knowledge management with AI as the default**, not bolted on. Kodama is where all of your working knowledge lives — and its flagship capability is that meetings feed it automatically: it listens to meetings, huddles, and videos, transcribes them on-device, and routes the distilled content to the right project. But it is equally your home for typed notes, quick captures, and every conversation you have with your own knowledge. Many mouths, one knowledge base: meetings, notes, chats (and later voice memos, GitHub activity, imported docs) all become markdown, all route, all join one conversation through Claude.
+A fully local, open-source desktop app for **personal knowledge management with AI as the default**, not bolted on. Kodabi is where all of your working knowledge lives — and its flagship capability is that meetings feed it automatically: it listens to meetings, huddles, and videos, transcribes them on-device, and routes the distilled content to the right project. But it is equally your home for typed notes, quick captures, and every conversation you have with your own knowledge. Many mouths, one knowledge base: meetings, notes, chats (and later voice memos, GitHub activity, imported docs) all become markdown, all route, all join one conversation through Claude.
 
 **One sentence:** A self-organizing personal knowledge base — your meetings, notes, and project activity organize and maintain themselves, powered by the Claude subscription you already pay for.
 
-**Category claim: self-organizing PKM.** Every other PKM is self-organized — by you, forever: filing, tagging, linking, grooming, until you stop and the garden rots. Kodama's thesis is zero gardening: knowledge flows in, organizes itself, and maintains itself. You never file; you only correct — and every correction makes it quieter (routing loop, self-maintaining glossary, voice profiles). **The test every feature must pass: does it reduce organizing work, or create it?**
+**Category claim: self-organizing PKM.** Every other PKM is self-organized — by you, forever: filing, tagging, linking, grooming, until you stop and the garden rots. Kodabi's thesis is zero gardening: knowledge flows in, organizes itself, and maintains itself. You never file; you only correct — and every correction makes it quieter (routing loop, self-maintaining glossary, voice profiles). **The test every feature must pass: does it reduce organizing work, or create it?**
 
 **Positioning:** Not an AI meeting-notes app (that competes with Granola). A self-organizing PKM (competing with Obsidian-class tools) whose unfair advantage is that spoken knowledge flows in automatically.
 
@@ -32,7 +42,7 @@ A fully local, open-source desktop app for **personal knowledge management with 
 
 The space is crowded (Granola, Notion AI, Obsidian + plugins, Reflect, Mem, Tana, Logseq). Individually, each strength below exists somewhere; the identity claim is the thing none of them have:
 
-**The core gap: every PKM ever made assumes you'll be the gardener — and everyone eventually stops.** Manual filing, tagging, linking, and review is the structural failure of the category; AI-added-on tools put chat on top of a garden you still tend. Kodama is **self-organizing**: it never asks you to organize, only to occasionally correct, and corrections compound into it needing fewer of them.
+**The core gap: every PKM ever made assumes you'll be the gardener — and everyone eventually stops.** Manual filing, tagging, linking, and review is the structural failure of the category; AI-added-on tools put chat on top of a garden you still tend. Kodabi is **self-organizing**: it never asks you to organize, only to occasionally correct, and corrections compound into it needing fewer of them.
 
 **Flagship expression (post-v1): the commitment ledger.** Not a task manager — a to-do list that writes and erases itself:
 
@@ -136,7 +146,7 @@ At meeting end (batch, not continuous — keeps token usage sane):
 - The knowledge base is a plain folder — sync it with anything: Syncthing (pure-local ethos), OneDrive/Dropbox (pragmatic), or a git repo.
 - **Each device rebuilds its own SQLite index locally** from the synced files. The database is never synced (synced SQLite corrupts; the index is rebuildable by design).
 - **Glossaries, project config, and routing examples live as files inside the folder** so they sync with the knowledge.
-  - Concretely, each project folder carries a `_glossary.yml` at its root — a plain YAML list of `{ term, definition, aliases }` entries (`crates/kodama-core`'s `glossary` module owns load/save/upsert). The project itself is never a field in the file; it's implicit in which project folder the file sits in, which is what keeps the glossary per-project-isolated. The MCP `GlossaryTerm` shape's `project` field is filled in from that folder path when the API surfaces a term.
+  - Concretely, each project folder carries a `_glossary.yml` at its root — a plain YAML list of `{ term, definition, aliases }` entries (`crates/kodabi-core`'s `glossary` module owns load/save/upsert). The project itself is never a field in the file; it's implicit in which project folder the file sits in, which is what keeps the glossary per-project-isolated. The MCP `GlossaryTerm` shape's `project` field is filled in from that folder path when the API surfaces a term.
 - **Filenames include timestamp + device ID** so simultaneous capture on two machines can never collide; the append-mostly design makes conflicts nearly impossible (scheme: [`FILENAME_SCHEME.md`](FILENAME_SCHEME.md)).
 - V1 ships zero sync code — one README paragraph. Built-in git-backed sync is a Phase 5 candidate.
 - **Import/export (settings):** export = zip of the knowledge base (or a single project) with notes, glossaries, config, routing examples + a version manifest; import = *merge*, never overwrite (timestamp+device-ID filenames prevent collisions; index rebuilds after). Import doubles as the schema-migration hook for old archives. Single-project scope covers the consulting cases: archive a finished engagement, hand a project to a colleague. Import-from-Obsidian/plain-markdown is a Phase 5 onboarding ramp.
@@ -163,7 +173,7 @@ Design is a feature, not polish. Bar: Linear / Things 3 quality, not admin-panel
 - **The kodama rattle** — an optional, off-by-default soft wooden "tick" on capture start/stop and distill-complete. A signature detail for those who enable it.
 - **Moodboard references (Phase 0):** Japanese stationery, Ghibli *backgrounds*, Muji, washi paper, misty forest photography.
 
-**Guardrail — theme as restraint, not decoration.** The Kodama influence lives almost entirely in palette, spacing, and the one animated spirit-mark. No leaf icons on buttons, no wood-grain backgrounds, no spirit illustrations scattered through the UI. Success test: a user thinks "this is unusually calm and beautiful" without consciously registering "forest." If the theme is noticeable as a theme, it's overdone.
+**Guardrail — theme as restraint, not decoration.** The kodama influence lives almost entirely in palette, spacing, and the one animated spirit-mark. No leaf icons on buttons, no wood-grain backgrounds, no spirit illustrations scattered through the UI. Success test: a user thinks "this is unusually calm and beautiful" without consciously registering "forest." If the theme is noticeable as a theme, it's overdone.
 
 Principles:
 
@@ -215,8 +225,10 @@ Shipped: license (**AGPL-3.0-only**), design system ([`DESIGN.md`](DESIGN.md),
 `design/tokens.css`, [`SPIRIT_MARK.md`](SPIRIT_MARK.md)), Tauri + Rust workspace scaffold with CI,
 the frontmatter schema ([`FRONTMATTER_SCHEMA.md`](FRONTMATTER_SCHEMA.md)), and the MCP tool
 surface ([`MCP_TOOL_SURFACE.md`](MCP_TOOL_SURFACE.md)). One item still open, tracked in the
-backlog: reserve the domain variant (kodama.app / getkodama.dev / kodama.sh) + crates.io/npm names
-(the GitHub repo exists: `github.com/ShaneHoffman/kodama`).
+backlog: reserve the domain variant (kodabi.app / kodabi.dev) + crates.io/npm names, and backorder
+kodabi.com (parked at GoDaddy, renew-prohibited, expires 2026-10-04). The GitHub repo/org rename to
+`kodabi` happens after this rename branch merges, so tooling isn't disrupted mid-task (currently
+`github.com/ShaneHoffman/kodama`).
 
 ### Phase 1 — Capture & transcribe (the hard 20%)
 
@@ -277,7 +289,7 @@ order of expected value — each earns its place only after the core loop proves
 
 | Decision | Options | Lean | Deadline |
 |---|---|---|---|
-| ~~Name~~ | — | **DECIDED: Kodama** | ✅ Closed |
+| ~~Name~~ | — | **DECIDED: Kodabi** (renamed from "Kodama", 2026-07 — namespace conflicts; see §Why) | ✅ Closed |
 | ~~License~~ | — | **DECIDED: AGPL-3.0-only** | ✅ Closed |
 | ~~Frontend stack~~ | — | **DECIDED: React + Tailwind** | ✅ Closed |
 | Default STT engine | Parakeet TDT (sherpa-onnx) / whisper.cpp large-v3-turbo | Parakeet (silence-safe, fast); confirm via real-meeting benchmark | Phase 1 |

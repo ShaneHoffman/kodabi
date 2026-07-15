@@ -1873,11 +1873,11 @@ dependencies = [
 ]
 
 [[package]]
-name = "kodama"
+name = "kodabi"
 version = "0.1.0"
 dependencies = [
- "kodama-audio",
- "kodama-core",
+ "kodabi-audio",
+ "kodabi-core",
  "serde",
  "serde_json",
  "tauri",
@@ -1886,7 +1886,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kodama-audio"
+name = "kodabi-audio"
 version = "0.1.0"
 dependencies = [
  "audioadapter-buffers",
@@ -1902,7 +1902,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "kodama-core"
+name = "kodabi-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
@@ -1916,20 +1916,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "kodama-llm"
+name = "kodabi-llm"
 version = "0.1.0"
 dependencies = [
- "kodama-core",
+ "kodabi-core",
  "serde",
  "serde_json",
 ]
 
 [[package]]
-name = "kodama-transcribe"
+name = "kodabi-transcribe"
 version = "0.1.0"
 dependencies = [
  "hound",
- "kodama-core",
+ "kodabi-core",
  "sherpa-onnx",
  "tempfile",
  "whisper-rs",

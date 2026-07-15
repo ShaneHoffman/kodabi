@@ -1,9 +1,9 @@
-//! Thin Tauri command wrappers over `kodama_audio::DualCapture`. All capture
-//! and two-channel orchestration logic lives in the `kodama-audio` crate;
+//! Thin Tauri command wrappers over `kodabi_audio::DualCapture`. All capture
+//! and two-channel orchestration logic lives in the `kodabi-audio` crate;
 //! these commands only own the managed [`DualCapture`] and map its status /
 //! aligned-session outputs to serializable IPC DTOs.
 
-use kodama_audio::{AlignedSession, AudioFormat, DualCapture, DualStatus, SourceStatus};
+use kodabi_audio::{AlignedSession, AudioFormat, DualCapture, DualStatus, SourceStatus};
 
 /// Bounds each source's capture-item channel — the slack between a cpal
 /// callback enqueuing a frame and the combiner's coordinator thread draining
@@ -57,7 +57,7 @@ pub struct CaptureStateEvent {
     pub phase: CapturePhase,
 }
 
-/// Serializable per-source status for IPC. Mirrors `kodama_audio::SourceStatus`
+/// Serializable per-source status for IPC. Mirrors `kodabi_audio::SourceStatus`
 /// — this crate owns the wire shape (serde) so the audio crate stays free of a
 /// serialization concern.
 #[derive(serde::Serialize)]
