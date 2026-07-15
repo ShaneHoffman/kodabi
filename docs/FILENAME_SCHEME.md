@@ -1,4 +1,4 @@
-# Kodama — Session Filename Scheme
+# Kodabi — Session Filename Scheme
 
 **Status:** Locked (Phase 1, `feat/session-filename-scheme`). Specifies how captured-session
 artifacts are named on disk. Implements [`FOUNDING_DOC.md`](FOUNDING_DOC.md) §3.6b ("Filenames
@@ -58,7 +58,7 @@ config, and routing examples are the config that syncs with the folder, per §3.
 The ID only needs to distinguish a single user's own handful of devices, not be globally unique —
 36⁸ (≈2.8×10¹²) possibilities makes collision negligible at that scale, so a short ID was chosen
 over a full UUID to keep filenames (and therefore full paths under deeply-nested synced folders)
-short. See `crates/kodama-core/src/device.rs` for generation and persistence.
+short. See `crates/kodabi-core/src/device.rs` for generation and persistence.
 
 ### Slug
 
@@ -72,7 +72,7 @@ a deeply-nested synced folder path.
 Because neither the timestamp nor the device ID ever contains `-`, splitting the filename stem
 (after removing the extension) on `-` with a limit of 3 unambiguously recovers
 `[timestamp, deviceID, slug]` — the slug, if present, may itself contain `-`. See
-`parse_session_filename` in `crates/kodama-core/src/naming.rs`.
+`parse_session_filename` in `crates/kodabi-core/src/naming.rs`.
 
 ---
 
@@ -90,7 +90,7 @@ Every component that names or reads a captured-session filename must follow this
 
 ## Reference implementation
 
-`crates/kodama-core/src/device.rs` — `DeviceId` generation, validation, and per-machine
+`crates/kodabi-core/src/device.rs` — `DeviceId` generation, validation, and per-machine
 persistence (`load_or_create`).
-`crates/kodama-core/src/naming.rs` — `session_filename` (compose) and `parse_session_filename`
+`crates/kodabi-core/src/naming.rs` — `session_filename` (compose) and `parse_session_filename`
 (decompose).

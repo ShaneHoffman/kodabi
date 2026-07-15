@@ -1,4 +1,4 @@
-# Kodama — Roadmap (Phases 2–5)
+# Kodabi — Roadmap (Phases 2–5)
 
 Phases 0 and 1 are tracked as individual, agent-actionable tickets in the Kangentic backlog.
 This file holds the **later phases as unrefined planning material** — goals, milestones, and

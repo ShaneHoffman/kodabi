@@ -1,4 +1,4 @@
-# Kodama — MCP Tool Surface (v1)
+# Kodabi — MCP Tool Surface (v1)
 
 **Status:** Spec (Phase 0, ticket P0-10). Defines the stdio MCP tool surface the Phase 3 server
 implements and the Phase 2 `search_notes` retrieval builds against. Schemas are the contract;
@@ -17,16 +17,16 @@ Claude Code MCP reference (`code.claude.com/docs/en/mcp`) and the MCP tool speci
 
 ## Server & wiring
 
-- **Server name:** `kodama`. **Transport:** local **stdio**. The process is spawned by the Tauri
+- **Server name:** `kodabi`. **Transport:** local **stdio**. The process is spawned by the Tauri
   shell and preconfigured for the embedded Claude Code terminal (Phase 3).
-- Tools are callable as **`mcp__kodama__<tool>`** — Claude Code's namespacing for a server named
-  `kodama` with no plugin wrapper.
+- Tools are callable as **`mcp__kodabi__<tool>`** — Claude Code's namespacing for a server named
+  `kodabi` with no plugin wrapper.
 - Example project-scoped `.mcp.json` entry (committed, shared with the team):
 
   ```json
   {
     "mcpServers": {
-      "kodama": { "command": "<path-to-kodama-mcp-binary>", "args": [], "env": {} }
+      "kodabi": { "command": "<path-to-kodabi-mcp-binary>", "args": [], "env": {} }
     }
   }
   ```
@@ -36,7 +36,7 @@ Claude Code MCP reference (`code.claude.com/docs/en/mcp`) and the MCP tool speci
   root from its own config (not from the working directory), and may implement the MCP `roots/list`
   request if it wants to bound its own filesystem access to Claude Code's granted directories.
 - **Permissions.** The two write tools should be allow-listed explicitly — e.g.
-  `"mcp__kodama__file_note_to_project"`, `"mcp__kodama__add_glossary_term"` — so Claude Code's
+  `"mcp__kodabi__file_note_to_project"`, `"mcp__kodabi__add_glossary_term"` — so Claude Code's
   permission prompt is meaningful per-tool; the six read tools can be granted as a group. The server
   performs no confirmation of its own; approval is entirely Claude Code's permission model.
 - Keep every tool `description` and the server's own instructions string **under 2 KB** — Claude
@@ -751,7 +751,7 @@ Out of scope for this spec, listed so Phase 3+ doesn't rediscover the gap from s
   unreliable in practice.
 - **Glossary `list` / `remove` / `update`-beyond-add** — reads are already covered by
   `get_project_context`'s `glossary` section; standalone edit/delete tools are minor and deferred.
-- **MCP resources** (`@kodama:note://...`) **and prompts** (`/mcp__kodama__...`) — separate MCP
+- **MCP resources** (`@kodabi:note://...`) **and prompts** (`/mcp__kodabi__...`) — separate MCP
   surfaces from tools; not addressed by this ticket.
 
 ---
@@ -785,7 +785,7 @@ All three calls are read-only and already in the v1 surface — no gap remains f
 
 ## What this hands downstream
 
-- **→ Phase 3 (stdio MCP server, `crates/kodama-core`):** these 8 `tools/list` entries verbatim,
+- **→ Phase 3 (stdio MCP server, `crates/kodabi-core`):** these 8 `tools/list` entries verbatim,
   the error/pagination contract, and the `.mcp.json` wiring. The server implements the schemas
   above as its `inputSchema`/`outputSchema` and returns `structuredContent` conforming to them.
 - **→ Phase 2 (`search_notes` via hybrid retrieval):** the `search_notes` input filters and the
