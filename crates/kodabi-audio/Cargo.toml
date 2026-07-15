@@ -28,8 +28,9 @@ windows-core = "=0.61.2"
 
 [dev-dependencies]
 serde_json = "1"
-# Test-only stereo WAV write/read: the hardware-gated two-channel test's
-# tangible verification artifact. Runtime persistence is a separate ticket
-# (`feat/persist-raw-session`), so this stays a dev-dependency.
+# Stereo WAV write/read: the hardware-gated two-channel test's tangible
+# verification artifact, and the `record_meeting` example's output format.
+# Runtime persistence is a separate ticket (`feat/persist-raw-session`), so
+# this stays a dev-dependency rather than shipping in the app.
 hound = "3.5"
 tempfile = "3"
