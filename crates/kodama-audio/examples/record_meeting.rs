@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use hound::{SampleFormat, WavSpec, WavWriter};
-use kodama_audio::{AlignedSession, DualCapture, DualStatus, SessionChannel};
+use kodama_audio::{levels, AlignedSession, DualCapture, DualStatus, SessionChannel};
 
 const TWO_CHANNEL_SAMPLE_RATE: u32 = 48_000;
 const FRAME_CAPACITY: usize = 256;
@@ -69,12 +69,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Stopped in {:?}.", stop_started.elapsed());
 
     print_summary(&status, &session);
-    write_outputs(&out_prefix, &session)?;
+    let written = write_outputs(&out_prefix, &session)?;
 
-    eprintln!(
-        "\nWrote {p}_you_them.wav, {p}_you.wav, {p}_them.wav",
-        p = out_prefix.display()
-    );
+    let listed = written
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    eprintln!("\nWrote {listed}");
     eprintln!(
         "Reminder: this is real recorded audio — keep participant consent and \
          retention posture in mind before committing any of it (FOUNDING_DOC §3.7)."
@@ -91,6 +93,11 @@ fn parse_args(args: Vec<String>) -> Result<(PathBuf, Option<u64>), Box<dyn std::
             "--max-secs" => {
                 let value = iter.next().ok_or("--max-secs requires a value")?;
                 max_secs = Some(value.parse::<u64>()?);
+            }
+            // Reject unrecognized flags rather than silently accepting a typo
+            // (e.g. `--max-sec`) as the output prefix.
+            flag if flag.starts_with("--") => {
+                return Err(format!("unknown flag: {flag}").into());
             }
             _ if prefix.is_none() => prefix = Some(PathBuf::from(arg)),
             other => return Err(format!("unexpected argument: {other}").into()),
@@ -123,48 +130,45 @@ fn print_summary(status: &DualStatus, session: &AlignedSession) {
     if them_peak == 0.0 {
         eprintln!("WARNING: system channel is pure silence — was anything playing?");
     }
+    // A benchmark master is only as good as its fidelity, so any dropped
+    // frames — glitches/gaps in the recording — matter as much as silence and
+    // must be surfaced loudly, not left buried in the numbers above.
+    if status.microphone.frames_dropped > 0 {
+        eprintln!(
+            "WARNING: mic dropped {} frame(s) — the recording has gaps/glitches; \
+             consider re-recording before using this as a fixture.",
+            status.microphone.frames_dropped,
+        );
+    }
+    if status.loopback.frames_dropped > 0 {
+        eprintln!(
+            "WARNING: loopback dropped {} frame(s) — the recording has gaps/glitches; \
+             consider re-recording before using this as a fixture.",
+            status.loopback.frames_dropped,
+        );
+    }
 }
 
-/// Peak absolute amplitude and RMS of a buffer of f32 samples. Mirrors
-/// `kodama_audio`'s internal `convert::levels` (not part of the crate's
-/// public surface) for this tool's post-capture summary.
-fn levels(samples: &[f32]) -> (f32, f32) {
-    if samples.is_empty() {
-        return (0.0, 0.0);
-    }
-    let mut peak = 0.0_f32;
-    let mut sum_sq = 0.0_f32;
-    for &s in samples {
-        peak = peak.max(s.abs());
-        sum_sq += s * s;
-    }
-    (peak, (sum_sq / samples.len() as f32).sqrt())
-}
-
+/// Writes the stereo master and the two mono channels, returning the exact
+/// paths written (so the caller reports the real filenames rather than
+/// re-deriving them and risking a mismatch).
 fn write_outputs(
     prefix: &Path,
     session: &AlignedSession,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
     let sample_rate = session.sample_rate();
+    let you_them = with_suffix(prefix, "you_them");
+    let you = with_suffix(prefix, "you");
+    let them = with_suffix(prefix, "them");
+    write_wav(&you_them, 2, sample_rate, &session.interleaved_stereo())?;
+    write_wav(&you, 1, sample_rate, session.channel(SessionChannel::Mic))?;
     write_wav(
-        &with_suffix(prefix, "you_them"),
-        2,
-        sample_rate,
-        &session.interleaved_stereo(),
-    )?;
-    write_wav(
-        &with_suffix(prefix, "you"),
-        1,
-        sample_rate,
-        session.channel(SessionChannel::Mic),
-    )?;
-    write_wav(
-        &with_suffix(prefix, "them"),
+        &them,
         1,
         sample_rate,
         session.channel(SessionChannel::System),
     )?;
-    Ok(())
+    Ok(vec![you_them, you, them])
 }
 
 /// Appends `_{suffix}.wav` to `prefix`'s filename, keeping its directory.
@@ -183,6 +187,22 @@ fn write_wav(
     sample_rate: u32,
     samples: &[f32],
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // WAV stores its RIFF/data chunk sizes as u32, so a stream whose PCM data
+    // (4 bytes per f32 sample) plus the ~44-byte header exceeds u32::MAX would
+    // silently wrap into a corrupt file at finalize. Fail loudly instead — a
+    // truncated benchmark master is worse than no file. (~4 GB is ~3.7 h of
+    // 48 kHz stereo; use --max-secs to bound long sessions.)
+    const WAV_HEADER_BYTES: u64 = 44;
+    let data_bytes = samples.len() as u64 * 4;
+    if data_bytes + WAV_HEADER_BYTES > u32::MAX as u64 {
+        return Err(format!(
+            "{}: recording too long for a WAV file ({:.1} GiB of samples exceeds the \
+             ~4 GiB WAV size limit) — record a shorter session (see --max-secs)",
+            path.display(),
+            data_bytes as f64 / (1024.0 * 1024.0 * 1024.0),
+        )
+        .into());
+    }
     let spec = WavSpec {
         channels,
         sample_rate,
