@@ -113,6 +113,42 @@ pub fn load_or_create(config_path: &Path) -> io::Result<DeviceId> {
     Ok(id)
 }
 
+/// Adopts a device identity from a legacy config location when the current
+/// one is absent, so a change in the app's bundle identifier doesn't orphan an
+/// existing device identity and silently mint a new one.
+///
+/// The Kodama → Kodabi rename changed the identifier (`com.kodama.app` →
+/// `com.kodabi.app`), which moves the OS-resolved config dir; without this,
+/// [`load_or_create`] would find nothing at the new path and generate a fresh
+/// ID, quietly changing the device's identity across the upgrade.
+///
+/// Returns `Ok(true)` when a legacy identity was adopted. A no-op (returning
+/// `Ok(false)`) unless `current_path` is missing *and* `legacy_path` holds a
+/// valid device ID: an existing current config is never overwritten, and a
+/// corrupt/missing legacy file is left for [`load_or_create`] to replace. Only
+/// a genuine I/O error (permissions, disk) propagates — the caller treats even
+/// that as best-effort and falls through to minting a fresh ID, exactly as
+/// before this migration existed.
+pub fn migrate_legacy_config(legacy_path: &Path, current_path: &Path) -> io::Result<bool> {
+    if current_path.exists() {
+        return Ok(false);
+    }
+    match read(legacy_path) {
+        // Re-serialize through `write_atomic` rather than copying raw bytes, so
+        // the new file is canonical and validated (a legacy file with stray
+        // fields or odd formatting lands clean).
+        Ok(Some(id)) => {
+            write_atomic(current_path, &id)?;
+            Ok(true)
+        }
+        Ok(None) => Ok(false),
+        // Corrupt/invalid legacy config: don't adopt it — `load_or_create`
+        // will mint a fresh ID at the new location instead.
+        Err(err) if err.kind() == io::ErrorKind::InvalidData => Ok(false),
+        Err(err) => Err(err),
+    }
+}
+
 fn read(config_path: &Path) -> io::Result<Option<DeviceId>> {
     let contents = match fs::read_to_string(config_path) {
         Ok(contents) => contents,
@@ -225,6 +261,92 @@ mod tests {
 
         // The healed file now round-trips on the next load.
         assert_eq!(load_or_create(&config_path).unwrap(), id);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    fn temp_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "kodabi-device-{tag}-{}",
+            DeviceId::generate().unwrap()
+        ));
+        fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn migrate_adopts_a_valid_legacy_identity_when_current_is_absent() {
+        let dir = temp_dir("migrate");
+        let legacy = dir.join("com.kodama.app").join("device.toml");
+        let current = dir.join("com.kodabi.app").join("device.toml");
+
+        // A legacy install already has a persisted identity.
+        let legacy_id = load_or_create(&legacy).unwrap();
+
+        let adopted = migrate_legacy_config(&legacy, &current).unwrap();
+        assert!(adopted, "a valid legacy identity should be adopted");
+
+        // The new location now carries the *same* identity — the rename didn't
+        // reset it — and load_or_create returns it rather than minting a fresh one.
+        assert_eq!(load_or_create(&current).unwrap(), legacy_id);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn migrate_never_overwrites_an_existing_current_identity() {
+        let dir = temp_dir("migrate-noop");
+        let legacy = dir.join("com.kodama.app").join("device.toml");
+        let current = dir.join("com.kodabi.app").join("device.toml");
+
+        let legacy_id = load_or_create(&legacy).unwrap();
+        let current_id = load_or_create(&current).unwrap();
+        assert_ne!(
+            legacy_id, current_id,
+            "distinct ids for the test to be meaningful"
+        );
+
+        let adopted = migrate_legacy_config(&legacy, &current).unwrap();
+        assert!(
+            !adopted,
+            "an existing current config must be left untouched"
+        );
+        assert_eq!(load_or_create(&current).unwrap(), current_id);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn migrate_is_a_noop_when_no_legacy_config_exists() {
+        let dir = temp_dir("migrate-fresh");
+        let legacy = dir.join("com.kodama.app").join("device.toml");
+        let current = dir.join("com.kodabi.app").join("device.toml");
+
+        let adopted = migrate_legacy_config(&legacy, &current).unwrap();
+        assert!(!adopted, "nothing to adopt on a fresh install");
+        assert!(
+            !current.exists(),
+            "migration must not create a config out of nothing"
+        );
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn migrate_ignores_a_corrupt_legacy_config() {
+        let dir = temp_dir("migrate-corrupt");
+        let legacy = dir.join("com.kodama.app").join("device.toml");
+        let current = dir.join("com.kodabi.app").join("device.toml");
+
+        fs::create_dir_all(legacy.parent().unwrap()).unwrap();
+        fs::write(&legacy, "}} not toml {{").unwrap();
+
+        // A corrupt legacy file must not be adopted; the new location is left
+        // untouched so load_or_create can mint a fresh, valid id there.
+        let adopted = migrate_legacy_config(&legacy, &current).unwrap();
+        assert!(!adopted);
+        assert!(!current.exists());
+        assert!(DeviceId::parse(load_or_create(&current).unwrap().as_str()).is_ok());
 
         fs::remove_dir_all(&dir).unwrap();
     }
