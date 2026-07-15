@@ -16,3 +16,10 @@ kangentic.local.json
 
 # TypeScript incremental build cache
 /tsconfig.tsbuildinfo
+
+# Real-meeting benchmark fixture: contains actual recorded audio/transcript
+# of a real conversation with real participants — kept local-only, never in
+# git history (not even a local commit), regardless of push. Only the
+# manifest describing the fixture's shape is versioned.
+/crates/kodama-transcribe/tests/data/benchmark/*
+!/crates/kodama-transcribe/tests/data/benchmark/README.md
