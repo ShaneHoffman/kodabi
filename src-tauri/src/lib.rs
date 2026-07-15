@@ -1,7 +1,7 @@
 mod audio_cmds;
 mod capture_control;
 
-use kodama_core::device::DeviceId;
+use kodabi_core::device::DeviceId;
 use tauri::Manager;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
@@ -26,7 +26,7 @@ pub fn run() {
         )
         .setup(move |app| {
             let config_dir = app.path().app_config_dir()?;
-            let device_id = kodama_core::device::load_or_create(&config_dir.join("device.toml"))?;
+            let device_id = kodabi_core::device::load_or_create(&config_dir.join("device.toml"))?;
             app.manage(device_id);
 
             // Build the tray (which manages `CaptureController`) BEFORE
@@ -63,12 +63,12 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-// Proves src-tauri actually links kodama-core (the data-layer dependency),
+// Proves src-tauri actually links kodabi-core (the data-layer dependency),
 // exercised by `cargo test`. No runtime feature is added.
 #[cfg(test)]
 mod tests {
     #[test]
     fn depends_on_core() {
-        assert!(!kodama_core::version().is_empty());
+        assert!(!kodabi_core::version().is_empty());
     }
 }

@@ -1,4 +1,4 @@
-# Kodama — Spirit-mark (Listening Indicator)
+# Kodabi — Spirit-mark (Listening Indicator)
 
 **Status:** Concept (Phase 0, ticket P0-5). Designs the mark that
 [`DESIGN.md`](DESIGN.md) reserves the green and the feeling for; the exact tokens are locked later
@@ -7,7 +7,7 @@ in P0-4 and the runtime is built in P1-5. This document is the *intent*; its vis
 to feel the breath.
 
 The listening indicator **is** the kodama. It is one mark doing three jobs at once: the app's
-**logo**, its **consent / trust signal** ("Kodama is recording"), and its **screenshot moment** —
+**logo**, its **consent / trust signal** ("Kodabi is recording"), and its **screenshot moment** —
 the single element that carries the product in a still frame. It animates while listening and is
 still when idle.
 
@@ -17,7 +17,7 @@ still when idle.
 
 > **Calm you notice before you notice why.**
 
-Everywhere else in Kodama, hue stays almost silent and hierarchy comes from value and space. The
+Everywhere else in Kodabi, hue stays almost silent and hierarchy comes from value and space. The
 spirit-mark is the one exception the aesthetic sets aside: the sole place a living green is ever
 spent. It has to earn that — a small, quiet presence that reads as *attending to you*, never as a
 status LED, a mascot, or a nature motif.
@@ -85,11 +85,11 @@ P1-5 to refine against real audio; the moodboard's `breathe` / `halo` keyframes 
 
 - **Logo.** The still neutral mark at rest. Because the core is a clean disc carried by *value*, not
   hue, it holds up as a brand mark at any size and in a single ink. Lockups: **mark-only** and
-  **mark + `kodama` wordmark** (in the interface humanist sans). Sizes down to a **16 px tray icon /
+  **mark + `kodabi` wordmark** (in the interface humanist sans). Sizes down to a **16 px tray icon /
   favicon**, plus title-bar and About. **Clear space** is measured in *ma*: an empty margin of at
   least the core's own diameter on every side; the aura's reach is generous — never crop it.
 - **Trust / consent signal.** Green + breath = recording; still neutral = not recording. It is
-  unambiguous *because* the green is reserved — green anywhere in Kodama means "live." This is the
+  unambiguous *because* the green is reserved — green anywhere in Kodabi means "live." This is the
   consent story P1-5 must satisfy, seeded here.
 - **Screenshot moment.** In an otherwise near-neutral interface, the one breathing green is the
   element that sells the app in a still marketing frame.

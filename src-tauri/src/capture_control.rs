@@ -1,7 +1,7 @@
 //! The shared capture toggle: the single decision point both the global
 //! hotkey and the tray menu drive, so pressing either always flips the same
 //! state. Inherently Tauri-coupled (AppHandle, tray, menu, events), so it
-//! lives in the shell rather than `kodama-audio` or `audio_cmds`'s thin
+//! lives in the shell rather than `kodabi-audio` or `audio_cmds`'s thin
 //! command wrappers.
 
 use std::str::FromStr;
@@ -21,7 +21,7 @@ use crate::audio_cmds::{
 pub const CAPTURE_STATE_EVENT: &str = "capture:state";
 
 /// Default global hotkey that starts/stops capture. OS-global — fires even
-/// while Kodama is unfocused. Not yet user-configurable.
+/// while Kodabi is unfocused. Not yet user-configurable.
 pub const DEFAULT_TOGGLE_SHORTCUT: &str = "Ctrl+Shift+K";
 
 /// Managed alongside [`CaptureState`]: serializes the toggle's
@@ -125,8 +125,8 @@ fn broadcast_capture_phase(app: &AppHandle, state: &CaptureState) {
     };
 
     let (label, tooltip) = match phase {
-        CapturePhase::Listening => ("Stop capture", "Kodama — listening"),
-        CapturePhase::Idle => ("Start capture", "Kodama — idle"),
+        CapturePhase::Listening => ("Stop capture", "Kodabi — listening"),
+        CapturePhase::Idle => ("Start capture", "Kodabi — idle"),
     };
     if let Some(controller) = app.try_state::<CaptureController>() {
         let _ = controller.toggle_item.set_text(label);
@@ -142,7 +142,7 @@ fn broadcast_capture_phase(app: &AppHandle, state: &CaptureState) {
 pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let toggle_item =
         MenuItem::with_id(app, "toggle_capture", "Start capture", true, None::<&str>)?;
-    let show_item = MenuItem::with_id(app, "show", "Show Kodama", true, None::<&str>)?;
+    let show_item = MenuItem::with_id(app, "show", "Show Kodabi", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
@@ -165,7 +165,7 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 .expect("tauri.conf.json bundles a default window icon")
                 .clone(),
         )
-        .tooltip("Kodama — idle")
+        .tooltip("Kodabi — idle")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {

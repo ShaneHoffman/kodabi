@@ -2,10 +2,10 @@
 resolver = "2"
 members = [
     "src-tauri",
-    "crates/kodama-core",
-    "crates/kodama-audio",
-    "crates/kodama-transcribe",
-    "crates/kodama-llm",
+    "crates/kodabi-core",
+    "crates/kodabi-audio",
+    "crates/kodabi-transcribe",
+    "crates/kodabi-llm",
 ]
 
 [workspace.package]

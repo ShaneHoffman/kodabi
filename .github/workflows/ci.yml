@@ -95,7 +95,7 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
-  # kodama-transcribe's native-engine features are off by default, so the
+  # kodabi-transcribe's native-engine features are off by default, so the
   # `lint`/`test` jobs' `--workspace` runs above never compile or lint them.
   # This matrixed job clippy-checks each feature with it turned on, so the FFI
   # glue can't silently rot between the rare times someone runs it locally:
@@ -143,7 +143,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Check for changes under crates/kodama-transcribe
+      - name: Check for changes under crates/kodabi-transcribe
         id: changed
         shell: bash
         run: |
@@ -160,7 +160,7 @@ jobs:
           if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
             base="HEAD~1"
           fi
-          changed="$(git diff --name-only "$base" HEAD -- crates/kodama-transcribe)"
+          changed="$(git diff --name-only "$base" HEAD -- crates/kodabi-transcribe)"
           if [ -n "$changed" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
@@ -182,4 +182,4 @@ jobs:
           # Harmless for the parakeet leg (nothing reads it); required by
           # whisper-rs's bindgen build to locate libclang.
           LIBCLANG_PATH: C:\Program Files\LLVM\bin
-        run: cargo clippy -p kodama-transcribe --features ${{ matrix.engine }} --all-targets --locked -- -D warnings
+        run: cargo clippy -p kodabi-transcribe --features ${{ matrix.engine }} --all-targets --locked -- -D warnings

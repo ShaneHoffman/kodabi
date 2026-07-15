@@ -1,10 +1,10 @@
 ---
 name: preview
-description: Preview the Kodama desktop app from the current (work)tree — launch Tauri dev mode and smoke-test it. Use to see a change working in the real app, or before committing a change that touches runtime behavior.
+description: Preview the Kodabi desktop app from the current (work)tree — launch Tauri dev mode and smoke-test it. Use to see a change working in the real app, or before committing a change that touches runtime behavior.
 argument-hint: [optional focus — e.g. "check the listening indicator"]
 ---
 
-# Preview Kodama from this tree
+# Preview Kodabi from this tree
 
 Launch the desktop app from the **current working tree** (usually a Kangentic task worktree under
 `.kangentic/worktrees/<slug>`) and confirm it is healthy before/after a change. Extra focus from

@@ -1,6 +1,6 @@
-# Kodama
+# Kodabi
 
-A self-organizing personal knowledge base. Kodama turns meeting transcripts and quick notes into a
+A self-organizing personal knowledge base. Kodabi turns meeting transcripts and quick notes into a
 searchable, chat-able knowledge base: **transcribe → distill → auto-route → search & chat**.
 
 ## Status
@@ -33,9 +33,9 @@ src/                    # React + TypeScript frontend. src/index.css bridges the
                         # into Tailwind v4 utilities; src/fonts.ts self-hosts the Source
                         # typeface trio.
 src-tauri/              # Tauri v2 binary crate — the desktop shell and window.
-crates/kodama-core/     # Pure, UI-agnostic, unit-testable data layer that the shell
+crates/kodabi-core/     # Pure, UI-agnostic, unit-testable data layer that the shell
                         # depends on. Future SQLite index and MCP query surface live here.
-Cargo.toml              # Cargo workspace manifest (src-tauri + crates/kodama-core).
+Cargo.toml              # Cargo workspace manifest (src-tauri + crates/kodabi-core).
 package.json            # Frontend package manifest and scripts.
 vite.config.ts, tsconfig*.json, eslint.config.js   # Frontend build/lint config.
 target/, dist/          # Build output (git-ignored).
@@ -65,7 +65,7 @@ cargo fmt --check
 
 ## License
 
-Kodama is free software licensed under the **GNU Affero General Public License, version 3**
+Kodabi is free software licensed under the **GNU Affero General Public License, version 3**
 (`AGPL-3.0-only`). You may redistribute and/or modify it under the terms of version 3 of the License
 as published by the Free Software Foundation. See [`LICENSE`](LICENSE) for the full text.
 
