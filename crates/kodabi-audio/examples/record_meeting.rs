@@ -1,7 +1,7 @@
 //! Manual recording tool: drives the real two-channel capture pipeline
 //! (loopback + mic + combiner — the same path `DualCapture` gives the app)
 //! and writes the result to WAV, for use as raw material for a benchmark
-//! fixture (see `crates/kodama-transcribe/tests/data/benchmark/README.md`).
+//! fixture (see `crates/kodabi-transcribe/tests/data/benchmark/README.md`).
 //!
 //! An example rather than app code: it needs `hound`, a dev-dependency only
 //! (see this crate's `Cargo.toml` — runtime persistence is a separate,
@@ -9,7 +9,7 @@
 //! real meeting, not a shipping feature.
 //!
 //! Usage:
-//!   cargo run -p kodama-audio --example record_meeting -- <output-prefix> [--max-secs N]
+//!   cargo run -p kodabi-audio --example record_meeting -- <output-prefix> [--max-secs N]
 //!
 //! Announce the recording and get participants' consent before running this
 //! (FOUNDING_DOC §3.7). Recording starts immediately; press Enter to stop it
@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use hound::{SampleFormat, WavSpec, WavWriter};
-use kodama_audio::{levels, AlignedSession, DualCapture, DualStatus, SessionChannel};
+use kodabi_audio::{levels, AlignedSession, DualCapture, DualStatus, SessionChannel};
 
 const TWO_CHANNEL_SAMPLE_RATE: u32 = 48_000;
 const FRAME_CAPACITY: usize = 256;
