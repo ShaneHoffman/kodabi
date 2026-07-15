@@ -20,6 +20,7 @@ mod source;
 
 pub use capture::Capture;
 pub use combine::{AlignedSession, Combiner, SessionChannel};
+pub use convert::levels;
 pub use error::{AudioError, Result};
 pub use format::{AudioFormat, SampleTag};
 pub use frame::{AudioFrame, CaptureItem, SegmentReason};
