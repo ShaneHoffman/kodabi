@@ -41,11 +41,51 @@ function stripQuotes(s) {
   return t;
 }
 
+// Drop a trailing YAML line comment: a `#` that starts a comment (at the start of
+// the value or preceded by whitespace) and sits outside quotes. Quote tracking keeps
+// a literal `#` inside a value (e.g. `raw/a#b.jsonl`, `"a # b"`) intact.
+function stripComment(s) {
+  let quote = null;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (quote) {
+      if (c === quote) quote = null;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+    } else if (c === '#' && (i === 0 || /\s/.test(s[i - 1]))) {
+      return s.slice(0, i);
+    }
+  }
+  return s;
+}
+
+// Split on top-level commas, ignoring commas inside quoted items.
+function splitTopLevel(s) {
+  const out = [];
+  let cur = '';
+  let quote = null;
+  for (const c of s) {
+    if (quote) {
+      cur += c;
+      if (c === quote) quote = null;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+      cur += c;
+    } else if (c === ',') {
+      out.push(cur);
+      cur = '';
+    } else {
+      cur += c;
+    }
+  }
+  out.push(cur);
+  return out;
+}
+
 function parseInlineList(v) {
   const inner = v.trim().replace(/^\[/, '').replace(/\]$/, '');
   if (inner.trim() === '') return [];
-  return inner
-    .split(',')
+  return splitTopLevel(inner)
     .map((x) => stripQuotes(x))
     .filter((x) => x !== '');
 }
@@ -85,7 +125,7 @@ function parseFrontmatter(content) {
       continue;
     }
     const key = m[1].trim();
-    const valuePart = m[2].trim();
+    const valuePart = stripComment(m[2]).trim();
     let kind;
     let items = null;
     let value = null;
@@ -102,7 +142,7 @@ function parseFrontmatter(content) {
         }
         const li = l.match(/^\s*-\s*(.*)$/);
         if (li) {
-          collected.push(stripQuotes(li[1]));
+          collected.push(stripQuotes(stripComment(li[1])));
           j++;
           continue;
         }
@@ -377,10 +417,17 @@ function checkSchema() {
   lines.push(`FRONTMATTER_SCHEMA.md`);
   try {
     const fsDoc = readFileSync(fsPath, 'utf8');
-    const m = fsDoc.match(/Canonical key order[^`]*`([^`]+)`/i);
-    if (!m) bad('could not find the canonical key-order line');
+    const orderLine = fsDoc.split(/\r?\n/).find((l) => /Canonical key order/i.test(l));
+    // Pick the backtick-delimited span holding the field list (the one with commas),
+    // not merely the first backtick span — so rewording the prose around it can't
+    // capture an unrelated `word` and report spurious drift.
+    const listSpan = orderLine
+      ? [...orderLine.matchAll(/`([^`]+)`/g)].map((mm) => mm[1]).find((s) => s.includes(','))
+      : null;
+    if (!orderLine) bad('could not find the canonical key-order line');
+    else if (!listSpan) bad('canonical key-order line has no backtick-quoted field list');
     else {
-      const order = m[1].split(',').map((s) => s.trim());
+      const order = listSpan.split(',').map((s) => s.trim());
       if (arraysEqual(order, CANONICAL)) ok(`canonical key order: ${order.join(', ')}`);
       else
         bad(
@@ -436,10 +483,25 @@ function checkSchema() {
 // ---------------------------------------------------------------------------
 
 function gather(p) {
-  const st = statSync(p);
+  // Resolve each entry defensively: an unreadable file or directory (broken symlink,
+  // permission denied) is reported and skipped, never aborting the whole sweep.
+  let st;
+  try {
+    st = statSync(p);
+  } catch {
+    console.error(`cannot read: ${relative(process.cwd(), p) || p}`);
+    return [];
+  }
   if (st.isDirectory()) {
     const out = [];
-    for (const name of readdirSync(p)) {
+    let names;
+    try {
+      names = readdirSync(p);
+    } catch {
+      console.error(`cannot read directory: ${relative(process.cwd(), p) || p}`);
+      return out;
+    }
+    for (const name of names) {
       if (name === 'node_modules' || name === '.git') continue;
       out.push(...gather(join(p, name)));
     }
