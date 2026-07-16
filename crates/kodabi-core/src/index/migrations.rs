@@ -12,10 +12,12 @@ use rusqlite::Connection;
 
 use super::{Result, EMBEDDING_DIM};
 
-/// The ordered migrations. Each is applied in its own transaction, so a failure
-/// leaves the database at the last fully-applied version.
-fn migrations() -> Vec<String> {
-    vec![migration_0001_initial_schema()]
+/// The ordered migrations, as lazy builders. Each is applied in its own
+/// transaction, so a failure leaves the database at the last fully-applied
+/// version. Builders are only invoked for versions that actually run, so a
+/// no-op open never formats any migration SQL.
+fn migrations() -> Vec<fn() -> String> {
+    vec![migration_0001_initial_schema]
 }
 
 /// Applies every migration newer than the database's current `user_version`.
@@ -24,10 +26,11 @@ pub(crate) fn apply(conn: &mut Connection) -> Result<()> {
     let current: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
     let current = usize::try_from(current).unwrap_or(0);
 
-    for (idx, sql) in migrations().iter().enumerate().skip(current) {
+    for (idx, build) in migrations().iter().enumerate().skip(current) {
         let version = idx + 1;
+        let sql = build();
         let tx = conn.transaction()?;
-        tx.execute_batch(sql)?;
+        tx.execute_batch(&sql)?;
         // `user_version` takes a literal, not a bound parameter; `version` is a
         // trusted in-process integer, so interpolating it is safe. Set inside
         // the transaction so a failed migration rolls the version back too.
