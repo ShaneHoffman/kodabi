@@ -1,5 +1,6 @@
 mod audio_cmds;
 mod capture_control;
+mod transcribe;
 
 use kodabi_core::device::DeviceId;
 use tauri::Manager;
