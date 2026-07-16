@@ -93,6 +93,15 @@ pub fn parse_session_filename(name: &str) -> Option<ParsedSessionName> {
     })
 }
 
+/// Slugifies `input` under the same rules and length cap the session filename
+/// scheme uses, for callers that need a bare slug (e.g. a distilled note's
+/// `{slug}.md` filename) rather than a full session filename. Returns an empty
+/// string when `input` has no usable characters — the caller decides on a
+/// fallback (see [`crate::note::write_note`]).
+pub fn slug(input: &str) -> String {
+    slugify(input, MAX_SLUG_LEN)
+}
+
 /// Lowercases, collapses runs of non-alphanumeric characters to a single
 /// `-`, trims leading/trailing `-`, and caps the result at `max_len` bytes.
 /// The output is ASCII, so `max_len` counts characters and bytes alike.
@@ -200,6 +209,15 @@ mod tests {
         let slug = slugify(&long_input, MAX_SLUG_LEN);
         assert!(slug.len() <= MAX_SLUG_LEN);
         assert!(!slug.ends_with('-'));
+    }
+
+    #[test]
+    fn slug_applies_the_session_rules_and_cap() {
+        assert_eq!(slug("Paradise Golf Sync!"), "paradise-golf-sync");
+        // Same length cap as the session scheme, and no usable characters
+        // yields an empty slug for the caller to fall back from.
+        assert!(slug(&"word ".repeat(20)).len() <= MAX_SLUG_LEN);
+        assert_eq!(slug("  !!!  "), "");
     }
 
     #[test]

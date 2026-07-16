@@ -42,33 +42,53 @@ Canonical key order the writer emits: **`id, type, project, date, tags, source, 
   [`MCP_TOOL_SURFACE.md`](MCP_TOOL_SURFACE.md), "Recommendation to P0-9"). `file_note_to_project`,
   `get_note`, and `get_meeting_transcript` all address notes by this value, so it survives every
   move and re-route unchanged — the file path is informational and changes on move; the `id` never
-  does. Matches the `NoteId` schema (`^n_[0-9a-z]{6,}$`) in the MCP tool surface.
+  does. Matches the `NoteId` schema (`^n_[0-9a-z]{6,}$`) in the MCP tool surface. The Phase 2 writer
+  generates `n_` + **8** random base36 characters (the regex permits any length ≥ 6; 8 is chosen so
+  an id collision stays negligible even when import/merge pools several devices' notes into one
+  vault, since — unlike a filename clash — an id collision is unrecoverable).
 - **`project`** — `Inbox` is not a real project; it is the sentinel value confidence-split routing
   uses when a note's score is too low to auto-file. The Inbox UI's one-click re-route corrects
-  `project` and re-scores `confidence` for the chosen project, in place.
+  `project` and re-scores `confidence` for the chosen project, in place. Because a project maps to
+  an on-disk folder (segments split on `/`, so `Growth/Q3` nests), each segment must be a legal
+  folder name beyond matching the slug pattern: no `:*?"<>|`, no trailing dot or space, and not a
+  Windows reserved device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`). `Inbox`
+  is a reserved folder name — a real project may not be named `Inbox`.
 - **`date`** — full timestamp+offset for anything with a real start time (a meeting, a chat
   session); date-only is acceptable for a quick-capture note jotted with no meaningful clock time.
-  Store the value exactly as written. A lexical string sort orders same-offset timestamps and
-  date-only values chronologically, but it compares wall-clock digits rather than the underlying
-  instant — so `2026-07-09T14:00:00-07:00` (21:00Z) sorts *before* `2026-07-09T15:00:00+00:00`
-  (15:00Z) even though it happened later. When notes span multiple offsets, the index must
-  normalize `date` to UTC before ordering; do not rely on raw string comparison across offsets.
-- **`tags`** — a plain YAML list, which Obsidian reads natively as note tags. Keep the key absent
-  rather than an empty list when a note has none.
+  Store the value exactly as written. The two accepted shapes are strictly a `YYYY-MM-DD` calendar
+  date **or** an RFC 3339 timestamp that **carries an offset** (`Z` or numeric); a naive
+  `2026-07-09T14:00:00` with no offset is rejected, because without an offset the instant is
+  ambiguous. A lexical string sort orders same-offset timestamps and date-only values
+  chronologically, but it compares wall-clock digits rather than the underlying instant — so
+  `2026-07-09T14:00:00-07:00` (21:00Z) sorts *before* `2026-07-09T15:00:00+00:00` (15:00Z) even
+  though it happened later. When notes span multiple offsets, the index must normalize `date` to UTC
+  before ordering; do not rely on raw string comparison across offsets.
+- **`tags`** — a plain YAML list, which Obsidian reads natively as note tags. Each tag matches
+  `^[a-z0-9]+(?:-[a-z0-9]+)*$` (lowercase kebab-case, no leading `#`). Emitted as an inline flow
+  list (`tags: [budgeting, phase-2]`). Keep the key absent rather than an empty list when a note has
+  none; a hand-edited `tags: []` is normalized to an omitted key on the next rewrite.
 - **`source`** — identifies *how* a note came to exist. For `type: meeting` and `type: chat` notes
   that have a corresponding raw session artifact (per the Phase 1 raw session store), `source` is
   a relative path to that artifact, giving direct traceback from the distilled note to its raw
   recording without adding a seventh field. Raw artifact filenames follow the timestamp+device-ID
   scheme in [`FILENAME_SCHEME.md`](FILENAME_SCHEME.md), so simultaneous capture on two devices
   never collides. When no raw artifact exists — a quick-capture note, an imported file, a
-  hand-written note — `source` falls back to the closest keyword.
+  hand-written note — `source` falls back to the closest keyword. Disambiguation rule: a value
+  **exactly equal** to one of the five keywords (`transcript` | `quick-capture` | `chat` | `import`
+  | `manual`) is that keyword; anything else is a repo-relative raw-artifact path (which may not be
+  absolute).
 - **`confidence`** — present whenever a routing score backs the current `project` value: notes
   confidence-split routing auto-filed, **including** low-score notes that land in `Inbox` (the score
   is *why* it landed there), and notes the Inbox re-route re-scored into a project. The trigger is
   that routing produced the score, not who authored the note — a human-jotted quick-capture note is
   still auto-routed, so it carries `confidence`. It is **omitted** entirely only when a human chose
-  the `project` directly with no routing involved — a note filed by hand, or an import — since no
-  routing score exists to report.
+  the `project` directly with no routing involved — a note filed *at creation* by hand, or an
+  import — since no routing score exists to report. This does **not** conflict with
+  `file_note_to_project` recording a manual re-route as `1.0`
+  ([`MCP_TOOL_SURFACE.md`](MCP_TOOL_SURFACE.md)): a re-route is a routing action, so the corrected
+  note *gains* a `confidence` (of `1.0`). The two ends describe one rule — the key is present iff a
+  routing score (auto or a `1.0` correction) backs `project`. Emitted as a YAML float that always
+  carries a decimal point (`1.0`, never `1`); range `0.0`–`1.0`.
 
 ---
 
@@ -148,11 +168,38 @@ than auto-routed, so there is no routing score to record.
 
 ---
 
+## On-disk placement, filenames & serialization
+
+The Phase 2 markdown writer (`kodabi-core::note`) is the first implementation of this schema; these
+are the placement and byte-level rules it establishes.
+
+- **Folder.** A note lives at `<vault>/<project>/<slug>.md`. A hierarchical `project` nests folders
+  (`Growth/Q3` → `<vault>/Growth/Q3/`), creating any missing parents; an `Inbox` note lives in
+  `<vault>/Inbox/`. The vault root is the KB root (`raw/…` in `source` is relative to it).
+- **Filename.** `{slug}.md`, where `slug` comes from a human-readable title under the same slug
+  rules the session scheme uses (lowercase, non-alphanumeric runs → `-`, 40-char cap). This is the
+  distilled-note filename and is **distinct** from the timestamp+device *raw/session* scheme in
+  [`FILENAME_SCHEME.md`](FILENAME_SCHEME.md). When the title slugifies to empty (blank, emoji-only,
+  punctuation-only), the filename falls back to `{id}.md`. A name clash gets an increasing numeric
+  suffix (`weekly-sync-2.md`) and never overwrites. The path is informational and changes on move;
+  the `id` never does.
+- **Serialization contract.** Opening `---` fence line, the seven keys in the canonical order above,
+  closing `---` fence line, then one blank separator line, the body, and a single trailing newline.
+  An empty body ends the file at the closing `---`. The body is stored trimmed of surrounding blank
+  lines. Only the **first** `---`-on-its-own-line after the opening fence closes the frontmatter, so
+  a `---` horizontal rule inside the body is preserved verbatim. Scalar values that would otherwise
+  re-resolve as a non-string (a project literally named `true`, `null`, or `123`) are quoted so they
+  round-trip as strings. Unknown frontmatter keys are tolerated on read but **not** preserved on
+  rewrite — round-trip fidelity is guaranteed for the seven canonical keys.
+
+---
+
 ## What this hands downstream
 
 - **→ Phase 2 markdown writer:** emits this frontmatter, in the canonical key order above, for
   every note it produces — end-of-meeting notes, quick-capture notes, and (later) distilled chat
-  sessions.
+  sessions. **Implemented** in `kodabi-core::note` (struct → md → struct round-trip), wrapped by the
+  thin `write_note` Tauri command.
 - **→ Phase 2 file watcher & full rebuild command:** parses `id`, `project`, `date`, `tags`,
   `type`, and `confidence` out of frontmatter to populate the SQLite FTS5 + `sqlite-vec` index (`date` is
   indexed so results can be ordered and range-filtered by recency without re-reading files); because the
@@ -163,6 +210,9 @@ than auto-routed, so there is no routing score to record.
 
 ---
 
-*Locked, not final in every detail: field names and the `type` enum are fixed by this ticket; the
-Phase 2 markdown writer is the first real consumer and may surface edge cases this document should
-absorb before Phase 3 depends on them further.*
+*Locked, not final in every detail: field names and the `type` enum are fixed by this ticket. The
+Phase 2 markdown writer (`kodabi-core::note`) is the first real consumer; building it surfaced the
+edge cases now absorbed above — the strict date shapes (offset required), the tag grammar, the
+project-segment folder-name constraints, the `source` keyword-vs-path rule, the `confidence`/re-route
+reconciliation, and the placement/filename/serialization section. The mirrored MCP shapes in
+[`MCP_TOOL_SURFACE.md`](MCP_TOOL_SURFACE.md) were updated in the same change (spec agreement).*
