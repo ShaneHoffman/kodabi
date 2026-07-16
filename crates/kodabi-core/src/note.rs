@@ -315,13 +315,29 @@ fn validate_raw_artifact(s: &str) -> Result<()> {
             "source must be a non-empty, single-line value",
         ));
     }
-    // Repo-relative: reject POSIX/UNC absolute paths and Windows drive letters.
-    let looks_absolute =
-        s.starts_with('/') || s.starts_with('\\') || s.as_bytes().get(1) == Some(&b':');
+    // Repo-relative with '/' separators only: a backslash (Windows-style or a
+    // UNC `\\server\…` prefix) breaks the cross-platform, forward-slash path
+    // contract — mirrors how `validate_project` rejects `\`.
+    if s.contains('\\') {
+        return Err(invalid(
+            "source",
+            format!("raw-artifact path {s:?} must use '/' as the separator, not '\\'"),
+        ));
+    }
+    // Repo-relative: reject POSIX absolute paths and Windows drive letters.
+    let looks_absolute = s.starts_with('/') || s.as_bytes().get(1) == Some(&b':');
     if looks_absolute {
         return Err(invalid(
             "source",
             format!("raw-artifact path {s:?} must be repo-relative, not absolute"),
+        ));
+    }
+    // No `.`/`..` traversal segments: the path is joined under the KB root, so a
+    // `..` segment would escape the vault.
+    if s.split('/').any(|seg| seg == "." || seg == "..") {
+        return Err(invalid(
+            "source",
+            format!("raw-artifact path {s:?} must not contain '.' or '..' path segments"),
         ));
     }
     Ok(())
@@ -616,6 +632,10 @@ const RESERVED_SEGMENTS: &[&str] = &[
     "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8", "lpt9",
 ];
 
+/// Maximum `project` length, mirroring the MCP `ProjectSlug` `maxLength`
+/// (`docs/MCP_TOOL_SURFACE.md`) so the writer and the tool surface agree.
+const MAX_PROJECT_LEN: usize = 300;
+
 fn validate_project(project: &str) -> Result<()> {
     if project == INBOX {
         return Ok(());
@@ -624,6 +644,27 @@ fn validate_project(project: &str) -> Result<()> {
         return Err(invalid(
             "project",
             "project must be a non-empty, single-line value",
+        ));
+    }
+    if project.len() > MAX_PROJECT_LEN {
+        return Err(invalid(
+            "project",
+            format!(
+                "project must be at most {MAX_PROJECT_LEN} characters (MCP ProjectSlug maxLength)"
+            ),
+        ));
+    }
+    // The `Inbox` sentinel owns `<vault>/Inbox/`. A real project whose first
+    // segment case-folds to `Inbox` would map into that same folder on a
+    // case-insensitive filesystem, mixing routed notes into the unfiled-Inbox
+    // tree, so `Inbox` is a reserved folder name. The exact-string sentinel is
+    // handled by the early return above; this catches every other casing
+    // (`inbox`, `INBOX`) and a nested `Inbox/…` landing.
+    let first_segment = project.split('/').next().unwrap_or(project);
+    if first_segment.eq_ignore_ascii_case(INBOX) {
+        return Err(invalid(
+            "project",
+            format!("project segment {first_segment:?} is reserved: a real project may not be named `Inbox`"),
         ));
     }
     if project.contains('\\') {
@@ -1157,6 +1198,19 @@ contractor shortlist.
         assert!(Source::parse("").is_err());
     }
 
+    #[test]
+    fn source_rejects_backslashes_and_traversal() {
+        // A leading-dot filename segment is fine (not a `.`/`..` segment).
+        assert!(matches!(
+            Source::parse("raw/.keep.jsonl").unwrap(),
+            Source::RawArtifact(_)
+        ));
+        assert!(Source::parse("raw\\2026.jsonl").is_err()); // windows separator
+        assert!(Source::parse("\\\\server\\share\\x.jsonl").is_err()); // UNC prefix
+        assert!(Source::parse("raw/../../etc/passwd.jsonl").is_err()); // `..` traversal
+        assert!(Source::parse("raw/./2026.jsonl").is_err()); // `.` segment
+    }
+
     // --- folder routing & filenames ---------------------------------------
 
     #[test]
@@ -1415,6 +1469,58 @@ contractor shortlist.
             );
             assert!(note.is_err(), "project {bad:?} should be rejected");
         }
+    }
+
+    #[test]
+    fn real_project_named_inbox_in_any_casing_is_rejected() {
+        // The exact-string `Inbox` sentinel is legal (it is the unfiled marker),
+        // but a real project that would share the `<vault>/Inbox/` folder on a
+        // case-insensitive filesystem must be rejected.
+        for reserved in ["inbox", "INBOX", "InBox", "Inbox/2026", "inbox/sub"] {
+            let note = Note::new(
+                id(),
+                NoteType::Note,
+                Routing::Routed {
+                    project: reserved.to_string(),
+                    confidence: 0.9,
+                },
+                "2026-07-10",
+                vec![],
+                source("manual"),
+                "body",
+            );
+            assert!(
+                matches!(
+                    note,
+                    Err(NoteError::InvalidField {
+                        field: "project",
+                        ..
+                    })
+                ),
+                "project {reserved:?} should be rejected as a reserved Inbox folder"
+            );
+        }
+    }
+
+    #[test]
+    fn overlong_project_is_rejected() {
+        let too_long = "a".repeat(MAX_PROJECT_LEN + 1);
+        let note = Note::new(
+            id(),
+            NoteType::Note,
+            Routing::Manual { project: too_long },
+            "2026-07-10",
+            vec![],
+            source("manual"),
+            "body",
+        );
+        assert!(matches!(
+            note,
+            Err(NoteError::InvalidField {
+                field: "project",
+                ..
+            })
+        ));
     }
 
     #[test]
