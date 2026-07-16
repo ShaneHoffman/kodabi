@@ -6,6 +6,7 @@
 
 pub mod device;
 pub mod glossary;
+pub mod metrics;
 pub mod naming;
 pub mod pipeline;
 pub mod raw_session;

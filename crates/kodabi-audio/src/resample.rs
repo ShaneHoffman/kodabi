@@ -12,15 +12,58 @@ use rubato::{
 };
 
 use crate::error::{AudioError, Result};
+use crate::tuning::apply_positive_usize_override;
 
-/// Input frames per resample call. Independent of any capture source's
-/// actual cpal buffer size — `push` queues arbitrary-sized input and drains
-/// full chunks of this size into the resampler.
+/// Default input frames per resample call. Independent of any capture
+/// source's actual cpal buffer size — `push` queues arbitrary-sized input
+/// and drains full chunks of this size into the resampler. Overridable via
+/// `KODABI_RESAMPLE_CHUNK` (see [`ResampleParams::from_env`]).
 const CHUNK_SIZE: usize = 1024;
+
+/// Default sinc filter taps: a quality/CPU tradeoff for two live resamplers
+/// running concurrently (the combiner's mic and system pipelines) — the
+/// resource budget's main capture-path CPU lever (FOUNDING_DOC §3.7,
+/// `docs/RESOURCE_BUDGET.md`). Overridable via `KODABI_RESAMPLE_TAPS`.
+const SINC_TAPS: usize = 128;
 
 /// Max relative ratio the resampler is built to tolerate. `DriftController`
 /// only ever asks for up to ±2% (see `drift.rs`), so this leaves headroom.
 const MAX_RELATIVE_RATIO: f64 = 1.05;
+
+/// Runtime-tunable resample quality/chunk knobs — see [`ResampleParams::from_env`].
+#[derive(Debug, Clone, Copy)]
+pub struct ResampleParams {
+    /// Input frames per resample call ([`CHUNK_SIZE`] by default).
+    pub chunk: usize,
+    /// Sinc filter taps ([`SINC_TAPS`] by default). More taps means higher
+    /// quality and more CPU.
+    pub taps: usize,
+}
+
+impl Default for ResampleParams {
+    fn default() -> Self {
+        ResampleParams {
+            chunk: CHUNK_SIZE,
+            taps: SINC_TAPS,
+        }
+    }
+}
+
+impl ResampleParams {
+    /// [`ResampleParams::default`] with `KODABI_RESAMPLE_CHUNK` and
+    /// `KODABI_RESAMPLE_TAPS` overrides applied, if set and valid — lets a
+    /// resource-budget pass iterate on real hardware without recompiling.
+    pub fn from_env() -> Self {
+        let mut params = ResampleParams::default();
+        params.chunk = apply_positive_usize_override(
+            params.chunk,
+            std::env::var("KODABI_RESAMPLE_CHUNK").ok(),
+        );
+        params.taps =
+            apply_positive_usize_override(params.taps, std::env::var("KODABI_RESAMPLE_TAPS").ok());
+        params
+    }
+}
 
 /// A live, single-channel resampler from `src_rate` to `target_rate`, with a
 /// runtime-adjustable ratio for clock-drift correction.
@@ -38,19 +81,27 @@ pub struct MonoResampler {
 }
 
 impl MonoResampler {
-    /// Build a resampler from `src_rate` to `target_rate`. Fails only if
-    /// rubato rejects the construction parameters (e.g. a zero rate).
+    /// Build a resampler from `src_rate` to `target_rate` with the default
+    /// [`ResampleParams`]. Fails only if rubato rejects the construction
+    /// parameters (e.g. a zero rate).
     pub fn new(src_rate: u32, target_rate: u32) -> Result<Self> {
-        // 128-tap sinc, Blackman-Harris windowed, cubic-interpolated: a
-        // reasonable quality/CPU tradeoff for two live resamplers running
-        // concurrently (the combiner's mic and system pipelines).
-        let params = SincInterpolationParameters::new(128, WindowFunction::BlackmanHarris2);
+        Self::with_params(src_rate, target_rate, ResampleParams::default())
+    }
+
+    /// Build a resampler from `src_rate` to `target_rate`, with `params`
+    /// controlling the resample chunk size and sinc filter quality (see
+    /// [`ResampleParams`]). Blackman-Harris windowed, cubic-interpolated.
+    /// Fails only if rubato rejects the construction parameters (e.g. a zero
+    /// rate).
+    pub fn with_params(src_rate: u32, target_rate: u32, params: ResampleParams) -> Result<Self> {
+        let sinc_params =
+            SincInterpolationParameters::new(params.taps, WindowFunction::BlackmanHarris2);
         let ratio = target_rate as f64 / src_rate as f64;
         let inner = Async::<f32>::new_sinc(
             ratio,
             MAX_RELATIVE_RATIO,
-            &params,
-            CHUNK_SIZE,
+            &sinc_params,
+            params.chunk,
             1,
             FixedAsync::Input,
         )

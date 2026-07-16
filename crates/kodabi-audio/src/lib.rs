@@ -17,6 +17,7 @@ mod mix;
 mod resample;
 mod session;
 mod source;
+mod tuning;
 
 pub use capture::Capture;
 pub use combine::{AlignedSession, Combiner, SessionChannel};
@@ -25,5 +26,6 @@ pub use error::{AudioError, Result};
 pub use format::{AudioFormat, SampleTag};
 pub use frame::{AudioFrame, CaptureItem, SegmentReason};
 pub use meter::MeterSnapshot;
-pub use session::{DualCapture, DualStatus, SourceStatus};
+pub use resample::ResampleParams;
+pub use session::{CaptureTuning, DualCapture, DualStatus, SourceStatus};
 pub use source::CaptureSource;

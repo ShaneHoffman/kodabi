@@ -8,11 +8,13 @@
 //! and a mock [`HeadlessClaude`].
 
 use std::path::{Path, PathBuf};
+use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 
 use crate::device::DeviceId;
 use crate::glossary::Glossary;
+use crate::metrics::PipelineTimings;
 use crate::raw_session::{self, RawSessionError};
 use crate::transcription::{
     self, clean_transcript, glossary_bias_terms, Channel, HeadlessClaude, TranscriptionEngine,
@@ -28,6 +30,15 @@ pub enum PipelineError {
     Persist(#[from] RawSessionError),
 }
 
+/// [`transcribe_and_persist`]'s successful result: the path
+/// [`raw_session::write_raw_session`] wrote, plus this run's per-stage
+/// timing (see [`PipelineTimings`]).
+#[derive(Debug, Clone)]
+pub struct PipelineOutcome {
+    pub path: PathBuf,
+    pub timings: PipelineTimings,
+}
+
 /// Transcribes each channel's audio through a freshly built engine, merges
 /// the results into one you/them transcript, runs the glossary cleanup
 /// post-pass, and persists it.
@@ -39,7 +50,10 @@ pub enum PipelineError {
 /// resampled to `sample_rate` (engines expect 16 kHz mono `f32`); this module
 /// has no audio-processing dependency of its own.
 ///
-/// Returns the path [`raw_session::write_raw_session`] wrote.
+/// Every stage is timed (an `Instant` read is ~free) and returned in
+/// [`PipelineOutcome::timings`] regardless of whether the caller looks at
+/// them — see `src-tauri/src/transcribe.rs`'s `KODABI_METRICS` gate for the
+/// only place that does.
 #[allow(clippy::too_many_arguments)]
 pub fn transcribe_and_persist(
     make_engine: &mut dyn FnMut() -> transcription::Result<Box<dyn TranscriptionEngine>>,
@@ -51,22 +65,51 @@ pub fn transcribe_and_persist(
     captured_at: DateTime<Utc>,
     device: &DeviceId,
     slug: Option<&str>,
-) -> Result<PathBuf, PipelineError> {
+) -> Result<PipelineOutcome, PipelineError> {
+    let total_start = Instant::now();
     let bias_terms = glossary_bias_terms(glossary);
 
     let mut per_channel = Vec::with_capacity(channels.len());
+    let mut engine_build_ms: u64 = 0;
+    let mut transcribe_ms = Vec::with_capacity(channels.len());
+    let mut audio_secs = 0.0f64;
     for (channel, samples) in channels {
+        let build_start = Instant::now();
         let mut engine = make_engine()?;
         engine.set_bias(&bias_terms)?;
+        engine_build_ms += build_start.elapsed().as_millis() as u64;
+
+        let transcribe_start = Instant::now();
         let segments = transcription::transcribe_all(engine.as_mut(), samples, sample_rate)?;
+        transcribe_ms.push(transcribe_start.elapsed().as_millis() as u64);
+
+        audio_secs += samples.len() as f64 / sample_rate.max(1) as f64;
         per_channel.push((*channel, segments));
     }
 
+    let assemble_start = Instant::now();
     let assembled = raw_session::assemble(per_channel);
-    let cleaned = clean_transcript(cleaner, assembled, glossary);
+    let assemble_ms = assemble_start.elapsed().as_millis() as u64;
 
+    let cleanup_start = Instant::now();
+    let cleaned = clean_transcript(cleaner, assembled, glossary);
+    let cleanup_ms = cleanup_start.elapsed().as_millis() as u64;
+
+    let persist_start = Instant::now();
     let path = raw_session::write_raw_session(dir, captured_at, device, slug, &cleaned)?;
-    Ok(path)
+    let persist_ms = persist_start.elapsed().as_millis() as u64;
+
+    let timings = PipelineTimings {
+        audio_secs,
+        engine_build_ms,
+        transcribe_ms,
+        assemble_ms,
+        cleanup_ms,
+        persist_ms,
+        total_ms: total_start.elapsed().as_millis() as u64,
+    };
+
+    Ok(PipelineOutcome { path, timings })
 }
 
 #[cfg(test)]
@@ -109,7 +152,7 @@ mod tests {
         ];
         let mut make_engine = mock_engine_factory();
 
-        let path = transcribe_and_persist(
+        let outcome = transcribe_and_persist(
             &mut make_engine,
             &NoopRunner,
             &Glossary::default(),
@@ -122,11 +165,15 @@ mod tests {
         )
         .expect("pipeline should succeed");
 
-        let segments = raw_session::read_raw_session(&path).unwrap();
+        let segments = raw_session::read_raw_session(&outcome.path).unwrap();
         assert_eq!(segments.len(), 2);
         assert!(segments.iter().any(|s| s.channel == Channel::You));
         assert!(segments.iter().any(|s| s.channel == Channel::Them));
         assert!(segments.iter().all(|s| s.text == "mock"));
+
+        // 16,000 + 8,000 samples at 16 kHz = 1.5s of audio across both channels.
+        assert_eq!(outcome.timings.audio_secs, 1.5);
+        assert_eq!(outcome.timings.transcribe_ms.len(), 2);
     }
 
     #[test]
@@ -134,7 +181,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let mut make_engine = mock_engine_factory();
 
-        let path = transcribe_and_persist(
+        let outcome = transcribe_and_persist(
             &mut make_engine,
             &NoopRunner,
             &Glossary::default(),
@@ -147,8 +194,10 @@ mod tests {
         )
         .expect("pipeline should succeed with no channels");
 
-        let segments = raw_session::read_raw_session(&path).unwrap();
+        let segments = raw_session::read_raw_session(&outcome.path).unwrap();
         assert!(segments.is_empty());
+        assert_eq!(outcome.timings.audio_secs, 0.0);
+        assert!(outcome.timings.transcribe_ms.is_empty());
     }
 
     #[test]
