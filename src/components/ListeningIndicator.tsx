@@ -1,0 +1,54 @@
+import { useCaptureState } from "../useCaptureState";
+import { useDebouncedValue } from "../useDebouncedValue";
+import { useTranscriptionState } from "../useTranscriptionState";
+import { SpiritMark } from "./SpiritMark";
+
+function transcriptionLabel(
+  state: ReturnType<typeof useTranscriptionState>,
+): string | null {
+  switch (state.status) {
+    case "transcribing":
+      return "Transcribing…";
+    case "saved":
+      return "Saved";
+    case "error":
+      return "Transcription failed";
+    case "idle":
+      return null;
+  }
+}
+
+/**
+ * The persistent on-air surface: a small SpiritMark plus status text,
+ * always visible in the sidebar foot regardless of the active view.
+ */
+export function ListeningIndicator() {
+  const phase = useCaptureState();
+  // The mark reacts instantly for immediate visual feedback, but the text
+  // label — an aria-live region — follows a debounced phase so a flapping VAD
+  // doesn't spam screen readers (or flicker the label) on every toggle.
+  const settled = useDebouncedValue(phase, 400) === "listening";
+  const transcription = useTranscriptionState(phase);
+  const transcriptionText = transcriptionLabel(transcription);
+
+  return (
+    <div className="flex flex-col gap-2xs">
+      <div className="flex items-center gap-xs">
+        <SpiritMark phase={phase} size="1rem" halo="0.9rem" />
+        <p
+          role="status"
+          className={`text-cap uppercase tracking-wide ${
+            settled ? "text-accent-dot" : "text-text-faint"
+          }`}
+        >
+          {settled ? "Listening" : "Idle"}
+        </p>
+      </div>
+      {transcriptionText && (
+        <p role="status" className="text-cap uppercase tracking-wide text-text-faint">
+          {transcriptionText}
+        </p>
+      )}
+    </div>
+  );
+}
