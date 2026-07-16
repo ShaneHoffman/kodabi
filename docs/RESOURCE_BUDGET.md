@@ -1,13 +1,11 @@
 # Resource budget
 
-Status: **idle + transcription measured on real hardware; capturing + fan observation still
-pending a real meeting.** See [FOUNDING_DOC.md §3.7](FOUNDING_DOC.md) for the requirement
-this ticket implements: *"idle ≈ zero; capturing under a target CPU ceiling (tune on real
-hardware); no fan spin-up during meetings. Treat as a requirement, not a bug report."*
-There is no pre-set numeric ceiling — it's deliberately left to be tuned on the real target
-machine, and this doc is where the measured numbers get recorded. Idle and transcription
-speed are automatable and were measured by the agent; "capturing" (needs a real, consented
-meeting) and fan spin-up (needs a human ear) are not — see **How to finish this** below.
+Status: **Done.** Idle, capturing, and transcription are all measured on real hardware, with
+no fan spin-up observed. See [FOUNDING_DOC.md §3.7](FOUNDING_DOC.md) for the requirement this
+ticket implements: *"idle ≈ zero; capturing under a target CPU ceiling (tune on real
+hardware); no fan spin-up during meetings. Treat as a requirement, not a bug report."* The
+numbers below show the compiled-in defaults already comfortably clear the budget on this
+hardware — no tuning was needed this pass (see **Final tuned constants**).
 
 Two costs are measured separately, because they happen at different times:
 
@@ -64,23 +62,6 @@ cargo test -p kodabi-transcribe --features parakeet -- --ignored --nocapture rtf
 cargo test -p kodabi-transcribe --features whisper -- --ignored --nocapture rtf
 ```
 
-## How to finish this
-
-Idle and transcription-speed numbers below were measured by the agent directly (build +
-launch + read the profiler output — no privacy/consent concern, nothing physical to sense).
-**Capturing** and **fan spin-up** need a human: starting real capture records your actual
-microphone and system audio, and "no fan spin-up" is a physically-heard signal an agent has
-no way to perceive. To finish:
-
-1. Run `C:\Users\shane\kodabi-models\measure-capture.ps1` (personal, not in the repo — sets
-   the Parakeet model env vars + `KODABI_METRICS` and launches the already-built
-   `target\debug\kodabi.exe`).
-2. Run `scripts\measure-resources.ps1` alongside it and watch the CPU% column live.
-3. Press `Ctrl+Shift+K` to start capture during a real, consented meeting (or just talk),
-   listen for the fan, press it again to stop.
-4. Hand over `metrics.jsonl` + the profiler CSV (or just the avg/peak numbers) to fill in
-   the **Capturing** and **Fan observation** rows below.
-
 ## Tuning knobs
 
 All env-overridable, applied on top of the compiled-in default — no recompile needed to
@@ -107,9 +88,15 @@ which bounds both the recognizer's per-segment work and the VAD's internal buffe
 
 ## Chosen CPU ceiling
 
-_TBD — idle is confirmed negligible (below); the ceiling itself is set once a real-meeting
-capturing measurement exists to tune against. Rationale (why this number, what fan behavior
-drove it) goes here._
+- **Capturing (sustained, system-wide):** ≤ 10%
+- **Post-meeting transcription burst (brief, few-second spike):** ≤ 35%
+
+Measured peaks were far below both (1.67% capturing, 4.29% transcription burst — see
+Results), so this ceiling is set with several-fold headroom rather than at the observed
+number: this hardware is a 16C/24T desktop CPU, likely stronger than the field/laptop target
+the app actually ships to, and "no fan spin-up" (the real requirement) was already confirmed
+at the measured levels. If a real capturing session on a more modest laptop ever approaches
+these ceilings, re-tune via the knobs above rather than raising the ceiling by default.
 
 ## Hardware profile
 
@@ -135,24 +122,26 @@ The WebView2 fleet's memory is Chromium/WebView2 infrastructure (GPU process, re
 network service, crashpad, etc.), not app logic — `kodabi.exe` itself is a thin native host
 with the visible work happening in these child processes.
 
-### Capturing (real meeting)
+### Capturing
 
-**TBD — needs a human.** See **How to finish this** above.
+Measured 2026-07-15: ~93s of real two-channel capture (mic + system-audio loopback, a
+YouTube video playing for the system/"them" channel) via `measure-resources.ps1` sampling
+alongside a real `Ctrl+Shift+K` start→stop cycle. **Well within the chosen ceiling.**
 
-Meeting length: _TBD_
+| Process | CPU% avg | CPU% peak | Working set |
+|---|---|---|---|
+| `kodabi.exe` | 1.00% | 1.67% | 3.6 MB → 37.5 MB (grows with buffered audio; ≈ expected for ~93s of 48 kHz stereo two-channel f32 PCM) |
+| `msedgewebview2.exe` fleet (summed) | 0.03% | 0.38% | avg 295.5 MB, peak 302.3 MB |
 
-| Process | CPU% avg | CPU% peak | Working set | `frames_dropped` |
-|---|---|---|---|---|
-| `kodabi.exe` | _TBD_ | _TBD_ | _TBD_ | _TBD_ |
-| `msedgewebview2.exe` (summed) | _TBD_ | _TBD_ | _TBD_ | — |
+`frames_dropped`: not observed this pass (no IPC status poll was run alongside the profiler).
 
-Fan observation: _TBD_
+**Fan observation: no spin-up** — confirmed by the human running the session, during both
+capturing and the transcription burst that followed.
 
 ### Transcription burst
 
-Measured 2026-07-15 against the committed `speech_16k_mono.wav` fixture (6.12s of audio) via
-`crates/kodabi-transcribe/tests/resource_budget.rs`, real models
-(`C:\Users\shane\kodabi-models\`).
+**Fixture-based (`crates/kodabi-transcribe/tests/resource_budget.rs`, `speech_16k_mono.wav`,
+6.12s of audio), real models:**
 
 | Engine | `speed_x` | Notes |
 |---|---|---|
@@ -160,9 +149,28 @@ Measured 2026-07-15 against the committed `speech_16k_mono.wav` fixture (6.12s o
 | Whisper (CPU, 4 threads) | blocked by the sherpa-onnx ORT bug (task #53) | `whisper.cpp` alone (bare `WhisperEngine`, no VAD) transcribed the fixture in ~15.1s as a rough, non-production proxy, but the mandatory VAD gate (`whisper_with_vad`, FOUNDING_DOC §8) crashes — see below. |
 | Whisper (CUDA) | blocked by the sherpa-onnx ORT bug (task #53) | Model loaded onto the RTX 4080 fine, then hit the identical crash at VAD init. |
 
-CPU%/GPU%/working-set peaks during the transcription burst were not separately profiled this
-pass (the RTF harness measures wall time only); `scripts/measure-resources.ps1` run alongside
-a real capture-then-stop cycle will capture these too.
+**Real end-to-end pipeline** (the ~93s capture above, stopped via `Ctrl+Shift+K`, full
+`transcribe → clean → persist` pipeline, from `KODABI_METRICS`'s `PipelineTimings`):
+
+| Stage | Value |
+|---|---|
+| Audio processed (both channels summed) | 180.0s (≈ 90s × 2 channels) |
+| Engine build (both channels — a fresh engine per channel, see `pipeline.rs`) | 6.16s |
+| Transcribe (mic, system) | 302 ms, 267 ms |
+| Assemble / cleanup / persist | 0 ms / 0 ms / 1 ms |
+| **Total wall time** | **6.83s** |
+| **`speed_x` (aggregate)** | **26.36x** |
+
+`kodabi.exe` CPU during this burst: **avg ~4.1%, peak 4.29%** (`scripts/measure-resources.ps1`,
+same session). Working set climbed cleanly 55→64 MB, then showed two anomalous readings
+(711 MB, 1360 MB) that oscillate rather than trend — treated as
+`Win32_PerfFormattedData_PerfProc_Process` sampling artifacts around the model-unload/reload
+boundary (both models are 650 MB/1.6 GB but memory-mapped, not necessarily fully resident;
+the readings don't monotonically decay the way real freed memory would), not genuine peak
+memory. Reported transparently rather than silently included or excluded. Engine-build
+dominates the pipeline cost (6.16s of the 6.83s total) — a real target for future tuning if
+the transcription burst ever needs to shrink further, though it's already well inside the
+chosen ceiling.
 
 #### Known issue: sherpa-onnx VAD crashes with an ONNX Runtime version mismatch
 
@@ -192,17 +200,22 @@ entirely, not just this measurement. Tracked as board task **#53**
 
 ## Final tuned constants
 
-_TBD — filled in once a configuration is confirmed to hold the budget. `old` is the
-compiled-in default before this pass; `new` is what got baked in as the new default (the
-env var remains available as an override either way)._
-
-| Knob | Old default | New default | Env var |
-|---|---|---|---|
-| _TBD_ | | | |
+**No changes needed.** The compiled-in defaults (Parakeet, 1 thread; `FRAME_CAPACITY=256`;
+resampler chunk 1024 / 128 sinc taps) already hold the chosen ceiling with wide margin —
+1.67% peak CPU while capturing against a 10% ceiling, no fan spin-up — on real target-adjacent
+hardware. The env-override knobs above remain in place as an escape hatch for a future,
+less powerful target machine (a laptop, most likely) where a tuning pass may find a real
+need to trade resampler quality or thread count for headroom; none was evident here.
 
 ## Provenance
 
-- **Idle + transcription (Parakeet + bare Whisper):** measured 2026-07-15 by the agent, on
-  branch `chore/resource-budget-tuning` (this ticket), debug build, models from
-  `C:\Users\shane\kodabi-models\` (downloaded during task #37's engine benchmark).
-- **Capturing + fan observation:** _TBD — pending a human-run real meeting._
+- **Idle, capturing, and transcription:** measured 2026-07-15 on branch
+  `chore/resource-budget-tuning` (this ticket): idle and the fixture-based transcription RTF
+  by the agent directly; capturing (a real ~93s `Ctrl+Shift+K` session with a YouTube video
+  as the system-audio channel) driven by the user with the agent running the profiler and
+  reading results, since starting real audio capture and confirming fan behavior both need a
+  human. Debug build, real Parakeet models from `C:\Users\shane\kodabi-models\` (downloaded
+  during task #37's engine benchmark). Hardware profile above.
+- **Whisper's production (VAD-gated) path:** blocked by a pre-existing `sherpa-onnx`
+  dependency bug, tracked separately as board task #53 — not this ticket's default engine,
+  not blocking.
