@@ -12,7 +12,9 @@ use crate::capture::Capture;
 use crate::combine::{AlignedSession, Combiner, SessionChannel};
 use crate::error::{AudioError, Result};
 use crate::format::AudioFormat;
+use crate::resample::ResampleParams;
 use crate::source::CaptureSource;
+use crate::tuning::apply_positive_usize_override;
 
 /// One source's live capture plus the error (if any) from its last start
 /// attempt. `last_error` is retained after a failed start — with no `capture`
@@ -131,22 +133,65 @@ fn channel_of(source: CaptureSource) -> SessionChannel {
     }
 }
 
+/// Runtime-tunable capture-path knobs (FOUNDING_DOC §3.7's resource budget,
+/// `docs/RESOURCE_BUDGET.md`) — bundled so [`DualCapture::new`] takes one
+/// value rather than an ever-growing parameter list as more knobs are added.
+#[derive(Debug, Clone, Copy)]
+pub struct CaptureTuning {
+    /// Bounds each source's item channel — the slack between a cpal callback
+    /// enqueuing a frame and the combiner's coordinator thread draining it.
+    pub frame_capacity: usize,
+    /// Common rate the combiner aligns mic and system audio to. Not
+    /// env-overridable (a device-format concern, not a resource knob).
+    pub target_rate: u32,
+    /// Live resampler chunk size + sinc quality (see [`ResampleParams`]).
+    pub resample: ResampleParams,
+}
+
+impl CaptureTuning {
+    /// `frame_capacity`/`target_rate` as given; `resample` defaults to
+    /// [`ResampleParams::default`]. The plain constructor callers (tests, the
+    /// `record_meeting` example) use when they don't need env overrides.
+    pub fn new(frame_capacity: usize, target_rate: u32) -> Self {
+        CaptureTuning {
+            frame_capacity,
+            target_rate,
+            resample: ResampleParams::default(),
+        }
+    }
+
+    /// [`CaptureTuning::new`] with `KODABI_FRAME_CAPACITY` and the resample
+    /// env overrides ([`ResampleParams::from_env`]) applied — the production
+    /// entry point, so a resource-budget pass can iterate on real hardware
+    /// without recompiling.
+    pub fn from_env(frame_capacity: usize, target_rate: u32) -> Self {
+        let mut tuning = CaptureTuning::new(frame_capacity, target_rate);
+        tuning.frame_capacity = apply_positive_usize_override(
+            tuning.frame_capacity,
+            std::env::var("KODABI_FRAME_CAPACITY").ok(),
+        );
+        tuning.resample = ResampleParams::from_env();
+        tuning
+    }
+}
+
 /// A two-channel capture session: loopback (system audio) + microphone,
 /// combined into one time-aligned [`AlignedSession`] at stop.
 pub struct DualCapture {
     inner: Mutex<Inner>,
     frame_capacity: usize,
     target_rate: u32,
+    resample: ResampleParams,
 }
 
 impl DualCapture {
-    /// `frame_capacity` bounds each source's item channel; `target_rate` is
-    /// the common rate the combiner aligns both channels to.
-    pub fn new(frame_capacity: usize, target_rate: u32) -> Self {
+    /// See [`CaptureTuning`] for what each knob controls.
+    pub fn new(tuning: CaptureTuning) -> Self {
         DualCapture {
             inner: Mutex::new(Inner::default()),
-            frame_capacity,
-            target_rate,
+            frame_capacity: tuning.frame_capacity,
+            target_rate: tuning.target_rate,
+            resample: tuning.resample,
         }
     }
 
@@ -270,7 +315,7 @@ impl DualCapture {
         // Spawn the combiner lazily on the first source; a spawn failure means
         // no combiner this session (best-effort, as above).
         if guard.combiner.is_none() {
-            match Combiner::start(self.target_rate) {
+            match Combiner::start(self.target_rate, self.resample) {
                 Ok(combiner) => {
                     guard.combiner = Some(CombinerState {
                         combiner,
@@ -404,7 +449,7 @@ mod tests {
 
     #[test]
     fn status_is_idle_before_any_start() {
-        let dual = DualCapture::new(4, 48_000);
+        let dual = DualCapture::new(CaptureTuning::new(4, 48_000));
         let status = dual.status().unwrap();
         assert!(!status.loopback.running);
         assert!(status.loopback.format.is_none());
@@ -414,7 +459,7 @@ mod tests {
 
     #[test]
     fn stop_while_idle_is_a_no_op() {
-        let dual = DualCapture::new(4, 48_000);
+        let dual = DualCapture::new(CaptureTuning::new(4, 48_000));
         let (status, session) = dual.stop().unwrap();
         assert!(!status.loopback.running);
         assert!(!status.microphone.running);
@@ -423,13 +468,13 @@ mod tests {
 
     #[test]
     fn is_active_is_false_before_any_start() {
-        let dual = DualCapture::new(4, 48_000);
+        let dual = DualCapture::new(CaptureTuning::new(4, 48_000));
         assert!(!dual.is_active().unwrap());
     }
 
     #[test]
     fn persisted_start_error_is_reported_by_status_until_stopped() {
-        let dual = DualCapture::new(4, 48_000);
+        let dual = DualCapture::new(CaptureTuning::new(4, 48_000));
         // Simulate a failed start: the source has no live capture, only the
         // error its last start attempt recorded.
         dual.inner.lock().unwrap().microphone.last_error =
@@ -459,7 +504,7 @@ mod tests {
     #[test]
     #[ignore = "starts real capture streams (mic/loopback) — requires audio hardware"]
     fn starting_twice_is_idempotent_per_stream() {
-        let dual = DualCapture::new(256, 48_000);
+        let dual = DualCapture::new(CaptureTuning::new(256, 48_000));
         let first = dual.start().unwrap();
         let second = dual.start().unwrap();
 
