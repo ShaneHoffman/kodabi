@@ -156,7 +156,7 @@ At meeting end (batch, not continuous — keeps token usage sane):
 - **Recording consent:** Massachusetts (and many states) require two-party consent. One-time in-app nudge ("announce your recordings"), unambiguous listening indicator, and a clear statement in the README. This is both legal hygiene and a trust signal.
 - **Retention policy:** optional "distill then discard raw audio/transcript after N days." Raw client-call transcripts accumulating forever is a liability.
 - **Security at rest (v1 posture):** rely on OS disk encryption (BitLocker) + the retention policy. Say so explicitly in docs. App-level encryption is a later consideration.
-- **Resource budget:** idle ≈ zero; capturing under a target CPU ceiling (tune on real hardware); no fan spin-up during meetings. Treat as a requirement, not a bug report.
+- **Resource budget:** idle ≈ zero; capturing under a target CPU ceiling (tune on real hardware); no fan spin-up during meetings. Treat as a requirement, not a bug report. Measurement procedure, tuning knobs, and the recorded numbers live in [`RESOURCE_BUDGET.md`](RESOURCE_BUDGET.md).
 
 ## 4. Design Principles
 
