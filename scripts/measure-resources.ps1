@@ -46,36 +46,28 @@ $deadline = (Get-Date).AddSeconds($Seconds)
 
 while ((Get-Date) -lt $deadline) {
     $tick = Get-Date -Format "o"
-    $procs = Get-Process -Name "kodabi*", "msedgewebview2*" -ErrorAction SilentlyContinue
+    # Win32_PerfFormattedData_PerfProc_Process gives IDProcess directly, so
+    # each row maps unambiguously to a process - no need to hand-construct a
+    # \Process(name#N) counter instance path from a PID (N is a small
+    # per-name instance index, not the PID, and getting that wrong just
+    # silently drops every sample).
+    $rows = Get-CimInstance Win32_PerfFormattedData_PerfProc_Process -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -like "kodabi*" -or $_.Name -like "msedgewebview2*" }
 
-    foreach ($proc in $procs) {
-        try {
-            $counterPath = "\Process($($proc.ProcessName)#$($proc.Id))\% Processor Time"
-        } catch {
-            continue
+    foreach ($row in $rows) {
+        $cpuPct = [math]::Round($row.PercentProcessorTime / $logicalCores, 2)
+        $workingSetMb = [math]::Round($row.WorkingSetPrivate / 1MB, 1)
+        $name = ($row.Name -replace '#\d+$', '')
+
+        "$tick,$name,$($row.IDProcess),$cpuPct,$workingSetMb" | Out-File -FilePath $Out -Append -Encoding utf8
+
+        if (-not $samples.ContainsKey($name)) {
+            $samples[$name] = @{ Cpu = @(); Mem = @() }
         }
-        $cpuRaw = $null
-        try {
-            $cpuRaw = (Get-Counter -Counter $counterPath -ErrorAction Stop).CounterSamples[0].CookedValue
-        } catch {
-            # A process can exit between Get-Process and Get-Counter (e.g. a
-            # WebView2 helper recycling) - skip this sample rather than abort
-            # the whole run over one missed reading.
-            continue
-        }
-        $cpuPct = [math]::Round($cpuRaw / $logicalCores, 2)
-        $workingSetMb = [math]::Round($proc.WorkingSet64 / 1MB, 1)
+        $samples[$name].Cpu += $cpuPct
+        $samples[$name].Mem += $workingSetMb
 
-        "$tick,$($proc.ProcessName),$($proc.Id),$cpuPct,$workingSetMb" | Out-File -FilePath $Out -Append -Encoding utf8
-
-        $key = $proc.ProcessName
-        if (-not $samples.ContainsKey($key)) {
-            $samples[$key] = @{ Cpu = @(); Mem = @() }
-        }
-        $samples[$key].Cpu += $cpuPct
-        $samples[$key].Mem += $workingSetMb
-
-        Write-Output ("{0}  {1,-20} pid={2,-7} cpu={3,6}%  ws={4,7}MB" -f $tick, $proc.ProcessName, $proc.Id, $cpuPct, $workingSetMb)
+        Write-Output ("{0}  {1,-20} pid={2,-7} cpu={3,6}%  ws={4,7}MB" -f $tick, $name, $row.IDProcess, $cpuPct, $workingSetMb)
     }
 
     Start-Sleep -Seconds 1
