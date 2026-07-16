@@ -4,6 +4,7 @@
 //! in isolation. This is where the future SQLite index and MCP-facing query
 //! surface will live, kept out of the desktop shell.
 
+pub mod benchmark;
 pub mod device;
 pub mod glossary;
 pub mod naming;
