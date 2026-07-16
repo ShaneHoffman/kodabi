@@ -13,7 +13,7 @@ use tauri::{AppHandle, Emitter, Manager, Wry};
 use tauri_plugin_global_shortcut::Shortcut;
 
 use crate::audio_cmds::{
-    start_capture_impl, stop_capture_impl, CapturePhase, CaptureState, CaptureStateEvent,
+    start_capture_impl, stop_capture_and_transcribe, CapturePhase, CaptureState, CaptureStateEvent,
 };
 
 /// Event the frontend subscribes to for capture state changes — also the
@@ -73,7 +73,7 @@ pub fn toggle_capture(app: &AppHandle) {
         let active = state.is_active().unwrap_or(false);
         let result = match next_action(active) {
             ToggleAction::Start => start_capture_impl(&state),
-            ToggleAction::Stop => stop_capture_impl(&state),
+            ToggleAction::Stop => stop_capture_and_transcribe(&app, &state),
         };
         if let Err(err) = result {
             eprintln!("capture toggle failed: {err}");
@@ -95,7 +95,7 @@ pub fn toggle_capture(app: &AppHandle) {
 pub fn run_under_toggle_lock<T>(
     app: &AppHandle,
     state: &CaptureState,
-    action: impl FnOnce(&CaptureState) -> Result<T, String>,
+    action: impl FnOnce(&AppHandle, &CaptureState) -> Result<T, String>,
 ) -> Result<T, String> {
     // Serialize against the toggle when the controller is available; if it
     // isn't yet (very early startup), just act — there is no concurrent
@@ -106,9 +106,9 @@ pub fn run_under_toggle_lock<T>(
                 .toggle_lock
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            action(state)
+            action(app, state)
         }
-        None => action(state),
+        None => action(app, state),
     };
     broadcast_capture_phase(app, state);
     result
