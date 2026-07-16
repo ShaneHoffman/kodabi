@@ -1,24 +1,13 @@
 import type { CSSProperties } from "react";
 import { PALETTE_SHORTCUT_LABEL } from "../useCommandPalette";
-import { useNavigation, type View } from "../useNavigation";
-import { useProjects, type SidebarEntry } from "../useProjects";
+import { useNavigation } from "../useNavigation";
+import { entryView, isEntrySelected, slugDepth, useProjects } from "../useProjects";
 import { ListeningIndicator } from "./ListeningIndicator";
 import "./Sidebar.css";
 
 type Props = {
   onOpenPalette: () => void;
 };
-
-function entryView(entry: SidebarEntry): View {
-  return entry.kind === "inbox"
-    ? { kind: "inbox" }
-    : { kind: "project", slug: entry.project.slug };
-}
-
-function isSelected(view: View, entry: SidebarEntry): boolean {
-  if (entry.kind === "inbox") return view.kind === "inbox";
-  return view.kind === "project" && view.slug === entry.project.slug;
-}
 
 /**
  * The quiet project switcher: Inbox sentinel pinned first, projects below
@@ -32,7 +21,9 @@ export function Sidebar({ onOpenPalette }: Props) {
 
   return (
     <aside className="sidebar flex w-64 flex-none flex-col gap-md bg-bg-sink p-md">
-      <p className="font-serif text-body text-text-soft">kodabi</p>
+      {/* The document's h1: heading navigation needs a level-1 root even
+          though the wordmark reads quietly (preflight strips h1 sizing). */}
+      <h1 className="font-serif text-body text-text-soft">kodabi</h1>
 
       <nav
         aria-label="Projects"
@@ -42,12 +33,11 @@ export function Sidebar({ onOpenPalette }: Props) {
           Projects
         </p>
         {entries.map((entry) => {
-          const selected = isSelected(view, entry);
+          const selected = isEntrySelected(view, entry);
           const name = entry.kind === "inbox" ? "Inbox" : entry.project.display_name;
           const count =
             entry.kind === "inbox" ? entry.note_count : entry.project.note_count;
-          const depth =
-            entry.kind === "inbox" ? 0 : entry.project.slug.split("/").length - 1;
+          const depth = entry.kind === "inbox" ? 0 : slugDepth(entry.project.slug);
           return (
             <button
               key={entry.kind === "inbox" ? "inbox" : entry.project.id}

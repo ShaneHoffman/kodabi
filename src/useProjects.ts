@@ -1,3 +1,5 @@
+import type { View } from "./useNavigation";
+
 /**
  * Mirrors the MCP `Project` shape (docs/MCP_TOOL_SURFACE.md) so the Phase 3
  * `list_projects` swap never touches the shell: replace this hook's body with
@@ -22,6 +24,37 @@ export type Project = {
 export type SidebarEntry =
   | { kind: "inbox"; note_count: number }
   | { kind: "project"; project: Project };
+
+/**
+ * The one entry→destination mapping. Every surface that jumps to or matches
+ * a sidebar entry (sidebar rows, palette commands, selection highlight)
+ * derives from here, so a View shape change lands in exactly one place.
+ */
+export function entryView(entry: SidebarEntry): View {
+  return entry.kind === "inbox"
+    ? { kind: "inbox" }
+    : { kind: "project", slug: entry.project.slug };
+}
+
+/** Whether `view` is the destination `entry` navigates to. */
+export function isEntrySelected(view: View, entry: SidebarEntry): boolean {
+  const target = entryView(entry);
+  if (target.kind === "project") {
+    return view.kind === "project" && view.slug === target.slug;
+  }
+  return view.kind === target.kind;
+}
+
+/* Slug policy — segments are "/"-separated. Every parse of a slug's
+   structure goes through these, next to the Project type they describe. */
+
+export function formatSlug(slug: string): string {
+  return slug.split("/").join(" / ");
+}
+
+export function slugDepth(slug: string): number {
+  return slug.split("/").length - 1;
+}
 
 const SAMPLE_ENTRIES: SidebarEntry[] = [
   { kind: "inbox", note_count: 3 },

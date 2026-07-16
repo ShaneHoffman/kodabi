@@ -1,22 +1,14 @@
-import { useCallback, useMemo, useReducer, type ReactNode } from "react";
-import {
-  INITIAL_VIEW,
-  NavigationContext,
-  navigationReducer,
-  type View,
-} from "../useNavigation";
+import { useMemo, useState, type ReactNode } from "react";
+import { INITIAL_VIEW, NavigationContext, type View } from "../useNavigation";
 
 type Props = {
   children: ReactNode;
 };
 
 export function NavigationProvider({ children }: Props) {
-  const [view, dispatch] = useReducer(navigationReducer, INITIAL_VIEW);
-  const navigate = useCallback(
-    (next: View) => dispatch({ type: "navigate", view: next }),
-    [],
-  );
-  const value = useMemo(() => ({ view, navigate }), [view, navigate]);
+  const [view, setView] = useState<View>(INITIAL_VIEW);
+  // setView's identity is stable, so the value changes only with the view.
+  const value = useMemo(() => ({ view, navigate: setView }), [view]);
 
   return <NavigationContext value={value}>{children}</NavigationContext>;
 }
