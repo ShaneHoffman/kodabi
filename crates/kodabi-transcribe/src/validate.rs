@@ -66,16 +66,35 @@ pub(crate) fn apply_positive_i32_override(current: i32, raw: Option<String>) -> 
     }
 }
 
-/// Parses a non-negative `f32` override (e.g. `KODABI_VAD_THRESHOLD`,
-/// `KODABI_VAD_MIN_SILENCE`), falling back to `current` on a blank,
-/// unparsable, non-finite, or negative value. See
-/// [`apply_positive_i32_override`] for the fallback rationale.
+/// Parses a non-negative `f32` override (e.g. `KODABI_VAD_MIN_SILENCE`,
+/// `KODABI_VAD_MIN_SPEECH`, `KODABI_VAD_MAX_SPEECH` — durations, which have no
+/// natural upper bound), falling back to `current` on a blank, unparsable,
+/// non-finite, or negative value. See [`apply_positive_i32_override`] for the
+/// fallback rationale. A bounded probability (the VAD threshold) uses
+/// [`apply_probability_f32_override`] instead.
 ///
 /// Gated on the native-engine features (see [`require_file`]).
 #[cfg(any(feature = "parakeet", feature = "vad"))]
 pub(crate) fn apply_nonnegative_f32_override(current: f32, raw: Option<String>) -> f32 {
     match raw.and_then(|v| v.trim().parse::<f32>().ok()) {
         Some(v) if v.is_finite() && v >= 0.0 => v,
+        _ => current,
+    }
+}
+
+/// Parses a speech-probability override in `[0.0, 1.0]` (e.g.
+/// `KODABI_VAD_THRESHOLD`), falling back to `current` on a blank, unparsable,
+/// non-finite, or out-of-range value. Unlike a duration, a probability has a
+/// hard upper bound of 1.0: a threshold above it can never be crossed, so it
+/// would silently disable VAD gating entirely (every span read as silence,
+/// an empty transcript) rather than tuning it — so it is rejected, not
+/// applied. See [`apply_positive_i32_override`] for the fallback rationale.
+///
+/// Gated on the native-engine features (see [`require_file`]).
+#[cfg(any(feature = "parakeet", feature = "vad"))]
+pub(crate) fn apply_probability_f32_override(current: f32, raw: Option<String>) -> f32 {
+    match raw.and_then(|v| v.trim().parse::<f32>().ok()) {
+        Some(v) if v.is_finite() && (0.0..=1.0).contains(&v) => v,
         _ => current,
     }
 }
@@ -321,6 +340,49 @@ mod override_tests {
             apply_nonnegative_f32_override(0.5, Some("0".to_owned())),
             0.0
         );
+    }
+
+    #[test]
+    fn probability_override_applies_an_in_range_value() {
+        assert_eq!(
+            apply_probability_f32_override(0.5, Some("0.7".to_owned())),
+            0.7
+        );
+    }
+
+    #[test]
+    fn probability_override_accepts_the_bounds() {
+        assert_eq!(
+            apply_probability_f32_override(0.5, Some("0".to_owned())),
+            0.0
+        );
+        assert_eq!(
+            apply_probability_f32_override(0.5, Some("1".to_owned())),
+            1.0
+        );
+    }
+
+    #[test]
+    fn probability_override_falls_back_above_one() {
+        // A threshold above 1.0 can never be crossed — silently disabling VAD
+        // gating — so it must be rejected, not applied.
+        assert_eq!(
+            apply_probability_f32_override(0.5, Some("1.5".to_owned())),
+            0.5
+        );
+    }
+
+    #[test]
+    fn probability_override_falls_back_on_negative_or_garbage() {
+        assert_eq!(
+            apply_probability_f32_override(0.5, Some("-0.1".to_owned())),
+            0.5
+        );
+        assert_eq!(
+            apply_probability_f32_override(0.5, Some("nope".to_owned())),
+            0.5
+        );
+        assert_eq!(apply_probability_f32_override(0.5, None), 0.5);
     }
 }
 

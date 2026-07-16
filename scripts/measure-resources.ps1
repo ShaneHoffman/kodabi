@@ -61,11 +61,20 @@ while ((Get-Date) -lt $deadline) {
 
         "$tick,$name,$($row.IDProcess),$cpuPct,$workingSetMb" | Out-File -FilePath $Out -Append -Encoding utf8
 
+        # A name like msedgewebview2 has ~19 concurrent instances; the summary
+        # reports the whole fleet, so sum every instance sharing this name
+        # *within this tick* into one per-tick total. Averaging/peaking the
+        # flat per-instance list instead would report a single process's number,
+        # never the summed fleet the doc records (docs/RESOURCE_BUDGET.md).
         if (-not $samples.ContainsKey($name)) {
-            $samples[$name] = @{ Cpu = @(); Mem = @() }
+            $samples[$name] = @{ Cpu = @{}; Mem = @{} }
         }
-        $samples[$name].Cpu += $cpuPct
-        $samples[$name].Mem += $workingSetMb
+        if (-not $samples[$name].Cpu.ContainsKey($tick)) {
+            $samples[$name].Cpu[$tick] = 0.0
+            $samples[$name].Mem[$tick] = 0.0
+        }
+        $samples[$name].Cpu[$tick] += $cpuPct
+        $samples[$name].Mem[$tick] += $workingSetMb
 
         Write-Output ("{0}  {1,-20} pid={2,-7} cpu={3,6}%  ws={4,7}MB" -f $tick, $name, $row.IDProcess, $cpuPct, $workingSetMb)
     }
@@ -74,10 +83,11 @@ while ((Get-Date) -lt $deadline) {
 }
 
 Write-Output ""
-Write-Output "--- Summary (avg / peak) ---"
+Write-Output "--- Summary (avg / peak, fleet summed per tick) ---"
 foreach ($key in $samples.Keys) {
-    $cpu = $samples[$key].Cpu
-    $mem = $samples[$key].Mem
+    # Values are the per-tick fleet totals; avg/peak run over ticks.
+    $cpu = @($samples[$key].Cpu.Values)
+    $mem = @($samples[$key].Mem.Values)
     if ($cpu.Count -eq 0) { continue }
     $cpuAvg = [math]::Round(($cpu | Measure-Object -Average).Average, 2)
     $cpuPeak = [math]::Round(($cpu | Measure-Object -Maximum).Maximum, 2)

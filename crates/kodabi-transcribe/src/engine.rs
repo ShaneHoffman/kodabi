@@ -15,8 +15,8 @@ use kodabi_core::transcription::{
 
 use crate::silero::{build_silero_vad, SileroParams};
 use crate::validate::{
-    apply_nonnegative_f32_override, apply_positive_i32_override, clamp_threads, path_to_string,
-    require_file, segment_ms, validate_chunk, SAMPLE_RATE_HZ,
+    apply_nonnegative_f32_override, apply_positive_i32_override, apply_probability_f32_override,
+    clamp_threads, path_to_string, require_file, segment_ms, validate_chunk, SAMPLE_RATE_HZ,
 };
 
 /// Local model files and tuning knobs for [`ParakeetEngine`].
@@ -69,7 +69,7 @@ impl ParakeetConfig {
             self.num_threads,
             std::env::var("KODABI_PARAKEET_THREADS").ok(),
         );
-        self.vad_threshold = apply_nonnegative_f32_override(
+        self.vad_threshold = apply_probability_f32_override(
             self.vad_threshold,
             std::env::var("KODABI_VAD_THRESHOLD").ok(),
         );

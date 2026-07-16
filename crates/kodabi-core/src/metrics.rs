@@ -33,8 +33,14 @@ impl PipelineTimings {
     /// wall" convention, the *inverse* of the usual wall÷audio real-time
     /// factor: read the ratio, don't assume which direction is "faster"
     /// without checking which convention a number uses.
+    ///
+    /// Wall time is floored at the 1 ms resolution of `total_ms` so an instant
+    /// run (`total_ms` rounding to 0, e.g. a `MockEngine`) yields a finite
+    /// ratio. Left as `f64::INFINITY`, it would serialize to `null` in the
+    /// `KODABI_METRICS` JSONL (serde_json maps non-finite floats to `null`),
+    /// silently dropping the very number the line exists to record.
     pub fn speed_x(&self) -> f64 {
-        real_time_factor(self.audio_secs, self.total_ms as f64 / 1_000.0)
+        real_time_factor(self.audio_secs, self.total_ms.max(1) as f64 / 1_000.0)
     }
 }
 
@@ -79,5 +85,24 @@ mod tests {
             total_ms: 5_000,
         };
         assert_eq!(timings.speed_x(), 4.0);
+    }
+
+    #[test]
+    fn speed_x_is_finite_when_total_ms_rounds_to_zero() {
+        // An instant run (e.g. `MockEngine`) times at 0 ms. `speed_x` must
+        // stay finite so it survives JSON serialization instead of becoming
+        // `null` — serde_json maps `f64::INFINITY` to `null`.
+        let timings = PipelineTimings {
+            audio_secs: 4.0,
+            engine_build_ms: 0,
+            transcribe_ms: vec![0],
+            assemble_ms: 0,
+            cleanup_ms: 0,
+            persist_ms: 0,
+            total_ms: 0,
+        };
+        assert!(timings.speed_x().is_finite());
+        // 4.0s audio / 1 ms floored wall = 4000x.
+        assert_eq!(timings.speed_x(), 4_000.0);
     }
 }
