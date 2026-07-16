@@ -98,8 +98,10 @@ pub fn spawn_transcription(app: &AppHandle, session: AlignedSession) {
 /// app-data dir, but it is the single seam a future vault-path setting
 /// replaces, so every KB path derives from here rather than calling
 /// `app_data_dir()` inline. Per-project subfolders — each with their own
-/// `_glossary.yml` — will hang off this once routing lands.
-fn knowledge_base_dir(app: &AppHandle) -> Result<PathBuf, String> {
+/// `_glossary.yml` — will hang off this once routing lands. Shared with
+/// `note_cmds` so the note writer resolves the same KB root as the transcribe
+/// pipeline (both must route through this single seam).
+pub(crate) fn knowledge_base_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
         .map_err(|err| format!("failed to resolve knowledge base directory: {err}"))

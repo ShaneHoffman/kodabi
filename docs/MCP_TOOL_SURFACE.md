@@ -553,7 +553,7 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
       "minLength": 1,
       "maxLength": 300,
       "pattern": "^[^/\\\\]+(?:/[^/\\\\]+)*$",
-      "description": "Hierarchical project path/slug relative to the KB root, e.g. \"Growth/Q3\". Segments are folder names; no leading/trailing or empty segments. This is the canonical project handle accepted by tools."
+      "description": "Hierarchical project path/slug relative to the KB root, e.g. \"Growth/Q3\". Segments are folder names; no leading/trailing or empty segments. Each segment must also be a legal Windows folder name (no reserved device names such as CON/PRN/NUL, no trailing dot or space, none of the characters Windows forbids in a path segment); the Phase 2 writer rejects violations. \"Inbox\" is a reserved folder name — a real project may not use it. This is the canonical project handle accepted by tools."
     },
     "IsoDate": {
       "type": "string",
@@ -606,13 +606,13 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
       "required": ["id", "path", "title", "type", "project", "date", "tags", "source"],
       "properties": {
         "id": { "$ref": "#/$defs/NoteId" },
-        "path": { "type": "string", "description": "Current note path relative to the KB root." },
+        "path": { "type": "string", "description": "Current note path relative to the KB root, e.g. \"Growth/Q3/weekly-sync.md\"; an unfiled (Inbox) note's path begins with \"Inbox/\". The filename is a slug of the title (or the id when the title slugifies to empty)." },
         "title": { "type": "string", "description": "Note title." },
         "type": { "$ref": "#/$defs/NoteType" },
-        "project": { "oneOf": [ { "$ref": "#/$defs/ProjectSlug" }, { "type": "null" } ], "description": "Owning project slug, or null if unfiled (Inbox)." },
-        "date": { "oneOf": [ { "$ref": "#/$defs/IsoDateTime" }, { "$ref": "#/$defs/IsoDate" } ], "description": "Frontmatter date, verbatim as stored: full timestamp with offset when a time is known, date-only otherwise." },
-        "tags": { "type": "array", "items": { "type": "string" }, "description": "Frontmatter tags; empty array when the frontmatter key is absent (the writer omits the key for untagged notes)." },
-        "source": { "type": "string", "description": "Frontmatter source: a capture keyword (transcript | quick-capture | chat | import | manual) or a repo-relative path to the raw artifact." },
+        "project": { "oneOf": [ { "$ref": "#/$defs/ProjectSlug" }, { "type": "null" } ], "description": "Owning project slug, or null if unfiled (Inbox). Frontmatter stores the sentinel string \"Inbox\" for the null case." },
+        "date": { "oneOf": [ { "$ref": "#/$defs/IsoDateTime" }, { "$ref": "#/$defs/IsoDate" } ], "description": "Frontmatter date, verbatim as stored: full timestamp with offset when a time is known, date-only otherwise. The writer accepts only these two shapes and rejects a naive timestamp with no offset." },
+        "tags": { "type": "array", "items": { "type": "string" }, "description": "Frontmatter tags; empty array when the frontmatter key is absent (the writer omits the key for untagged notes, and normalizes a hand-edited empty list to an omitted key). Each tag is lowercase kebab-case." },
+        "source": { "type": "string", "description": "Frontmatter source: a capture keyword (transcript | quick-capture | chat | import | manual) or a repo-relative path to the raw artifact. Disambiguation: a value exactly equal to a keyword is that keyword; anything else is the path." },
         "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Routing confidence 0..1, or null when no routing score exists (hand-filed or imported notes)." }
       },
       "description": "Core note metadata shared by search hits, recent-notes lists, and routing results. Deliberately open (no unevaluatedProperties) because SearchHit and MeetingMeta extend it — see Conventions."
@@ -792,7 +792,12 @@ All three calls are read-only and already in the v1 surface — no gap remains f
   `SearchHit`/`PageInfo` output shape that the FTS5 + `sqlite-vec` + RRF pipeline must produce.
 - **→ P0-9 (frontmatter schema):** the `id`-field recommendation above (adopted); the
   `NoteSummary` fields (`id`, `project`, `date`, `type`, `tags`, `source`, `confidence`) mirror the
-  frontmatter fields, so the two specs must stay in agreement as either evolves.
+  frontmatter fields, so the two specs must stay in agreement as either evolves. The Phase 2 markdown
+  writer (`kodabi-core::note`) now implements the frontmatter emitter/parser; building it surfaced
+  edge cases (offset-required dates, tag grammar, project-segment folder-name constraints, the
+  `source` keyword-vs-path rule, the `confidence`/re-route reconciliation, Inbox-folder placement)
+  that were absorbed into [`FRONTMATTER_SCHEMA.md`](FRONTMATTER_SCHEMA.md) and mirrored into the
+  `$defs` above in the same change.
 
 ---
 

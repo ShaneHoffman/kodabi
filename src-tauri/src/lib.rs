@@ -1,5 +1,6 @@
 mod audio_cmds;
 mod capture_control;
+mod note_cmds;
 mod transcribe;
 
 use kodabi_core::device::DeviceId;
@@ -72,6 +73,7 @@ pub fn run() {
             audio_cmds::stop_capture,
             audio_cmds::capture_status,
             audio_cmds::capture_phase,
+            note_cmds::write_note,
         ])
         .on_window_event(|window, event| {
             // Hide instead of exit: the tray + global hotkey must stay
