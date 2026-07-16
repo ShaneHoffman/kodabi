@@ -20,8 +20,8 @@ use kodabi_core::transcription::{AudioChunk, Result, Segment, TranscriptionEngin
 
 use crate::silero::{build_silero_vad, SileroParams};
 use crate::validate::{
-    apply_nonnegative_f32_override, apply_positive_i32_override, offset_into_span, segment_ms,
-    validate_chunk, SAMPLE_RATE_HZ,
+    apply_nonnegative_f32_override, apply_positive_i32_override, apply_probability_f32_override,
+    offset_into_span, segment_ms, validate_chunk, SAMPLE_RATE_HZ,
 };
 
 /// Silero VAD tuning knobs for [`VadGate`].
@@ -61,7 +61,7 @@ impl VadConfig {
     pub fn apply_env_overrides(mut self) -> Self {
         self.num_threads =
             apply_positive_i32_override(self.num_threads, std::env::var("KODABI_VAD_THREADS").ok());
-        self.vad_threshold = apply_nonnegative_f32_override(
+        self.vad_threshold = apply_probability_f32_override(
             self.vad_threshold,
             std::env::var("KODABI_VAD_THRESHOLD").ok(),
         );

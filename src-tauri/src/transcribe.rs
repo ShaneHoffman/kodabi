@@ -70,16 +70,20 @@ pub fn spawn_transcription(app: &AppHandle, session: AlignedSession) {
     let captured_at = Utc::now() - chrono::Duration::milliseconds(elapsed_ms);
 
     std::thread::spawn(move || {
-        let _ = app.emit(
-            TRANSCRIPTION_STATE_EVENT,
-            TranscriptionStateEvent::Transcribing,
-        );
         // Hold the lock across the whole pipeline so only one engine is ever
         // resident; a queued stop waits here rather than piling a second model
         // load on top of the first.
         let _guard = TRANSCRIBE_LOCK
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Announce `Transcribing` only once this run actually starts (i.e.
+        // after the lock is held). Emitting before blocking on the lock would
+        // let a queued back-to-back stop fire a second `Transcribing` up front
+        // and leave a stale `Saved`/`Error` showing while it waits its turn.
+        let _ = app.emit(
+            TRANSCRIPTION_STATE_EVENT,
+            TranscriptionStateEvent::Transcribing,
+        );
         let event = match run(&app, &session, captured_at) {
             Ok(path) => TranscriptionStateEvent::Saved {
                 path: path.display().to_string(),
