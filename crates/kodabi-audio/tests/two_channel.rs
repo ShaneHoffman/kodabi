@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
-use kodabi_audio::{Capture, CaptureSource, Combiner, SessionChannel};
+use kodabi_audio::{Capture, CaptureSource, Combiner, ResampleParams, SessionChannel};
 
 /// Direct verification of this ticket's "Done when": mic and loopback
 /// capture in parallel, get combined by `Combiner` into one time-aligned
@@ -20,7 +20,8 @@ fn two_channel_session_is_aligned_and_round_trips_through_wav() {
     let microphone =
         Capture::start(CaptureSource::Microphone, 256).expect("failed to start microphone capture");
 
-    let combiner = Combiner::start(48_000).expect("failed to start combiner");
+    let combiner =
+        Combiner::start(48_000, ResampleParams::default()).expect("failed to start combiner");
     assert!(combiner.attach(SessionChannel::Mic, microphone.items()));
     assert!(combiner.attach(SessionChannel::System, loopback.items()));
 

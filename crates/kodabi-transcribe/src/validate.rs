@@ -50,6 +50,52 @@ pub(crate) fn clamp_threads(num_threads: i32) -> i32 {
     num_threads.max(1)
 }
 
+/// Parses a positive `i32` override (e.g. `KODABI_PARAKEET_THREADS`),
+/// falling back to `current` on a blank, unparsable, or non-positive value —
+/// an override that would zero out a thread count is nonsensical, not a
+/// valid "use zero". Mirrors `kodabi-llm`'s `apply_*_override(config,
+/// Option<String>)` pattern so the parsing itself is unit-tested without
+/// touching real environment variables.
+///
+/// Gated on the native-engine features (see [`require_file`]).
+#[cfg(any(feature = "parakeet", feature = "vad"))]
+pub(crate) fn apply_positive_i32_override(current: i32, raw: Option<String>) -> i32 {
+    match raw.and_then(|v| v.trim().parse::<i32>().ok()) {
+        Some(v) if v > 0 => v,
+        _ => current,
+    }
+}
+
+/// Parses a non-negative `f32` override (e.g. `KODABI_VAD_THRESHOLD`,
+/// `KODABI_VAD_MIN_SILENCE`), falling back to `current` on a blank,
+/// unparsable, non-finite, or negative value. See
+/// [`apply_positive_i32_override`] for the fallback rationale.
+///
+/// Gated on the native-engine features (see [`require_file`]).
+#[cfg(any(feature = "parakeet", feature = "vad"))]
+pub(crate) fn apply_nonnegative_f32_override(current: f32, raw: Option<String>) -> f32 {
+    match raw.and_then(|v| v.trim().parse::<f32>().ok()) {
+        Some(v) if v.is_finite() && v >= 0.0 => v,
+        _ => current,
+    }
+}
+
+/// Parses a `bool` override (e.g. `KODABI_WHISPER_GPU`) from `"true"`/`"1"`
+/// or `"false"`/`"0"` (case-insensitive), falling back to `current` on a
+/// blank or unrecognized value. See [`apply_positive_i32_override`] for the
+/// fallback rationale.
+///
+/// Gated on `whisper` — the only config field this applies to today
+/// (`WhisperConfig::use_gpu`).
+#[cfg(feature = "whisper")]
+pub(crate) fn apply_bool_override(current: bool, raw: Option<String>) -> bool {
+    match raw.as_deref().map(str::trim) {
+        Some(s) if s.eq_ignore_ascii_case("true") || s == "1" => true,
+        Some(s) if s.eq_ignore_ascii_case("false") || s == "0" => false,
+        _ => current,
+    }
+}
+
 /// Validate an incoming [`AudioChunk`](kodabi_core::transcription::AudioChunk)
 /// before it reaches an engine.
 ///
@@ -199,5 +245,106 @@ mod tests {
     #[test]
     fn offset_into_span_drops_everything_for_a_zero_length_span() {
         assert!(offset_into_span(seg(0, 100, "hi"), 3_000, 3_000).is_none());
+    }
+}
+
+#[cfg(all(test, any(feature = "parakeet", feature = "vad")))]
+mod override_tests {
+    use super::*;
+
+    #[test]
+    fn i32_override_applies_a_valid_value() {
+        assert_eq!(apply_positive_i32_override(1, Some("4".to_owned())), 4);
+    }
+
+    #[test]
+    fn i32_override_falls_back_when_unset() {
+        assert_eq!(apply_positive_i32_override(1, None), 1);
+    }
+
+    #[test]
+    fn i32_override_falls_back_on_blank() {
+        assert_eq!(apply_positive_i32_override(1, Some("  ".to_owned())), 1);
+    }
+
+    #[test]
+    fn i32_override_falls_back_on_garbage() {
+        assert_eq!(apply_positive_i32_override(1, Some("nope".to_owned())), 1);
+    }
+
+    #[test]
+    fn i32_override_falls_back_on_zero_or_negative() {
+        assert_eq!(apply_positive_i32_override(1, Some("0".to_owned())), 1);
+        assert_eq!(apply_positive_i32_override(1, Some("-2".to_owned())), 1);
+    }
+
+    #[test]
+    fn f32_override_applies_a_valid_value() {
+        assert_eq!(
+            apply_nonnegative_f32_override(0.5, Some("0.7".to_owned())),
+            0.7
+        );
+    }
+
+    #[test]
+    fn f32_override_falls_back_when_unset() {
+        assert_eq!(apply_nonnegative_f32_override(0.5, None), 0.5);
+    }
+
+    #[test]
+    fn f32_override_falls_back_on_blank() {
+        assert_eq!(
+            apply_nonnegative_f32_override(0.5, Some(String::new())),
+            0.5
+        );
+    }
+
+    #[test]
+    fn f32_override_falls_back_on_garbage() {
+        assert_eq!(
+            apply_nonnegative_f32_override(0.5, Some("nope".to_owned())),
+            0.5
+        );
+    }
+
+    #[test]
+    fn f32_override_falls_back_on_negative() {
+        assert_eq!(
+            apply_nonnegative_f32_override(0.5, Some("-1.0".to_owned())),
+            0.5
+        );
+    }
+
+    #[test]
+    fn f32_override_accepts_zero() {
+        assert_eq!(
+            apply_nonnegative_f32_override(0.5, Some("0".to_owned())),
+            0.0
+        );
+    }
+}
+
+#[cfg(all(test, feature = "whisper"))]
+mod bool_override_tests {
+    use super::*;
+
+    #[test]
+    fn bool_override_accepts_true_variants() {
+        assert!(apply_bool_override(false, Some("true".to_owned())));
+        assert!(apply_bool_override(false, Some("TRUE".to_owned())));
+        assert!(apply_bool_override(false, Some("1".to_owned())));
+    }
+
+    #[test]
+    fn bool_override_accepts_false_variants() {
+        assert!(!apply_bool_override(true, Some("false".to_owned())));
+        assert!(!apply_bool_override(true, Some("FALSE".to_owned())));
+        assert!(!apply_bool_override(true, Some("0".to_owned())));
+    }
+
+    #[test]
+    fn bool_override_falls_back_when_unset_or_garbage() {
+        assert!(apply_bool_override(true, None));
+        assert!(apply_bool_override(true, Some("nope".to_owned())));
     }
 }

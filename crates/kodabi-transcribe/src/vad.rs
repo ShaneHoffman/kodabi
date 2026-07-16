@@ -19,7 +19,10 @@ use std::path::PathBuf;
 use kodabi_core::transcription::{AudioChunk, Result, Segment, TranscriptionEngine};
 
 use crate::silero::{build_silero_vad, SileroParams};
-use crate::validate::{offset_into_span, segment_ms, validate_chunk, SAMPLE_RATE_HZ};
+use crate::validate::{
+    apply_nonnegative_f32_override, apply_positive_i32_override, offset_into_span, segment_ms,
+    validate_chunk, SAMPLE_RATE_HZ,
+};
 
 /// Silero VAD tuning knobs for [`VadGate`].
 ///
@@ -45,6 +48,37 @@ pub struct VadConfig {
     pub max_speech_duration: f32,
     /// Forwarded to sherpa-onnx's own debug logging.
     pub debug: bool,
+}
+
+impl VadConfig {
+    /// Applies `KODABI_VAD_THREADS` and the VAD-gating overrides
+    /// `KODABI_VAD_THRESHOLD`/`KODABI_VAD_MIN_SILENCE`/`KODABI_VAD_MIN_SPEECH`/
+    /// `KODABI_VAD_MAX_SPEECH`, if set and valid — the same gating env vars
+    /// [`crate::ParakeetConfig::apply_env_overrides`] reads (this config's
+    /// `num_threads` is the standalone VAD's own, distinct from Parakeet's
+    /// shared recognizer+VAD thread count). A blank/unparsable/out-of-range
+    /// value falls back to whatever `self` already carries.
+    pub fn apply_env_overrides(mut self) -> Self {
+        self.num_threads =
+            apply_positive_i32_override(self.num_threads, std::env::var("KODABI_VAD_THREADS").ok());
+        self.vad_threshold = apply_nonnegative_f32_override(
+            self.vad_threshold,
+            std::env::var("KODABI_VAD_THRESHOLD").ok(),
+        );
+        self.min_silence_duration = apply_nonnegative_f32_override(
+            self.min_silence_duration,
+            std::env::var("KODABI_VAD_MIN_SILENCE").ok(),
+        );
+        self.min_speech_duration = apply_nonnegative_f32_override(
+            self.min_speech_duration,
+            std::env::var("KODABI_VAD_MIN_SPEECH").ok(),
+        );
+        self.max_speech_duration = apply_nonnegative_f32_override(
+            self.max_speech_duration,
+            std::env::var("KODABI_VAD_MAX_SPEECH").ok(),
+        );
+        self
+    }
 }
 
 /// Fronts a wrapped [`TranscriptionEngine`] with sherpa-onnx's bundled Silero

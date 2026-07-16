@@ -21,7 +21,10 @@ use kodabi_core::transcription::{
 };
 use whisper_rs::{FullParams, SamplingStrategy, WhisperContext, WhisperContextParameters};
 
-use crate::validate::{clamp_threads, path_to_string, require_file, validate_chunk};
+use crate::validate::{
+    apply_bool_override, apply_positive_i32_override, clamp_threads, path_to_string, require_file,
+    validate_chunk,
+};
 use crate::{VadConfig, VadGate};
 
 /// Local model file and tuning knobs for [`WhisperEngine`].
@@ -43,6 +46,21 @@ pub struct WhisperConfig {
     /// whisper.cpp auto-detect — the multilingual case this engine exists
     /// for.
     pub language: Option<String>,
+}
+
+impl WhisperConfig {
+    /// Applies `KODABI_WHISPER_THREADS` and `KODABI_WHISPER_GPU`, if set and
+    /// valid. A blank/unparsable/out-of-range value falls back to whatever
+    /// `self` already carries — lets a resource-budget pass iterate on real
+    /// hardware without recompiling.
+    pub fn apply_env_overrides(mut self) -> Self {
+        self.num_threads = apply_positive_i32_override(
+            self.num_threads,
+            std::env::var("KODABI_WHISPER_THREADS").ok(),
+        );
+        self.use_gpu = apply_bool_override(self.use_gpu, std::env::var("KODABI_WHISPER_GPU").ok());
+        self
+    }
 }
 
 /// whisper.cpp large-v3-turbo transcription. A batch engine: `accept`
