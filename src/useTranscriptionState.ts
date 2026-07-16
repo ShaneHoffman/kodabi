@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type { CapturePhase } from "./useCaptureState";
 
@@ -20,9 +20,19 @@ const TRANSCRIPTION_STATE_EVENT = "transcription:state";
  * Resets to `idle` whenever a new capture begins (`capturePhase` becomes
  * `listening`) so a terminal `saved`/`error` label from the previous meeting
  * doesn't linger on screen through the next recording.
+ *
+ * The previous meeting's cleanup stage runs a headless Claude subprocess that
+ * can take seconds, so its terminal `saved`/`error` event may not land until
+ * the next recording is already under way. Any event that arrives while a
+ * capture is live (`capturePhase === "listening"`) therefore belongs to that
+ * prior run and is dropped — transcription itself only ever starts after a
+ * stop, so a genuine event for the current session never arrives while
+ * listening.
  */
 export function useTranscriptionState(capturePhase: CapturePhase): TranscriptionState {
   const [state, setState] = useState<TranscriptionState>({ status: "idle" });
+  const capturePhaseRef = useRef(capturePhase);
+  capturePhaseRef.current = capturePhase;
 
   useEffect(() => {
     if (capturePhase === "listening") setState({ status: "idle" });
@@ -33,7 +43,7 @@ export function useTranscriptionState(capturePhase: CapturePhase): Transcription
     let unlisten: (() => void) | undefined;
 
     listen<TranscriptionState>(TRANSCRIPTION_STATE_EVENT, (event) => {
-      if (active) setState(event.payload);
+      if (active && capturePhaseRef.current !== "listening") setState(event.payload);
     }).then((fn) => {
       if (active) {
         unlisten = fn;

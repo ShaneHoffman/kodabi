@@ -15,6 +15,7 @@ use kodabi_core::transcription::{
 
 use crate::silero::{build_silero_vad, SileroParams};
 use crate::validate::{
+    apply_nonnegative_f32_override, apply_positive_i32_override, apply_probability_f32_override,
     clamp_threads, path_to_string, require_file, segment_ms, validate_chunk, SAMPLE_RATE_HZ,
 };
 
@@ -51,6 +52,41 @@ pub struct ParakeetConfig {
     pub max_speech_duration: f32,
     /// Forwarded to sherpa-onnx's own debug logging.
     pub debug: bool,
+}
+
+impl ParakeetConfig {
+    /// Applies `KODABI_PARAKEET_THREADS` (both the VAD and recognizer thread
+    /// count — see [`ParakeetConfig::num_threads`]) and the VAD-gating
+    /// overrides `KODABI_VAD_THRESHOLD`/`KODABI_VAD_MIN_SILENCE`/
+    /// `KODABI_VAD_MIN_SPEECH`/`KODABI_VAD_MAX_SPEECH`, if set and valid —
+    /// the same env vars [`crate::VadConfig::apply_env_overrides`] reads, so
+    /// one set of knobs tunes VAD gating for whichever engine is active. A
+    /// blank/unparsable/out-of-range value falls back to whatever `self`
+    /// already carries rather than silently breaking the pipeline. Lets a
+    /// resource-budget pass iterate on real hardware without recompiling.
+    pub fn apply_env_overrides(mut self) -> Self {
+        self.num_threads = apply_positive_i32_override(
+            self.num_threads,
+            std::env::var("KODABI_PARAKEET_THREADS").ok(),
+        );
+        self.vad_threshold = apply_probability_f32_override(
+            self.vad_threshold,
+            std::env::var("KODABI_VAD_THRESHOLD").ok(),
+        );
+        self.min_silence_duration = apply_nonnegative_f32_override(
+            self.min_silence_duration,
+            std::env::var("KODABI_VAD_MIN_SILENCE").ok(),
+        );
+        self.min_speech_duration = apply_nonnegative_f32_override(
+            self.min_speech_duration,
+            std::env::var("KODABI_VAD_MIN_SPEECH").ok(),
+        );
+        self.max_speech_duration = apply_nonnegative_f32_override(
+            self.max_speech_duration,
+            std::env::var("KODABI_VAD_MAX_SPEECH").ok(),
+        );
+        self
+    }
 }
 
 /// NVIDIA Parakeet TDT transcription, gated by sherpa-onnx's bundled Silero

@@ -3,16 +3,21 @@
 //! these commands only own the managed [`DualCapture`] and map its status /
 //! aligned-session outputs to serializable IPC DTOs.
 
-use kodabi_audio::{AlignedSession, AudioFormat, DualCapture, DualStatus, SourceStatus};
+use kodabi_audio::{
+    AlignedSession, AudioFormat, CaptureTuning, DualCapture, DualStatus, SourceStatus,
+};
 
-/// Bounds each source's capture-item channel — the slack between a cpal
-/// callback enqueuing a frame and the combiner's coordinator thread draining
-/// it. Each source is attached to the combiner the instant it goes live
-/// (`DualCapture::start_and_attach`), so a source is drained continuously and
-/// never has to buffer a whole slow-negotiation window — the channel only has
-/// to absorb ordinary scheduling jitter, for which a few frames is ample. 256
-/// leaves generous headroom while keeping the buffered PCM bounded; a full
-/// channel drops the frame (`try_send` fails) and bumps `frames_dropped`.
+/// Default bound on each source's capture-item channel — the slack between a
+/// cpal callback enqueuing a frame and the combiner's coordinator thread
+/// draining it. Each source is attached to the combiner the instant it goes
+/// live (`DualCapture::start_and_attach`), so a source is drained
+/// continuously and never has to buffer a whole slow-negotiation window — the
+/// channel only has to absorb ordinary scheduling jitter, for which a few
+/// frames is ample. 256 leaves generous headroom while keeping the buffered
+/// PCM bounded; a full channel drops the frame (`try_send` fails) and bumps
+/// `frames_dropped`. Overridable via `KODABI_FRAME_CAPACITY`
+/// (`CaptureTuning::from_env`) for a resource-budget tuning pass
+/// (`docs/RESOURCE_BUDGET.md`).
 const FRAME_CAPACITY: usize = 256;
 
 /// Common rate the two-channel combiner aligns mic and system audio to.
@@ -25,7 +30,10 @@ pub struct CaptureState(DualCapture);
 
 impl Default for CaptureState {
     fn default() -> Self {
-        CaptureState(DualCapture::new(FRAME_CAPACITY, TWO_CHANNEL_SAMPLE_RATE))
+        CaptureState(DualCapture::new(CaptureTuning::from_env(
+            FRAME_CAPACITY,
+            TWO_CHANNEL_SAMPLE_RATE,
+        )))
     }
 }
 
