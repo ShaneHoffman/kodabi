@@ -157,8 +157,8 @@ Measured 2026-07-15 against the committed `speech_16k_mono.wav` fixture (6.12s o
 | Engine | `speed_x` | Notes |
 |---|---|---|
 | Parakeet (CPU, 1 thread) | **72.19x** | Production configuration (VAD-gated pseudo-streaming) — the leaned default's real number. |
-| Whisper (CPU, 4 threads) | ~0.41x *(caveated)* | **Not the production configuration** — see the known issue below. `whisper.cpp` alone (bare `WhisperEngine`, no VAD) transcribed the fixture in ~15.1s; the mandatory VAD gate (`whisper_with_vad`, FOUNDING_DOC §8) crashes on this machine, so a true production-path number couldn't be measured. |
-| Whisper (CUDA) | — | Blocked by the same issue (see below) — model loaded onto the RTX 4080 fine, then hit the identical crash. |
+| Whisper (CPU, 4 threads) | blocked by the sherpa-onnx ORT bug (task #53) | `whisper.cpp` alone (bare `WhisperEngine`, no VAD) transcribed the fixture in ~15.1s as a rough, non-production proxy, but the mandatory VAD gate (`whisper_with_vad`, FOUNDING_DOC §8) crashes — see below. |
+| Whisper (CUDA) | blocked by the sherpa-onnx ORT bug (task #53) | Model loaded onto the RTX 4080 fine, then hit the identical crash at VAD init. |
 
 CPU%/GPU%/working-set peaks during the transcription burst were not separately profiled this
 pass (the RTF harness measures wall time only); `scripts/measure-resources.ps1` run alongside
@@ -187,8 +187,8 @@ Runtime C API version than the `onnxruntime.dll` it bundles actually implements.
 
 This is a real, pre-existing bug independent of this ticket (the `sherpa-onnx` version is
 unchanged by this branch) that blocks the production Whisper fallback path on Windows
-entirely, not just this measurement — worth its own ticket to reproduce elsewhere and
-pin/patch the dependency.
+entirely, not just this measurement. Tracked as board task **#53**
+(`fix/sherpa-onnx-ort-mismatch`).
 
 ## Final tuned constants
 
