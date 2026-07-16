@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useNavigation } from "./useNavigation";
-import { useProjects } from "./useProjects";
+import { entryView, formatSlug, useProjects } from "./useProjects";
 
 export type Command = {
   id: string;
@@ -21,21 +21,12 @@ export function useCommands(): Command[] {
   const { entries } = useProjects();
 
   return useMemo(() => {
-    const commands: Command[] = entries.map((entry) =>
-      entry.kind === "inbox"
-        ? {
-            id: "jump:inbox",
-            title: "Inbox",
-            hint: "Jump to",
-            run: () => navigate({ kind: "inbox" }),
-          }
-        : {
-            id: `jump:${entry.project.slug}`,
-            title: entry.project.slug.split("/").join(" / "),
-            hint: "Jump to",
-            run: () => navigate({ kind: "project", slug: entry.project.slug }),
-          },
-    );
+    const commands: Command[] = entries.map((entry) => ({
+      id: entry.kind === "inbox" ? "jump:inbox" : `jump:${entry.project.slug}`,
+      title: entry.kind === "inbox" ? "Inbox" : formatSlug(entry.project.slug),
+      hint: "Jump to",
+      run: () => navigate(entryView(entry)),
+    }));
 
     commands.push(
       {

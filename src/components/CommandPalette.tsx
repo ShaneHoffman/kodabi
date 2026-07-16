@@ -23,9 +23,8 @@ function optionId(index: number): string {
 
 /**
  * The primary navigation surface (FOUNDING_DOC §4), hand-rolled as a
- * combobox: focus never leaves the input; ↑/↓ move a virtual highlight via
- * aria-activedescendant, Enter runs it. Escape is handled by the global
- * listener in useCommandPalette.
+ * combobox: focus never leaves the input (Tab is held); ↑/↓ move a virtual
+ * highlight via aria-activedescendant, Enter runs it, Escape closes.
  */
 export function CommandPalette({ onClose }: Props) {
   const { navigate } = useNavigation();
@@ -33,7 +32,14 @@ export function CommandPalette({ onClose }: Props) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  const panelRef = useRef<HTMLDivElement>(null);
+  // Whether the current pointer gesture started on the backdrop itself —
+  // a press that starts inside the panel must never dismiss, even if it
+  // ends (or retargets, via common-ancestor click) on the backdrop.
+  const backdropPressed = useRef(false);
+  // Last pointer position over the list: scrolling shifts rows under a
+  // stationary cursor and Chromium re-fires boundary/move events, which
+  // must not yank the keyboard highlight to whatever lands under the mouse.
+  const lastPointer = useRef<{ x: number; y: number } | null>(null);
 
   const filtered = useFilteredCommands(commands, query);
 
@@ -67,18 +73,6 @@ export function CommandPalette({ onClose }: Props) {
     };
   }, []);
 
-  // Click-outside dismiss. pointerdown, not click: a different event from the
-  // opening keydown, so opening can never immediately self-close.
-  useEffect(() => {
-    const onPointerDown = (event: PointerEvent) => {
-      if (panelRef.current && !panelRef.current.contains(event.target as Node)) {
-        onClose();
-      }
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [onClose]);
-
   // Keep the keyboard highlight visible when it walks past the list's edge.
   useEffect(() => {
     document.getElementById(optionId(active))?.scrollIntoView({ block: "nearest" });
@@ -90,6 +84,9 @@ export function CommandPalette({ onClose }: Props) {
   };
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    // Keys pressed mid-IME-composition belong to the composition (committing
+    // with Enter, cancelling with Escape), never to the palette.
+    if (event.nativeEvent.isComposing) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setActiveIndex(Math.min(active + 1, rows.length - 1));
@@ -100,13 +97,34 @@ export function CommandPalette({ onClose }: Props) {
       event.preventDefault();
       const command = rows[active];
       if (command) runCommand(command);
+    } else if (event.key === "Escape") {
+      event.preventDefault();
+      onClose();
+    } else if (event.key === "Tab") {
+      // The dialog's only tabbable element is this input — hold focus here
+      // so Tab can't reach controls hidden behind the overlay (aria-modal).
+      event.preventDefault();
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center bg-bg-sink/60 px-md pt-2xl">
+    // Backdrop dismiss happens on click, not pointerdown: unmounting the
+    // overlay at pointerdown lets the rest of the gesture fall through to
+    // whatever sat underneath (the unmount flushes before mousedown), so a
+    // dismissing click would also press sidebar controls. The opening
+    // gesture predates the overlay, so it can never self-close.
+    <div
+      className="fixed inset-0 z-50 flex items-start justify-center bg-bg-sink/60 px-md pt-2xl"
+      onPointerDown={(event) => {
+        backdropPressed.current = event.target === event.currentTarget;
+      }}
+      onClick={(event) => {
+        if (backdropPressed.current && event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
       <div
-        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="Command palette"
@@ -143,7 +161,13 @@ export function CommandPalette({ onClose }: Props) {
               role="option"
               aria-selected={index === active}
               onPointerDown={(event) => event.preventDefault()}
-              onMouseEnter={() => setActiveIndex(index)}
+              onMouseMove={(event) => {
+                const moved =
+                  lastPointer.current?.x !== event.clientX ||
+                  lastPointer.current?.y !== event.clientY;
+                lastPointer.current = { x: event.clientX, y: event.clientY };
+                if (moved && index !== active) setActiveIndex(index);
+              }}
               onClick={() => runCommand(command)}
               className={`command-palette__row flex items-baseline justify-between px-4 py-2 text-body text-text-soft${
                 index === active ? " is-active" : ""

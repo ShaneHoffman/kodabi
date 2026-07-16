@@ -13,24 +13,13 @@ export type View =
   | { kind: "search"; query: string }
   | { kind: "capture" };
 
-/**
- * Navigation is a dispatched action rather than a bare setter so a future
- * history stack ({ type: "back" }) slots in without touching call sites.
- */
-export type NavigationAction = { type: "navigate"; view: View };
-
 /** Inbox is home: the unrouted bucket is the first thing worth seeing. */
 export const INITIAL_VIEW: View = { kind: "inbox" };
 
-export function navigationReducer(state: View, action: NavigationAction): View {
-  switch (action.type) {
-    case "navigate":
-      return action.view;
-    default:
-      return state;
-  }
-}
-
+/**
+ * Call sites see only this shape, so a future history stack (back/forward)
+ * swaps in behind `navigate` by touching NavigationProvider alone.
+ */
 type NavigationContextValue = {
   view: View;
   navigate: (view: View) => void;
