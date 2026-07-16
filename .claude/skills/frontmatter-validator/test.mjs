@@ -12,7 +12,9 @@ import { validateContent, checkSchema } from './validate.mjs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const fx = (p) => readFileSync(join(__dirname, 'fixtures', p), 'utf8');
 const errors = (content) => validateContent(content).filter((f) => f.level === 'ERROR');
+const warns = (content) => validateContent(content).filter((f) => f.level === 'WARN');
 const hasError = (content, code) => errors(content).some((f) => f.code === code);
+const hasWarn = (content, code) => warns(content).some((f) => f.code === code);
 
 let pass = 0;
 let fail = 0;
@@ -28,7 +30,7 @@ function check(name, cond, detail) {
 }
 
 console.log('valid fixtures (expect zero errors):');
-for (const f of ['valid/meeting.md', 'valid/note.md', 'valid/chat.md']) {
+for (const f of ['valid/meeting.md', 'valid/note.md', 'valid/chat.md', 'valid/inline-comments.md']) {
   const errs = errors(fx(f));
   check(`${f} passes`, errs.length === 0, errs.map((e) => `${e.code}: ${e.message}`).join('; '));
 }
@@ -44,6 +46,25 @@ check(
   'invalid/wrong-key-order.md flags key order',
   hasError(fx('invalid/wrong-key-order.md'), 'key-order'),
 );
+check(
+  'invalid/inbox-missing-confidence.md flags inbox-confidence',
+  hasError(fx('invalid/inbox-missing-confidence.md'), 'inbox-confidence'),
+);
+
+console.log('warning fixtures (expect a non-fatal WARN, zero errors):');
+{
+  const c = fx('valid/manual-with-confidence.md');
+  const errs = errors(c);
+  check(
+    'valid/manual-with-confidence.md has no errors',
+    errs.length === 0,
+    errs.map((e) => `${e.code}: ${e.message}`).join('; '),
+  );
+  check(
+    'valid/manual-with-confidence.md warns confidence-presence',
+    hasWarn(c, 'confidence-presence'),
+  );
+}
 
 console.log('schema mirror check (expect agreement):');
 const { drift } = checkSchema();
