@@ -37,11 +37,14 @@ pub struct NewNoteInput {
 /// The written note echoed back to the frontend, in the MCP `NoteSummary`
 /// projection: `project: null` and `confidence: null` stand in for the
 /// frontmatter's Inbox sentinel and omitted-confidence key, and `path` is
-/// relative to the KB root with forward slashes.
+/// relative to the KB root with forward slashes. `title` echoes the
+/// caller-supplied title that seeded the filename — `null` when none was given,
+/// in which case the filename derives from the `id`.
 #[derive(serde::Serialize)]
 pub struct WrittenNote {
     id: String,
     path: String,
+    title: Option<String>,
     #[serde(rename = "type")]
     note_type: String,
     project: Option<String>,
@@ -68,7 +71,7 @@ fn write_note_impl(app: &AppHandle, input: NewNoteInput) -> Result<WrittenNote, 
 
     let path = note::write_note(&kb, &note, title.as_deref()).map_err(|err| err.to_string())?;
     let rel = path.strip_prefix(&kb).unwrap_or(&path);
-    Ok(written_note(&note, rel))
+    Ok(written_note(&note, title, rel))
 }
 
 /// Builds a validated core [`Note`] from the wire input and a freshly minted
@@ -91,12 +94,14 @@ fn note_from_input(input: NewNoteInput, id: NoteId) -> Result<Note, String> {
 
 /// Projects a written [`Note`] to the `NoteSummary` wire shape: the Inbox
 /// sentinel becomes `project: null`, and the KB-relative path is normalized to
-/// forward slashes.
-fn written_note(note: &Note, rel_path: &Path) -> WrittenNote {
+/// forward slashes. `title` is the caller-supplied title (if any) that seeded
+/// the filename.
+fn written_note(note: &Note, title: Option<String>, rel_path: &Path) -> WrittenNote {
     let project = note.routing.project();
     WrittenNote {
         id: note.id.as_str().to_string(),
         path: rel_path.to_string_lossy().replace('\\', "/"),
+        title,
         note_type: note.note_type.as_str().to_string(),
         project: (project != note::INBOX).then(|| project.to_string()),
         date: note.date.clone(),
@@ -178,10 +183,11 @@ mod tests {
             "",
         )
         .unwrap();
-        let dto = written_note(&note, Path::new("Inbox\\idea.md"));
+        let dto = written_note(&note, Some("Idea".to_string()), Path::new("Inbox\\idea.md"));
         assert_eq!(dto.project, None);
         assert_eq!(dto.confidence, Some(0.38));
         assert_eq!(dto.path, "Inbox/idea.md");
+        assert_eq!(dto.title.as_deref(), Some("Idea"));
     }
 
     #[test]
@@ -198,9 +204,10 @@ mod tests {
             "",
         )
         .unwrap();
-        let dto = written_note(&note, Path::new("Growth\\Q3\\weekly-sync.md"));
+        let dto = written_note(&note, None, Path::new("Growth\\Q3\\weekly-sync.md"));
         assert_eq!(dto.project.as_deref(), Some("Growth/Q3"));
         assert_eq!(dto.confidence, None);
         assert_eq!(dto.path, "Growth/Q3/weekly-sync.md");
+        assert_eq!(dto.title, None);
     }
 }
