@@ -59,15 +59,16 @@ fn mirror_runtime_dlls_into_deps() -> Result<(), BuildError> {
     let deps_dir = profile_dir.join("deps");
     fs::create_dir_all(&deps_dir)?;
 
-    let mut copied = 0usize;
+    let mut saw_dll = false;
     for entry in fs::read_dir(&profile_dir)? {
         let source = entry?.path();
-        if source.extension() != Some(OsStr::new("dll")) {
+        if !is_runtime_dll(&source) {
             continue;
         }
         let Some(name) = source.file_name() else {
             continue;
         };
+        saw_dll = true;
         let dest = deps_dir.join(name);
 
         // Re-copy when the upstream DLL changes (e.g. a sherpa/ORT bump refreshes
@@ -76,13 +77,27 @@ fn mirror_runtime_dlls_into_deps() -> Result<(), BuildError> {
         println!("cargo:rerun-if-changed={}", source.display());
         println!("cargo:rerun-if-changed={}", dest.display());
 
-        copy_file_atomically(&source, &dest)?;
-        copied += 1;
+        // Best-effort *per file*: overwriting a currently-loaded DLL (e.g. while
+        // a test binary is running) fails on Windows. Warn and keep going so one
+        // locked or unreadable DLL never blocks mirroring the rest — above all
+        // `onnxruntime.dll`, whose absence is the access violation this fixes.
+        if let Err(err) = copy_file_atomically(&source, &dest) {
+            println!(
+                "cargo:warning=kodabi-transcribe: could not mirror {} into deps/: {err}",
+                name.to_string_lossy()
+            );
+        }
     }
 
-    if copied == 0 {
+    if !saw_dll {
+        // With no runtime DLL found we emit no per-file `rerun-if-changed`
+        // above, so Cargo would fall back to "rerun if a package file changed" —
+        // which never fires here, stranding `deps/` empty across later builds
+        // even after the upstream build script populates `target/<profile>/`.
+        // Watch the profile directory so a DLL appearing there re-runs us.
+        println!("cargo:rerun-if-changed={}", profile_dir.display());
         println!(
-            "cargo:warning=kodabi-transcribe: found no runtime DLLs in {} to mirror into deps/ (the sherpa-onnx shared build may not have populated it)",
+            "cargo:warning=kodabi-transcribe: found no runtime DLLs in {} to mirror into deps/ (the sherpa-onnx shared build may not have populated it — expected under a custom Cargo profile, whose output dir the upstream copy step does not locate)",
             profile_dir.display()
         );
     }
@@ -90,21 +105,45 @@ fn mirror_runtime_dlls_into_deps() -> Result<(), BuildError> {
     Ok(())
 }
 
-/// `target/<profile>/` — the ancestor of `OUT_DIR` whose final component is the
-/// active Cargo profile. Mirrors sherpa-onnx-sys's own path logic, so we resolve
-/// to the exact directory it copied the DLLs into. Because `OUT_DIR` already sits
-/// under the real target directory, this inherits `CARGO_TARGET_DIR` and
-/// `--target <triple>` layouts for free.
+/// The sherpa/ONNX Runtime runtime DLLs the shared build stages into
+/// `target/<profile>/`: `onnxruntime.dll`, `onnxruntime_providers_*.dll`,
+/// `sherpa-onnx-c-api.dll`, `sherpa-onnx-cxx-api.dll`. Restricting to these
+/// name prefixes keeps the mirror from copying — and clobbering — unrelated
+/// DLLs other workspace crates may drop into the shared profile directory.
+fn is_runtime_dll(path: &Path) -> bool {
+    if path.extension() != Some(OsStr::new("dll")) {
+        return false;
+    }
+    match path.file_name().and_then(OsStr::to_str) {
+        Some(name) => {
+            let name = name.to_ascii_lowercase();
+            name.starts_with("onnxruntime") || name.starts_with("sherpa-onnx")
+        }
+        None => false,
+    }
+}
+
+/// `target/<profile>/` — resolved *structurally* from `OUT_DIR`, which Cargo
+/// lays out as `<target>/<profile>/build/<pkg>-<hash>/out`. Taking the parent
+/// of the `build` component yields the profile directory without matching on the
+/// `PROFILE` env var — which only ever holds `debug`/`release` and so cannot
+/// locate a custom profile's `target/<name>/` output dir. Because `OUT_DIR`
+/// already sits under the real target directory, this inherits `CARGO_TARGET_DIR`
+/// and `--target <triple>` layouts for free.
+///
+/// Caveat: the upstream sherpa-onnx-sys copy step *does* key off `PROFILE`, so
+/// under a custom profile it will not have populated `target/<name>/` and the
+/// mirror finds nothing to copy (a warning, not a build failure).
 fn profile_dir() -> Result<PathBuf, BuildError> {
     let out_dir = PathBuf::from(env::var("OUT_DIR")?);
-    let profile = env::var("PROFILE")?;
     out_dir
         .ancestors()
-        .find(|path| path.file_name() == Some(OsStr::new(&profile)))
+        .find(|path| path.file_name() == Some(OsStr::new("build")))
+        .and_then(Path::parent)
         .map(Path::to_path_buf)
         .ok_or_else(|| {
             format!(
-                "could not locate the `{profile}` profile directory above OUT_DIR ({})",
+                "could not locate the profile directory above OUT_DIR ({}): no `build` component",
                 out_dir.display()
             )
             .into()
