@@ -115,7 +115,7 @@ The app never calls the Anthropic API directly. Instead:
 - **Engine is a trait, not a dependency.** The Rust backend defines a `TranscriptionEngine` trait; concrete engines are swappable. This is the design decision that makes the model choice low-stakes.
 - **Default engine: NVIDIA Parakeet TDT via sherpa-onnx** (Apache 2.0). Rationale: near-Whisper-large English accuracy, dramatically faster, streaming-friendly, and — critically for meetings — its architecture doesn't hallucinate phantom text during silence, which Whisper is notorious for on pause-heavy audio. sherpa-onnx provides Rust bindings and bundled VAD with no Python/NeMo dependency.
 - **Fallback engine: whisper.cpp (large-v3-turbo)** for multilingual needs and the strongest glossary-biasing mechanism (initial prompt). Must be paired with **Silero VAD** to chop silence before it hallucinates.
-- **Benchmark both on one real recorded meeting** before locking the default (Phase 1 task).
+- **Benchmarked both on one real recorded meeting (2026-07-15); default locked to Parakeet TDT** — silence-safe, ~10× faster, and no content-accuracy deficit (its lone proper-noun miss is exactly what the post-pass fixes). See `docs/benchmarks/stt-engine-benchmark.md`.
 - **Per-project glossary** — project names (MERIDIAN, TeeTrack), client names, teammate names, domain terms. Applied via initial-prompt bias where the engine supports it (Whisper); otherwise enforced entirely by the post-pass. This is the defense against mangled proper nouns poisoning categorization and search.
 - **Post-pass cleanup:** at meeting end, a cheap Claude pass ("here's the glossary; fix obvious misrecognitions") catches what biasing missed — and is engine-agnostic.
 - **Self-maintaining glossary:** when corrections happen, the tool proposes glossary additions.
@@ -292,7 +292,7 @@ order of expected value — each earns its place only after the core loop proves
 | ~~Name~~ | — | **DECIDED: Kodabi** (renamed from "Kodama", 2026-07 — namespace conflicts; see §Why) | ✅ Closed |
 | ~~License~~ | — | **DECIDED: AGPL-3.0-only** | ✅ Closed |
 | ~~Frontend stack~~ | — | **DECIDED: React + Tailwind** | ✅ Closed |
-| Default STT engine | Parakeet TDT (sherpa-onnx) / whisper.cpp large-v3-turbo | Parakeet (silence-safe, fast); confirm via real-meeting benchmark | Phase 1 |
+| ~~Default STT engine~~ | — | **DECIDED: Parakeet TDT (sherpa-onnx)** (real-meeting benchmark 2026-07-15 — silence-safe, ~10× faster, no content-accuracy deficit; whisper.cpp stays the fallback. See `docs/benchmarks/stt-engine-benchmark.md`) | ✅ Closed |
 | Embedding model | bge-small / nomic-embed / other | Benchmark retrieval quality on real notes | Phase 2 |
 | Audio retention default | keep / discard after distill | Discard raw audio by default, keep transcript N days | Phase 2 |
 | Claude Code invocation | headless CLI vs Agent SDK | Verify current docs at implementation time | Phase 3 |
