@@ -23,5 +23,18 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-global-shortcut = "2"
 kodabi-core = { path = "../crates/kodabi-core" }
 kodabi-audio = { path = "../crates/kodabi-audio" }
+kodabi-transcribe = { path = "../crates/kodabi-transcribe", optional = true }
+kodabi-llm = { path = "../crates/kodabi-llm" }
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[features]
+default = []
+# Forward to `kodabi-transcribe`'s own mutually-exclusive engine features (see
+# that crate's Cargo.toml for the static/shared link-mode conflict that keeps
+# `parakeet` and `whisper` from ever being enabled together in one binary).
+# Neither is on by default, so the default build transcribes with
+# `kodabi_core::transcription::MockEngine` and stays native-dependency-free.
+parakeet = ["dep:kodabi-transcribe", "kodabi-transcribe/parakeet"]
+whisper = ["dep:kodabi-transcribe", "kodabi-transcribe/whisper"]

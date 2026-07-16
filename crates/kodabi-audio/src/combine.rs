@@ -80,6 +80,21 @@ impl AlignedSession {
     pub fn duration(&self) -> Duration {
         Duration::from_secs_f64(self.frames() as f64 / self.sample_rate.max(1) as f64)
     }
+
+    /// Borrow one channel's mono samples resampled to `target_rate` — e.g.
+    /// downsampling from this session's rate to the 16 kHz mono `f32` a
+    /// transcription engine requires. Returns a plain copy of the channel,
+    /// unresampled, when `target_rate` already matches.
+    pub fn channel_resampled(&self, ch: SessionChannel, target_rate: u32) -> Result<Vec<f32>> {
+        let source = self.channel(ch);
+        if target_rate == self.sample_rate {
+            return Ok(source.to_vec());
+        }
+        let mut resampler = MonoResampler::new(self.sample_rate, target_rate)?;
+        let mut out = resampler.push(source);
+        out.extend(resampler.flush());
+        Ok(out)
+    }
 }
 
 /// One source's downmix -> resample -> drift-correct -> accumulate pipeline.
@@ -711,6 +726,41 @@ mod tests {
                 .any(|&s| s != 0.0),
             "the mic burst captured before system attached was lost"
         );
+    }
+
+    #[test]
+    fn channel_resampled_downsamples_48k_to_16k() {
+        let session = AlignedSession {
+            sample_rate: 48_000,
+            mic: vec![0.1; 48_000],
+            system: vec![0.2; 48_000],
+        };
+
+        let resampled = session
+            .channel_resampled(SessionChannel::Mic, 16_000)
+            .expect("resample should succeed");
+
+        let diff = (resampled.len() as i64 - 16_000).abs();
+        assert!(
+            diff < 300,
+            "expected roughly a third of the input length, got {}",
+            resampled.len()
+        );
+    }
+
+    #[test]
+    fn channel_resampled_is_a_no_op_copy_at_the_same_rate() {
+        let session = AlignedSession {
+            sample_rate: 48_000,
+            mic: vec![0.3; 480],
+            system: vec![0.0; 480],
+        };
+
+        let resampled = session
+            .channel_resampled(SessionChannel::Mic, 48_000)
+            .expect("resample should succeed");
+
+        assert_eq!(resampled, session.mic);
     }
 
     #[test]
