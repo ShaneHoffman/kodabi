@@ -24,7 +24,9 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use hound::{SampleFormat, WavSpec, WavWriter};
-use kodabi_audio::{levels, AlignedSession, DualCapture, DualStatus, SessionChannel};
+use kodabi_audio::{
+    levels, AlignedSession, CaptureTuning, DualCapture, DualStatus, SessionChannel,
+};
 
 const TWO_CHANNEL_SAMPLE_RATE: u32 = 48_000;
 const FRAME_CAPACITY: usize = 256;
@@ -36,7 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     eprintln!("Starting loopback + microphone capture...");
-    let capture = DualCapture::new(FRAME_CAPACITY, TWO_CHANNEL_SAMPLE_RATE);
+    let capture = DualCapture::new(CaptureTuning::new(FRAME_CAPACITY, TWO_CHANNEL_SAMPLE_RATE));
     let status = capture.start()?;
     if let Some(err) = &status.loopback.error {
         return Err(format!("loopback capture failed to start: {err}").into());

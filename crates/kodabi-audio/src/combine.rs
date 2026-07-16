@@ -24,7 +24,7 @@ use crate::drift::{DriftController, GapCorrection};
 use crate::error::Result;
 use crate::frame::{AudioFrame, CaptureItem};
 use crate::mix::{downmix_to_mono_into, interleave_stereo};
-use crate::resample::MonoResampler;
+use crate::resample::{MonoResampler, ResampleParams};
 
 /// How often (of wall-clock time) a source's drift is re-evaluated. See
 /// `drift.rs` for what the correction itself does.
@@ -102,6 +102,7 @@ impl AlignedSession {
 /// of the combiner's public surface.
 struct SourcePipeline {
     target_rate: u32,
+    resample_params: ResampleParams,
     resampler: Option<MonoResampler>,
     /// The segment this pipeline's resampler was built for. `AudioFrame`
     /// carries its own `segment_id`, so a change here (rather than relying
@@ -121,9 +122,10 @@ struct SourcePipeline {
 }
 
 impl SourcePipeline {
-    fn new(target_rate: u32) -> Self {
+    fn new(target_rate: u32, resample_params: ResampleParams) -> Self {
         SourcePipeline {
             target_rate,
+            resample_params,
             resampler: None,
             segment_id: None,
             drift: DriftController::new(target_rate),
@@ -150,7 +152,8 @@ impl SourcePipeline {
             self.out.extend(old.flush());
         }
         self.segment_id = Some(segment_id);
-        self.resampler = MonoResampler::new(sample_rate, self.target_rate).ok();
+        self.resampler =
+            MonoResampler::with_params(sample_rate, self.target_rate, self.resample_params).ok();
     }
 
     /// Prepend `n` samples of leading silence, shifting all existing output
@@ -346,9 +349,13 @@ enum Action {
 /// (which would drop real audio). A source arriving mid-flight is simply added
 /// to the select set; [`Combiner::finish`] drops the control sender to signal
 /// that the roster is closed.
-fn coordinator_loop(control_rx: Receiver<SourceAttach>, target_rate: u32) -> AlignedSession {
-    let mut mic_pipeline = SourcePipeline::new(target_rate);
-    let mut system_pipeline = SourcePipeline::new(target_rate);
+fn coordinator_loop(
+    control_rx: Receiver<SourceAttach>,
+    target_rate: u32,
+    resample_params: ResampleParams,
+) -> AlignedSession {
+    let mut mic_pipeline = SourcePipeline::new(target_rate, resample_params);
+    let mut system_pipeline = SourcePipeline::new(target_rate, resample_params);
     let mut t0: Option<Instant> = None;
 
     let mut mic_rx: Option<Receiver<CaptureItem>> = None;
@@ -429,12 +436,14 @@ impl Combiner {
     /// Spawn the coordinator thread. It starts with no sources attached —
     /// each is added by [`Combiner::attach`] the moment it goes live, so the
     /// first source begins draining immediately instead of buffering until
-    /// its sibling finishes negotiating.
-    pub fn start(target_rate: u32) -> Result<Combiner> {
+    /// its sibling finishes negotiating. `resample_params` tunes the live
+    /// per-source resamplers' chunk size and sinc quality (see
+    /// [`ResampleParams`]).
+    pub fn start(target_rate: u32, resample_params: ResampleParams) -> Result<Combiner> {
         let (control_tx, control_rx) = crossbeam_channel::unbounded();
         let handle = thread::Builder::new()
             .name("kodabi-audio-combiner".to_string())
-            .spawn(move || coordinator_loop(control_rx, target_rate))
+            .spawn(move || coordinator_loop(control_rx, target_rate, resample_params))
             .map_err(|_| crate::error::AudioError::ThreadStart)?;
         Ok(Combiner { handle, control_tx })
     }
@@ -487,7 +496,7 @@ mod tests {
 
     #[test]
     fn first_arriving_pipeline_gets_no_leading_silence() {
-        let mut pipeline = SourcePipeline::new(48_000);
+        let mut pipeline = SourcePipeline::new(48_000, ResampleParams::default());
         let t0 = Instant::now();
         let frame = AudioFrame {
             segment_id: 0,
@@ -504,7 +513,7 @@ mod tests {
 
     #[test]
     fn later_arriving_pipeline_gets_leading_silence_padding() {
-        let mut pipeline = SourcePipeline::new(48_000);
+        let mut pipeline = SourcePipeline::new(48_000, ResampleParams::default());
         let t0 = Instant::now();
         let arrival = t0 + Duration::from_millis(50);
         let frame = AudioFrame {
@@ -522,8 +531,8 @@ mod tests {
 
     #[test]
     fn origin_is_lowered_and_other_channel_backfilled_when_an_earlier_frame_arrives_second() {
-        let mut mic = SourcePipeline::new(48_000);
-        let mut system = SourcePipeline::new(48_000);
+        let mut mic = SourcePipeline::new(48_000, ResampleParams::default());
+        let mut system = SourcePipeline::new(48_000, ResampleParams::default());
         let mut t0: Option<Instant> = None;
         let base = Instant::now();
 
@@ -579,7 +588,7 @@ mod tests {
 
     #[test]
     fn segment_change_to_a_new_rate_rebuilds_the_resampler_and_keeps_output() {
-        let mut pipeline = SourcePipeline::new(48_000);
+        let mut pipeline = SourcePipeline::new(48_000, ResampleParams::default());
         let t0 = Instant::now();
 
         let frame_a = AudioFrame {
@@ -614,7 +623,7 @@ mod tests {
 
     #[test]
     fn apply_drift_inserts_silence_when_far_behind_real_time() {
-        let mut pipeline = SourcePipeline::new(48_000);
+        let mut pipeline = SourcePipeline::new(48_000, ResampleParams::default());
         let t0 = Instant::now();
         // Simulate a source that has fallen far behind real time (e.g. a
         // device-change gap): 1000 samples written but 2s have elapsed.
@@ -658,7 +667,8 @@ mod tests {
         drop(mic_tx);
         drop(system_tx);
 
-        let combiner = Combiner::start(48_000).expect("combiner should start");
+        let combiner =
+            Combiner::start(48_000, ResampleParams::default()).expect("combiner should start");
         assert!(combiner.attach(SessionChannel::Mic, mic_rx));
         assert!(combiner.attach(SessionChannel::System, system_rx));
         let session = combiner.finish();
@@ -681,7 +691,8 @@ mod tests {
         // "negotiating"; system attaches only afterwards. The mic audio
         // captured during that window must survive into the aligned session —
         // this is the regression the incremental-attach design fixes.
-        let combiner = Combiner::start(48_000).expect("combiner should start");
+        let combiner =
+            Combiner::start(48_000, ResampleParams::default()).expect("combiner should start");
 
         let capture_time = Instant::now();
         let (mic_tx, mic_rx) = crossbeam_channel::bounded(64);
@@ -770,7 +781,8 @@ mod tests {
         drop(mic_tx);
         drop(system_tx);
 
-        let combiner = Combiner::start(48_000).expect("combiner should start");
+        let combiner =
+            Combiner::start(48_000, ResampleParams::default()).expect("combiner should start");
         assert!(combiner.attach(SessionChannel::Mic, mic_rx));
         assert!(combiner.attach(SessionChannel::System, system_rx));
         let session = combiner.finish();
