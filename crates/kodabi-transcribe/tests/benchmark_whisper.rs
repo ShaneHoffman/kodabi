@@ -6,8 +6,10 @@
 //! `#[ignore]`d and gated on `KODABI_BENCHMARK_MEETING_DIR` (mirrors
 //! `WHISPER_MODEL`/`VAD_MODEL` in `vad_whisper.rs`): needs the local fixture
 //! *and* real whisper.cpp + Silero VAD model files, neither committed nor
-//! available in CI. See `vad_whisper.rs`'s module docs for the Windows
-//! shared-link DLL-copy gotcha if this crashes with an access violation.
+//! available in CI. On Windows the crate's `build.rs` mirrors the sherpa/ONNX
+//! Runtime DLLs into `target/<profile>/deps` so this no longer crashes with an
+//! access violation; see `vad_whisper.rs`'s module docs for the full explanation
+//! and the manual fallback.
 //!
 //! ```text
 //! KODABI_BENCHMARK_MEETING_DIR=... WHISPER_MODEL=... VAD_MODEL=... \
