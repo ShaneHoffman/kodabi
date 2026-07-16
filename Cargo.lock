@@ -1876,8 +1876,11 @@ dependencies = [
 name = "kodabi"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "kodabi-audio",
  "kodabi-core",
+ "kodabi-llm",
+ "kodabi-transcribe",
  "serde",
  "serde_json",
  "tauri",

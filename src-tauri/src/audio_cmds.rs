@@ -139,10 +139,29 @@ pub(crate) fn start_capture_impl(state: &CaptureState) -> Result<CaptureStatus, 
     Ok(CaptureStatus::from_parts(status, None))
 }
 
-pub(crate) fn stop_capture_impl(state: &CaptureState) -> Result<CaptureStatus, String> {
-    let (status, session) = state.0.stop().map_err(|e| e.to_string())?;
+/// Stops capture, and — when both sources ran long enough to produce a
+/// finalized two-channel session — spawns the transcribe → clean → persist
+/// pipeline on it (`crate::transcribe`).
+///
+/// Takes the `AppHandle` the pipeline needs to resolve the app-data
+/// directory, read the managed device identity, and emit
+/// `transcription:state` events; the stopping itself is factored into
+/// [`stop_and_finalize`], which stays app-free and unit-testable without a
+/// running Tauri app.
+pub(crate) fn stop_capture_and_transcribe(
+    app: &tauri::AppHandle,
+    state: &CaptureState,
+) -> Result<CaptureStatus, String> {
+    let (status, session) = stop_and_finalize(state)?;
     let aligned_session = session.as_ref().map(AlignedSessionStats::from);
+    if let Some(session) = session {
+        crate::transcribe::spawn_transcription(app, session);
+    }
     Ok(CaptureStatus::from_parts(status, aligned_session))
+}
+
+fn stop_and_finalize(state: &CaptureState) -> Result<(DualStatus, Option<AlignedSession>), String> {
+    state.0.stop().map_err(|e| e.to_string())
 }
 
 fn capture_status_impl(state: &CaptureState) -> Result<CaptureStatus, String> {
@@ -170,7 +189,9 @@ pub fn start_capture(
     // hotkey/tray toggle and broadcasts the resulting phase (relabelling the
     // tray + emitting `capture:state`) — otherwise the UI would go stale
     // whenever capture is driven over IPC instead of the toggle.
-    crate::capture_control::run_under_toggle_lock(&app, state.inner(), start_capture_impl)
+    crate::capture_control::run_under_toggle_lock(&app, state.inner(), |_app, state| {
+        start_capture_impl(state)
+    })
 }
 
 #[tauri::command]
@@ -178,7 +199,7 @@ pub fn stop_capture(
     app: tauri::AppHandle,
     state: tauri::State<'_, CaptureState>,
 ) -> Result<CaptureStatus, String> {
-    crate::capture_control::run_under_toggle_lock(&app, state.inner(), stop_capture_impl)
+    crate::capture_control::run_under_toggle_lock(&app, state.inner(), stop_capture_and_transcribe)
 }
 
 #[tauri::command]
@@ -212,10 +233,10 @@ mod tests {
     #[test]
     fn stop_capture_while_idle_is_a_no_op() {
         let state = CaptureState::default();
-        let status = stop_capture_impl(&state).unwrap();
+        let (status, session) = stop_and_finalize(&state).unwrap();
         assert!(!status.loopback.running);
         assert!(!status.microphone.running);
-        assert!(status.aligned_session.is_none());
+        assert!(session.is_none());
     }
 
     #[test]
