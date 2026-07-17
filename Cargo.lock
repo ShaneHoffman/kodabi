@@ -1972,6 +1972,7 @@ dependencies = [
  "hound",
  "kodabi-core",
  "sherpa-onnx",
+ "sherpa-onnx-sys",
  "tempfile",
  "whisper-rs",
 ]

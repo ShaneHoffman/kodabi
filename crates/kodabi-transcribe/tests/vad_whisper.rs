@@ -27,7 +27,13 @@
 //! `target/debug/deps`, so it won't find them there and instead falls back to
 //! an incompatible system-wide `onnxruntime.dll` if one is present (a version
 //! mismatch that surfaces as an access violation, not a linker or compiler
-//! error). If these tests crash that way, copy the DLLs down a level once:
+//! error). This crate's `build.rs` now mirrors those DLLs from `target/<profile>`
+//! into `target/<profile>/deps` on Windows whenever the `whisper` feature is
+//! enabled, so the test binary finds the correct `onnxruntime.dll` in its own
+//! directory (DLL search position #1, ahead of the System32 copy) with no manual
+//! step. That mirror is best-effort; if it was skipped (e.g. the source DLLs were
+//! not present when the build script ran), fall back to copying them down a level
+//! once:
 //!
 //! ```text
 //! cp target/debug/{onnxruntime,onnxruntime_providers_shared,sherpa-onnx-c-api,sherpa-onnx-cxx-api}*.dll target/debug/deps/
