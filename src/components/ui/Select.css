@@ -1,0 +1,42 @@
+/* ============================================================
+   Select — a token-styled dropdown (collapsible listbox).
+
+   Only non-bridged tokens live here: the trigger hairline and the open
+   list's elevation (inset shadow / --lift, never a border), the shared
+   2px accent focus ring, the caret sizing, and the active-row value wash.
+   The wash is an ink-mix of the text colour — value not hue, identical in
+   both themes, and never the reserved green (docs/DESIGN.md).
+   ============================================================ */
+
+.ui-select__trigger {
+  box-shadow: var(--hairline);
+}
+
+.ui-select__trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Functional affordance, not decoration: a caret that scales with the
+   type and inherits a faint value. */
+.ui-select__caret {
+  width: 0.7em;
+  height: 0.7em;
+  flex: none;
+  color: var(--text-faint);
+}
+
+.ui-select__list {
+  box-shadow: var(--lift);
+}
+
+/* Highlighted (keyboard/pointer) row — the palette's ink wash. */
+.ui-select__option.is-active {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+}
+
+/* The chosen value reads through weight (value, not hue). */
+.ui-select__option.is-selected {
+  font-weight: var(--fw-medium);
+}
