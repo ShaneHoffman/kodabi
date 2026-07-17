@@ -1,8 +1,8 @@
-import type { CSSProperties } from "react";
 import { PALETTE_SHORTCUT_LABEL } from "../useCommandPalette";
 import { useNavigation } from "../useNavigation";
 import { entryView, isEntrySelected, slugDepth, useProjects } from "../useProjects";
 import { ListeningIndicator } from "./ListeningIndicator";
+import { Button } from "./ui/Button";
 import "./Sidebar.css";
 
 type Props = {
@@ -39,13 +39,15 @@ export function Sidebar({ onOpenPalette }: Props) {
             entry.kind === "inbox" ? entry.note_count : entry.project.note_count;
           const depth = entry.kind === "inbox" ? 0 : slugDepth(entry.project.slug);
           return (
-            <button
+            <Button
               key={entry.kind === "inbox" ? "inbox" : entry.project.id}
-              type="button"
+              variant="quiet"
               aria-current={selected ? "page" : undefined}
               onClick={() => navigate(entryView(entry))}
-              style={{ "--row-depth": depth } as CSSProperties}
-              className={`sidebar__row flex w-full items-baseline justify-between rounded-md py-2 pr-3 text-left text-body ${
+              style={{
+                paddingInlineStart: `calc(var(--space-xs) + ${depth} * var(--space-sm))`,
+              }}
+              className={`sidebar__row flex w-full items-baseline justify-between text-left text-body ${
                 selected
                   ? "is-selected bg-surface text-text"
                   : "text-text-soft hover:text-text"
@@ -53,21 +55,21 @@ export function Sidebar({ onOpenPalette }: Props) {
             >
               <span>{name}</span>
               <span className="text-cap text-text-faint">{count}</span>
-            </button>
+            </Button>
           );
         })}
       </nav>
 
       <footer className="flex flex-col gap-sm">
         <ListeningIndicator />
-        <button
-          type="button"
+        <Button
+          variant="quiet"
           onClick={onOpenPalette}
-          className="sidebar__row flex w-full items-baseline justify-between rounded-md py-2 pr-3 text-left text-cap text-text-faint hover:text-text-soft"
+          className="flex w-full items-baseline justify-between text-left text-cap text-text-faint hover:text-text-soft"
         >
           <span>Commands</span>
           <span>{PALETTE_SHORTCUT_LABEL}</span>
-        </button>
+        </Button>
       </footer>
     </aside>
   );

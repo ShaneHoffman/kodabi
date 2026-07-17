@@ -52,6 +52,13 @@ const NOTE_ID_MIN_RANDOM_LEN: usize = 6;
 /// the MCP layer, to `project: null`.
 pub const INBOX: &str = "Inbox";
 
+/// Name of the vault-root folder holding raw session artifacts
+/// (`docs/FRONTMATTER_SCHEMA.md` places `raw/…` relative to the vault root).
+/// Reserved as a first project segment in any casing — a routed note must
+/// never land inside the sessions tree — and excluded from project discovery
+/// (`routing`); deeper segments stay legal (`Data/raw` is a real project).
+pub(crate) const RAW_DIR: &str = "raw";
+
 /// Per-process counter that, combined with the process id, gives each in-flight
 /// write a unique scratch filename so concurrent writes can't clobber each
 /// other's temp file (mirrors `raw_session.rs` / `glossary.rs`).
@@ -636,7 +643,7 @@ const RESERVED_SEGMENTS: &[&str] = &[
 /// (`docs/MCP_TOOL_SURFACE.md`) so the writer and the tool surface agree.
 const MAX_PROJECT_LEN: usize = 300;
 
-fn validate_project(project: &str) -> Result<()> {
+pub(crate) fn validate_project(project: &str) -> Result<()> {
     if project == INBOX {
         return Ok(());
     }
@@ -665,6 +672,18 @@ fn validate_project(project: &str) -> Result<()> {
         return Err(invalid(
             "project",
             format!("project segment {first_segment:?} is reserved: a real project may not be named `Inbox`"),
+        ));
+    }
+    // `raw/` at the vault root holds raw session artifacts, not notes. Same
+    // case-insensitive reservation as `Inbox`: a first segment that case-folds
+    // to `raw` would land routed notes inside the sessions tree on a
+    // case-insensitive filesystem. Deeper segments stay legal (`Data/raw`).
+    if first_segment.eq_ignore_ascii_case(RAW_DIR) {
+        return Err(invalid(
+            "project",
+            format!(
+                "project segment {first_segment:?} is reserved: `raw/` holds raw session artifacts"
+            ),
         ));
     }
     if project.contains('\\') {
@@ -704,6 +723,18 @@ fn validate_folder_segment(segment: &str) -> Result<()> {
         return Err(invalid(
             "project",
             format!("project segment {segment:?} may not end with a dot or space"),
+        ));
+    }
+    // Dot- and underscore-prefixed folders are infra (`.obsidian`, `_assets`,
+    // `_glossary.yml`'s home) and project discovery skips them at every depth
+    // (`routing`), so a project named like one would be writable yet invisible
+    // to routing forever — its glossary never loaded, its meetings drifting to
+    // Inbox with no error. Reject it here, at the choke point every writer
+    // shares, so the two definitions of "project" stay equal.
+    if segment.starts_with('.') || segment.starts_with('_') {
+        return Err(invalid(
+            "project",
+            format!("project segment {segment:?} may not start with '.' or '_' (reserved for infra folders)"),
         ));
     }
     let stem = segment
@@ -784,7 +815,7 @@ pub fn write_note(vault_root: &Path, note: &Note, title: Option<&str>) -> Result
 /// nested segments (so separators are correct on every OS). `validate_project`
 /// guarantees no empty segments and no backslash, so this can't escape or
 /// mis-nest.
-fn project_dir(vault_root: &Path, project: &str) -> PathBuf {
+pub(crate) fn project_dir(vault_root: &Path, project: &str) -> PathBuf {
     let mut dir = vault_root.to_path_buf();
     for segment in project.split('/') {
         dir.push(segment);
@@ -1498,6 +1529,82 @@ contractor shortlist.
                     })
                 ),
                 "project {reserved:?} should be rejected as a reserved Inbox folder"
+            );
+        }
+    }
+
+    #[test]
+    fn real_project_named_raw_at_root_is_rejected_but_nested_raw_is_fine() {
+        // `<vault>/raw/` holds raw session artifacts; a first segment that
+        // case-folds to it would mix routed notes into the sessions tree.
+        for reserved in ["raw", "Raw", "RAW", "raw/2026", "Raw/sub"] {
+            let note = Note::new(
+                id(),
+                NoteType::Note,
+                Routing::Manual {
+                    project: reserved.to_string(),
+                },
+                "2026-07-10",
+                vec![],
+                source("manual"),
+                "body",
+            );
+            assert!(
+                matches!(
+                    note,
+                    Err(NoteError::InvalidField {
+                        field: "project",
+                        ..
+                    })
+                ),
+                "project {reserved:?} should be rejected as the reserved raw folder"
+            );
+        }
+        // Only the vault root is reserved — a nested `raw` is a real project.
+        let nested = Note::new(
+            id(),
+            NoteType::Note,
+            Routing::Manual {
+                project: "Data/raw".to_string(),
+            },
+            "2026-07-10",
+            vec![],
+            source("manual"),
+            "body",
+        );
+        assert!(nested.is_ok(), "nested Data/raw should be a legal project");
+    }
+
+    #[test]
+    fn infra_prefixed_project_segments_are_rejected() {
+        // Discovery skips dot-/underscore-prefixed folders at every depth, so
+        // the writer must refuse to create projects routing can never see.
+        for bad in [
+            "_assets",
+            ".planning",
+            "Growth/_attachments",
+            "Growth/.hidden",
+        ] {
+            let note = Note::new(
+                id(),
+                NoteType::Note,
+                Routing::Manual {
+                    project: bad.to_string(),
+                },
+                "2026-07-10",
+                vec![],
+                source("manual"),
+                "body",
+            );
+            assert!(
+                matches!(
+                    note,
+                    Err(NoteError::InvalidField {
+                        field: "project",
+                        ..
+                    })
+                ),
+                "project {bad:?} should be rejected as an infra-prefixed segment"
             );
         }
     }

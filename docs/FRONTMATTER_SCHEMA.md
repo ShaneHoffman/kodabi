@@ -50,9 +50,13 @@ Canonical key order the writer emits: **`id, type, project, date, tags, source, 
   uses when a note's score is too low to auto-file. The Inbox UI's one-click re-route corrects
   `project` and re-scores `confidence` for the chosen project, in place. Because a project maps to
   an on-disk folder (segments split on `/`, so `Growth/Q3` nests), each segment must be a legal
-  folder name beyond matching the slug pattern: no `:*?"<>|`, no trailing dot or space, and not a
-  Windows reserved device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`). `Inbox`
-  is a reserved folder name — a real project may not be named `Inbox`.
+  folder name beyond matching the slug pattern: no `:*?"<>|`, no trailing dot or space, not a
+  Windows reserved device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`), and no
+  leading `.` or `_` — those prefixes mark infra folders (`.obsidian`, `_assets`, the
+  `_glossary.yml` home) that routing discovery skips, so such a project would be writable yet
+  invisible to routing. `Inbox` (any casing) is a reserved folder name — a real project may not be
+  named `Inbox` — and `raw` (any casing) is reserved as a first segment: `<vault>/raw/` holds raw
+  session artifacts, never notes (a nested segment like `Data/raw` is fine).
 - **`date`** — full timestamp+offset for anything with a real start time (a meeting, a chat
   session); date-only is acceptable for a quick-capture note jotted with no meaningful clock time.
   Store the value exactly as written. The two accepted shapes are strictly a `YYYY-MM-DD` calendar
