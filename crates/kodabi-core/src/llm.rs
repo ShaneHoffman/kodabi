@@ -48,7 +48,29 @@ pub enum LlmRunError {
 /// Models sometimes wrap the JSON they were told to return bare in prose or a
 /// markdown fence; each pass's parser falls back to these spans (`[`/`]` for
 /// cleanup's array, `{`/`}` for distill's object) before giving up.
+///
+/// Two scans, because prose around the JSON can lie in either direction: the
+/// first tracks quotes everywhere (so a quoted delimiter in prose, like
+/// `"see [x]"`, can't open a phantom span), the second ignores quotes outside
+/// any span (so a stray unbalanced prose quote can't flip string-parity and
+/// hide every span after it). Spans the second scan finds that the first
+/// missed are appended, so callers try the conservative reading first and
+/// garbage recoveries simply fail their serde parse.
 pub(crate) fn extract_balanced_spans(text: &str, open: char, close: char) -> Vec<&str> {
+    let mut spans = scan_spans(text, open, close, true);
+    for span in scan_spans(text, open, close, false) {
+        if !spans.contains(&span) {
+            spans.push(span);
+        }
+    }
+    spans
+}
+
+/// One span-collection pass. `track_prose_quotes` controls whether a `"` seen
+/// outside any span starts a string (see [`extract_balanced_spans`]); inside
+/// a span quotes are always tracked — there they delimit well-formed JSON
+/// strings whose contents must not be miscounted.
+fn scan_spans(text: &str, open: char, close: char, track_prose_quotes: bool) -> Vec<&str> {
     let mut spans = Vec::new();
     let mut depth = 0i32;
     let mut in_string = false;
@@ -70,7 +92,7 @@ pub(crate) fn extract_balanced_spans(text: &str, open: char, close: char) -> Vec
             continue;
         }
         match ch {
-            '"' => in_string = true,
+            '"' if depth > 0 || track_prose_quotes => in_string = true,
             _ if ch == open => {
                 if depth == 0 {
                     start = Some(i);
@@ -158,5 +180,23 @@ mod tests {
         let spans = extract_balanced_spans(r#"} noise {"a":1}"#, '{', '}');
 
         assert_eq!(spans, vec![r#"{"a":1}"#]);
+    }
+
+    #[test]
+    fn an_unbalanced_prose_quote_does_not_hide_a_later_span() {
+        // The stray quote flips string-parity for the quote-tracking scan;
+        // the quote-ignoring rescan must still recover the object.
+        let spans = extract_balanced_spans(r#"notes for "Budget sync: {"a":1}"#, '{', '}');
+
+        assert!(spans.contains(&r#"{"a":1}"#), "spans: {spans:?}");
+    }
+
+    #[test]
+    fn a_quoted_delimiter_in_prose_does_not_open_a_phantom_span() {
+        // The conservative scan keeps this exact recovery; the rescan's
+        // additions come after it, so the real object stays first.
+        let spans = extract_balanced_spans(r#"see "{" then {"a":1}"#, '{', '}');
+
+        assert_eq!(spans.first(), Some(&r#"{"a":1}"#));
     }
 }

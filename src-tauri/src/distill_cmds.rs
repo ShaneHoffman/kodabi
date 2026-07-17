@@ -7,7 +7,7 @@
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 
-use kodabi_core::distill::inbox_routing;
+use kodabi_core::distill::{inbox_routing, DistillError};
 use kodabi_llm::{ClaudeConfig, ClaudeRunner};
 use tauri::{AppHandle, Emitter};
 
@@ -17,13 +17,16 @@ use crate::transcribe::knowledge_base_dir;
 pub const DISTILL_STATE_EVENT: &str = "distill:state";
 
 /// Payload for [`DISTILL_STATE_EVENT`]. Tagged on `status` so the frontend
-/// can switch on that alone; `path`/`message` only accompany their matching
-/// variant (mirrors `transcription:state`).
+/// can switch on that alone; `path`/`reason`/`message` only accompany their
+/// matching variant (mirrors `transcription:state`). `Skipped` is terminal
+/// like `Saved`/`Error` but benign: nothing distillable (a silent capture),
+/// so no note — and no error to alarm anyone with.
 #[derive(Clone, serde::Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 enum DistillStateEvent {
     Distilling,
     Saved { path: String },
+    Skipped { reason: String },
     Error { message: String },
 }
 
@@ -36,6 +39,14 @@ static DISTILL_LOCK: Mutex<()> = Mutex::new(());
 /// Queues the raw session at `session_path` for distillation. Validation is
 /// synchronous (a bad path fails the IPC call directly); the distill itself
 /// runs on a background thread and reports through [`DISTILL_STATE_EVENT`].
+///
+/// **Manual retry/backfill only.** Every freshly transcribed session is
+/// already distilled automatically — [`crate::transcribe`] chains
+/// [`spawn_distill`] right after emitting its `Saved` event — and nothing
+/// dedupes a session distilled twice: a second run spends a second headless
+/// Claude call and writes a second, suffix-disambiguated note. Call this only
+/// for a session whose distill failed or was skipped (or, in a mock-engine
+/// build, never auto-ran).
 #[tauri::command]
 pub fn distill_session(app: AppHandle, session_path: String) -> Result<(), String> {
     let kb = knowledge_base_dir(&app)?;
@@ -58,12 +69,26 @@ pub(crate) fn spawn_distill(app: &AppHandle, session_path: PathBuf) {
         // lock is held), for the same reason `transcribe.rs` does: a queued
         // run must not overwrite the previous run's final state early.
         let _ = app.emit(DISTILL_STATE_EVENT, DistillStateEvent::Distilling);
-        let event = match run(&app, &session_path) {
-            Ok(path) => DistillStateEvent::Saved {
+        // `catch_unwind` so even a panic inside the distill yields a terminal
+        // event: an unwinding thread would otherwise die between the
+        // `Distilling` emit above and the emit below, leaving subscribers
+        // stuck on "distilling" forever (and poisoning the lock).
+        let outcome =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&app, &session_path)));
+        let event = match outcome {
+            Ok(Ok(path)) => DistillStateEvent::Saved {
                 path: path.display().to_string(),
             },
-            Err(message) => {
+            Ok(Err(DistillFailure::EmptyTranscript { reason })) => {
+                DistillStateEvent::Skipped { reason }
+            }
+            Ok(Err(DistillFailure::Other(message))) => {
                 eprintln!("distill pipeline failed: {message}");
+                DistillStateEvent::Error { message }
+            }
+            Err(panic) => {
+                let message = format!("distill panicked: {}", panic_message(panic.as_ref()));
+                eprintln!("{message}");
                 DistillStateEvent::Error { message }
             }
         };
@@ -71,15 +96,40 @@ pub(crate) fn spawn_distill(app: &AppHandle, session_path: PathBuf) {
     });
 }
 
+/// [`run`]'s failure split: an empty transcript is a benign skip — a silent
+/// capture is not an error — while everything else is a real failure worth
+/// surfacing as one.
+enum DistillFailure {
+    EmptyTranscript { reason: String },
+    Other(String),
+}
+
+/// Best-effort extraction of a panic's payload message; panics carry
+/// `&str`/`String` payloads in practice (`panic!` with a literal or format).
+fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
+    panic
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("unknown panic payload")
+}
+
 /// Resolves the KB root, builds the distill-configured runner, and runs the
 /// pure `kodabi-core` pipeline. Routing is the pre-#43 Inbox placeholder.
-/// Errors collapse to a message string — the house IPC/event convention.
-fn run(app: &AppHandle, session_path: &Path) -> Result<PathBuf, String> {
-    let kb = knowledge_base_dir(app)?;
+/// Errors collapse to a message string — the house IPC/event convention —
+/// except the empty-transcript case, which stays typed so [`spawn_distill`]
+/// can report it as a skip rather than a failure.
+fn run(app: &AppHandle, session_path: &Path) -> Result<PathBuf, DistillFailure> {
+    let kb = knowledge_base_dir(app).map_err(DistillFailure::Other)?;
     let runner = ClaudeRunner::new(ClaudeConfig::distill_from_env());
     kodabi_core::distill::distill_session(&runner, &kb, session_path, &|_| inbox_routing())
         .map(|distilled| distilled.path)
-        .map_err(|err| err.to_string())
+        .map_err(|err| match err {
+            DistillError::EmptyTranscript => DistillFailure::EmptyTranscript {
+                reason: err.to_string(),
+            },
+            other => DistillFailure::Other(other.to_string()),
+        })
 }
 
 /// Validates an IPC-supplied session path: the absolute path of a `.jsonl`

@@ -96,6 +96,12 @@ pub fn spawn_transcription(app: &AppHandle, session: AlignedSession) {
                 // freshly saved session into a note. It has its own lock,
                 // thread, and event channel, so a slow or failing distill
                 // never disturbs the transcription flow reported above.
+                // Real engines only: a default (MockEngine) build would spend
+                // a real headless Claude call on placeholder text and write a
+                // junk note into the KB on every dev capture. To exercise the
+                // distill from a mock build, invoke the `distill_session`
+                // command on the saved path instead.
+                #[cfg(any(feature = "parakeet", feature = "whisper"))]
                 crate::distill_cmds::spawn_distill(&app, path);
             }
             Err(message) => {

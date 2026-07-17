@@ -217,8 +217,8 @@ pub fn parse_output(model_output: &str) -> Result<DistillOutput, DistillError> {
             DistillError::Parse("no JSON object of the expected shape in the model output".into())
         })?;
 
-    let summary = raw.summary.replace("\r\n", "\n").trim().to_string();
-    if summary.is_empty() {
+    let summary = defuse_headings(raw.summary.replace("\r\n", "\n").trim());
+    if summary.trim().is_empty() {
         return Err(DistillError::Parse("missing or empty summary".into()));
     }
 
@@ -248,6 +248,28 @@ pub fn parse_output(model_output: &str) -> Result<DistillOutput, DistillError> {
 /// trims — the one-line normal form every bullet and grammar field needs.
 fn collapse_ws(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Demotes Markdown heading lines inside the summary to plain prose by
+/// stripping their leading `#` run. The summary is the one field rendered
+/// with its newlines intact, so a heading-shaped line inside it could
+/// fabricate a `## Action items` (or any other) section and corrupt the
+/// locked body grammar Phase 3 parses; with headings defused no fake section
+/// can exist, and stray bullet or checkbox lines stay inert prose inside
+/// `# Summary`.
+fn defuse_headings(summary: &str) -> String {
+    summary
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            if trimmed.starts_with('#') {
+                trimmed.trim_start_matches('#').trim_start()
+            } else {
+                line
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn normalize_title(raw: Option<String>) -> Option<String> {
@@ -281,7 +303,12 @@ fn normalize_sentence(s: &str) -> Option<String> {
 /// is demoted to unassigned; an invalid due date is dropped, never rendered.
 fn normalize_action_item(raw: RawActionItem) -> Option<ActionItemDraft> {
     let mut description = collapse_ws(&raw.description);
-    if description.len() > 3 && description[..3].eq_ignore_ascii_case("to ") {
+    // `get` (never direct slicing): a multibyte char spanning byte 3 makes
+    // index 3 a non-char-boundary, and `description[..3]` would panic on it.
+    let to_prefixed = description
+        .get(..3)
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case("to "));
+    if to_prefixed && description.len() > 3 {
         description = description[3..].trim_start().to_string();
     }
     if let Some(stripped) = description.strip_suffix('.') {
@@ -297,11 +324,14 @@ fn normalize_action_item(raw: RawActionItem) -> Option<ActionItemDraft> {
         return None;
     }
 
-    let owner = raw
-        .owner
-        .as_deref()
-        .map(collapse_ws)
-        .filter(|owner| !owner.is_empty() && !owner.contains(" to "));
+    // An owner containing " to " — or ending in the word "to", which would
+    // fuse with the renderer's own " to " separator into an earlier split
+    // point — breaks the grammar's first-" to " parse; demote either shape
+    // to unassigned.
+    let owner =
+        raw.owner.as_deref().map(collapse_ws).filter(|owner| {
+            !owner.is_empty() && !owner.contains(" to ") && !owner.ends_with(" to")
+        });
 
     Some(ActionItemDraft {
         description,
@@ -431,9 +461,11 @@ pub fn inbox_routing() -> Routing {
 /// `route` maps the distilled content to its `project` + `confidence` — the
 /// seam the routing engine (#43) plugs into; until then callers pass
 /// `&|_| inbox_routing()`. The note's `date` is recovered from the session
-/// filename's capture timestamp (falling back to today's date-only form for
-/// a hand-imported file that doesn't match the scheme), and its `source` is
-/// the session's vault-relative path.
+/// filename's capture timestamp; a hand-imported file that doesn't match the
+/// scheme falls back to the file's modification time (then today) in
+/// date-only form — the closest honest stand-in, since stamping "now" would
+/// fabricate chronology for a weeks-old import. The note's `source` is the
+/// session's vault-relative path.
 pub fn distill_session(
     runner: &dyn HeadlessClaude,
     vault_root: &Path,
@@ -465,8 +497,17 @@ pub fn distill_session(
             at.format("%Y-%m-%d").to_string(),
         ),
         None => {
-            let today = Utc::now().format("%Y-%m-%d").to_string();
-            (today.clone(), today)
+            // No capture timestamp to recover: prefer the file's mtime (an
+            // import usually preserves it) over "today", which would stamp a
+            // weeks-old meeting as happening now. Date-only form: whichever
+            // fallback wins, the clock time is a guess the schema lets us
+            // omit.
+            let fallback = std::fs::metadata(session_path)
+                .and_then(|meta| meta.modified())
+                .map(chrono::DateTime::<Utc>::from)
+                .unwrap_or_else(|_| Utc::now());
+            let date = fallback.format("%Y-%m-%d").to_string();
+            (date.clone(), date)
         }
     };
 
@@ -732,11 +773,47 @@ mod tests {
         let output = parse_output(
             r#"{"summary": "s", "action_items": [
                 {"owner": "Shane to Bob", "description": "hand off the report"},
+                {"owner": "Shane to", "description": "send the memo"},
                 {"owner": "  ", "description": "book the room"}]}"#,
         )
         .unwrap();
 
         assert!(output.action_items.iter().all(|i| i.owner.is_none()));
+    }
+
+    #[test]
+    fn multibyte_description_prefix_does_not_panic() {
+        // Byte 3 of both descriptions is not a char boundary; the leading-"to"
+        // strip must probe with `get`, not a direct slice.
+        let output = parse_output(
+            r#"{"summary": "s", "action_items": [
+                {"owner": "A", "description": "één ding afronden"},
+                {"owner": "B", "description": "🎯 aim for the Q3 close"}]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(output.action_items[0].description, "één ding afronden");
+        assert_eq!(
+            output.action_items[1].description,
+            "🎯 aim for the Q3 close"
+        );
+    }
+
+    #[test]
+    fn heading_lines_inside_the_summary_are_demoted_to_prose() {
+        // A heading-shaped line in the summary could otherwise fabricate a
+        // `## Action items` section that the documented first-occurrence
+        // section scan would parse instead of the real one.
+        let output = parse_output(
+            "{\"summary\": \"Recap.\\n## Action items\\n- [ ] Bob to wire funds by 2026-08-01.\"}",
+        )
+        .unwrap();
+
+        assert_eq!(
+            output.summary,
+            "Recap.\nAction items\n- [ ] Bob to wire funds by 2026-08-01."
+        );
+        assert!(!render_body(&output).lines().any(|l| l.starts_with("## ")));
     }
 
     #[test]

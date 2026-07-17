@@ -1,0 +1,57 @@
+import { useEffect, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
+import type { CapturePhase } from "./useCaptureState";
+
+export type DistillState =
+  | { status: "idle" }
+  | { status: "distilling" }
+  | { status: "saved"; path: string }
+  | { status: "skipped"; reason: string }
+  | { status: "error"; message: string };
+
+const DISTILL_STATE_EVENT = "distill:state";
+
+/**
+ * Subscribes to the backend's end-of-meeting distill progress: `distilling`
+ * while the headless pass runs, then `saved`, `skipped` (nothing distillable —
+ * e.g. a silent capture), or `error`. The distill pass fails hard (no note is
+ * written on failure), so surfacing its terminal state is the only signal the
+ * user gets that a meeting note did or did not land.
+ *
+ * Mirrors `useTranscriptionState`'s lifecycle exactly, for the same reasons:
+ * resets to `idle` when a new capture begins, and drops events that arrive
+ * while a capture is live — a distill can run for minutes, so its terminal
+ * event may land mid-way through the next recording and would otherwise show
+ * a stale label for the wrong meeting.
+ */
+export function useDistillState(capturePhase: CapturePhase): DistillState {
+  const [state, setState] = useState<DistillState>({ status: "idle" });
+  const capturePhaseRef = useRef(capturePhase);
+  capturePhaseRef.current = capturePhase;
+
+  useEffect(() => {
+    if (capturePhase === "listening") setState({ status: "idle" });
+  }, [capturePhase]);
+
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | undefined;
+
+    listen<DistillState>(DISTILL_STATE_EVENT, (event) => {
+      if (active && capturePhaseRef.current !== "listening") setState(event.payload);
+    }).then((fn) => {
+      if (active) {
+        unlisten = fn;
+      } else {
+        fn();
+      }
+    });
+
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
+
+  return state;
+}
