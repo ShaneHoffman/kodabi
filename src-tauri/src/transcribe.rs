@@ -20,7 +20,7 @@ use kodabi_core::glossary::Glossary;
 use kodabi_core::metrics::PipelineTimings;
 use kodabi_core::pipeline::transcribe_and_persist;
 use kodabi_core::transcription::{self, Channel, TranscriptionEngine};
-use kodabi_llm::{ClaudeCleaner, ClaudeConfig};
+use kodabi_llm::{ClaudeConfig, ClaudeRunner};
 use tauri::{AppHandle, Emitter, Manager};
 
 /// All engines expect mono `f32` PCM at this rate.
@@ -84,16 +84,28 @@ pub fn spawn_transcription(app: &AppHandle, session: AlignedSession) {
             TRANSCRIPTION_STATE_EVENT,
             TranscriptionStateEvent::Transcribing,
         );
-        let event = match run(&app, &session, captured_at) {
-            Ok(path) => TranscriptionStateEvent::Saved {
-                path: path.display().to_string(),
-            },
+        match run(&app, &session, captured_at) {
+            Ok(path) => {
+                let _ = app.emit(
+                    TRANSCRIPTION_STATE_EVENT,
+                    TranscriptionStateEvent::Saved {
+                        path: path.display().to_string(),
+                    },
+                );
+                // End-of-meeting brain-pass (FOUNDING_DOC §3.5): distill the
+                // freshly saved session into a note. It has its own lock,
+                // thread, and event channel, so a slow or failing distill
+                // never disturbs the transcription flow reported above.
+                crate::distill_cmds::spawn_distill(&app, path);
+            }
             Err(message) => {
                 eprintln!("transcription pipeline failed: {message}");
-                TranscriptionStateEvent::Error { message }
+                let _ = app.emit(
+                    TRANSCRIPTION_STATE_EVENT,
+                    TranscriptionStateEvent::Error { message },
+                );
             }
-        };
-        let _ = app.emit(TRANSCRIPTION_STATE_EVENT, event);
+        }
     });
 }
 
@@ -134,7 +146,7 @@ fn run(
         .map_err(|err| err.to_string())?;
     let channels = [(Channel::You, mic), (Channel::Them, system)];
 
-    let cleaner = ClaudeCleaner::new(ClaudeConfig::from_env());
+    let cleaner = ClaudeRunner::new(ClaudeConfig::cleanup_from_env());
     let mut make_engine = build_engine;
 
     let outcome = transcribe_and_persist(

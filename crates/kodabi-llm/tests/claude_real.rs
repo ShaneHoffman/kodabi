@@ -1,6 +1,6 @@
 //! Integration test that drives a real headless `claude` subprocess and
 //! proves the Done-when for this ticket: a transcript with mangled glossary
-//! terms comes back corrected through [`ClaudeCleaner`].
+//! terms comes back corrected through [`ClaudeRunner`].
 //!
 //! `#[ignore]` because it spends a small amount of real Claude usage and
 //! requires a working, authenticated `claude` CLI on `PATH` (subscription
@@ -13,7 +13,7 @@
 use kodabi_core::glossary::{Glossary, GlossaryTerm, OnConflict};
 use kodabi_core::raw_session::TranscriptSegment;
 use kodabi_core::transcription::{clean_transcript, Channel};
-use kodabi_llm::{ClaudeCleaner, ClaudeConfig};
+use kodabi_llm::{ClaudeConfig, ClaudeRunner};
 
 fn segment(index: u64, text: &str) -> TranscriptSegment {
     TranscriptSegment {
@@ -64,7 +64,7 @@ fn corrects_mangled_glossary_terms_via_a_real_headless_claude_call() {
         segment(2, "how was your weekend"),
     ];
 
-    let cleaner = ClaudeCleaner::new(ClaudeConfig::default());
+    let cleaner = ClaudeRunner::new(ClaudeConfig::default());
     let cleaned = clean_transcript(&cleaner, segments.clone(), &glossary);
 
     assert!(
@@ -89,7 +89,7 @@ fn leaves_a_transcript_with_no_relevant_terms_unchanged() {
     let glossary = meridian_and_teetrack_glossary();
     let segments = vec![segment(0, "how was your weekend, did you get any rest")];
 
-    let cleaner = ClaudeCleaner::new(ClaudeConfig::default());
+    let cleaner = ClaudeRunner::new(ClaudeConfig::default());
     let cleaned = clean_transcript(&cleaner, segments.clone(), &glossary);
 
     assert_eq!(cleaned, segments);

@@ -6,40 +6,8 @@
 //! every engine (FOUNDING_DOC §3.4).
 
 use crate::glossary::{Glossary, GlossaryError};
+use crate::llm::{extract_balanced_spans, HeadlessClaude, LlmRequest};
 use crate::raw_session::TranscriptSegment;
-
-/// A single headless call to Claude Code: takes a built request, returns its
-/// text result.
-///
-/// Implemented for real by `kodabi-llm`'s subprocess runner; kept as a trait
-/// here so `kodabi-core` stays free of any process-spawning dependency and
-/// [`clean_transcript`] can be unit-tested against a mock.
-pub trait HeadlessClaude {
-    fn run(&self, request: &CleanupRequest) -> Result<String, CleanupRunError>;
-}
-
-/// A fully-built headless request: a system prompt pinning Claude's role and
-/// the user-turn prompt carrying the glossary and transcript segments.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CleanupRequest {
-    pub system_prompt: String,
-    pub prompt: String,
-}
-
-/// Failure invoking the headless runner.
-///
-/// Every variant is treated identically by [`clean_transcript`]: worth
-/// logging, but never fatal — the transcript that went in comes back out
-/// unchanged (FOUNDING_DOC §3.4's fail-soft requirement).
-#[derive(Debug, Clone, thiserror::Error)]
-pub enum CleanupRunError {
-    #[error("failed to run headless Claude Code: {0}")]
-    Spawn(String),
-    #[error("headless Claude Code reported an error: {0}")]
-    ClaudeError(String),
-    #[error("headless Claude Code returned an empty result")]
-    EmptyResult,
-}
 
 const SYSTEM_PROMPT: &str = "You are a narrow transcript-correction tool. You will be given a \
 project glossary and a JSON array of transcript segments. Fix ONLY obvious misrecognitions of the \
@@ -70,7 +38,7 @@ struct SegmentEntry<'a> {
 /// canonical terms), this includes each entry's aliases and definition: the
 /// post-pass is where alias normalization and misrecognition repair actually
 /// happen.
-pub fn build_request(segments: &[TranscriptSegment], glossary: &Glossary) -> CleanupRequest {
+pub fn build_request(segments: &[TranscriptSegment], glossary: &Glossary) -> LlmRequest {
     let entries: Vec<GlossaryEntry> = glossary
         .terms()
         .iter()
@@ -91,7 +59,7 @@ pub fn build_request(segments: &[TranscriptSegment], glossary: &Glossary) -> Cle
         .collect();
     let segments_json = serde_json::to_string(&segment_entries).unwrap_or_else(|_| "[]".to_owned());
 
-    CleanupRequest {
+    LlmRequest {
         system_prompt: SYSTEM_PROMPT.to_owned(),
         prompt: format!("Glossary:\n{glossary_json}\n\nTranscript segments:\n{segments_json}"),
     }
@@ -140,7 +108,7 @@ fn parse_corrections(model_output: &str) -> Option<Vec<Correction>> {
     // real array that follows; only fall back to an empty result if that is
     // genuinely all the model produced.
     let mut saw_empty = false;
-    for array in extract_json_arrays(trimmed) {
+    for array in extract_balanced_spans(trimmed, '[', ']') {
         if let Ok(corrections) = serde_json::from_str::<Vec<Correction>>(array) {
             if corrections.is_empty() {
                 saw_empty = true;
@@ -150,50 +118,6 @@ fn parse_corrections(model_output: &str) -> Option<Vec<Correction>> {
         }
     }
     saw_empty.then(Vec::new)
-}
-
-/// Collects every top-level, balanced `[...]` span in `text`, in order,
-/// respecting (and not miscounting brackets inside) quoted strings.
-fn extract_json_arrays(text: &str) -> Vec<&str> {
-    let mut arrays = Vec::new();
-    let mut depth = 0i32;
-    let mut in_string = false;
-    let mut escape = false;
-    let mut start = None;
-
-    // `char_indices` yields byte offsets, so the returned slices always fall
-    // on char boundaries even when `text` contains multibyte characters (a
-    // `skip`-by-byte-count approach silently overshoots past the first `[`).
-    for (i, ch) in text.char_indices() {
-        if in_string {
-            match ch {
-                _ if escape => escape = false,
-                '\\' => escape = true,
-                '"' => in_string = false,
-                _ => {}
-            }
-            continue;
-        }
-        match ch {
-            '"' => in_string = true,
-            '[' => {
-                if depth == 0 {
-                    start = Some(i);
-                }
-                depth += 1;
-            }
-            ']' if depth > 0 => {
-                depth -= 1;
-                if depth == 0 {
-                    if let Some(s) = start.take() {
-                        arrays.push(&text[s..=i]);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
-    arrays
 }
 
 /// Runs the glossary cleanup post-pass: builds the request, invokes `runner`,
@@ -239,6 +163,7 @@ pub fn clean_transcript_for_project(
 mod tests {
     use super::*;
     use crate::glossary::{GlossaryTerm, OnConflict};
+    use crate::llm::LlmRunError;
     use crate::transcription::Channel;
 
     fn term(term: &str, definition: &str, aliases: &[&str]) -> GlossaryTerm {
@@ -268,10 +193,10 @@ mod tests {
         }
     }
 
-    struct MockRunner(Result<String, CleanupRunError>);
+    struct MockRunner(Result<String, LlmRunError>);
 
     impl HeadlessClaude for MockRunner {
-        fn run(&self, _request: &CleanupRequest) -> Result<String, CleanupRunError> {
+        fn run(&self, _request: &LlmRequest) -> Result<String, LlmRunError> {
             self.0.clone()
         }
     }
@@ -279,7 +204,7 @@ mod tests {
     struct PanicRunner;
 
     impl HeadlessClaude for PanicRunner {
-        fn run(&self, _request: &CleanupRequest) -> Result<String, CleanupRunError> {
+        fn run(&self, _request: &LlmRequest) -> Result<String, LlmRunError> {
             panic!("runner should not be called when there is nothing to clean");
         }
     }
@@ -347,7 +272,7 @@ mod tests {
     fn runner_error_leaves_the_transcript_unchanged() {
         let glossary = glossary_with(&[("MERIDIAN", "A regional systems-migration project.", &[])]);
         let segments = vec![segment(0, "hello")];
-        let runner = MockRunner(Err(CleanupRunError::Spawn("boom".to_owned())));
+        let runner = MockRunner(Err(LlmRunError::Spawn("boom".to_owned())));
 
         let result = clean_transcript(&runner, segments.clone(), &glossary);
 

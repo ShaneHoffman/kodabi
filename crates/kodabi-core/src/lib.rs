@@ -6,8 +6,10 @@
 
 pub mod benchmark;
 pub mod device;
+pub mod distill;
 pub mod glossary;
 pub mod index;
+pub mod llm;
 pub mod metrics;
 pub mod naming;
 pub mod note;
