@@ -13,6 +13,7 @@ pub mod naming;
 pub mod note;
 pub mod pipeline;
 pub mod raw_session;
+pub mod routing;
 pub mod transcription;
 
 /// Crate version — a trivial placeholder proving the crate compiles, links,
