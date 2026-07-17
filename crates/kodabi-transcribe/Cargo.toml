@@ -12,6 +12,17 @@ kodabi-core = { path = "../kodabi-core" }
 # (see the `parakeet`/`vad`/`whisper` features below) rather than inheriting
 # its `static` default unconditionally.
 sherpa-onnx = { version = "1.13.4", optional = true, default-features = false }
+# Direct (optional) dependency on the sys crate purely to order build scripts.
+# sherpa-onnx-sys declares `links = "sherpa-onnx"`, so naming it a direct
+# dependency makes Cargo run *its* build script — which copies the shared-mode
+# runtime DLLs into `target/<profile>` — before this crate's `build.rs` runs to
+# mirror them into `target/<profile>/deps` (see `build.rs`). Without this edge the
+# two build scripts race (we only depend on sherpa-onnx-sys transitively via
+# `sherpa-onnx`, which enforces no ordering) and the mirror can run first and find
+# nothing. `default-features = false` so it adds no link-mode feature of its own:
+# `shared` still comes solely from `sherpa-onnx/shared` on the `whisper` path, so
+# feature resolution is unchanged. Only pulled in by `whisper` (shared mode).
+sherpa-onnx-sys = { version = "1.13.4", optional = true, default-features = false }
 # Unlike sherpa-onnx, whisper-rs compiles whisper.cpp from source (CMake +
 # bindgen/libclang) rather than downloading a prebuilt archive. The base
 # `whisper` feature builds on CPU; `whisper-cuda` additionally needs the CUDA
@@ -38,7 +49,9 @@ vad = ["dep:sherpa-onnx"]
 # path"), so this is compile-enforced rather than left to caller convention.
 #
 # Forces sherpa-onnx's `shared` link mode (dynamic; copies its runtime DLLs
-# next to the build output automatically) instead of the `static` mode
+# next to the build output automatically — and this crate's `build.rs` mirrors
+# them into `target/<profile>/deps` so `cargo test`/bench binaries resolve them
+# too, see `tests/vad_whisper.rs`) instead of the `static` mode
 # `parakeet` uses. whisper-rs's CMake build of whisper.cpp links the MSVC C++
 # runtime dynamically (`/MD`); sherpa-onnx's prebuilt `static` archive links
 # it statically (`/MT`). Combining a `/MT`-linked static lib with `/MD`-linked
@@ -55,7 +68,7 @@ vad = ["dep:sherpa-onnx"]
 # engines compiled into one binary (e.g. to switch engines at runtime) will
 # need to resolve this, most likely by moving `parakeet` to `shared` too, at
 # the cost of bundling its DLLs.
-whisper = ["dep:whisper-rs", "vad", "sherpa-onnx/shared"]
+whisper = ["dep:whisper-rs", "vad", "sherpa-onnx/shared", "dep:sherpa-onnx-sys"]
 whisper-cuda = ["whisper", "whisper-rs/cuda"]
 
 [dev-dependencies]
