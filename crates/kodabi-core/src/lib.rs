@@ -9,6 +9,7 @@ pub mod device;
 pub mod glossary;
 pub mod metrics;
 pub mod naming;
+pub mod note;
 pub mod pipeline;
 pub mod raw_session;
 pub mod transcription;
