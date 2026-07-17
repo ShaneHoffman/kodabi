@@ -1,0 +1,33 @@
+/* ============================================================
+   Sidebar — the quiet project switcher.
+
+   Only non-bridged tokens live here (weights, letter-spacing, edges,
+   focus radius); everything bridged stays in Tailwind utilities on the
+   component. Separation from the main region is a value shift
+   (bg-bg-sink vs bg-bg) plus this hairline — an inset shadow, never a
+   border (docs/DESIGN.md).
+   ============================================================ */
+
+.sidebar {
+  box-shadow: inset -1px 0 0 var(--edge-faint);
+}
+
+.sidebar__eyebrow {
+  letter-spacing: var(--ls-eyebrow);
+}
+
+/* Nested projects indent by slug depth — the row exposes --row-depth as a
+   CSS-var knob (the SpiritMark convention); base left padding matches the
+   pr-3 (12px = --space-xs) on the other side. */
+.sidebar__row {
+  padding-left: calc(var(--space-xs) + var(--row-depth, 0) * var(--space-sm));
+}
+
+.sidebar__row.is-selected {
+  font-weight: var(--fw-medium);
+}
+
+.sidebar__row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
