@@ -19,8 +19,10 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+use unicode_normalization::UnicodeNormalization;
+
 use crate::glossary::{Glossary, GlossaryError};
-use crate::note::{validate_project, Routing, INBOX};
+use crate::note::{project_dir, validate_project, Routing, INBOX, RAW_DIR};
 
 /// Weight of one distinct glossary entry (term or any alias) matched in the
 /// body.
@@ -37,16 +39,14 @@ const TITLE_MULTIPLIER: f64 = 2.0;
 /// Saturation constant `K` in `evidence = w / (w + K)` — diminishing returns.
 const SATURATION_WEIGHT: f64 = 2.0;
 
-/// Compiled-in default threshold; equals `saturate(3.0)` exactly (`3/(3+2)`),
-/// i.e. auto-filing requires net evidence worth three unopposed body-level
-/// signals. The future `KODABI_ROUTING_THRESHOLD` env override is applied at
-/// the src-tauri boundary, never read here — core takes config as a parameter.
-pub const DEFAULT_THRESHOLD: f64 = 0.6;
-
-/// Name of the vault-root folder holding raw session artifacts
-/// (`docs/FRONTMATTER_SCHEMA.md` places `raw/…` relative to the vault root),
-/// excluded from project discovery.
-const RAW_DIR: &str = "raw";
+/// Compiled-in default threshold: `saturate(3.0)` by construction, i.e.
+/// auto-filing requires net evidence worth three unopposed body-level signals
+/// (`3/(3+K)`, `0.6` at the current `K = 2`). Written in terms of
+/// [`SATURATION_WEIGHT`] so retuning the curve keeps that meaning instead of
+/// silently changing what the threshold demands. The future
+/// `KODABI_ROUTING_THRESHOLD` env override is applied at the src-tauri
+/// boundary, never read here — core takes config as a parameter.
+pub const DEFAULT_THRESHOLD: f64 = 3.0 / (3.0 + SATURATION_WEIGHT);
 
 // ---------------------------------------------------------------------------
 // Config
@@ -141,11 +141,18 @@ pub enum RoutingError {
 // Matching
 // ---------------------------------------------------------------------------
 
-/// Lowercased word tokens: split on any non-alphanumeric char (Unicode-aware),
+/// Lowercased word tokens: NFC-composed first (a decomposed `Cafe´` and a
+/// precomposed `Café` are the same text on screen and must tokenize alike —
+/// combining marks are non-alphanumeric and would otherwise become split
+/// points), then split on any non-alphanumeric char (Unicode-aware) and
 /// case-folded with `char::to_lowercase` — the same fold `glossary`'s lookups
 /// use, so what matches here agrees with what the glossary considers equal.
+/// Marks with no precomposed form still split, but identically on both the
+/// needle and haystack side.
 fn tokens(text: &str) -> Vec<String> {
-    text.split(|c: char| !c.is_alphanumeric())
+    let composed: String = text.nfc().collect();
+    composed
+        .split(|c: char| !c.is_alphanumeric())
         .filter(|t| !t.is_empty())
         .map(|t| t.chars().flat_map(char::to_lowercase).collect())
         .collect()
@@ -153,9 +160,13 @@ fn tokens(text: &str) -> Vec<String> {
 
 /// Whole-word contiguous phrase match: `"tee sheet"` matches "Tee-Sheet" but
 /// `"golf"` never matches "golfing". A needle that tokenized to nothing never
-/// matches anything.
+/// matches anything, and neither does one that tokenized down to a single
+/// one-character word: punctuation-heavy vocabulary ("C#", "A+") degrades to a
+/// bare letter under [`tokens`], and matching every stray "c" would award a
+/// full signal to text that never mentioned the term.
 fn contains_phrase(haystack: &[String], needle: &[String]) -> bool {
-    !needle.is_empty()
+    let degenerate = needle.is_empty() || (needle.len() == 1 && needle[0].chars().count() == 1);
+    !degenerate
         && haystack
             .windows(needle.len())
             .any(|window| window == needle)
@@ -229,38 +240,63 @@ fn score_candidate(title: &[String], body: &[String], candidate: &ProjectSignals
     let mut name_hits = 0;
     let mut weight = 0.0;
 
-    // One signal per glossary *entry*: its term plus every alias are alternate
-    // spellings of the same concept, so together they count once. Distinct
-    // entries (not occurrences) make the score reward breadth of project
-    // vocabulary, not verbosity.
-    for entry in candidate.glossary.terms() {
-        let needles: Vec<Vec<String>> = std::iter::once(entry.term.as_str())
-            .chain(entry.aliases.iter().map(String::as_str))
-            .map(tokens)
-            .collect();
-        if let Some(location) = best_location(title, body, &needles) {
-            glossary_hits += 1;
-            weight += TERM_WEIGHT * location.multiplier();
-        }
-    }
-
     // One signal per distinct path segment: "Briarwood Golf" is a single
     // multi-token phrase; "Growth/Q3" contributes "growth" and "q3"
     // separately, so a title like "Growth Q3 planning" hits both. A hit weighs
     // only toward this exact candidate — no cascade from `Growth/Q3` up to
     // `Growth`, which would inflate parents and worsen exactly the ambiguity
     // the margin rule exists to catch.
-    let mut seen_segments: Vec<Vec<String>> = Vec::new();
+    let mut segment_needles: Vec<Vec<String>> = Vec::new();
     for segment in candidate.project.split('/') {
         let needle = tokens(segment);
-        if needle.is_empty() || seen_segments.contains(&needle) {
-            continue;
+        if !needle.is_empty() && !segment_needles.contains(&needle) {
+            segment_needles.push(needle);
         }
-        if let Some(location) = best_location(title, body, std::slice::from_ref(&needle)) {
-            name_hits += 1;
-            weight += NAME_WEIGHT * location.multiplier();
+    }
+
+    // The reverse cascade needs breaking too: the leaf segment is this
+    // project's own name, while ancestor segments appear in every descendant's
+    // slug. Crediting an ancestor hit without the leaf would hand each child a
+    // copy of its parent's name evidence ("Growth planning" scoring
+    // `Growth/Q3` as high as `Growth` — a guaranteed tie that parks every
+    // parent-project note in Inbox). So ancestor segments count only when the
+    // leaf matched: without the leaf, the mention is the ancestor's evidence,
+    // not this candidate's.
+    let leaf = candidate
+        .project
+        .rsplit('/')
+        .next()
+        .map(tokens)
+        .unwrap_or_default();
+    if best_location(title, body, std::slice::from_ref(&leaf)).is_some() {
+        for needle in &segment_needles {
+            if let Some(location) = best_location(title, body, std::slice::from_ref(needle)) {
+                name_hits += 1;
+                weight += NAME_WEIGHT * location.multiplier();
+            }
         }
-        seen_segments.push(needle);
+    }
+
+    // One signal per glossary *entry*: its term plus every alias are alternate
+    // spellings of the same concept, so together they count once. Distinct
+    // entries (not occurrences) make the score reward breadth of project
+    // vocabulary, not verbosity. And one signal per *spelling* overall: a
+    // needle already claimed — by the project name (an entry that is just the
+    // project's own name must not turn one mention into TERM_WEIGHT +
+    // NAME_WEIGHT and clear the threshold on a lone name-drop) or by an
+    // earlier entry (two entries sharing an alias) — never counts again.
+    let mut claimed = segment_needles;
+    for entry in candidate.glossary.terms() {
+        let needles: Vec<Vec<String>> = std::iter::once(entry.term.as_str())
+            .chain(entry.aliases.iter().map(String::as_str))
+            .map(tokens)
+            .filter(|needle| !claimed.contains(needle))
+            .collect();
+        if let Some(location) = best_location(title, body, &needles) {
+            glossary_hits += 1;
+            weight += TERM_WEIGHT * location.multiplier();
+        }
+        claimed.extend(needles);
     }
 
     ProjectScore {
@@ -291,9 +327,22 @@ pub fn route(text: NoteText<'_>, candidates: &[ProjectSignals], config: &Routing
         // beats miscategorized, with the zero score on record.
         return inbox_landing(0.0);
     };
-    let runner_up = scores.get(1).map_or(0.0, |s| s.weight);
+    // The margin is against the best *other* project: candidates are
+    // caller-supplied and nothing forbids duplicates, and a duplicate of the
+    // winner as its own runner-up would zero out the confidence of an
+    // unopposed match.
+    let runner_up = scores
+        .iter()
+        .skip(1)
+        .find(|s| s.project != top.project)
+        .map_or(0.0, |s| s.weight);
     let confidence = saturate(top.weight - runner_up);
-    if confidence >= config.effective_threshold() {
+    // A slug the writer would reject (candidates need not come from
+    // discovery, which is the only validated source) must not surface as a
+    // `Routed` target — `Note::new` would fail the whole write, losing the
+    // note. Uncategorized beats lost: it lands in Inbox with the score on
+    // record, like every other low-quality outcome.
+    if confidence >= config.effective_threshold() && validate_project(&top.project).is_ok() {
         Routing::Routed {
             project: top.project.clone(),
             confidence,
@@ -316,14 +365,15 @@ fn inbox_landing(confidence: f64) -> Routing {
 
 /// Whether a directory name is excluded from project discovery outright.
 /// Dot- and underscore-prefixed folders are infra at any depth; the `Inbox`
-/// sentinel folder (any casing, matching `validate_project`'s reservation) and
-/// the `raw` sessions folder are reserved at the vault root only — a nested
-/// `Data/raw` is a legitimate project.
+/// sentinel folder and the `raw` sessions folder are reserved at the vault
+/// root only (any casing — the filesystem this ships on is case-insensitive,
+/// matching `validate_project`'s reservations) — a nested `Data/raw` is a
+/// legitimate project.
 fn is_excluded_dir_name(name: &str, top_level: bool) -> bool {
     if name.starts_with('.') || name.starts_with('_') {
         return true;
     }
-    top_level && (name.eq_ignore_ascii_case(INBOX) || name == RAW_DIR)
+    top_level && (name.eq_ignore_ascii_case(INBOX) || name.eq_ignore_ascii_case(RAW_DIR))
 }
 
 /// Walks `vault_root` for project folders, returned as `/`-joined slugs sorted
@@ -398,11 +448,9 @@ pub fn load_project_signals(vault_root: &Path) -> Result<Vec<ProjectSignals>, Ro
     let projects = discover_projects(vault_root)?;
     let mut signals = Vec::with_capacity(projects.len());
     for project in projects {
-        let mut dir = vault_root.to_path_buf();
-        for segment in project.split('/') {
-            dir.push(segment);
-        }
-        let glossary = Glossary::load(&dir)?;
+        // `note::project_dir` is the writer's slug→folder mapping; using it
+        // here keeps glossaries loading from exactly the folder notes land in.
+        let glossary = Glossary::load(&project_dir(vault_root, &project))?;
         signals.push(ProjectSignals { project, glossary });
     }
     Ok(signals)
@@ -585,6 +633,89 @@ mod tests {
     }
 
     #[test]
+    fn degenerate_single_letter_needles_never_match() {
+        // "C#" and "A+" tokenize down to bare letters; matching every stray
+        // "c"/"a" would score text that never mentioned the term.
+        let candidates = [signals("DevTools", &[("C#", &[]), ("A+", &[])])];
+        let scores = score_projects(
+            titled("A plan C review", "option c and a word"),
+            &candidates,
+        );
+        assert_eq!(score_of(&scores, "DevTools").weight, 0.0);
+    }
+
+    #[test]
+    fn project_name_in_own_glossary_counts_once_as_name() {
+        // A glossary entry that is the project's own name must not turn one
+        // mention into TERM_WEIGHT + NAME_WEIGHT — that would auto-file a lone
+        // body name-drop at exactly the default threshold.
+        let candidates = [signals("Irrigation", &[("irrigation", &[])])];
+        let text = body("mentioned irrigation in passing");
+
+        let scores = score_projects(text, &candidates);
+        let score = score_of(&scores, "Irrigation");
+        assert_eq!(score.name_hits, 1);
+        assert_eq!(score.glossary_hits, 0);
+        assert_eq!(score.weight, NAME_WEIGHT);
+
+        let routing = route(text, &candidates, &RoutingConfig::default());
+        assert_eq!(routing.project(), INBOX);
+        assert_eq!(routing.confidence(), Some(0.5));
+    }
+
+    #[test]
+    fn alias_shared_by_two_entries_counts_once() {
+        // Only term text is deduplicated at glossary load; a shared alias must
+        // not turn one occurrence into two hits' worth of weight.
+        let candidates = [signals(
+            "Briarwood Golf",
+            &[("TeeTrack", &["FU"]), ("FollowUp", &["FU"])],
+        )];
+        let scores = score_projects(body("the fu rollout"), &candidates);
+        let score = score_of(&scores, "Briarwood Golf");
+        assert_eq!(score.glossary_hits, 1);
+        assert_eq!(score.weight, TERM_WEIGHT);
+    }
+
+    #[test]
+    fn parent_only_evidence_routes_to_the_parent_not_a_tie() {
+        // The child inherits the parent's segment in its slug; without this
+        // being leaf-gated, "Growth planning" would tie Growth with Growth/Q3
+        // and park every parent-project note in Inbox.
+        let candidates = [signals("Growth", &[]), signals("Growth/Q3", &[])];
+        let text = titled("Growth planning", "agenda to follow");
+
+        let scores = score_projects(text, &candidates);
+        assert_eq!(
+            score_of(&scores, "Growth").weight,
+            NAME_WEIGHT * TITLE_MULTIPLIER
+        );
+        assert_eq!(score_of(&scores, "Growth/Q3").weight, 0.0);
+
+        let routing = route(text, &candidates, &RoutingConfig::default());
+        assert_eq!(
+            routing,
+            Routing::Routed {
+                project: "Growth".to_string(),
+                confidence: 4.0 / 6.0,
+            }
+        );
+    }
+
+    #[test]
+    fn nfc_and_nfd_forms_of_the_same_text_match() {
+        // Decomposed é (e + U+0301) and precomposed é are the same text on
+        // screen; neither side's Unicode form may decide whether a term hits.
+        let nfc_term = [signals("Cafe", &[("Caf\u{e9} Renovation", &[])])];
+        let scores = score_projects(body("the cafe\u{301} renovation budget"), &nfc_term);
+        assert_eq!(score_of(&scores, "Cafe").glossary_hits, 1);
+
+        let nfd_term = [signals("Cafe", &[("Cafe\u{301} Renovation", &[])])];
+        let scores = score_projects(body("the caf\u{e9} renovation budget"), &nfd_term);
+        assert_eq!(score_of(&scores, "Cafe").glossary_hits, 1);
+    }
+
+    #[test]
     fn glossary_hits_do_not_cascade_to_parent_project() {
         let candidates = [
             signals("Growth", &[]),
@@ -709,6 +840,45 @@ mod tests {
     }
 
     #[test]
+    fn invalid_candidate_slug_falls_back_to_inbox() {
+        // Candidates need not come from validated discovery; a slug the writer
+        // would reject ("con" is a reserved Windows device name) must land in
+        // Inbox with the score recorded, not surface as a Routed target that
+        // fails the note write downstream.
+        let candidates = [signals(
+            "con",
+            &[("MERIDIAN", &[]), ("TeeTrack", &[]), ("GreenFlow", &[])],
+        )];
+        let routing = route(
+            body("MERIDIAN update, TeeTrack demo, GreenFlow next"),
+            &candidates,
+            &RoutingConfig::default(),
+        );
+        assert_eq!(routing.project(), INBOX);
+        assert_eq!(routing.confidence(), Some(DEFAULT_THRESHOLD));
+    }
+
+    #[test]
+    fn duplicate_candidates_do_not_zero_the_margin() {
+        // A caller merging signal lists can pass the same project twice; the
+        // duplicate must not become its own runner-up and drag an unopposed
+        // winner's confidence to 0.0.
+        let duplicated: Vec<ProjectSignals> = vec![fixture()[0].clone(), fixture()[0].clone()];
+        let routing = route(
+            body("MERIDIAN update, TeeTrack demo, GreenFlow next"),
+            &duplicated,
+            &RoutingConfig::default(),
+        );
+        assert_eq!(
+            routing,
+            Routing::Routed {
+                project: "Briarwood Golf".to_string(),
+                confidence: DEFAULT_THRESHOLD,
+            }
+        );
+    }
+
+    #[test]
     fn invalid_threshold_falls_back_to_default() {
         // 5/7 ≈ 0.714 clears the default; 0.5 does not. Every invalid
         // threshold must behave exactly like the default on both sides.
@@ -764,12 +934,15 @@ mod tests {
 
     #[test]
     fn dir_name_exclusion_rules_are_pure() {
-        // Reserved only at the vault root (any casing for the Inbox sentinel,
-        // matching `validate_project`)…
+        // Reserved only at the vault root, in any casing — on the
+        // case-insensitive filesystem this ships on, `Raw` *is* the sessions
+        // folder (matching `validate_project`'s reservations)…
         assert!(is_excluded_dir_name("Inbox", true));
         assert!(is_excluded_dir_name("inbox", true));
         assert!(is_excluded_dir_name("INBOX", true));
         assert!(is_excluded_dir_name("raw", true));
+        assert!(is_excluded_dir_name("Raw", true));
+        assert!(is_excluded_dir_name("RAW", true));
         // …but legitimate deeper down.
         assert!(!is_excluded_dir_name("Inbox", false));
         assert!(!is_excluded_dir_name("raw", false));
@@ -828,10 +1001,7 @@ mod tests {
             fs::create_dir_all(vault.path().join(dir)).unwrap();
         }
         for candidate in fixture() {
-            let mut dir = vault.path().to_path_buf();
-            for segment in candidate.project.split('/') {
-                dir.push(segment);
-            }
+            let dir = project_dir(vault.path(), &candidate.project);
             fs::create_dir_all(&dir).unwrap();
             candidate.glossary.save(&dir).unwrap();
         }

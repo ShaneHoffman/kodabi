@@ -553,7 +553,7 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
       "minLength": 1,
       "maxLength": 300,
       "pattern": "^[^/\\\\]+(?:/[^/\\\\]+)*$",
-      "description": "Hierarchical project path/slug relative to the KB root, e.g. \"Growth/Q3\". Segments are folder names; no leading/trailing or empty segments. Each segment must also be a legal Windows folder name (no reserved device names such as CON/PRN/NUL, no trailing dot or space, none of the characters Windows forbids in a path segment); the Phase 2 writer rejects violations. \"Inbox\" is a reserved folder name — a real project may not use it. This is the canonical project handle accepted by tools."
+      "description": "Hierarchical project path/slug relative to the KB root, e.g. \"Growth/Q3\". Segments are folder names; no leading/trailing or empty segments. Each segment must also be a legal Windows folder name (no reserved device names such as CON/PRN/NUL, no trailing dot or space, none of the characters Windows forbids in a path segment), and may not start with \".\" or \"_\" — those prefixes mark infra folders (\".obsidian\", \"_assets\") that routing discovery skips, so such a project would be writable yet invisible to routing. The Phase 2 writer rejects violations. \"Inbox\" (any casing) is a reserved folder name — a real project may not use it — and \"raw\" (any casing) is reserved as a first segment: <KB root>/raw/ holds raw session artifacts, never notes (a nested segment like \"Data/raw\" is fine). This is the canonical project handle accepted by tools."
     },
     "IsoDate": {
       "type": "string",
