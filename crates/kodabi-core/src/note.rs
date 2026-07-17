@@ -636,7 +636,7 @@ const RESERVED_SEGMENTS: &[&str] = &[
 /// (`docs/MCP_TOOL_SURFACE.md`) so the writer and the tool surface agree.
 const MAX_PROJECT_LEN: usize = 300;
 
-fn validate_project(project: &str) -> Result<()> {
+pub(crate) fn validate_project(project: &str) -> Result<()> {
     if project == INBOX {
         return Ok(());
     }
