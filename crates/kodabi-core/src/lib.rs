@@ -7,6 +7,7 @@
 pub mod benchmark;
 pub mod device;
 pub mod glossary;
+pub mod index;
 pub mod metrics;
 pub mod naming;
 pub mod note;
