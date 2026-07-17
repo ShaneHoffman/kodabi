@@ -16,6 +16,7 @@ serde_yaml_ng = "0.10"
 sqlite-vec = "0.1"
 thiserror = "2"
 toml = "1"
+unicode-normalization = "0.1"
 
 [dev-dependencies]
 tempfile = "3"
