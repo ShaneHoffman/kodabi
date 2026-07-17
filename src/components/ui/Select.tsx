@@ -62,6 +62,7 @@ export function Select({
   const active = options.length > 0 ? Math.min(activeIndex, options.length - 1) : 0;
 
   const openList = () => {
+    if (options.length === 0) return;
     setActiveIndex(selectedIndex >= 0 ? selectedIndex : 0);
     setOpen(true);
   };
@@ -117,11 +118,17 @@ export function Select({
     if (event.nativeEvent.isComposing) return;
     const { key } = event;
 
+    // A key the widget acts on is fully consumed — stopPropagation keeps it
+    // from reaching an ancestor (a dialog that closes on Escape, a form that
+    // submits on Enter). Tab is the one exception: it must bubble so focus
+    // can leave the trigger.
     if (!open) {
       if (key === "ArrowDown" || key === "ArrowUp" || key === "Enter" || key === " ") {
         event.preventDefault();
+        event.stopPropagation();
         openList();
       } else if (isPrintable(event)) {
+        event.stopPropagation();
         openList();
         typeahead(key);
       }
@@ -130,26 +137,33 @@ export function Select({
 
     if (key === "ArrowDown") {
       event.preventDefault();
+      event.stopPropagation();
       setActiveIndex(Math.min(active + 1, options.length - 1));
     } else if (key === "ArrowUp") {
       event.preventDefault();
+      event.stopPropagation();
       setActiveIndex(Math.max(active - 1, 0));
     } else if (key === "Home") {
       event.preventDefault();
+      event.stopPropagation();
       setActiveIndex(0);
     } else if (key === "End") {
       event.preventDefault();
+      event.stopPropagation();
       setActiveIndex(options.length - 1);
     } else if (key === "Enter" || key === " ") {
       event.preventDefault();
+      event.stopPropagation();
       choose(active);
     } else if (key === "Escape") {
       event.preventDefault();
+      event.stopPropagation();
       close();
     } else if (key === "Tab") {
       // Let focus leave, but collapse the list behind it.
       setOpen(false);
     } else if (isPrintable(event)) {
+      event.stopPropagation();
       typeahead(key);
     }
   };
@@ -170,7 +184,7 @@ export function Select({
         aria-expanded={open}
         aria-controls={listboxId}
         aria-labelledby={`${labelId} ${baseId}`}
-        aria-activedescendant={open ? optionId(active) : undefined}
+        aria-activedescendant={open && options.length > 0 ? optionId(active) : undefined}
         onClick={() => (open ? setOpen(false) : openList())}
         onKeyDown={onKeyDown}
         className="ui-select__trigger flex w-full items-center justify-between rounded-md bg-surface px-xs py-2xs text-body text-text"

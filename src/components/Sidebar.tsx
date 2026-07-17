@@ -45,7 +45,7 @@ export function Sidebar({ onOpenPalette }: Props) {
               aria-current={selected ? "page" : undefined}
               onClick={() => navigate(entryView(entry))}
               style={{
-                paddingLeft: `calc(var(--space-xs) + ${depth} * var(--space-sm))`,
+                paddingInlineStart: `calc(var(--space-xs) + ${depth} * var(--space-sm))`,
               }}
               className={`sidebar__row flex w-full items-baseline justify-between text-left text-body ${
                 selected
