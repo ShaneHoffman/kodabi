@@ -18,8 +18,9 @@
 
 /* A selected row reads through weight (value, not hue). Its surface fill
    and text colour are Tailwind utilities on the row; the nested-project
-   indent is applied inline (paddingLeft) so it overrides the primitive's
-   symmetric control padding. */
+   indent is applied inline (paddingInlineStart) so it cleanly overrides the
+   leading half of the primitive's symmetric control padding (px-xs compiles
+   to logical padding-inline in Tailwind v4). */
 .sidebar__row.is-selected {
   font-weight: var(--fw-medium);
 }

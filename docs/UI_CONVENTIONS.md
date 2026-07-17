@@ -50,7 +50,7 @@ below bake this in, so most screens never spell control padding out at all.
 
 Most tokens are bridged into Tailwind utilities and are consumed **as utilities on the component**:
 
-- **Colours** → `bg-bg`, `bg-bg-sink`, `bg-surface`, `text-text`, `text-soft`, `text-faint`, `text-accent`…
+- **Colours** → `bg-bg`, `bg-bg-sink`, `bg-surface`, `text-text`, `text-text-soft`, `text-text-faint`, `text-accent`…
 - **Type sizes** → `text-eyebrow`, `text-cap`, `text-body`, `text-read`, `text-h3`, `text-h2`, `text-display`
 - **Families** → `font-sans`, `font-serif`, `font-mono`
 - **Spacing steps** → `p-*`, `px-*`, `py-*`, `gap-*`, `m-*` with the named suffixes above
