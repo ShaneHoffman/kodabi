@@ -85,3 +85,6 @@ Commit subjects follow Conventional Commits: `<type>: <imperative summary>`, mat
 - **Spec agreement:** `docs/FRONTMATTER_SCHEMA.md` and `docs/MCP_TOOL_SURFACE.md` mirror each
   other (frontmatter fields ≡ the MCP `NoteSummary` shape). Editing one requires checking the
   other in the same change.
+
+Topical rules that aren't repo-wide engineering constraints live as modular files under
+`.claude/rules/` (e.g. `copy-style.md`).

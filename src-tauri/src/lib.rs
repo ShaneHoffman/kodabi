@@ -3,6 +3,9 @@ mod capture_control;
 mod distill_cmds;
 mod index_state;
 mod note_cmds;
+mod quick_capture;
+mod retention;
+mod settings_cmds;
 mod transcribe;
 
 use kodabi_core::device::DeviceId;
@@ -22,13 +25,19 @@ fn device_id(state: tauri::State<'_, DeviceId>) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let toggle_shortcut = capture_control::default_toggle_shortcut();
+    let quick_capture_shortcut = quick_capture::default_quick_capture_shortcut();
 
     tauri::Builder::default()
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(move |app, shortcut, event| {
-                    if *shortcut == toggle_shortcut && event.state == ShortcutState::Pressed {
+                    if event.state != ShortcutState::Pressed {
+                        return;
+                    }
+                    if *shortcut == toggle_shortcut {
                         capture_control::toggle_capture(app);
+                    } else if *shortcut == quick_capture_shortcut {
+                        quick_capture::toggle_window(app);
                     }
                 })
                 .build(),
@@ -55,6 +64,15 @@ pub fn run() {
             let device_id = kodabi_core::device::load_or_create(&device_config)?;
             app.manage(device_id);
 
+            // Load machine-local app settings (consent + retention policy) from
+            // the same config dir, and manage them so the capture gate and the
+            // retention schedule can read the current policy. A corrupt file
+            // self-heals to defaults (consent unacknowledged) rather than
+            // bricking startup.
+            let settings_config = config_dir.join("settings.toml");
+            let settings = kodabi_core::settings::load_or_create(&settings_config)?;
+            app.manage(settings_cmds::SettingsState::new(settings_config, settings));
+
             // Open the note index (best-effort — a cache, never a launch
             // blocker) so the note commands can keep it in sync on write/edit.
             app.manage(index_state::IndexState::initialize(app.handle()));
@@ -66,13 +84,24 @@ pub fn run() {
             capture_control::build_tray(app.handle())?;
 
             // A clashing OS-global shortcut must not prevent launch — the
-            // tray toggle still works even if the hotkey couldn't bind.
+            // tray toggle still works even if the hotkey couldn't bind. The two
+            // shortcuts register independently: one clashing must not sink the
+            // other, and the tray items (capture toggle, Quick capture) remain
+            // as fallbacks for whichever failed.
             if let Err(err) = app.global_shortcut().register(toggle_shortcut) {
                 eprintln!("failed to register global capture-toggle shortcut: {err}");
             }
+            if let Err(err) = app.global_shortcut().register(quick_capture_shortcut) {
+                eprintln!("failed to register global quick-capture shortcut: {err}");
+            }
+
+            // Start the retention schedule (an immediate sweep, then periodic)
+            // now that the settings state it reads is managed.
+            retention::start_schedule(app.handle());
             Ok(())
         })
         .manage(audio_cmds::CaptureState::default())
+        .manage(quick_capture::DismissArmed::default())
         .invoke_handler(tauri::generate_handler![
             device_id,
             audio_cmds::start_capture,
@@ -84,16 +113,38 @@ pub fn run() {
             note_cmds::list_notes,
             note_cmds::read_note,
             note_cmds::save_note,
+            note_cmds::file_note_to_project,
             note_cmds::list_projects,
+            quick_capture::show_quick_capture,
+            quick_capture::hide_quick_capture,
+            quick_capture::quick_capture_submit,
+            settings_cmds::get_settings,
+            settings_cmds::set_retention_policy,
+            settings_cmds::acknowledge_consent,
         ])
-        .on_window_event(|window, event| {
+        .on_window_event(|window, event| match event {
             // Hide instead of exit: the tray + global hotkey must stay
             // functional after the window closes. Full exit is only via the
-            // tray's Quit item.
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+            // tray's Quit item. Applies to every window, including quick-capture
+            // (so Alt+F4 dismisses it rather than destroying its webview).
+            tauri::WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
                 let _ = window.hide();
             }
+            // The quick-capture window genuinely has focus now, so a later blur
+            // is a real dismiss — not the show/focus race. Arm dismiss-on-blur.
+            tauri::WindowEvent::Focused(true) if window.label() == quick_capture::WINDOW_LABEL => {
+                quick_capture::arm_dismiss(window);
+            }
+            // The quick-capture window is a transient overlay: losing focus
+            // (clicking elsewhere, Alt+Tab) dismisses it, but only once it had
+            // truly gained focus (else the spurious blur from a denied
+            // `set_focus` would hide it on arrival). The draft survives — the
+            // webview is only hidden, never destroyed.
+            tauri::WindowEvent::Focused(false) if window.label() == quick_capture::WINDOW_LABEL => {
+                quick_capture::dismiss_on_focus_lost(window);
+            }
+            _ => {}
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

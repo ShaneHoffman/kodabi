@@ -16,6 +16,13 @@
   letter-spacing: var(--ls-eyebrow);
 }
 
+/* Divides the Inbox (unfiled) from the projects: a hairline at the top of the
+   projects group — an inset shadow, never a border (docs/DESIGN.md). The
+   group's pt-md gives the line room above the "Projects" eyebrow. */
+.sidebar__group {
+  box-shadow: inset 0 1px 0 var(--edge-faint);
+}
+
 /* A selected row reads through weight (value, not hue). Its surface fill
    and text colour are Tailwind utilities on the row; the nested-project
    indent is applied inline (paddingInlineStart) so it cleanly overrides the

@@ -1,9 +1,10 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { useNavigation } from "../../useNavigation";
+import { useNavigation, type View } from "../../useNavigation";
 import {
   createNote,
+  INBOX_PROJECT,
   notifyVaultChanged,
   parseTagsInput,
   saveNote,
@@ -45,7 +46,7 @@ export function NoteEditorView({ noteId, project }: Props) {
     return (
       <Frame>
         <p className="text-body text-text-soft">
-          This note arrived without its project — open it from a project list.
+          This note arrived without its project. Open it from a project list.
         </p>
       </Frame>
     );
@@ -279,16 +280,25 @@ function ReadNote({
   const { navigate } = useNavigation();
   const meta = [note.date.slice(0, 10), note.type, ...note.tags].join(" · ");
 
+  // An unfiled note came from the Inbox, not a project — send "back" there
+  // (navigating to a `project` view for the Inbox sentinel is a dead end).
+  const isInbox = project === INBOX_PROJECT;
+  const backView: View = isInbox
+    ? { kind: "inbox" }
+    : { kind: "project", slug: project };
+  const backLabel = isInbox ? "Inbox" : formatSlug(project);
+
   return (
     <Frame>
       <article className="flex flex-col gap-lg">
         <header className="flex flex-col gap-3xs">
           <button
             type="button"
-            onClick={() => navigate({ kind: "project", slug: project })}
-            className="self-start text-eyebrow uppercase tracking-wide text-text-faint hover:text-text-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            onClick={() => navigate(backView)}
+            className="flex items-center gap-2xs self-start text-cap text-text-faint hover:text-text-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >
-            {formatSlug(project)}
+            <span aria-hidden="true">←</span>
+            <span>{backLabel}</span>
           </button>
           <div className="flex items-baseline justify-between gap-md">
             <h2 className="font-serif text-h2 text-text">{note.title}</h2>

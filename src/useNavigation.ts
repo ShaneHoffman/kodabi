@@ -2,16 +2,18 @@ import { createContext, useContext } from "react";
 
 /**
  * The shell's destination screens. Each later ticket replaces a placeholder
- * view, not this union's shape: Inbox (#44), note editor (#46), quick
- * capture (#45 — ships as a separate window; the palette action is the
- * seam), search (Phase 3).
+ * view, not this union's shape: Inbox (#44), note editor (#46), search
+ * (Phase 3). Quick capture (#45) is deliberately absent — it ships as its own
+ * always-available window (`src/components/QuickCapture.tsx`), driven by a
+ * global hotkey and the palette's "Quick capture" action, not as a main-window
+ * destination.
  */
 export type View =
   | { kind: "inbox" }
   | { kind: "project"; slug: string }
   | { kind: "noteEditor"; noteId: string | null; project: string | null }
   | { kind: "search"; query: string }
-  | { kind: "capture" };
+  | { kind: "settings" };
 
 /** Inbox is home: the unrouted bucket is the first thing worth seeing. */
 export const INITIAL_VIEW: View = { kind: "inbox" };

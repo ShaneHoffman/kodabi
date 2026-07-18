@@ -1,9 +1,9 @@
 import { useNavigation } from "../useNavigation";
-import { CaptureView } from "./views/CaptureView";
 import { InboxView } from "./views/InboxView";
 import { NoteEditorView } from "./views/NoteEditorView";
 import { ProjectView } from "./views/ProjectView";
 import { SearchView } from "./views/SearchView";
+import { SettingsView } from "./views/SettingsView";
 
 /** Routes the main region to the active destination view. */
 export function MainContent() {
@@ -27,8 +27,8 @@ export function MainContent() {
       );
     case "search":
       return <SearchView query={view.query} />;
-    case "capture":
-      return <CaptureView />;
+    case "settings":
+      return <SettingsView />;
     default: {
       // Exhaustiveness: a new View variant fails to compile until routed here.
       const exhausted: never = view;
