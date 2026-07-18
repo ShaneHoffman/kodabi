@@ -6,13 +6,16 @@
 
 pub mod benchmark;
 pub mod device;
+pub mod distill;
 pub mod glossary;
 pub mod index;
+pub mod llm;
 pub mod metrics;
 pub mod naming;
 pub mod note;
 pub mod pipeline;
 pub mod raw_session;
+pub mod routing;
 pub mod transcription;
 pub mod vault;
 

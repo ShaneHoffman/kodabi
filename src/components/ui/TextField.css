@@ -1,0 +1,17 @@
+/* ============================================================
+   TextField — a labelled text input.
+
+   Only non-bridged tokens live here: the bottom hairline (an inset
+   shadow, never a border — reads as a writing line, not a box) and the
+   shared 2px accent focus ring. Unlike the command palette, a form field
+   keeps its focus ring (docs/UI_CONVENTIONS.md, docs/DESIGN.md).
+   ============================================================ */
+
+.ui-field {
+  box-shadow: inset 0 -1px 0 var(--edge);
+}
+
+.ui-field:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

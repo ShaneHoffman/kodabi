@@ -1,5 +1,6 @@
 import { useCaptureState } from "../useCaptureState";
 import { useDebouncedValue } from "../useDebouncedValue";
+import { useDistillState } from "../useDistillState";
 import { useTranscriptionState } from "../useTranscriptionState";
 import { SpiritMark } from "./SpiritMark";
 
@@ -18,6 +19,22 @@ function transcriptionLabel(
   }
 }
 
+function distillLabel(state: ReturnType<typeof useDistillState>): string | null {
+  switch (state.status) {
+    case "distilling":
+      return "Distilling…";
+    case "saved":
+      return "Note saved";
+    case "error":
+      return "Distill failed";
+    // A skipped distill (nothing distillable — e.g. a silent capture) is not
+    // worth a status line; only real progress and real failures surface.
+    case "skipped":
+    case "idle":
+      return null;
+  }
+}
+
 /**
  * The persistent on-air surface: a small SpiritMark plus status text,
  * always visible in the sidebar foot regardless of the active view.
@@ -30,6 +47,8 @@ export function ListeningIndicator() {
   const settled = useDebouncedValue(phase, 400) === "listening";
   const transcription = useTranscriptionState(phase);
   const transcriptionText = transcriptionLabel(transcription);
+  const distill = useDistillState(phase);
+  const distillText = distillLabel(distill);
 
   return (
     <div className="flex flex-col gap-2xs">
@@ -47,6 +66,11 @@ export function ListeningIndicator() {
       {transcriptionText && (
         <p role="status" className="text-cap uppercase tracking-wide text-text-faint">
           {transcriptionText}
+        </p>
+      )}
+      {distillText && (
+        <p role="status" className="text-cap uppercase tracking-wide text-text-faint">
+          {distillText}
         </p>
       )}
     </div>

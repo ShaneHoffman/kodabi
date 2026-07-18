@@ -1,0 +1,19 @@
+/* ============================================================
+   Button — the one action control.
+
+   Only non-bridged tokens live here (the primary variant's hairline and
+   medium weight, plus the shared focus ring); control padding, rounding
+   and colour stay as Tailwind utilities on the component. The hairline is
+   an inset shadow, never a border, and focus is a 2px accent outline —
+   the Sidebar convention (docs/DESIGN.md, docs/UI_CONVENTIONS.md).
+   ============================================================ */
+
+.ui-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ui-btn--primary {
+  box-shadow: var(--hairline);
+  font-weight: var(--fw-medium);
+}
