@@ -123,7 +123,7 @@ export function ConsentNudge({ onClose }: Props) {
             indicator is green. It only ever records while that indicator shows.
           </p>
           <p>
-            Please announce your recordings — many places (Massachusetts among
+            Please announce your recordings. Many places (Massachusetts among
             them) require everyone on a call to consent before you record.
           </p>
           <p>
@@ -159,7 +159,7 @@ export function ConsentNudge({ onClose }: Props) {
             Not now
           </Button>
           <Button id={PRIMARY_ID} onClick={acknowledge} disabled={submitting}>
-            I understand — start capture
+            I understand, start capture
           </Button>
         </div>
       </div>
