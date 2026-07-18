@@ -17,6 +17,7 @@ pub mod pipeline;
 pub mod raw_session;
 pub mod routing;
 pub mod transcription;
+pub mod vault;
 
 /// Crate version — a trivial placeholder proving the crate compiles, links,
 /// and is unit-testable from the Tauri binary and from `cargo test`.
