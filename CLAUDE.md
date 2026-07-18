@@ -79,3 +79,7 @@ Commit subjects follow Conventional Commits: `<type>: <imperative summary>`, mat
 - **Spec agreement:** `docs/FRONTMATTER_SCHEMA.md` and `docs/MCP_TOOL_SURFACE.md` mirror each
   other (frontmatter fields ≡ the MCP `NoteSummary` shape). Editing one requires checking the
   other in the same change.
+- **User-facing copy:** no em dashes (the `—` character) in any language the user reads: UI
+  strings, labels, captions, tray text, and user-visible error or status messages. Rewrite with a
+  period, comma, colon, or parentheses instead. This is a copy rule only; code comments and repo
+  docs are unaffected.

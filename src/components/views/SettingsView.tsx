@@ -76,7 +76,7 @@ export function SettingsView() {
                 />
               )}
               <p className="text-cap text-text-faint">
-                Discard after distilling applies to captures from now on — sessions
+                Discard after distilling applies to captures from now on. Sessions
                 distilled before you chose it are not removed.
               </p>
               {saveError && (

@@ -153,8 +153,8 @@ fn broadcast_capture_phase(app: &AppHandle, state: &CaptureState) {
     };
 
     let (label, tooltip) = match phase {
-        CapturePhase::Listening => ("Stop capture", "Kodabi — listening"),
-        CapturePhase::Idle => ("Start capture", "Kodabi — idle"),
+        CapturePhase::Listening => ("Stop capture", "Kodabi: listening"),
+        CapturePhase::Idle => ("Start capture", "Kodabi: idle"),
     };
     if let Some(controller) = app.try_state::<CaptureController>() {
         let _ = controller.toggle_item.set_text(label);
@@ -193,7 +193,7 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 .expect("tauri.conf.json bundles a default window icon")
                 .clone(),
         )
-        .tooltip("Kodabi — idle")
+        .tooltip("Kodabi: idle")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
