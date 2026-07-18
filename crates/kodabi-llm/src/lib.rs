@@ -2,11 +2,11 @@
 //!
 //! The one place in the app that spawns `claude` as a subprocess — the
 //! MCP-inversion loop's subprocess boundary (FOUNDING_DOC §3.2, §3.4). Pure
-//! prompt-building and response-merging logic lives in
-//! `kodabi_core::transcription::cleanup`; this crate only owns the
-//! side-effecting process spawn, so the rest of the app stays engine- and
-//! process-agnostic and unit-testable against a mock
-//! `kodabi_core::transcription::HeadlessClaude`.
+//! prompt-building and response-parsing logic lives in `kodabi-core` behind
+//! `kodabi_core::llm::HeadlessClaude` (the glossary cleanup pass in
+//! `transcription::cleanup`, the end-of-meeting distill in `distill`); this
+//! crate only owns the side-effecting process spawn, so the rest of the app
+//! stays engine- and process-agnostic and unit-testable against a mock.
 //!
 //! Auth is never this crate's concern: a headless `claude -p` run reuses
 //! whatever the machine's Claude Code is already authenticated with — the
@@ -27,18 +27,30 @@ use std::process::{Child, Command, Output, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use kodabi_core::transcription::{CleanupRequest, CleanupRunError, HeadlessClaude};
+use kodabi_core::llm::{HeadlessClaude, LlmRequest, LlmRunError};
 
-/// Cheapest model alias capable of this task; Claude Code resolves it to the
-/// latest Haiku snapshot. Override via [`ClaudeConfig::model`] or the
-/// `KODABI_CLEANUP_MODEL` env var ([`ClaudeConfig::from_env`]).
+/// The glossary cleanup pass's model: the cheapest alias capable of that
+/// narrow task; Claude Code resolves it to the latest Haiku snapshot.
+/// Override via [`ClaudeConfig::model`] or the `KODABI_CLEANUP_MODEL` env
+/// var ([`ClaudeConfig::cleanup_from_env`]).
 pub const DEFAULT_MODEL: &str = "haiku";
 
-/// Default cap on a single headless run. Long meeting transcripts can take a
+/// Default cap on a single cleanup run. Long meeting transcripts can take a
 /// while for the cheap model to chew through, so this is generous — and
 /// overridable via [`ClaudeConfig::timeout`] or the `KODABI_CLEANUP_TIMEOUT_SECS`
-/// env var ([`ClaudeConfig::from_env`]) when even this is too tight.
+/// env var ([`ClaudeConfig::cleanup_from_env`]) when even this is too tight.
 pub const DEFAULT_TIMEOUT_SECS: u64 = 60;
+
+/// The distill pass's model. Summarization + extraction quality shapes the
+/// note the knowledge base keeps forever, so this defaults a tier above the
+/// cleanup pass's. Override via `KODABI_DISTILL_MODEL`
+/// ([`ClaudeConfig::distill_from_env`]).
+pub const DISTILL_DEFAULT_MODEL: &str = "sonnet";
+
+/// Default cap on a single distill run: a whole-meeting pass on a stronger
+/// model, so far roomier than the cleanup default. Override via
+/// `KODABI_DISTILL_TIMEOUT_SECS` ([`ClaudeConfig::distill_from_env`]).
+pub const DISTILL_DEFAULT_TIMEOUT_SECS: u64 = 180;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(DEFAULT_TIMEOUT_SECS);
 
@@ -65,12 +77,31 @@ impl Default for ClaudeConfig {
 }
 
 impl ClaudeConfig {
-    /// [`ClaudeConfig::default`] with `KODABI_CLEANUP_MODEL` and
-    /// `KODABI_CLEANUP_TIMEOUT_SECS` overrides applied, if set and valid.
-    pub fn from_env() -> Self {
+    /// The glossary cleanup pass's config: [`ClaudeConfig::default`] with
+    /// `KODABI_CLEANUP_MODEL` and `KODABI_CLEANUP_TIMEOUT_SECS` overrides
+    /// applied, if set and valid.
+    pub fn cleanup_from_env() -> Self {
         let config =
             apply_model_override(Self::default(), std::env::var("KODABI_CLEANUP_MODEL").ok());
         apply_timeout_override(config, std::env::var("KODABI_CLEANUP_TIMEOUT_SECS").ok())
+    }
+
+    /// The distill pass's base config: [`DISTILL_DEFAULT_MODEL`] and
+    /// [`DISTILL_DEFAULT_TIMEOUT_SECS`], no explicit binary.
+    pub fn distill() -> Self {
+        Self {
+            model: DISTILL_DEFAULT_MODEL.to_owned(),
+            timeout: Duration::from_secs(DISTILL_DEFAULT_TIMEOUT_SECS),
+            binary: None,
+        }
+    }
+
+    /// [`ClaudeConfig::distill`] with `KODABI_DISTILL_MODEL` and
+    /// `KODABI_DISTILL_TIMEOUT_SECS` overrides applied, if set and valid.
+    pub fn distill_from_env() -> Self {
+        let config =
+            apply_model_override(Self::distill(), std::env::var("KODABI_DISTILL_MODEL").ok());
+        apply_timeout_override(config, std::env::var("KODABI_DISTILL_TIMEOUT_SECS").ok())
     }
 }
 
@@ -97,21 +128,24 @@ fn apply_timeout_override(mut config: ClaudeConfig, secs: Option<String>) -> Cla
     config
 }
 
-/// Runs the glossary cleanup post-pass through a real headless `claude`
-/// subprocess. Implements [`HeadlessClaude`] so it plugs directly into
-/// `kodabi_core::transcription::clean_transcript`.
-pub struct ClaudeCleaner {
+/// Runs any headless pass through a real `claude` subprocess. Implements
+/// [`HeadlessClaude`] so one instance plugs directly into
+/// `kodabi_core::transcription::clean_transcript` (built with
+/// [`ClaudeConfig::cleanup_from_env`]) or `kodabi_core::distill::distill_session`
+/// (built with [`ClaudeConfig::distill_from_env`]) — the pass's character
+/// lives entirely in its config and request.
+pub struct ClaudeRunner {
     config: ClaudeConfig,
 }
 
-impl ClaudeCleaner {
+impl ClaudeRunner {
     pub fn new(config: ClaudeConfig) -> Self {
         Self { config }
     }
 }
 
-impl HeadlessClaude for ClaudeCleaner {
-    fn run(&self, request: &CleanupRequest) -> Result<String, CleanupRunError> {
+impl HeadlessClaude for ClaudeRunner {
+    fn run(&self, request: &LlmRequest) -> Result<String, LlmRunError> {
         let raw = invoke(&self.config, request)?;
         parse_envelope(&raw)
     }
@@ -127,7 +161,7 @@ impl HeadlessClaude for ClaudeCleaner {
 /// denied action fails immediately instead of blocking on a prompt with no
 /// TTY to answer it. Every flag here was verified against a live `claude`
 /// invocation, including that this combination preserves subscription auth.
-fn invoke(config: &ClaudeConfig, request: &CleanupRequest) -> Result<String, CleanupRunError> {
+fn invoke(config: &ClaudeConfig, request: &LlmRequest) -> Result<String, LlmRunError> {
     let program = config
         .binary
         .clone()
@@ -157,7 +191,7 @@ fn invoke(config: &ClaudeConfig, request: &CleanupRequest) -> Result<String, Cle
 
     let child = command
         .spawn()
-        .map_err(|err| CleanupRunError::Spawn(err.to_string()))?;
+        .map_err(|err| LlmRunError::Spawn(err.to_string()))?;
 
     let output = wait_with_timeout(child, &request.prompt, config.timeout)?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -169,7 +203,7 @@ fn invoke(config: &ClaudeConfig, request: &CleanupRequest) -> Result<String, Cle
     // anything the envelope contract covers (e.g. spawned but crashed
     // immediately).
     let stderr = String::from_utf8_lossy(&output.stderr);
-    Err(CleanupRunError::Spawn(stderr.trim().to_owned()))
+    Err(LlmRunError::Spawn(stderr.trim().to_owned()))
 }
 
 /// Feeds `prompt` to `child`, waits for it to exit, and returns its captured
@@ -188,7 +222,7 @@ fn wait_with_timeout(
     mut child: Child,
     prompt: &str,
     timeout: Duration,
-) -> Result<Output, CleanupRunError> {
+) -> Result<Output, LlmRunError> {
     let pid = child.id();
 
     if let Some(mut stdin) = child.stdin.take() {
@@ -206,10 +240,10 @@ fn wait_with_timeout(
 
     match rx.recv_timeout(timeout) {
         Ok(Ok(output)) => Ok(output),
-        Ok(Err(err)) => Err(CleanupRunError::Spawn(err.to_string())),
+        Ok(Err(err)) => Err(LlmRunError::Spawn(err.to_string())),
         Err(_) => {
             kill_process(pid);
-            Err(CleanupRunError::Spawn(format!(
+            Err(LlmRunError::Spawn(format!(
                 "headless Claude Code did not exit within {timeout:?}"
             )))
         }
@@ -241,15 +275,15 @@ struct Envelope {
 }
 
 /// Parses `claude -p --output-format json`'s stdout and extracts the model's
-/// text result, or a [`CleanupRunError`] if Claude reported a failure or the
+/// text result, or a [`LlmRunError`] if Claude reported a failure or the
 /// envelope carries no usable text.
-fn parse_envelope(raw: &str) -> Result<String, CleanupRunError> {
+fn parse_envelope(raw: &str) -> Result<String, LlmRunError> {
     let envelope: Envelope = serde_json::from_str(raw.trim())
-        .map_err(|err| CleanupRunError::ClaudeError(format!("unparsable output: {err}")))?;
+        .map_err(|err| LlmRunError::ClaudeError(format!("unparsable output: {err}")))?;
     let text = envelope.result.unwrap_or_default();
 
     if envelope.is_error {
-        return Err(CleanupRunError::ClaudeError(if text.trim().is_empty() {
+        return Err(LlmRunError::ClaudeError(if text.trim().is_empty() {
             "unknown error".to_owned()
         } else {
             text
@@ -257,7 +291,7 @@ fn parse_envelope(raw: &str) -> Result<String, CleanupRunError> {
     }
 
     if text.trim().is_empty() {
-        return Err(CleanupRunError::EmptyResult);
+        return Err(LlmRunError::EmptyResult);
     }
 
     Ok(text)
@@ -270,6 +304,31 @@ mod tests {
     #[test]
     fn default_config_uses_the_cheap_model() {
         assert_eq!(ClaudeConfig::default().model, DEFAULT_MODEL);
+    }
+
+    #[test]
+    fn distill_config_uses_the_stronger_model_and_longer_timeout() {
+        let config = ClaudeConfig::distill();
+
+        assert_eq!(config.model, DISTILL_DEFAULT_MODEL);
+        assert_eq!(
+            config.timeout,
+            Duration::from_secs(DISTILL_DEFAULT_TIMEOUT_SECS)
+        );
+        assert!(config.binary.is_none());
+    }
+
+    #[test]
+    fn distill_overrides_apply_on_top_of_the_distill_defaults() {
+        // `distill_from_env` composes `distill()` with the same override
+        // helpers tested above; this pins that the base really is the
+        // distill config, not `default()`.
+        let config = apply_timeout_override(ClaudeConfig::distill(), Some("  ".to_owned()));
+
+        assert_eq!(
+            config.timeout,
+            Duration::from_secs(DISTILL_DEFAULT_TIMEOUT_SECS)
+        );
     }
 
     #[test]
@@ -335,7 +394,7 @@ mod tests {
         let err = parse_envelope(raw).unwrap_err();
 
         match err {
-            CleanupRunError::ClaudeError(message) => assert_eq!(message, "model not found"),
+            LlmRunError::ClaudeError(message) => assert_eq!(message, "model not found"),
             other => panic!("expected ClaudeError, got {other:?}"),
         }
     }
@@ -346,7 +405,7 @@ mod tests {
 
         let err = parse_envelope(raw).unwrap_err();
 
-        assert!(matches!(err, CleanupRunError::ClaudeError(_)));
+        assert!(matches!(err, LlmRunError::ClaudeError(_)));
     }
 
     #[test]
@@ -355,13 +414,13 @@ mod tests {
 
         let err = parse_envelope(raw).unwrap_err();
 
-        assert!(matches!(err, CleanupRunError::EmptyResult));
+        assert!(matches!(err, LlmRunError::EmptyResult));
     }
 
     #[test]
     fn unparsable_json_is_an_error() {
         let err = parse_envelope("not json").unwrap_err();
 
-        assert!(matches!(err, CleanupRunError::ClaudeError(_)));
+        assert!(matches!(err, LlmRunError::ClaudeError(_)));
     }
 }

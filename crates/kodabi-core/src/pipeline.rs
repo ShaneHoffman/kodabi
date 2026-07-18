@@ -14,11 +14,11 @@ use chrono::{DateTime, Utc};
 
 use crate::device::DeviceId;
 use crate::glossary::Glossary;
+use crate::llm::HeadlessClaude;
 use crate::metrics::PipelineTimings;
 use crate::raw_session::{self, RawSessionError};
 use crate::transcription::{
-    self, clean_transcript, glossary_bias_terms, Channel, HeadlessClaude, TranscriptionEngine,
-    TranscriptionError,
+    self, clean_transcript, glossary_bias_terms, Channel, TranscriptionEngine, TranscriptionError,
 };
 
 /// Failure transcribing or persisting a session.
@@ -115,7 +115,8 @@ pub fn transcribe_and_persist(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::transcription::{CleanupRequest, CleanupRunError, MockEngine};
+    use crate::llm::{LlmRequest, LlmRunError};
+    use crate::transcription::MockEngine;
     use chrono::TimeZone;
     use tempfile::tempdir;
 
@@ -133,7 +134,7 @@ mod tests {
 
     struct NoopRunner;
     impl HeadlessClaude for NoopRunner {
-        fn run(&self, _request: &CleanupRequest) -> Result<String, CleanupRunError> {
+        fn run(&self, _request: &LlmRequest) -> Result<String, LlmRunError> {
             Ok("[]".to_owned())
         }
     }
