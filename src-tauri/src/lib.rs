@@ -108,6 +108,7 @@ pub fn run() {
             note_cmds::list_notes,
             note_cmds::read_note,
             note_cmds::save_note,
+            note_cmds::file_note_to_project,
             note_cmds::list_projects,
             quick_capture::show_quick_capture,
             quick_capture::hide_quick_capture,
