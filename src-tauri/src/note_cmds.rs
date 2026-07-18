@@ -1,13 +1,15 @@
-//! Thin Tauri command wrapper over `kodabi_core::note`. The note struct,
-//! frontmatter emit/parse, atomic per-project write, and all validation live in
-//! `kodabi-core`; this command only owns the serde IPC DTOs, mints the note id
-//! server-side at creation, resolves the knowledge-base root, and maps the
-//! result to the MCP `NoteSummary` projection. Errors collapse to a message
-//! string — the same convention `audio_cmds` uses for IPC results.
+//! Thin Tauri command wrappers over `kodabi_core::note` and
+//! `kodabi_core::vault`. The note struct, frontmatter emit/parse, atomic
+//! writes, disk enumeration, and all validation live in `kodabi-core`; these
+//! commands only own the serde IPC DTOs, mint the note id server-side at
+//! creation, resolve the knowledge-base root, and map results to the MCP
+//! `NoteSummary` projection. Errors collapse to a message string — the same
+//! convention `audio_cmds` uses for IPC results.
 
 use std::path::Path;
 
-use kodabi_core::note::{self, Note, NoteId, NoteType, Routing, Source, Tag};
+use kodabi_core::note::{self, Note, NoteEdit, NoteId, NoteType, Routing, Source, Tag};
+use kodabi_core::vault::{self, ListedNote, ProjectInfo};
 use tauri::AppHandle;
 
 use crate::transcribe::knowledge_base_dir;
@@ -56,15 +58,22 @@ pub struct WrittenNote {
 
 /// Creates a note file from `input` and returns its `NoteSummary`-shaped
 /// metadata. The `id` is generated here (at creation), so later moves and
-/// re-routes preserve it.
+/// re-routes preserve it. `async` (like every command below) so the disk work
+/// runs on the async runtime's pool, not the main thread — a sync command
+/// would freeze the webview for the duration of the vault I/O.
 #[tauri::command]
-pub fn write_note(app: AppHandle, input: NewNoteInput) -> Result<WrittenNote, String> {
+pub async fn write_note(app: AppHandle, input: NewNoteInput) -> Result<WrittenNote, String> {
     write_note_impl(&app, input)
 }
 
-fn write_note_impl(app: &AppHandle, input: NewNoteInput) -> Result<WrittenNote, String> {
+fn write_note_impl(app: &AppHandle, mut input: NewNoteInput) -> Result<WrittenNote, String> {
     let kb = knowledge_base_dir(app)?;
     let title = input.title.clone();
+
+    // Adopt the on-disk casing of any existing project folder, so the
+    // frontmatter never disagrees with the folder the file actually lands in.
+    input.project =
+        vault::canonicalize_project(&kb, &input.project).map_err(|err| err.to_string())?;
 
     let id = NoteId::generate().map_err(|err| err.to_string())?;
     let note = note_from_input(input, id)?;
@@ -79,16 +88,21 @@ fn write_note_impl(app: &AppHandle, input: NewNoteInput) -> Result<WrittenNote, 
 fn note_from_input(input: NewNoteInput, id: NoteId) -> Result<Note, String> {
     let note_type = NoteType::parse(&input.note_type).map_err(|err| err.to_string())?;
     let source = Source::parse(&input.source).map_err(|err| err.to_string())?;
-    let tags = input
-        .tags
-        .iter()
-        .map(|t| Tag::parse(t))
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|err| err.to_string())?;
+    let tags = parse_tags(&input.tags)?;
     let routing = Routing::from_project_and_confidence(input.project, input.confidence)
         .map_err(|err| err.to_string())?;
 
     Note::new(id, note_type, routing, input.date, tags, source, input.body)
+        .map_err(|err| err.to_string())
+}
+
+/// Parses wire tags through the core's lenient input normalization
+/// (`Tag::parse_normalized`: trim + case-fold), shared by the create and edit
+/// paths so they can't drift.
+fn parse_tags(tags: &[String]) -> Result<Vec<Tag>, String> {
+    tags.iter()
+        .map(|t| Tag::parse_normalized(t))
+        .collect::<Result<Vec<_>, _>>()
         .map_err(|err| err.to_string())
 }
 
@@ -108,6 +122,197 @@ fn written_note(note: &Note, title: Option<String>, rel_path: &Path) -> WrittenN
         tags: note.tags.iter().map(|t| t.as_str().to_string()).collect(),
         source: note.source.as_yaml().to_string(),
         confidence: note.routing.confidence(),
+    }
+}
+
+/// A note listed from or read off the disk, in the MCP `NoteSummary`
+/// projection. Unlike [`WrittenNote`] (which echoes the caller-supplied title
+/// that seeded the filename), `title` here is derived from the filename stem —
+/// the only faithful source, since the title is not frontmatter.
+#[derive(serde::Serialize)]
+pub struct NoteSummaryDto {
+    id: String,
+    path: String,
+    title: String,
+    #[serde(rename = "type")]
+    note_type: String,
+    project: Option<String>,
+    date: String,
+    tags: Vec<String>,
+    source: String,
+    confidence: Option<f64>,
+}
+
+/// One opened note: the MCP `get_note` vocabulary (`NoteSummary` +
+/// `body_markdown`), flattened for IPC ergonomics.
+#[derive(serde::Serialize)]
+pub struct NoteDetailDto {
+    #[serde(flatten)]
+    summary: NoteSummaryDto,
+    body_markdown: String,
+}
+
+/// An edit to an existing note, as sent from the frontend. Deliberately
+/// narrow: `id` and `project` only locate the file — the id is preserved
+/// verbatim, and moving a note between projects is the re-route flow, not an
+/// edit. `source` and `confidence` are absent by design; they are read from
+/// the existing file and preserved untouched.
+#[derive(serde::Deserialize)]
+pub struct SaveNoteInput {
+    id: String,
+    project: String,
+    #[serde(rename = "type")]
+    note_type: String,
+    date: String,
+    #[serde(default)]
+    tags: Vec<String>,
+    #[serde(default)]
+    body: String,
+}
+
+/// A project discovered on disk, mirroring the MCP `Project` shape. `id` is
+/// the slug — with no index there is no separate opaque identity yet.
+#[derive(serde::Serialize)]
+pub struct ProjectDto {
+    id: String,
+    slug: String,
+    display_name: String,
+    parent: Option<String>,
+    note_count: u32,
+    meeting_count: u32,
+    last_activity: Option<String>,
+}
+
+/// The sidebar's whole world in one response: the pinned Inbox badge count
+/// plus every real project on disk.
+#[derive(serde::Serialize)]
+pub struct ProjectListDto {
+    inbox_note_count: u32,
+    projects: Vec<ProjectDto>,
+}
+
+/// Lists a project's direct notes, newest first. Unparseable `.md` files are
+/// skipped (and logged) rather than failing the whole listing.
+#[tauri::command]
+pub async fn list_notes(app: AppHandle, project: String) -> Result<Vec<NoteSummaryDto>, String> {
+    let kb = knowledge_base_dir(&app)?;
+    let scan = vault::scan_project_notes(&kb, &project).map_err(|err| err.to_string())?;
+    if !scan.skipped.is_empty() {
+        eprintln!(
+            "list_notes: skipped {} unparseable file(s) in {project}",
+            scan.skipped.len()
+        );
+    }
+    Ok(scan
+        .notes
+        .iter()
+        .map(|listed| note_summary(listed, &kb))
+        .collect())
+}
+
+/// Opens one note by its stable id within a project.
+#[tauri::command]
+pub async fn read_note(
+    app: AppHandle,
+    project: String,
+    id: String,
+) -> Result<NoteDetailDto, String> {
+    let kb = knowledge_base_dir(&app)?;
+    let id = parse_note_id(&id)?;
+    let listed = vault::find_note(&kb, &project, &id)
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| format!("note {} not found in {project}", id.as_str()))?;
+    Ok(note_detail(&listed, &kb))
+}
+
+/// Saves an edit to an existing note in place: the file is re-located by
+/// `(project, id)`, only the editable fields (body, tags, date, type) are
+/// replaced, and the filename never changes. The locate-merge-rewrite sequence
+/// (and its id/source/routing preservation contract) lives in
+/// `vault::save_note_edit`; this command only parses the wire strings.
+#[tauri::command]
+pub async fn save_note(app: AppHandle, input: SaveNoteInput) -> Result<NoteDetailDto, String> {
+    let kb = knowledge_base_dir(&app)?;
+    let id = parse_note_id(&input.id)?;
+    let edit = note_edit_from_input(&input)?;
+    let listed = vault::save_note_edit(&kb, &input.project, &id, edit)
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| format!("note {} not found in {}", input.id, input.project))?;
+    Ok(note_detail(&listed, &kb))
+}
+
+/// Lists every project on disk plus the Inbox note count, for the sidebar.
+#[tauri::command]
+pub async fn list_projects(app: AppHandle) -> Result<ProjectListDto, String> {
+    let kb = knowledge_base_dir(&app)?;
+    let projects = vault::list_projects(&kb).map_err(|err| err.to_string())?;
+    let inbox = vault::scan_project_notes(&kb, note::INBOX).map_err(|err| err.to_string())?;
+    Ok(ProjectListDto {
+        inbox_note_count: inbox.notes.len() as u32,
+        projects: projects.into_iter().map(project_dto).collect(),
+    })
+}
+
+fn parse_note_id(id: &str) -> Result<NoteId, String> {
+    NoteId::parse(id).map_err(|_| format!("id {id:?} must match ^n_[0-9a-z]{{6,}}$"))
+}
+
+/// Parses the wire edit into the core's [`NoteEdit`] (the merge itself —
+/// preserving `id`, `source`, routing — is `Note::with_edits` in kodabi-core).
+fn note_edit_from_input(input: &SaveNoteInput) -> Result<NoteEdit, String> {
+    Ok(NoteEdit {
+        note_type: NoteType::parse(&input.note_type).map_err(|err| err.to_string())?,
+        date: input.date.clone(),
+        tags: parse_tags(&input.tags)?,
+        body: input.body.clone(),
+    })
+}
+
+/// Projects a disk-listed note to the `NoteSummary` wire shape (same mapping
+/// as [`written_note`]: Inbox → `null`, KB-relative forward-slash path).
+fn note_summary(listed: &ListedNote, kb: &Path) -> NoteSummaryDto {
+    let rel = listed.path.strip_prefix(kb).unwrap_or(&listed.path);
+    let project = listed.note.routing.project();
+    NoteSummaryDto {
+        id: listed.note.id.as_str().to_string(),
+        path: rel.to_string_lossy().replace('\\', "/"),
+        title: listed.title.clone(),
+        note_type: listed.note.note_type.as_str().to_string(),
+        project: (project != note::INBOX).then(|| project.to_string()),
+        date: listed.note.date.clone(),
+        tags: listed
+            .note
+            .tags
+            .iter()
+            .map(|t| t.as_str().to_string())
+            .collect(),
+        source: listed.note.source.as_yaml().to_string(),
+        confidence: listed.note.routing.confidence(),
+    }
+}
+
+fn note_detail(listed: &ListedNote, kb: &Path) -> NoteDetailDto {
+    NoteDetailDto {
+        body_markdown: listed.note.body.clone(),
+        summary: note_summary(listed, kb),
+    }
+}
+
+/// Splits a slug into the sidebar's `display_name` (last segment) and `parent`
+/// (everything before it).
+fn project_dto(info: ProjectInfo) -> ProjectDto {
+    let (parent, display_name) = match info.slug.rsplit_once('/') {
+        Some((parent, name)) => (Some(parent.to_string()), name.to_string()),
+        None => (None, info.slug.clone()),
+    };
+    ProjectDto {
+        id: info.slug.clone(),
+        slug: info.slug,
+        display_name,
+        parent,
+        note_count: info.note_count,
+        meeting_count: info.meeting_count,
+        last_activity: info.last_activity,
     }
 }
 
@@ -209,5 +414,96 @@ mod tests {
         assert_eq!(dto.confidence, None);
         assert_eq!(dto.path, "Growth/Q3/weekly-sync.md");
         assert_eq!(dto.title, None);
+    }
+
+    // --- edit path (save_note helpers) -------------------------------------
+
+    fn save_input(json: &str) -> SaveNoteInput {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn save_note_input_deserializes_with_type_rename_and_defaults() {
+        let input =
+            save_input(r#"{"id":"n_a1b2c3","project":"Ops","type":"note","date":"2026-07-10"}"#);
+        assert_eq!(input.note_type, "note");
+        assert!(input.tags.is_empty());
+        assert_eq!(input.body, "");
+    }
+
+    #[test]
+    fn note_edit_parses_the_wire_strings_and_folds_tag_case() {
+        let input = save_input(
+            r#"{"id":"n_a1b2c3","project":"Ops","type":"note",
+                "date":"2026-07-12","tags":["Follow-Up"],"body":"Rewritten."}"#,
+        );
+        let edit = note_edit_from_input(&input).unwrap();
+        assert_eq!(edit.note_type, NoteType::Note);
+        assert_eq!(edit.tags, vec![Tag::parse("follow-up").unwrap()]);
+        assert_eq!(edit.date, "2026-07-12");
+        assert_eq!(edit.body, "Rewritten.");
+    }
+
+    #[test]
+    fn note_edit_rejects_invalid_type_or_tag() {
+        // (An invalid date is rejected downstream, by `Note::with_edits`.)
+        for json in [
+            r#"{"id":"n_a1b2c3","project":"Ops","type":"Meeting","date":"2026-07-10"}"#,
+            r#"{"id":"n_a1b2c3","project":"Ops","type":"note","date":"2026-07-10","tags":["bad tag"]}"#,
+        ] {
+            assert!(note_edit_from_input(&save_input(json)).is_err());
+        }
+    }
+
+    // --- disk projections ---------------------------------------------------
+
+    #[test]
+    fn note_summary_maps_inbox_to_null_and_normalizes_the_path() {
+        let kb = Path::new("kb-root");
+        let note = Note::new(
+            NoteId::parse("n_a1b2c3").unwrap(),
+            NoteType::Note,
+            Routing::Routed {
+                project: note::INBOX.to_string(),
+                confidence: 0.38,
+            },
+            "2026-07-10",
+            vec![],
+            Source::parse("quick-capture").unwrap(),
+            "Body.",
+        )
+        .unwrap();
+        let listed = ListedNote {
+            path: kb.join("Inbox").join("idea.md"),
+            title: "idea".to_string(),
+            note,
+        };
+        let dto = note_summary(&listed, kb);
+        assert_eq!(dto.project, None);
+        assert_eq!(dto.path, "Inbox/idea.md");
+        assert_eq!(dto.title, "idea");
+        assert_eq!(dto.confidence, Some(0.38));
+    }
+
+    #[test]
+    fn project_dto_derives_display_name_parent_and_id_from_slug() {
+        let nested = project_dto(ProjectInfo {
+            slug: "Growth/Q3".to_string(),
+            note_count: 8,
+            meeting_count: 4,
+            last_activity: None,
+        });
+        assert_eq!(nested.id, "Growth/Q3");
+        assert_eq!(nested.display_name, "Q3");
+        assert_eq!(nested.parent.as_deref(), Some("Growth"));
+
+        let root = project_dto(ProjectInfo {
+            slug: "Ops".to_string(),
+            note_count: 1,
+            meeting_count: 0,
+            last_activity: None,
+        });
+        assert_eq!(root.display_name, "Ops");
+        assert_eq!(root.parent, None);
     }
 }

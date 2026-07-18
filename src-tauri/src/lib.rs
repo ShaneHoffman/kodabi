@@ -74,6 +74,10 @@ pub fn run() {
             audio_cmds::capture_status,
             audio_cmds::capture_phase,
             note_cmds::write_note,
+            note_cmds::list_notes,
+            note_cmds::read_note,
+            note_cmds::save_note,
+            note_cmds::list_projects,
         ])
         .on_window_event(|window, event| {
             // Hide instead of exit: the tray + global hotkey must stay

@@ -1,10 +1,12 @@
+import { useCallback, useMemo } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { View } from "./useNavigation";
+import { useVaultQuery } from "./useVaultQuery";
 
 /**
- * Mirrors the MCP `Project` shape (docs/MCP_TOOL_SURFACE.md) so the Phase 3
- * `list_projects` swap never touches the shell: replace this hook's body with
- * an invoke (following the useCaptureState mount pattern) and the
- * `SidebarEntry` return type stays stable.
+ * Mirrors the MCP `Project` shape (docs/MCP_TOOL_SURFACE.md), fed by the
+ * `list_projects` command (a disk scan of the knowledge base — `id` is the
+ * slug until an index exists to mint anything more opaque).
  */
 export type Project = {
   id: string;
@@ -56,47 +58,38 @@ export function slugDepth(slug: string): number {
   return slug.split("/").length - 1;
 }
 
-const SAMPLE_ENTRIES: SidebarEntry[] = [
-  { kind: "inbox", note_count: 3 },
-  {
-    kind: "project",
-    project: {
-      id: "p_growth",
-      slug: "Growth",
-      display_name: "Growth",
-      parent: null,
-      note_count: 5,
-      meeting_count: 2,
-      last_activity: "2026-07-14T18:20:00Z",
-    },
-  },
-  {
-    kind: "project",
-    project: {
-      id: "p_q3",
-      slug: "Growth/Q3",
-      display_name: "Q3",
-      parent: "Growth",
-      note_count: 8,
-      meeting_count: 4,
-      last_activity: "2026-07-16T09:05:00Z",
-    },
-  },
-  {
-    kind: "project",
-    project: {
-      id: "p_pgolf",
-      slug: "Briarwood Golf",
-      display_name: "Briarwood Golf",
-      parent: null,
-      note_count: 2,
-      meeting_count: 1,
-      last_activity: null,
-    },
-  },
-];
+/** The `list_projects` wire shape: the pinned Inbox badge count plus every
+ * project on disk, already sorted by slug (parents before children). */
+type ProjectList = {
+  inbox_note_count: number;
+  projects: Project[];
+};
 
-/** Stub until the Phase 3 `list_projects` backend exists — sample data only. */
-export function useProjects(): { entries: SidebarEntry[]; loading: boolean } {
-  return { entries: SAMPLE_ENTRIES, loading: false };
+/**
+ * The sidebar's world, straight from disk: Inbox pinned first, projects in
+ * backend slug order. Fetched (and response-sequenced) via `useVaultQuery`,
+ * refetched on every vault change, so a note created into a brand-new project
+ * surfaces without a restart. `error` must be surfaced by the consumer — a
+ * failed listing looks identical to an empty vault otherwise.
+ */
+export function useProjects(): {
+  entries: SidebarEntry[];
+  loading: boolean;
+  error: string | null;
+} {
+  const { data, loading, error } = useVaultQuery(
+    useCallback(() => invoke<ProjectList>("list_projects"), []),
+  );
+
+  // Memoized so consumers keyed on `entries` (useCommands) don't recompute
+  // every render.
+  const entries = useMemo<SidebarEntry[]>(
+    () => [
+      { kind: "inbox", note_count: data?.inbox_note_count ?? 0 },
+      ...(data?.projects ?? []).map((project) => ({ kind: "project" as const, project })),
+    ],
+    [data],
+  );
+
+  return { entries, loading, error };
 }
