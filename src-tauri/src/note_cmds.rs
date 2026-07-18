@@ -9,10 +9,31 @@
 use std::path::Path;
 
 use kodabi_core::note::{self, Note, NoteEdit, NoteId, NoteType, Routing, Source, Tag};
-use kodabi_core::vault::{self, ListedNote, ProjectInfo};
+use kodabi_core::vault::{self, FileNoteOptions, ListedNote, ProjectInfo, RoutedNote};
 use tauri::AppHandle;
 
 use crate::transcribe::knowledge_base_dir;
+
+/// Maximum length (in `char`s) of a note-list snippet.
+const SNIPPET_MAX_CHARS: usize = 160;
+
+/// A one-line snippet of a note body for list rows: leading Markdown line
+/// markers (`#` headings, `>` quotes, `-`/`*`/`+` bullets) are stripped, blank
+/// lines dropped, remaining lines joined with a space, and the result truncated
+/// on a `char` boundary. Pure (no filesystem), so it is unit-tested directly.
+fn snippet(body: &str) -> String {
+    let joined = body
+        .lines()
+        .map(|line| {
+            line.trim_start()
+                .trim_start_matches(['#', '>', '-', '*', '+'])
+                .trim()
+        })
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    joined.chars().take(SNIPPET_MAX_CHARS).collect()
+}
 
 /// A note to create, as sent from the frontend. Fields mirror the flat
 /// frontmatter shape (and the MCP `NoteSummary`): `project` plus an optional
@@ -129,6 +150,10 @@ fn written_note(note: &Note, title: Option<String>, rel_path: &Path) -> WrittenN
 /// projection. Unlike [`WrittenNote`] (which echoes the caller-supplied title
 /// that seeded the filename), `title` here is derived from the filename stem —
 /// the only faithful source, since the title is not frontmatter.
+///
+/// `snippet` is a UI-only extension beyond the doc'd `NoteSummary` (which is
+/// deliberately schema-open); it gives list rows a body preview without a
+/// second `read_note` round-trip. It is derived, never stored.
 #[derive(serde::Serialize)]
 pub struct NoteSummaryDto {
     id: String,
@@ -141,6 +166,7 @@ pub struct NoteSummaryDto {
     tags: Vec<String>,
     source: String,
     confidence: Option<f64>,
+    snippet: String,
 }
 
 /// One opened note: the MCP `get_note` vocabulary (`NoteSummary` +
@@ -241,6 +267,80 @@ pub async fn save_note(app: AppHandle, input: SaveNoteInput) -> Result<NoteDetai
     Ok(note_detail(&listed, &kb))
 }
 
+/// A re-route request, mirroring the MCP `file_note_to_project` input. `id` and
+/// `project` are required; the rest default to the contract defaults (no
+/// creation, confidence recorded as `1.0`, no reason). The Inbox UI's one-click
+/// correction sends only `{ id, project }`.
+#[derive(serde::Deserialize)]
+pub struct FileNoteInput {
+    id: String,
+    project: String,
+    #[serde(default)]
+    create_project: bool,
+    #[serde(default)]
+    confidence: Option<f64>,
+    #[serde(default)]
+    reason: Option<String>,
+}
+
+/// The note's location before a re-route, mirroring the MCP output `previous`.
+#[derive(serde::Serialize)]
+pub struct PreviousLocationDto {
+    path: String,
+    project: Option<String>,
+}
+
+/// The re-route outcome, mirroring the MCP `file_note_to_project` output:
+/// the note after routing, where it came from, and whether the file moved.
+#[derive(serde::Serialize)]
+pub struct FileNoteOutcomeDto {
+    note: NoteSummaryDto,
+    previous: PreviousLocationDto,
+    moved: bool,
+}
+
+/// Routes or re-routes a note to a project — the human correction loop. Moves
+/// the file, updates its frontmatter `project` + `confidence`, preserves the
+/// stable `id`, and logs the correction as a routing example. The whole
+/// mutation (and its contract) lives in `vault::file_note_to_project`, shared
+/// with the future MCP tool of the same name; this command only parses the wire
+/// strings and projects the result to the `NoteSummary` shape.
+#[tauri::command]
+pub async fn file_note_to_project(
+    app: AppHandle,
+    input: FileNoteInput,
+) -> Result<FileNoteOutcomeDto, String> {
+    let kb = knowledge_base_dir(&app)?;
+    let id = parse_note_id(&input.id)?;
+    let options = FileNoteOptions {
+        create_project: input.create_project,
+        confidence: input.confidence,
+        reason: input.reason,
+    };
+    let routed = vault::file_note_to_project(&kb, &id, &input.project, &options)
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| format!("note {} not found in the vault", input.id))?;
+    Ok(file_note_outcome(routed, &kb))
+}
+
+/// Projects a [`RoutedNote`] to the wire outcome: the routed note as a
+/// `NoteSummary`, and the previous location with its KB-relative forward-slash
+/// path and Inbox → `null` project mapping (same convention as [`note_summary`]).
+fn file_note_outcome(routed: RoutedNote, kb: &Path) -> FileNoteOutcomeDto {
+    let previous_rel = routed
+        .previous_path
+        .strip_prefix(kb)
+        .unwrap_or(&routed.previous_path);
+    FileNoteOutcomeDto {
+        note: note_summary(&routed.note, kb),
+        previous: PreviousLocationDto {
+            path: previous_rel.to_string_lossy().replace('\\', "/"),
+            project: routed.previous_project,
+        },
+        moved: routed.moved,
+    }
+}
+
 /// Lists every project on disk plus the Inbox note count, for the sidebar.
 #[tauri::command]
 pub async fn list_projects(app: AppHandle) -> Result<ProjectListDto, String> {
@@ -288,6 +388,7 @@ fn note_summary(listed: &ListedNote, kb: &Path) -> NoteSummaryDto {
             .collect(),
         source: listed.note.source.as_yaml().to_string(),
         confidence: listed.note.routing.confidence(),
+        snippet: snippet(&listed.note.body),
     }
 }
 
@@ -505,5 +606,76 @@ mod tests {
         });
         assert_eq!(root.display_name, "Ops");
         assert_eq!(root.parent, None);
+    }
+
+    // --- snippet ------------------------------------------------------------
+
+    #[test]
+    fn snippet_strips_line_markers_drops_blanks_and_joins() {
+        let body = "# Heading\n\n> A quote line\n\n- first bullet\n* second bullet";
+        assert_eq!(
+            snippet(body),
+            "Heading A quote line first bullet second bullet"
+        );
+    }
+
+    #[test]
+    fn snippet_is_empty_for_an_empty_body() {
+        assert_eq!(snippet(""), "");
+        assert_eq!(snippet("\n\n"), "");
+    }
+
+    #[test]
+    fn snippet_truncates_on_a_char_boundary() {
+        let body = "é".repeat(SNIPPET_MAX_CHARS + 40);
+        assert_eq!(snippet(&body).chars().count(), SNIPPET_MAX_CHARS);
+    }
+
+    // --- file_note_to_project (re-route) -----------------------------------
+
+    #[test]
+    fn file_note_input_deserializes_with_required_fields_and_defaults() {
+        let input: FileNoteInput =
+            serde_json::from_str(r#"{"id":"n_a1b2c3","project":"Ops"}"#).unwrap();
+        assert_eq!(input.id, "n_a1b2c3");
+        assert_eq!(input.project, "Ops");
+        assert!(!input.create_project);
+        assert!(input.confidence.is_none());
+        assert!(input.reason.is_none());
+    }
+
+    #[test]
+    fn file_note_outcome_projects_previous_inbox_to_null_and_forward_slashes() {
+        let kb = Path::new("kb-root");
+        let note = Note::new(
+            NoteId::parse("n_a1b2c3").unwrap(),
+            NoteType::Note,
+            Routing::Routed {
+                project: "Ops".to_string(),
+                confidence: 1.0,
+            },
+            "2026-07-10",
+            vec![],
+            Source::parse("quick-capture").unwrap(),
+            "Body.",
+        )
+        .unwrap();
+        let routed = RoutedNote {
+            note: ListedNote {
+                path: kb.join("Ops").join("idea.md"),
+                title: "idea".to_string(),
+                note,
+            },
+            previous_path: kb.join("Inbox").join("idea.md"),
+            previous_project: None, // was in the Inbox
+            moved: true,
+        };
+
+        let dto = file_note_outcome(routed, kb);
+        assert_eq!(dto.note.project.as_deref(), Some("Ops"));
+        assert_eq!(dto.note.path, "Ops/idea.md");
+        assert_eq!(dto.previous.path, "Inbox/idea.md");
+        assert_eq!(dto.previous.project, None);
+        assert!(dto.moved);
     }
 }

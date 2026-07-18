@@ -24,6 +24,9 @@ export type NoteSummary = {
   tags: string[];
   source: string;
   confidence: number | null;
+  /** A derived one-line body preview for list rows — a UI-only extension
+   * beyond the doc'd MCP `NoteSummary`, never stored. */
+  snippet: string;
 };
 
 /** One opened note: the MCP `get_note` vocabulary, flattened. */
@@ -57,8 +60,28 @@ export type SaveNoteInput = {
   body: string;
 };
 
+/** The `file_note_to_project` outcome, mirroring the MCP tool's output: the
+ * note after routing, where it came from (`project: null` when it was in the
+ * Inbox), and whether the file moved (`false` when already in the target). */
+export type FileNoteOutcome = {
+  note: NoteSummary;
+  previous: { path: string; project: string | null };
+  moved: boolean;
+};
+
 export function createNote(input: CreateNoteInput): Promise<CreatedNote> {
   return invoke<CreatedNote>("write_note", { input });
+}
+
+/** One-click human correction: re-route a note to `project`. The backend moves
+ * the file, preserves the stable `id`, records the correction as confidence
+ * `1.0` (the contract default — `create_project`/`confidence`/`reason` stay at
+ * their defaults for this one-click path), and logs a routing example. */
+export function fileNoteToProject(input: {
+  id: string;
+  project: string;
+}): Promise<FileNoteOutcome> {
+  return invoke<FileNoteOutcome>("file_note_to_project", { input });
 }
 
 export function saveNote(input: SaveNoteInput): Promise<NoteDetail> {

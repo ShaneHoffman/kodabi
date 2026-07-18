@@ -95,6 +95,8 @@ pub enum NoteError {
          resolve the duplicate on disk before opening or editing it"
     )]
     DuplicateNoteId { id: String, paths: Vec<PathBuf> },
+    #[error("target project {project:?} does not exist; pass create_project to create it")]
+    MissingProject { project: String },
 }
 
 /// `Result` specialised to [`NoteError`].
@@ -902,6 +904,59 @@ pub fn save_note_at(path: &Path, note: &Note) -> Result<()> {
     Ok(())
 }
 
+/// Moves a note file into `target_dir`, writing `note`'s new content and
+/// removing the original — the primitive under the re-route flow
+/// (`vault::file_note_to_project`). The complement of [`write_note`] (which
+/// slugs a fresh filename from the title) and [`save_note_at`] (which never
+/// changes the folder): here the note's project has changed, so the file must
+/// move to a new folder while keeping its **existing filename stem** (the path
+/// is informational, and re-slugging would rename an id-fallback or a
+/// hand-renamed file). `target_dir` is created if missing.
+///
+/// Atomic and collision-safe like `write_note`: a fully written scratch file is
+/// hard-linked into the first free `{stem}.md` (numeric suffix on clash), so a
+/// concurrent writer can't clobber. The original is removed only after the new
+/// link exists; if that removal fails the new link is rolled back, so the vault
+/// never ends with two files claiming one id. Returns the new path.
+pub(crate) fn relocate_note_file(
+    note: &Note,
+    old_path: &Path,
+    target_dir: &Path,
+) -> Result<PathBuf> {
+    note.validate()?;
+
+    // Preserve the original filename stem; fall back to the id if the path has
+    // none (unreachable for a real note file, but keeps this total).
+    let stem = old_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or_else(|| note.id.as_str())
+        .to_string();
+
+    fs::create_dir_all(target_dir).map_err(|source| NoteError::Io {
+        path: target_dir.to_path_buf(),
+        source,
+    })?;
+
+    let tmp_path = stage_scratch(target_dir, &note.to_markdown())?;
+    let new_path = link_into_free_stem(&tmp_path, target_dir, &stem);
+    // The linked destination keeps the content alive; the scratch name is
+    // redundant on both success and failure.
+    let _ = fs::remove_file(&tmp_path);
+    let new_path = new_path?;
+
+    // Remove the original only now that the move target exists. On failure roll
+    // the new link back so exactly one file ever claims the id.
+    if let Err(source) = fs::remove_file(old_path) {
+        let _ = fs::remove_file(&new_path);
+        return Err(NoteError::Io {
+            path: old_path.to_path_buf(),
+            source,
+        });
+    }
+    Ok(new_path)
+}
+
 /// Resolves the on-disk folder for a project, splitting a hierarchical slug into
 /// nested segments (so separators are correct on every OS). `validate_project`
 /// guarantees no empty segments and no backslash, so this can't escape or
@@ -958,6 +1013,34 @@ fn link_into_free_path(
             },
         };
         let candidate = dir.join(format!("{stem}.md"));
+        match fs::hard_link(tmp_path, &candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
+                attempt = Some(attempt.map_or(2, |n| n + 1));
+            }
+            Err(source) => {
+                return Err(NoteError::Io {
+                    path: candidate,
+                    source,
+                });
+            }
+        }
+    }
+}
+
+/// Hard-links the staged scratch file into the first free name derived from a
+/// fixed `stem` under `dir` (`{stem}.md`, then `{stem}-2.md`, `{stem}-3.md`…),
+/// and returns that path. Unlike [`link_into_free_path`], the stem is given (the
+/// original filename on a move) rather than slugged from a title; the numeric
+/// suffix guarantees distinct attempts, so the loop terminates.
+fn link_into_free_stem(tmp_path: &Path, dir: &Path, stem: &str) -> Result<PathBuf> {
+    let mut attempt: Option<u32> = None;
+    loop {
+        let name = match attempt {
+            None => format!("{stem}.md"),
+            Some(n) => format!("{stem}-{n}.md"),
+        };
+        let candidate = dir.join(name);
         match fs::hard_link(tmp_path, &candidate) {
             Ok(()) => return Ok(candidate),
             Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
@@ -1428,6 +1511,79 @@ contractor shortlist.
             .filter_map(|e| e.ok())
             .any(|e| e.file_name().to_string_lossy().ends_with(".tmp"));
         assert!(!stray, "write should not leave a .tmp scratch file behind");
+    }
+
+    // --- relocate_note_file (move across folders) -------------------------
+
+    /// The `note_inbox` note rebuilt as a routed note in `project` — what the
+    /// re-route flow hands `relocate_note_file` (same id/source/type/date/tags/
+    /// body, new project + confidence).
+    fn rerouted(project: &str, confidence: f64) -> Note {
+        let base = note_inbox();
+        Note::new(
+            base.id,
+            base.note_type,
+            Routing::Routed {
+                project: project.to_string(),
+                confidence,
+            },
+            base.date,
+            base.tags,
+            base.source,
+            base.body,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn relocate_preserves_stem_and_content_and_removes_original() {
+        let dir = tempdir().unwrap();
+        let old_path = write_note(dir.path(), &note_inbox(), Some("Bright Idea")).unwrap();
+        assert_eq!(old_path, dir.path().join("Inbox").join("bright-idea.md"));
+
+        let moved = rerouted("Ops", 1.0);
+        let target = dir.path().join("Ops");
+        let new_path = relocate_note_file(&moved, &old_path, &target).unwrap();
+
+        // Stem preserved, folder changed, original gone.
+        assert_eq!(new_path, target.join("bright-idea.md"));
+        assert!(!old_path.exists());
+        // New content is the routed note, id preserved.
+        let on_disk = Note::from_markdown(&fs::read_to_string(&new_path).unwrap()).unwrap();
+        assert_eq!(on_disk, moved);
+        assert_eq!(on_disk.id, note_inbox().id);
+    }
+
+    #[test]
+    fn relocate_suffixes_on_stem_collision_in_target() {
+        let dir = tempdir().unwrap();
+        // A note already occupies the target stem.
+        write_note(dir.path(), &chat_manual(), Some("Bright Idea")).unwrap();
+        let old_path = write_note(dir.path(), &note_inbox(), Some("Bright Idea")).unwrap();
+
+        let moved = rerouted("Paradise Golf", 1.0);
+        let target = dir.path().join("Paradise Golf");
+        let new_path = relocate_note_file(&moved, &old_path, &target).unwrap();
+
+        assert_eq!(new_path, target.join("bright-idea-2.md"));
+        assert!(!old_path.exists());
+    }
+
+    #[test]
+    fn relocate_leaves_no_temp_file_behind() {
+        let dir = tempdir().unwrap();
+        let old_path = write_note(dir.path(), &note_inbox(), Some("idea")).unwrap();
+        let target = dir.path().join("Ops");
+        relocate_note_file(&rerouted("Ops", 1.0), &old_path, &target).unwrap();
+
+        let stray = fs::read_dir(&target)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().ends_with(".tmp"));
+        assert!(
+            !stray,
+            "relocate should not leave a .tmp scratch file behind"
+        );
     }
 
     // --- save_note_at (edit in place) -------------------------------------
