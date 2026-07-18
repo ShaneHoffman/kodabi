@@ -33,7 +33,9 @@ const PRIMARY_ID = "consent-nudge-primary";
  */
 export function ConsentNudge({ onClose }: Props) {
   const [kind, setKind] = useState<RetentionKind>("keep_all");
-  const [days, setDays] = useState(DEFAULT_KEEP_DAYS);
+  // Held as the raw input string so the field can be cleared mid-edit rather
+  // than snapping to 0; `buildRetentionPolicy` parses and clamps it on submit.
+  const [days, setDays] = useState(String(DEFAULT_KEEP_DAYS));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,16 +59,23 @@ export function ConsentNudge({ onClose }: Props) {
   const acknowledge = async () => {
     setSubmitting(true);
     setError(null);
+    // Persist consent + the chosen policy first, then start the capture the
+    // user's toggle intended — start_capture's own gate passes now. The two
+    // steps fail differently, so they're caught separately: a failed persist
+    // means consent was NOT granted (the nudge will correctly reappear on the
+    // next toggle), while a failed start leaves consent granted.
     try {
-      // Persist consent + the chosen policy first, then start the capture the
-      // user's toggle intended — start_capture's own gate passes now.
-      await acknowledgeConsent(buildRetentionPolicy(kind, days));
+      await acknowledgeConsent(buildRetentionPolicy(kind, Number(days)));
+    } catch (err) {
+      setError(`Couldn't save your choice: ${String(err)}`);
+      setSubmitting(false);
+      return;
+    }
+    try {
       await invoke("start_capture");
       onClose();
     } catch (err) {
-      // Consent is already granted; surface the failure and let the user retry
-      // or dismiss (the nudge won't reappear on the next toggle).
-      setError(String(err));
+      setError(`Couldn't start capture: ${String(err)}`);
       setSubmitting(false);
     }
   };
@@ -144,13 +153,13 @@ export function ConsentNudge({ onClose }: Props) {
             type="number"
             min={1}
             value={days}
-            onChange={(event) => setDays(Number(event.target.value))}
+            onChange={(event) => setDays(event.target.value)}
           />
         )}
 
         {error && (
           <p role="alert" className="text-cap text-text-soft">
-            Couldn't start capture: {error}
+            {error}
           </p>
         )}
 

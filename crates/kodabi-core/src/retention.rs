@@ -84,6 +84,11 @@ pub fn prune_sessions(
         if is_expired(file_name, mtime, cutoff) {
             match fs::remove_file(&path) {
                 Ok(()) => report.deleted.push(path),
+                // Already gone — a concurrent sweep (the periodic schedule
+                // racing an on-change `spawn_prune`) or the post-distill
+                // discard beat us to it. That's success, not failure; only a
+                // real error counts as failed (mirrors `apply_post_distill`).
+                Err(err) if err.kind() == io::ErrorKind::NotFound => {}
                 Err(_) => report.failed.push(path),
             }
         }

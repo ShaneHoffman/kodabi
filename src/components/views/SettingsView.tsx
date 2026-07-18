@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   buildRetentionPolicy,
   DEFAULT_KEEP_DAYS,
@@ -17,14 +17,21 @@ import { TextField } from "../ui/TextField";
  */
 export function SettingsView() {
   const { settings, error, setSettings } = useSettings();
-  const [days, setDays] = useState(DEFAULT_KEEP_DAYS);
+  // Raw input string so the field can be cleared mid-edit rather than snapping
+  // to 0; `buildRetentionPolicy` parses and clamps it on apply.
+  const [days, setDays] = useState(String(DEFAULT_KEEP_DAYS));
   const [saveError, setSaveError] = useState<string | null>(null);
 
-  // Seed the day field from the loaded policy so editing it starts from the
-  // stored value rather than the placeholder default.
+  // Seed the day field from the stored policy the first time a keep_days value
+  // is seen, so editing starts from the stored value rather than the
+  // placeholder default. Guarded by a ref so a later `settings` change (an
+  // apply() echoing its result back) never overwrites an edit the user is
+  // still typing.
+  const seededDays = useRef(false);
   useEffect(() => {
-    if (settings?.retention.policy === "keep_days") {
-      setDays(settings.retention.days);
+    if (!seededDays.current && settings?.retention.policy === "keep_days") {
+      setDays(String(settings.retention.days));
+      seededDays.current = true;
     }
   }, [settings]);
 
@@ -62,7 +69,7 @@ export function SettingsView() {
               <Select
                 label="Retention"
                 value={kind}
-                onChange={(value) => apply(value as RetentionKind, days)}
+                onChange={(value) => apply(value as RetentionKind, Number(days))}
                 options={RETENTION_OPTIONS}
               />
               {kind === "keep_days" && (
@@ -71,8 +78,8 @@ export function SettingsView() {
                   type="number"
                   min={1}
                   value={days}
-                  onChange={(event) => setDays(Number(event.target.value))}
-                  onBlur={() => apply("keep_days", days)}
+                  onChange={(event) => setDays(event.target.value)}
+                  onBlur={() => apply("keep_days", Number(days))}
                 />
               )}
               <p className="text-cap text-text-faint">

@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+
+/** Backend event carrying the new settings after a mutation, so a view already
+ * mounted when the change lands (the Settings view open while the consent nudge
+ * acknowledges) refreshes without a reload. Mirrors `SETTINGS_CHANGED_EVENT` in
+ * `src-tauri/src/settings_cmds.rs`. */
+const SETTINGS_CHANGED_EVENT = "settings:changed";
 
 /*
  * The settings wire shapes, mirroring the Rust DTOs in
@@ -84,6 +91,8 @@ export function useSettings(): {
 
   useEffect(() => {
     let active = true;
+    let unlisten: (() => void) | undefined;
+
     getSettings()
       .then((loaded) => {
         if (!active) return;
@@ -96,8 +105,24 @@ export function useSettings(): {
       .finally(() => {
         if (active) setLoading(false);
       });
+
+    // Stay in sync with mutations that land elsewhere (the consent nudge
+    // acknowledging while this view is mounted), not just our own setSettings.
+    listen<Settings>(SETTINGS_CHANGED_EVENT, (event) => {
+      if (!active) return;
+      setSettings(event.payload);
+      setError(null);
+    }).then((fn) => {
+      if (active) {
+        unlisten = fn;
+      } else {
+        fn();
+      }
+    });
+
     return () => {
       active = false;
+      unlisten?.();
     };
   }, []);
 
