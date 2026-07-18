@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigation } from "../../useNavigation";
 import {
   fileNoteToProject,
@@ -27,11 +27,17 @@ function inboxMeta(note: NoteSummary): string {
 export function InboxView() {
   const { notes, loading, error } = useProjectNotes("Inbox");
   const { entries } = useProjects();
-  // Real projects only — the Inbox itself is never a re-route target.
-  const options: SelectOption[] = entries.flatMap((entry) =>
-    entry.kind === "project"
-      ? [{ value: entry.project.slug, label: formatSlug(entry.project.slug) }]
-      : [],
+  // Real projects only — the Inbox itself is never a re-route target. Memoized
+  // (entries is stable from useProjects) so the same array reference reaches
+  // every InboxRow's Select and doesn't force a re-render of every row.
+  const options = useMemo<SelectOption[]>(
+    () =>
+      entries.flatMap((entry) =>
+        entry.kind === "project"
+          ? [{ value: entry.project.slug, label: formatSlug(entry.project.slug) }]
+          : [],
+      ),
+    [entries],
   );
 
   return (
@@ -84,6 +90,11 @@ function InboxRow({
   const [pending, setPending] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The pending exit-transition timer, cleared on unmount so a row dropped by
+  // an unrelated refetch before it fires can't leak a stray timer or trigger a
+  // redundant vault-changed refetch.
+  const exitTimer = useRef<number | undefined>(undefined);
+  useEffect(() => () => window.clearTimeout(exitTimer.current), []);
 
   const route = (slug: string) => {
     setPending(true);
@@ -93,7 +104,7 @@ function InboxRow({
         setLeaving(true);
         // The exit transition (InboxView.css, 0.2s) covers the gap until the
         // vault-changed refetch drops the row from the list.
-        window.setTimeout(notifyVaultChanged, 220);
+        exitTimer.current = window.setTimeout(notifyVaultChanged, 220);
       })
       .catch((err: unknown) => {
         setPending(false);
