@@ -12,7 +12,8 @@ export type View =
   | { kind: "inbox" }
   | { kind: "project"; slug: string }
   | { kind: "noteEditor"; noteId: string | null; project: string | null }
-  | { kind: "search"; query: string };
+  | { kind: "search"; query: string }
+  | { kind: "settings" };
 
 /** Inbox is home: the unrouted bucket is the first thing worth seeing. */
 export const INITIAL_VIEW: View = { kind: "inbox" };

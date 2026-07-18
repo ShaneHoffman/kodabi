@@ -193,6 +193,19 @@ pub fn start_capture(
     app: tauri::AppHandle,
     state: tauri::State<'_, CaptureState>,
 ) -> Result<CaptureStatus, String> {
+    // Same consent gate as the hotkey/tray toggle: recording never starts
+    // before the nudge is acknowledged. The consent nudge persists consent
+    // *before* calling this, so its own start passes; a stale frontend calling
+    // start directly gets bounced back to the nudge. (Defense in depth — the
+    // toggle path already gates.)
+    if !crate::capture_control::consent_acknowledged(&app) {
+        use tauri::Emitter;
+        let _ = app.emit(
+            crate::capture_control::CONSENT_REQUIRED_EVENT,
+            crate::capture_control::ConsentRequiredEvent {},
+        );
+        return Err("consent required before first capture".to_string());
+    }
     // Route through the shared toggle path so this serializes with the
     // hotkey/tray toggle and broadcasts the resulting phase (relabelling the
     // tray + emitting `capture:state`) — otherwise the UI would go stale
