@@ -1,4 +1,5 @@
 import { useCommandPalette } from "../useCommandPalette";
+import { useVaultChangedBridge } from "../useVaultChangedBridge";
 import { CommandPalette } from "./CommandPalette";
 import { MainContent } from "./MainContent";
 import { Sidebar } from "./Sidebar";
@@ -10,6 +11,8 @@ import { Sidebar } from "./Sidebar";
  */
 export function AppShell() {
   const { open, openPalette, closePalette } = useCommandPalette();
+  // Refresh this window's lists when another window (quick capture) writes.
+  useVaultChangedBridge();
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg font-sans text-text">
