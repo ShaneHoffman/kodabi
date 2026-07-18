@@ -93,6 +93,15 @@ pub fn parse_session_filename(name: &str) -> Option<ParsedSessionName> {
     })
 }
 
+/// Parses a [`ParsedSessionName::timestamp`] back into its capture instant.
+/// Kept here so the timestamp format stays this module's single concern; the
+/// distill pass uses it to recover a session's meeting date from its filename.
+pub fn parse_session_timestamp(timestamp: &str) -> Option<DateTime<Utc>> {
+    NaiveDateTime::parse_from_str(timestamp, TIMESTAMP_FORMAT)
+        .ok()
+        .map(|naive| naive.and_utc())
+}
+
 /// Slugifies `input` under the same rules and length cap the session filename
 /// scheme uses, for callers that need a bare slug (e.g. a distilled note's
 /// `{slug}.md` filename) rather than a full session filename. Returns an empty
@@ -262,6 +271,17 @@ mod tests {
 
         let parsed = parse_session_filename(&name).expect("should parse");
         assert_eq!(parsed.slug, None);
+    }
+
+    #[test]
+    fn parse_session_timestamp_round_trips_the_capture_instant() {
+        let device = DeviceId::parse("k4m2xp7q").unwrap();
+        let when = instant(123);
+        let name = session_filename(when, &device, None, "jsonl");
+
+        let parsed = parse_session_filename(&name).expect("should parse");
+        assert_eq!(parse_session_timestamp(&parsed.timestamp), Some(when));
+        assert_eq!(parse_session_timestamp("not-a-timestamp"), None);
     }
 
     #[test]

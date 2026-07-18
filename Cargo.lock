@@ -1961,9 +1961,11 @@ dependencies = [
 name = "kodabi-llm"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "kodabi-core",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]
