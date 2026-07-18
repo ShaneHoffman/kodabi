@@ -44,6 +44,11 @@ export function useCommands(): Command[] {
         title: "Search notes",
         run: () => navigate({ kind: "search", query: "" }),
       },
+      {
+        id: "settings",
+        title: "Settings",
+        run: () => navigate({ kind: "settings" }),
+      },
     );
 
     return commands;

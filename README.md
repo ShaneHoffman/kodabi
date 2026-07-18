@@ -22,6 +22,21 @@ Pre-alpha — early development, no releases yet. See [`ROADMAP.md`](docs/ROADMA
 - Hybrid retrieval (full-text + vector, RRF merge) exposed as a `search_notes` MCP tool
 - Chat over your history via an embedded Claude Code terminal wired to the MCP server
 
+## Recording & privacy
+
+Kodabi records your microphone and system audio, but **only while the listening indicator is green** —
+capture is a deliberate act (a global hotkey or the tray menu), never silent. Before your very first
+capture, a one-time in-app nudge asks you to **announce your recordings**: many places (Massachusetts
+among them) require everyone on a call to consent before you record. Nothing is recorded until you
+acknowledge it.
+
+Everything stays on your machine as plain files — audio and transcripts never leave except through
+your own Claude account. A **retention policy** (Settings → Privacy) governs how long raw session
+transcripts are kept: keep all (the default — nothing is pruned until you choose), keep for a set
+number of days, or discard each transcript as soon as it has been distilled into a note. At-rest
+security relies on your OS disk encryption (e.g. BitLocker) plus this retention policy; app-level
+encryption is a later consideration.
+
 ## Repository layout
 
 ```

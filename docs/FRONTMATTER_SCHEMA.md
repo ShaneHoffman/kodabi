@@ -80,7 +80,10 @@ Canonical key order the writer emits: **`id, type, project, date, tags, source, 
   hand-written note — `source` falls back to the closest keyword. Disambiguation rule: a value
   **exactly equal** to one of the five keywords (`transcript` | `quick-capture` | `chat` | `import`
   | `manual`) is that keyword; anything else is a repo-relative raw-artifact path (which may not be
-  absolute).
+  absolute). A path-valued `source` is best-effort traceback only: the retention policy may have
+  since pruned the referenced raw artifact, so a reader must tolerate a `source` path that no longer
+  resolves (the MCP `get_meeting_transcript` tool reports this as `transcript_available: false` — see
+  [`MCP_TOOL_SURFACE.md`](MCP_TOOL_SURFACE.md)).
 - **`confidence`** — present whenever a routing score backs the current `project` value: notes
   confidence-split routing auto-filed, **including** low-score notes that land in `Inbox` (the score
   is *why* it landed there), and notes the Inbox re-route re-scored into a project. The trigger is
