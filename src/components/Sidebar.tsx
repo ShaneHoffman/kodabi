@@ -16,7 +16,7 @@ type Props = {
  * shift — never the reserved green.
  */
 export function Sidebar({ onOpenPalette }: Props) {
-  const { entries } = useProjects();
+  const { entries, error } = useProjects();
   const { view, navigate } = useNavigation();
 
   return (
@@ -32,6 +32,10 @@ export function Sidebar({ onOpenPalette }: Props) {
         <p className="sidebar__eyebrow mb-2xs text-eyebrow uppercase text-text-faint">
           Projects
         </p>
+        {/* A failed listing must not masquerade as an empty vault. */}
+        {error && (
+          <p className="text-cap text-text-soft">Couldn't load projects: {error}</p>
+        )}
         {entries.map((entry) => {
           const selected = isEntrySelected(view, entry);
           const name = entry.kind === "inbox" ? "Inbox" : entry.project.display_name;

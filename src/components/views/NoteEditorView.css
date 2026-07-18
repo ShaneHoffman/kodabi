@@ -1,0 +1,118 @@
+/* ============================================================
+   Note editor — the serif reading view and the body editor.
+
+   Only non-bridged tokens live here (reading line-height, weights,
+   letter-spacing, edges); everything bridged stays in Tailwind
+   utilities on the component (the Sidebar.css discipline).
+
+   .note-reading styles the rendered Markdown body. Hierarchy through
+   type and space: the body's own headings step DOWN from the screen's
+   h2 title, hairlines are shadows or hairline-height backgrounds,
+   never borders (docs/DESIGN.md).
+   ============================================================ */
+
+.note-reading {
+  line-height: var(--lh-read);
+}
+
+.note-reading > :first-child {
+  margin-top: 0;
+}
+
+.note-reading h1 {
+  font-size: var(--fs-h3);
+  line-height: var(--lh-h3);
+  letter-spacing: var(--ls-h3);
+  font-weight: var(--fw-semibold);
+  margin-top: var(--space-lg);
+}
+
+.note-reading h2 {
+  font-size: var(--fs-read);
+  font-weight: var(--fw-semibold);
+  margin-top: var(--space-md);
+}
+
+.note-reading h3,
+.note-reading h4,
+.note-reading h5,
+.note-reading h6 {
+  font-size: var(--fs-read);
+  font-weight: var(--fw-medium);
+  margin-top: var(--space-md);
+}
+
+.note-reading p,
+.note-reading ul,
+.note-reading ol,
+.note-reading blockquote,
+.note-reading pre,
+.note-reading table {
+  margin-top: var(--space-sm);
+}
+
+.note-reading ul,
+.note-reading ol {
+  padding-left: var(--space-md);
+}
+
+.note-reading ul {
+  list-style: disc;
+}
+
+.note-reading ol {
+  list-style: decimal;
+}
+
+.note-reading li + li {
+  margin-top: var(--space-3xs);
+}
+
+.note-reading a {
+  color: var(--accent);
+}
+
+.note-reading code {
+  font-family: var(--mono);
+  font-size: var(--fs-cap);
+  background: var(--bg-sink);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--space-3xs);
+}
+
+.note-reading pre {
+  background: var(--bg-sink);
+  border-radius: var(--radius-md);
+  padding: var(--space-sm);
+  overflow-x: auto;
+}
+
+.note-reading pre code {
+  background: none;
+  padding: 0;
+}
+
+.note-reading blockquote {
+  box-shadow: inset 2px 0 0 var(--edge);
+  padding-left: var(--space-sm);
+  color: var(--text-soft);
+}
+
+.note-reading hr {
+  border: none;
+  height: 1px;
+  background: var(--edge-faint);
+  margin: var(--space-lg) 0;
+}
+
+/* GFM task-list checkboxes render disabled; keep the mark on-palette. */
+.note-reading input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+/* The body editor earns the page: most of the viewport, body rhythm. */
+.note-editor__body {
+  min-height: 55vh;
+  line-height: var(--lh-body);
+  resize: vertical;
+}
