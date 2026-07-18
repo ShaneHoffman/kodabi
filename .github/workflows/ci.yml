@@ -183,3 +183,46 @@ jobs:
           # whisper-rs's bindgen build to locate libclang.
           LIBCLANG_PATH: C:\Program Files\LLVM\bin
         run: cargo clippy -p kodabi-transcribe --features ${{ matrix.engine }} --all-targets --locked -- -D warnings
+
+  # kodabi-embed's `bge` backend (bge-small via fastembed/ONNX Runtime) is off
+  # by default, so the `lint`/`test` jobs never compile it — same rationale as
+  # the `transcribe` job above. No MSVC/bindgen step is needed (fastembed has no
+  # C++ compile); the only extra cost is the one-time (cached) ONNX Runtime
+  # binary download `ort-download-binaries` performs at build time. Path-filtered
+  # to changes under the crate, and skips `--locked`'s dist/ dependency — this
+  # crate never touches `tauri::generate_context!`.
+  embed:
+    name: Rust (embed backend)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for changes under crates/kodabi-embed
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Same base-selection logic as the transcribe job: PR base, else the
+          # commit the push replaced, else HEAD~1 for a brand-new branch.
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            base="HEAD~1"
+          fi
+          changed="$(git diff --name-only "$base" HEAD -- crates/kodabi-embed)"
+          if [ -n "$changed" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install Rust (stable) + clippy
+        if: steps.changed.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        if: steps.changed.outputs.run == 'true'
+      - name: Clippy (feature bge — strict, warnings fail)
+        if: steps.changed.outputs.run == 'true'
+        run: cargo clippy -p kodabi-embed --features bge --all-targets --locked -- -D warnings

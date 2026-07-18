@@ -8,10 +8,12 @@
 
 use std::path::Path;
 
+use kodabi_core::index::IndexedNote;
 use kodabi_core::note::{self, Note, NoteEdit, NoteId, NoteType, Routing, Source, Tag};
 use kodabi_core::vault::{self, ListedNote, ProjectInfo};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
+use crate::index_state::IndexState;
 use crate::transcribe::knowledge_base_dir;
 
 /// A note to create, as sent from the frontend. Fields mirror the flat
@@ -80,6 +82,18 @@ fn write_note_impl(app: &AppHandle, mut input: NewNoteInput) -> Result<WrittenNo
 
     let path = note::write_note(&kb, &note, title.as_deref()).map_err(|err| err.to_string())?;
     let rel = path.strip_prefix(&kb).unwrap_or(&path);
+
+    // Keep the index in step with the disk write. Best-effort: the file is the
+    // source of truth, so a failed index never fails the write. The title is
+    // derived from the on-disk stem (not the caller's title) so a later edit —
+    // which re-derives it the same way — sees no spurious title change.
+    let indexed = IndexedNote::from_note(
+        &note,
+        &vault::display_title(&path),
+        &rel.to_string_lossy().replace('\\', "/"),
+    );
+    app.state::<IndexState>().index_note_best_effort(&indexed);
+
     Ok(written_note(&note, title, rel))
 }
 
@@ -238,6 +252,17 @@ pub async fn save_note(app: AppHandle, input: SaveNoteInput) -> Result<NoteDetai
     let listed = vault::save_note_edit(&kb, &input.project, &id, edit)
         .map_err(|err| err.to_string())?
         .ok_or_else(|| format!("note {} not found in {}", input.id, input.project))?;
+
+    // Re-index the edited note (best-effort; see `write_note_impl`). Editing the
+    // body drops its stale vectors in `upsert_note`, so this re-embeds them.
+    let rel = listed.path.strip_prefix(&kb).unwrap_or(&listed.path);
+    let indexed = IndexedNote::from_note(
+        &listed.note,
+        &listed.title,
+        &rel.to_string_lossy().replace('\\', "/"),
+    );
+    app.state::<IndexState>().index_note_best_effort(&indexed);
+
     Ok(note_detail(&listed, &kb))
 }
 

@@ -74,7 +74,7 @@ pub fn scan_project_notes(vault_root: &Path, project: &str) -> Result<NoteScan> 
             .and_then(|contents| Note::from_markdown(&contents).map_err(|_| ()))
         {
             Ok(note) => scan.notes.push(ListedNote {
-                title: title_from_path(&path),
+                title: display_title(&path),
                 path,
                 note,
             }),
@@ -303,7 +303,13 @@ fn is_project_segment(name: &str) -> bool {
 /// De-slugged display title from the filename stem: hyphens become spaces
 /// (`weekly-sync` → `weekly sync`); an id-fallback stem (`n_a1b2c3`) has no
 /// hyphens and passes through unchanged.
-fn title_from_path(path: &Path) -> String {
+///
+/// The title is not a frontmatter field — the filename is the slug of the title
+/// — so the stem is its only faithful source. Both the disk listing
+/// ([`ListedNote::title`]) and the index writer derive the title this way, so a
+/// note's indexed title matches what a later read shows and a create-then-edit
+/// cycle sees no spurious title change.
+pub fn display_title(path: &Path) -> String {
     path.file_stem()
         .and_then(|stem| stem.to_str())
         .unwrap_or_default()

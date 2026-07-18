@@ -54,6 +54,16 @@ impl FromStr for NoteType {
     }
 }
 
+impl From<crate::note::NoteType> for NoteType {
+    fn from(ty: crate::note::NoteType) -> Self {
+        match ty {
+            crate::note::NoteType::Meeting => NoteType::Meeting,
+            crate::note::NoteType::Note => NoteType::Note,
+            crate::note::NoteType::Chat => NoteType::Chat,
+        }
+    }
+}
+
 /// A string that isn't one of the three allowed [`NoteType`] values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnknownNoteType(pub String);
@@ -114,6 +124,32 @@ pub struct IndexedNote {
     pub body: String,
 }
 
+impl IndexedNote {
+    /// Builds an index record from a parsed [`Note`](crate::note::Note), its
+    /// KB-relative path, and a display title.
+    ///
+    /// The title is not a frontmatter field, so the caller derives it from the
+    /// on-disk filename stem (via [`crate::vault::display_title`]); `path`
+    /// should already be KB-relative with forward slashes. The `Inbox` sentinel
+    /// project collapses to `None`, matching how `NoteSummary` represents an
+    /// unfiled note.
+    pub fn from_note(note: &crate::note::Note, title: &str, path: &str) -> Self {
+        let project = note.routing.project();
+        IndexedNote {
+            id: note.id.as_str().to_string(),
+            path: path.to_string(),
+            title: title.to_string(),
+            note_type: note.note_type.into(),
+            project: (project != crate::note::INBOX).then(|| project.to_string()),
+            date: note.date.clone(),
+            tags: note.tags.iter().map(|t| t.as_str().to_string()).collect(),
+            source: note.source.as_yaml().to_string(),
+            confidence: note.routing.confidence(),
+            body: note.body.clone(),
+        }
+    }
+}
+
 /// A note row read back from the index. Carries both the verbatim `date` and
 /// the derived `date_utc` ordering key (see [`normalize_date_to_utc`]).
 #[derive(Debug, Clone, PartialEq)]
@@ -161,6 +197,55 @@ pub fn normalize_date_to_utc(raw: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn from_note_maps_fields_and_collapses_inbox_to_none() {
+        use crate::note::{Note, NoteId, Routing, Source, Tag};
+
+        let routed = Note::new(
+            NoteId::parse("n_a1b2c3").unwrap(),
+            crate::note::NoteType::Meeting,
+            Routing::Routed {
+                project: "Paradise Golf".to_string(),
+                confidence: 0.94,
+            },
+            "2026-07-09T14:00:00-07:00",
+            vec![Tag::parse("budgeting").unwrap()],
+            Source::parse("transcript").unwrap(),
+            "the body",
+        )
+        .unwrap();
+        let indexed =
+            IndexedNote::from_note(&routed, "Weekly Sync", "Paradise Golf/weekly-sync.md");
+        assert_eq!(indexed.id, "n_a1b2c3");
+        assert_eq!(indexed.title, "Weekly Sync");
+        assert_eq!(indexed.path, "Paradise Golf/weekly-sync.md");
+        assert_eq!(indexed.note_type, NoteType::Meeting);
+        assert_eq!(indexed.project.as_deref(), Some("Paradise Golf"));
+        assert_eq!(indexed.date, "2026-07-09T14:00:00-07:00");
+        assert_eq!(indexed.tags, vec!["budgeting".to_string()]);
+        assert_eq!(indexed.source, "transcript");
+        assert_eq!(indexed.confidence, Some(0.94));
+        assert_eq!(indexed.body, "the body");
+
+        // An Inbox note collapses to a null project and keeps its score.
+        let inbox = Note::new(
+            NoteId::parse("n_inbox1").unwrap(),
+            crate::note::NoteType::Note,
+            Routing::Routed {
+                project: crate::note::INBOX.to_string(),
+                confidence: 0.30,
+            },
+            "2026-07-11",
+            vec![],
+            Source::parse("quick-capture").unwrap(),
+            "",
+        )
+        .unwrap();
+        let indexed = IndexedNote::from_note(&inbox, "idea", "Inbox/idea.md");
+        assert_eq!(indexed.project, None);
+        assert_eq!(indexed.confidence, Some(0.30));
+    }
 
     #[test]
     fn note_type_round_trips_through_its_string() {

@@ -1,0 +1,24 @@
+[package]
+name = "kodabi-embed"
+description = "Kodabi local embedding backend — bge-small-en-v1.5 via fastembed/ONNX Runtime, fully offline at runtime."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+kodabi-core = { path = "../kodabi-core" }
+# `default-features = false` drops fastembed's `hf-hub*`, `online`, and
+# `image-models` defaults, so no code path fetches a model over the network at
+# runtime (data custody — FOUNDING_DOC §2): the model is loaded from local
+# files via `try_new_from_user_defined`. `ort-download-binaries` fetches the
+# ONNX Runtime shared library at *build* time only (documented in
+# docs/RESOURCE_BUDGET.md). Behind the `bge` feature so the default workspace
+# build compiles no ONNX toolchain — mirroring `kodabi-transcribe`.
+fastembed = { version = "5.17", optional = true, default-features = false, features = [
+    "ort-download-binaries",
+] }
+
+[features]
+default = []
+bge = ["dep:fastembed"]
