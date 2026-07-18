@@ -18,6 +18,9 @@ type Props = {
   /** Optional explicit id; one is generated (useId) when omitted. */
   id?: string;
   placeholder?: string;
+  /** Hide the label visually (still an accessible name) — for a control whose
+   * purpose is clear from context, e.g. a per-row picker in a list. */
+  hideLabel?: boolean;
 };
 
 /**
@@ -36,6 +39,7 @@ export function Select({
   options,
   id,
   placeholder = "Select…",
+  hideLabel = false,
 }: Props) {
   const generatedId = useId();
   const baseId = id ?? generatedId;
@@ -171,8 +175,14 @@ export function Select({
   const selectedLabel = selectedIndex >= 0 ? options[selectedIndex].label : null;
 
   return (
-    <div ref={rootRef} className="relative flex flex-col gap-2xs">
-      <span id={labelId} className="text-cap text-text-soft">
+    <div
+      ref={rootRef}
+      className={`relative flex flex-col${hideLabel ? "" : " gap-2xs"}`}
+    >
+      <span
+        id={labelId}
+        className={hideLabel ? "sr-only" : "text-cap text-text-soft"}
+      >
         {label}
       </span>
       <button

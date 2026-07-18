@@ -16,6 +16,7 @@ pub mod note;
 pub mod pipeline;
 pub mod raw_session;
 pub mod routing;
+pub mod routing_examples;
 pub mod transcription;
 pub mod vault;
 
