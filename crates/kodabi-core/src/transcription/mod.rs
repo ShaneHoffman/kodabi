@@ -43,7 +43,6 @@ mod mock;
 
 pub use cleanup::{
     apply_corrections, build_request, clean_transcript, clean_transcript_for_project,
-    CleanupRequest, CleanupRunError, HeadlessClaude,
 };
 pub use glossary_bias::{apply_glossary_bias, glossary_bias_terms, GlossaryBiasError};
 pub use mock::MockEngine;

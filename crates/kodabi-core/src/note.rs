@@ -53,11 +53,14 @@ const NOTE_ID_MIN_RANDOM_LEN: usize = 6;
 pub const INBOX: &str = "Inbox";
 
 /// Knowledge-base root directory names owned by other subsystems — the
-/// transcription pipeline's `sessions/` and `raw/` trees, and WebView2's data
-/// dir (the KB root is currently the Tauri `app_data_dir`, which they share).
-/// A project may not claim one: vault enumeration skips these dirs, so a note
-/// filed there would be invisible to the UI. Reserved in any casing — the
-/// filesystem is case-insensitive on Windows.
+/// transcription pipeline's raw-session-artifact tree
+/// (`docs/FRONTMATTER_SCHEMA.md` places `raw/…` relative to the vault root),
+/// its `sessions/` tree, and WebView2's data dir (the KB root is currently the
+/// Tauri `app_data_dir`, which they share). A project may not claim one as its
+/// first segment — vault enumeration and project discovery (`routing`) skip
+/// these dirs, so a note filed there would be invisible to the UI — but deeper
+/// segments stay legal (`Data/raw` is a real project). Reserved in any casing
+/// — the filesystem is case-insensitive on Windows.
 pub(crate) const RESERVED_ROOT_DIRS: &[&str] = &["sessions", "raw", "EBWebView"];
 
 /// Per-process counter that, combined with the process id, gives each in-flight
@@ -718,8 +721,10 @@ pub(crate) fn validate_project(project: &str) -> Result<()> {
             format!("project segment {first_segment:?} is reserved: a real project may not be named `Inbox`"),
         ));
     }
-    // Same hazard as `Inbox` for the other reserved root dirs: writing there
-    // succeeds, but enumeration skips those trees, stranding the note.
+    // Same hazard as `Inbox` for the other reserved root dirs (`raw/` holds
+    // raw session artifacts, not notes): writing there succeeds, but
+    // enumeration skips those trees, stranding the note. Only the first
+    // segment is reserved — `Data/raw` stays a real project.
     if RESERVED_ROOT_DIRS
         .iter()
         .any(|reserved| first_segment.eq_ignore_ascii_case(reserved))
@@ -766,6 +771,18 @@ pub(crate) fn validate_folder_segment(segment: &str) -> Result<()> {
         return Err(invalid(
             "project",
             format!("project segment {segment:?} may not end with a dot or space"),
+        ));
+    }
+    // Dot- and underscore-prefixed folders are infra (`.obsidian`, `_assets`,
+    // `_glossary.yml`'s home) and project discovery skips them at every depth
+    // (`routing`), so a project named like one would be writable yet invisible
+    // to routing forever — its glossary never loaded, its meetings drifting to
+    // Inbox with no error. Reject it here, at the choke point every writer
+    // shares, so the two definitions of "project" stay equal.
+    if segment.starts_with('.') || segment.starts_with('_') {
+        return Err(invalid(
+            "project",
+            format!("project segment {segment:?} may not start with '.' or '_' (reserved for infra folders)"),
         ));
     }
     let stem = segment
@@ -1655,6 +1672,82 @@ contractor shortlist.
                     })
                 ),
                 "project {reserved:?} should be rejected as a reserved Inbox folder"
+            );
+        }
+    }
+
+    #[test]
+    fn real_project_named_raw_at_root_is_rejected_but_nested_raw_is_fine() {
+        // `<vault>/raw/` holds raw session artifacts; a first segment that
+        // case-folds to it would mix routed notes into the sessions tree.
+        for reserved in ["raw", "Raw", "RAW", "raw/2026", "Raw/sub"] {
+            let note = Note::new(
+                id(),
+                NoteType::Note,
+                Routing::Manual {
+                    project: reserved.to_string(),
+                },
+                "2026-07-10",
+                vec![],
+                source("manual"),
+                "body",
+            );
+            assert!(
+                matches!(
+                    note,
+                    Err(NoteError::InvalidField {
+                        field: "project",
+                        ..
+                    })
+                ),
+                "project {reserved:?} should be rejected as the reserved raw folder"
+            );
+        }
+        // Only the vault root is reserved — a nested `raw` is a real project.
+        let nested = Note::new(
+            id(),
+            NoteType::Note,
+            Routing::Manual {
+                project: "Data/raw".to_string(),
+            },
+            "2026-07-10",
+            vec![],
+            source("manual"),
+            "body",
+        );
+        assert!(nested.is_ok(), "nested Data/raw should be a legal project");
+    }
+
+    #[test]
+    fn infra_prefixed_project_segments_are_rejected() {
+        // Discovery skips dot-/underscore-prefixed folders at every depth, so
+        // the writer must refuse to create projects routing can never see.
+        for bad in [
+            "_assets",
+            ".planning",
+            "Growth/_attachments",
+            "Growth/.hidden",
+        ] {
+            let note = Note::new(
+                id(),
+                NoteType::Note,
+                Routing::Manual {
+                    project: bad.to_string(),
+                },
+                "2026-07-10",
+                vec![],
+                source("manual"),
+                "body",
+            );
+            assert!(
+                matches!(
+                    note,
+                    Err(NoteError::InvalidField {
+                        field: "project",
+                        ..
+                    })
+                ),
+                "project {bad:?} should be rejected as an infra-prefixed segment"
             );
         }
     }

@@ -1,5 +1,6 @@
 mod audio_cmds;
 mod capture_control;
+mod distill_cmds;
 mod note_cmds;
 mod transcribe;
 
@@ -73,6 +74,7 @@ pub fn run() {
             audio_cmds::stop_capture,
             audio_cmds::capture_status,
             audio_cmds::capture_phase,
+            distill_cmds::distill_session,
             note_cmds::write_note,
             note_cmds::list_notes,
             note_cmds::read_note,
