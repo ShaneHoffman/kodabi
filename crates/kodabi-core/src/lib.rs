@@ -15,7 +15,9 @@ pub mod naming;
 pub mod note;
 pub mod pipeline;
 pub mod raw_session;
+pub mod retention;
 pub mod routing;
+pub mod settings;
 pub mod transcription;
 pub mod vault;
 
