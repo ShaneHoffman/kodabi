@@ -52,12 +52,16 @@ const NOTE_ID_MIN_RANDOM_LEN: usize = 6;
 /// the MCP layer, to `project: null`.
 pub const INBOX: &str = "Inbox";
 
-/// Name of the vault-root folder holding raw session artifacts
-/// (`docs/FRONTMATTER_SCHEMA.md` places `raw/…` relative to the vault root).
-/// Reserved as a first project segment in any casing — a routed note must
-/// never land inside the sessions tree — and excluded from project discovery
-/// (`routing`); deeper segments stay legal (`Data/raw` is a real project).
-pub(crate) const RAW_DIR: &str = "raw";
+/// Knowledge-base root directory names owned by other subsystems — the
+/// transcription pipeline's raw-session-artifact tree
+/// (`docs/FRONTMATTER_SCHEMA.md` places `raw/…` relative to the vault root),
+/// its `sessions/` tree, and WebView2's data dir (the KB root is currently the
+/// Tauri `app_data_dir`, which they share). A project may not claim one as its
+/// first segment — vault enumeration and project discovery (`routing`) skip
+/// these dirs, so a note filed there would be invisible to the UI — but deeper
+/// segments stay legal (`Data/raw` is a real project). Reserved in any casing
+/// — the filesystem is case-insensitive on Windows.
+pub(crate) const RESERVED_ROOT_DIRS: &[&str] = &["sessions", "raw", "EBWebView"];
 
 /// Per-process counter that, combined with the process id, gives each in-flight
 /// write a unique scratch filename so concurrent writes can't clobber each
@@ -86,6 +90,11 @@ pub enum NoteError {
     MissingFrontmatter,
     #[error("invalid note {field}: {detail}")]
     InvalidField { field: &'static str, detail: String },
+    #[error(
+        "note id {id} is claimed by more than one file in the same folder ({paths:?}); \
+         resolve the duplicate on disk before opening or editing it"
+    )]
+    DuplicateNoteId { id: String, paths: Vec<PathBuf> },
 }
 
 /// `Result` specialised to [`NoteError`].
@@ -227,6 +236,15 @@ impl Tag {
                 format!("tag {s:?} must be lowercase kebab-case with no leading '#'"),
             ))
         }
+    }
+
+    /// Parses user input leniently: trims surrounding whitespace and folds
+    /// ASCII uppercase before validating. Frontmatter parsing stays strict
+    /// ([`Tag::parse`]) — files on disk must already be canonical. This is the
+    /// single home of the input-normalization policy, so every entry point
+    /// (UI form, MCP tool, distill pipeline) folds identically.
+    pub fn parse_normalized(s: &str) -> Result<Self> {
+        Self::parse(&s.trim().to_ascii_lowercase())
     }
 
     /// Borrows the tag text.
@@ -415,6 +433,18 @@ impl Routing {
 // Note
 // ---------------------------------------------------------------------------
 
+/// The editable subset of a note — what the edit flow may replace. Everything
+/// else (`id`, `source`, routing) is preserved verbatim by
+/// [`Note::with_edits`]; moving a note between projects is the re-route flow,
+/// not an edit.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NoteEdit {
+    pub note_type: NoteType,
+    pub date: String,
+    pub tags: Vec<Tag>,
+    pub body: String,
+}
+
 /// A single note: its seven frontmatter fields plus the Markdown body.
 ///
 /// Construct through [`Note::new`], which validates every field and normalizes
@@ -460,6 +490,23 @@ impl Note {
         };
         note.validate()?;
         Ok(note)
+    }
+
+    /// Applies an edit, preserving `id`, `source`, and routing (project +
+    /// confidence) verbatim and replacing only the editable fields; the result
+    /// is re-validated. This is the edit path's preservation contract — it
+    /// lives here so every shell (Tauri command, MCP `edit_note`) shares one
+    /// implementation instead of re-merging by hand.
+    pub fn with_edits(self, edit: NoteEdit) -> Result<Self> {
+        Note::new(
+            self.id,
+            edit.note_type,
+            self.routing,
+            edit.date,
+            edit.tags,
+            self.source,
+            edit.body,
+        )
     }
 
     /// Checks every field against the schema. The type of each field already
@@ -674,16 +721,17 @@ pub(crate) fn validate_project(project: &str) -> Result<()> {
             format!("project segment {first_segment:?} is reserved: a real project may not be named `Inbox`"),
         ));
     }
-    // `raw/` at the vault root holds raw session artifacts, not notes. Same
-    // case-insensitive reservation as `Inbox`: a first segment that case-folds
-    // to `raw` would land routed notes inside the sessions tree on a
-    // case-insensitive filesystem. Deeper segments stay legal (`Data/raw`).
-    if first_segment.eq_ignore_ascii_case(RAW_DIR) {
+    // Same hazard as `Inbox` for the other reserved root dirs (`raw/` holds
+    // raw session artifacts, not notes): writing there succeeds, but
+    // enumeration skips those trees, stranding the note. Only the first
+    // segment is reserved — `Data/raw` stays a real project.
+    if RESERVED_ROOT_DIRS
+        .iter()
+        .any(|reserved| first_segment.eq_ignore_ascii_case(reserved))
+    {
         return Err(invalid(
             "project",
-            format!(
-                "project segment {first_segment:?} is reserved: `raw/` holds raw session artifacts"
-            ),
+            format!("project segment {first_segment:?} is reserved for internal app data"),
         ));
     }
     if project.contains('\\') {
@@ -706,7 +754,7 @@ pub(crate) fn validate_project(project: &str) -> Result<()> {
 
 /// A project path segment becomes a real folder, so it must be a legal Windows
 /// folder name beyond just matching the slug regex.
-fn validate_folder_segment(segment: &str) -> Result<()> {
+pub(crate) fn validate_folder_segment(segment: &str) -> Result<()> {
     const FORBIDDEN: &[char] = &[':', '*', '?', '"', '<', '>', '|'];
     if segment
         .chars()
@@ -809,6 +857,49 @@ pub fn write_note(vault_root: &Path, note: &Note, title: Option<&str>) -> Result
     // redundant on both success and failure.
     let _ = fs::remove_file(&tmp_path);
     result
+}
+
+/// Rewrites an existing note file in place, atomically. The complement of
+/// [`write_note`] for the edit path: the filename never changes on edit.
+/// Build the note via [`Note::with_edits`] (or the whole-flow
+/// `vault::save_note_edit`) so `id`, `source`, and routing are preserved from
+/// the parsed original.
+///
+/// The scratch file is staged in the same directory, so the `fs::rename` is a
+/// same-volume atomic replace (`MoveFileExW` + `MOVEFILE_REPLACE_EXISTING` on
+/// Windows) — a concurrent reader never observes a partial file. Errors with
+/// `NotFound` when `path` is no longer a file (the note was deleted or moved
+/// externally) rather than re-creating it; the check-then-rename window is
+/// accepted for a single-user desktop vault.
+pub fn save_note_at(path: &Path, note: &Note) -> Result<()> {
+    note.validate()?;
+
+    if !path.is_file() {
+        return Err(NoteError::Io {
+            path: path.to_path_buf(),
+            source: io::Error::new(
+                io::ErrorKind::NotFound,
+                "note file no longer exists; it may have been deleted or moved",
+            ),
+        });
+    }
+    let dir = path.parent().ok_or_else(|| NoteError::Io {
+        path: path.to_path_buf(),
+        source: io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "note path has no parent directory",
+        ),
+    })?;
+
+    let tmp_path = stage_scratch(dir, &note.to_markdown())?;
+    if let Err(source) = fs::rename(&tmp_path, path) {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(NoteError::Io {
+            path: path.to_path_buf(),
+            source,
+        });
+    }
+    Ok(())
 }
 
 /// Resolves the on-disk folder for a project, splitting a hierarchical slug into
@@ -1339,6 +1430,58 @@ contractor shortlist.
         assert!(!stray, "write should not leave a .tmp scratch file behind");
     }
 
+    // --- save_note_at (edit in place) -------------------------------------
+
+    #[test]
+    fn save_note_at_overwrites_in_place_and_round_trips() {
+        let dir = tempdir().unwrap();
+        let path = write_note(dir.path(), &meeting_note(), Some("sync")).unwrap();
+
+        // Same id/source/routing; edited body and tags (the edit contract).
+        let original = meeting_note();
+        let edited = Note::new(
+            original.id,
+            original.note_type,
+            original.routing,
+            "2026-07-10",
+            tags(&["budgeting"]),
+            original.source,
+            "Rewritten after the follow-up call.",
+        )
+        .unwrap();
+
+        save_note_at(&path, &edited).unwrap();
+        let on_disk = fs::read_to_string(&path).unwrap();
+        assert_eq!(on_disk, edited.to_markdown());
+        assert_eq!(Note::from_markdown(&on_disk).unwrap(), edited);
+        // The edit stayed at the same filename — no sibling file appeared.
+        assert_eq!(fs::read_dir(path.parent().unwrap()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn save_note_at_leaves_no_tmp_file_behind() {
+        let dir = tempdir().unwrap();
+        let path = write_note(dir.path(), &meeting_note(), Some("sync")).unwrap();
+        save_note_at(&path, &meeting_note()).unwrap();
+        let stray = fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .any(|e| e.file_name().to_string_lossy().ends_with(".tmp"));
+        assert!(!stray, "save should not leave a .tmp scratch file behind");
+    }
+
+    #[test]
+    fn save_note_at_errors_when_the_file_is_missing_and_creates_nothing() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("gone.md");
+        let err = save_note_at(&path, &meeting_note()).unwrap_err();
+        assert!(matches!(
+            err,
+            NoteError::Io { ref source, .. } if source.kind() == io::ErrorKind::NotFound
+        ));
+        assert!(!path.exists(), "a failed save must not create the file");
+    }
+
     // --- body handling ----------------------------------------------------
 
     #[test]
@@ -1649,6 +1792,140 @@ contractor shortlist.
                 field: "project",
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn reserved_root_dir_project_in_any_casing_is_rejected() {
+        // These root dirs belong to other subsystems and are skipped by vault
+        // enumeration — a note filed there would be unreachable in the UI.
+        for reserved in ["sessions", "Sessions", "raw", "RAW", "EBWebView", "raw/sub"] {
+            let note = Note::new(
+                id(),
+                NoteType::Note,
+                Routing::Manual {
+                    project: reserved.to_string(),
+                },
+                "2026-07-10",
+                vec![],
+                source("manual"),
+                "body",
+            );
+            assert!(
+                matches!(
+                    note,
+                    Err(NoteError::InvalidField {
+                        field: "project",
+                        ..
+                    })
+                ),
+                "project {reserved:?} should be rejected as a reserved root dir"
+            );
+        }
+    }
+
+    #[test]
+    fn tag_parse_normalized_folds_case_and_trims_but_stays_strict_otherwise() {
+        assert_eq!(
+            Tag::parse_normalized(" Phase-2 ").unwrap(),
+            Tag::parse("phase-2").unwrap()
+        );
+        assert!(Tag::parse("Phase-2").is_err()); // frontmatter stays strict
+        assert!(Tag::parse_normalized("bad tag").is_err());
+        assert!(Tag::parse_normalized("").is_err());
+    }
+
+    #[test]
+    fn with_edits_preserves_id_source_and_routing_and_replaces_editable_fields() {
+        let original = Note::new(
+            id(),
+            NoteType::Meeting,
+            Routing::Routed {
+                project: "Briarwood Golf".to_string(),
+                confidence: 0.94,
+            },
+            "2026-07-09T14:00:00-07:00",
+            vec![Tag::parse("budgeting").unwrap()],
+            source("raw/20260709T210000000Z-k4m2xp7q-sync.jsonl"),
+            "Original body.",
+        )
+        .unwrap();
+
+        let merged = original
+            .clone()
+            .with_edits(NoteEdit {
+                note_type: NoteType::Note,
+                date: "2026-07-12".to_string(),
+                tags: vec![Tag::parse("follow-up").unwrap()],
+                body: "Rewritten.".to_string(),
+            })
+            .unwrap();
+
+        // Preserved verbatim — including the routing score an edit can't carry.
+        assert_eq!(merged.id, original.id);
+        assert_eq!(merged.routing, original.routing);
+        assert_eq!(merged.source, original.source);
+        // Replaced from the edit.
+        assert_eq!(merged.note_type, NoteType::Note);
+        assert_eq!(merged.date, "2026-07-12");
+        assert_eq!(merged.tags, vec![Tag::parse("follow-up").unwrap()]);
+        assert_eq!(merged.body, "Rewritten.");
+    }
+
+    #[test]
+    fn with_edits_keeps_a_manual_note_confidence_free() {
+        let manual = Note::new(
+            id(),
+            NoteType::Note,
+            Routing::Manual {
+                project: "Ops".to_string(),
+            },
+            "2026-07-10",
+            vec![],
+            source("manual"),
+            "Body.",
+        )
+        .unwrap();
+        let merged = manual
+            .with_edits(NoteEdit {
+                note_type: NoteType::Note,
+                date: "2026-07-11".to_string(),
+                tags: vec![],
+                body: "New.".to_string(),
+            })
+            .unwrap();
+        assert_eq!(
+            merged.routing,
+            Routing::Manual {
+                project: "Ops".to_string()
+            }
+        );
+        assert!(!merged.to_markdown().contains("confidence:"));
+    }
+
+    #[test]
+    fn with_edits_revalidates_the_result() {
+        let original = Note::new(
+            id(),
+            NoteType::Note,
+            Routing::Manual {
+                project: "Ops".to_string(),
+            },
+            "2026-07-10",
+            vec![],
+            source("manual"),
+            "Body.",
+        )
+        .unwrap();
+        let bad_date = original.with_edits(NoteEdit {
+            note_type: NoteType::Note,
+            date: "2026-07-10T14:00:00".to_string(), // offset-less: invalid
+            tags: vec![],
+            body: String::new(),
+        });
+        assert!(matches!(
+            bad_date,
+            Err(NoteError::InvalidField { field: "date", .. })
         ));
     }
 }

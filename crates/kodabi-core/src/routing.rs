@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::glossary::{Glossary, GlossaryError};
-use crate::note::{project_dir, validate_project, Routing, INBOX, RAW_DIR};
+use crate::note::{project_dir, validate_project, Routing, INBOX, RESERVED_ROOT_DIRS};
 
 /// Weight of one distinct glossary entry (term or any alias) matched in the
 /// body.
@@ -365,15 +365,19 @@ fn inbox_landing(confidence: f64) -> Routing {
 
 /// Whether a directory name is excluded from project discovery outright.
 /// Dot- and underscore-prefixed folders are infra at any depth; the `Inbox`
-/// sentinel folder and the `raw` sessions folder are reserved at the vault
-/// root only (any casing — the filesystem this ships on is case-insensitive,
-/// matching `validate_project`'s reservations) — a nested `Data/raw` is a
-/// legitimate project.
+/// sentinel folder and the reserved root dirs (`note::RESERVED_ROOT_DIRS`)
+/// are reserved at the vault root only (any casing — the filesystem this
+/// ships on is case-insensitive, matching `validate_project`'s reservations)
+/// — a nested `Data/raw` is a legitimate project.
 fn is_excluded_dir_name(name: &str, top_level: bool) -> bool {
     if name.starts_with('.') || name.starts_with('_') {
         return true;
     }
-    top_level && (name.eq_ignore_ascii_case(INBOX) || name.eq_ignore_ascii_case(RAW_DIR))
+    top_level
+        && (name.eq_ignore_ascii_case(INBOX)
+            || RESERVED_ROOT_DIRS
+                .iter()
+                .any(|reserved| name.eq_ignore_ascii_case(reserved)))
 }
 
 /// Walks `vault_root` for project folders, returned as `/`-joined slugs sorted
