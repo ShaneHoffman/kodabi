@@ -15,10 +15,23 @@ use tauri_plugin_global_shortcut::Shortcut;
 use crate::audio_cmds::{
     start_capture_impl, stop_capture_and_transcribe, CapturePhase, CaptureState, CaptureStateEvent,
 };
+use crate::settings_cmds::SettingsState;
 
 /// Event the frontend subscribes to for capture state changes — also the
 /// consent signal (listening == mic/system audio is live).
 pub const CAPTURE_STATE_EVENT: &str = "capture:state";
+
+/// Event emitted when a capture is attempted before the user has acknowledged
+/// the recording-consent nudge. The frontend opens the nudge in response; no
+/// capture starts until the user acknowledges (which persists consent, then
+/// starts capture via `start_capture`).
+pub const CONSENT_REQUIRED_EVENT: &str = "consent:required";
+
+/// Payload for [`CONSENT_REQUIRED_EVENT`]. An empty object (rather than no
+/// payload) so a future field — which capture control triggered it, a reason —
+/// can be added without breaking the frontend contract.
+#[derive(Clone, serde::Serialize)]
+pub struct ConsentRequiredEvent {}
 
 /// Default global hotkey that starts/stops capture. OS-global — fires even
 /// while Kodabi is unfocused. Not yet user-configurable.
@@ -36,15 +49,19 @@ pub struct CaptureController {
 enum ToggleAction {
     Start,
     Stop,
+    /// Idle, but consent hasn't been acknowledged yet — surface the nudge
+    /// instead of recording. Only ever reached on the very first capture.
+    RequireConsent,
 }
 
 /// Pure toggle decision, factored out of [`toggle_capture`] so it's testable
-/// without a running app: stop while active, start while idle.
-fn next_action(active: bool) -> ToggleAction {
-    if active {
-        ToggleAction::Stop
-    } else {
-        ToggleAction::Start
+/// without a running app. Stopping is always allowed; starting requires
+/// acknowledged consent, so the first-ever capture surfaces the nudge instead.
+fn next_action(active: bool, consent_acknowledged: bool) -> ToggleAction {
+    match (active, consent_acknowledged) {
+        (true, _) => ToggleAction::Stop,
+        (false, true) => ToggleAction::Start,
+        (false, false) => ToggleAction::RequireConsent,
     }
 }
 
@@ -69,11 +86,22 @@ pub fn toggle_capture(app: &AppHandle) {
         };
         let state = app.state::<CaptureState>();
 
-        // Decide from the TRUE backend state, act idempotently.
+        // Decide from the TRUE backend state, act idempotently. Consent is read
+        // fail-safe: a missing settings state (very early startup) counts as
+        // NOT acknowledged, so nothing is ever recorded without consent.
         let active = state.is_active().unwrap_or(false);
-        let result = match next_action(active) {
+        let consent = consent_acknowledged(&app);
+        let result = match next_action(active, consent) {
             ToggleAction::Start => start_capture_impl(&state),
             ToggleAction::Stop => stop_capture_and_transcribe(&app, &state),
+            ToggleAction::RequireConsent => {
+                // Surface the app window and let the frontend open the nudge.
+                // No capture starts; the tray/indicator stay idle.
+                show_main_window(&app);
+                let _ = app.emit(CONSENT_REQUIRED_EVENT, ConsentRequiredEvent {});
+                broadcast_capture_phase(&app, state.inner());
+                return;
+            }
         };
         if let Err(err) = result {
             eprintln!("capture toggle failed: {err}");
@@ -125,8 +153,8 @@ fn broadcast_capture_phase(app: &AppHandle, state: &CaptureState) {
     };
 
     let (label, tooltip) = match phase {
-        CapturePhase::Listening => ("Stop capture", "Kodabi — listening"),
-        CapturePhase::Idle => ("Start capture", "Kodabi — idle"),
+        CapturePhase::Listening => ("Stop capture", "Kodabi: listening"),
+        CapturePhase::Idle => ("Start capture", "Kodabi: idle"),
     };
     if let Some(controller) = app.try_state::<CaptureController>() {
         let _ = controller.toggle_item.set_text(label);
@@ -168,7 +196,7 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
                 .expect("tauri.conf.json bundles a default window icon")
                 .clone(),
         )
-        .tooltip("Kodabi — idle")
+        .tooltip("Kodabi: idle")
         .menu(&menu)
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
@@ -196,7 +224,19 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-fn show_main_window(app: &AppHandle) {
+/// Whether the user has acknowledged the recording-consent nudge. Reads the
+/// managed [`SettingsState`]; a missing state (very early startup, before the
+/// settings load in `setup`) is treated as NOT acknowledged — the fail-safe
+/// direction, so a capture can never slip through before consent exists.
+///
+/// `pub(crate)` so the `start_capture` IPC command applies the same gate.
+pub(crate) fn consent_acknowledged(app: &AppHandle) -> bool {
+    app.try_state::<SettingsState>()
+        .map(|state| state.snapshot().consent_acknowledged)
+        .unwrap_or(false)
+}
+
+pub(crate) fn show_main_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
         let _ = window.set_focus();
@@ -214,9 +254,23 @@ mod tests {
     use super::*;
 
     #[test]
-    fn next_action_stops_when_active_starts_when_idle() {
-        assert!(matches!(next_action(true), ToggleAction::Stop));
-        assert!(matches!(next_action(false), ToggleAction::Start));
+    fn next_action_decides_stop_start_or_consent() {
+        // Stopping is always allowed, regardless of the consent flag.
+        assert!(matches!(next_action(true, true), ToggleAction::Stop));
+        assert!(matches!(next_action(true, false), ToggleAction::Stop));
+        // Starting requires acknowledged consent; without it, surface the nudge.
+        assert!(matches!(next_action(false, true), ToggleAction::Start));
+        assert!(matches!(
+            next_action(false, false),
+            ToggleAction::RequireConsent
+        ));
+    }
+
+    #[test]
+    fn consent_required_event_is_an_empty_object() {
+        // Locks the wire shape the frontend's consent listener expects.
+        let payload = serde_json::to_string(&ConsentRequiredEvent {}).unwrap();
+        assert_eq!(payload, "{}");
     }
 
     #[test]

@@ -1,6 +1,6 @@
 [package]
 name = "kodabi"
-description = "Kodabi — Windows-first desktop shell."
+description = "Kodabi: Windows-first desktop shell."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

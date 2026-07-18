@@ -3,6 +3,8 @@ mod capture_control;
 mod distill_cmds;
 mod note_cmds;
 mod quick_capture;
+mod retention;
+mod settings_cmds;
 mod transcribe;
 
 use kodabi_core::device::DeviceId;
@@ -61,6 +63,15 @@ pub fn run() {
             let device_id = kodabi_core::device::load_or_create(&device_config)?;
             app.manage(device_id);
 
+            // Load machine-local app settings (consent + retention policy) from
+            // the same config dir, and manage them so the capture gate and the
+            // retention schedule can read the current policy. A corrupt file
+            // self-heals to defaults (consent unacknowledged) rather than
+            // bricking startup.
+            let settings_config = config_dir.join("settings.toml");
+            let settings = kodabi_core::settings::load_or_create(&settings_config)?;
+            app.manage(settings_cmds::SettingsState::new(settings_config, settings));
+
             // Build the tray (which manages `CaptureController`) BEFORE
             // registering the shortcut, so a hotkey firing in the first
             // moments of launch can't reach the toggle before the controller
@@ -78,6 +89,10 @@ pub fn run() {
             if let Err(err) = app.global_shortcut().register(quick_capture_shortcut) {
                 eprintln!("failed to register global quick-capture shortcut: {err}");
             }
+
+            // Start the retention schedule (an immediate sweep, then periodic)
+            // now that the settings state it reads is managed.
+            retention::start_schedule(app.handle());
             Ok(())
         })
         .manage(audio_cmds::CaptureState::default())
@@ -97,6 +112,9 @@ pub fn run() {
             quick_capture::show_quick_capture,
             quick_capture::hide_quick_capture,
             quick_capture::quick_capture_submit,
+            settings_cmds::get_settings,
+            settings_cmds::set_retention_policy,
+            settings_cmds::acknowledge_consent,
         ])
         .on_window_event(|window, event| match event {
             // Hide instead of exit: the tray + global hotkey must stay
