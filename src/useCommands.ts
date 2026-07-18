@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useNavigation } from "./useNavigation";
 import { entryView, formatSlug, useProjects } from "./useProjects";
+import { showQuickCaptureWindow } from "./quickCapture";
 
 export type Command = {
   id: string;
@@ -36,8 +37,12 @@ export function useCommands(): Command[] {
       },
       {
         id: "open-capture",
-        title: "Open capture",
-        run: () => navigate({ kind: "capture" }),
+        title: "Quick capture",
+        // Quick capture is its own window (#45), not a main-window view — the
+        // palette action pops it, matching the global hotkey.
+        run: () => {
+          void showQuickCaptureWindow();
+        },
       },
       {
         id: "search",
