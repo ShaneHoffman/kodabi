@@ -10,11 +10,12 @@
 //! `quick-capture` so the two never blur together.
 
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use kodabi_core::capture::quick_capture;
 use kodabi_core::note::{self, Note};
 use kodabi_core::routing::RoutingConfig;
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime, Window};
 use tauri_plugin_global_shortcut::Shortcut;
 
 use crate::transcribe::knowledge_base_dir;
@@ -61,6 +62,50 @@ pub fn default_quick_capture_shortcut() -> Shortcut {
         .expect("DEFAULT_QUICK_CAPTURE_SHORTCUT is a valid accelerator")
 }
 
+/// Guards the quick-capture window's dismiss-on-blur against a Windows
+/// foreground-stealing race. [`show_window`]'s `show()` + `set_focus()` can be
+/// denied — or granted and immediately revoked — when Kodabi isn't the
+/// foreground process, and the resulting spurious `Focused(false)` would hide
+/// the window the instant it appeared (the hotkey looking like a no-op). So
+/// blur-dismiss is *armed* only once the window genuinely gains focus
+/// (`Focused(true)`); a blur before that is treated as the race and ignored.
+/// Managed as Tauri state; the window-event handler in `lib.rs` drives it.
+#[derive(Default)]
+pub struct DismissArmed(AtomicBool);
+
+impl DismissArmed {
+    /// A real focus gain: the next blur is a genuine dismiss.
+    fn arm(&self) {
+        self.0.store(true, Ordering::SeqCst);
+    }
+
+    /// Cancel any pending arm (on show, before focus is resolved).
+    fn disarm(&self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+
+    /// Consume the armed state, reporting whether a blur should dismiss.
+    fn take(&self) -> bool {
+        self.0.swap(false, Ordering::SeqCst)
+    }
+}
+
+/// The quick-capture window genuinely gained focus (`Focused(true)`): arm
+/// blur-dismiss so a later focus loss actually hides it.
+pub fn arm_dismiss<R: Runtime>(window: &Window<R>) {
+    window.state::<DismissArmed>().arm();
+}
+
+/// The quick-capture window lost focus (`Focused(false)`): hide it, but only if
+/// it had truly gained focus since the last show — otherwise this is the
+/// show/focus race, not the user clicking away, and hiding would swallow the
+/// hotkey.
+pub fn dismiss_on_focus_lost<R: Runtime>(window: &Window<R>) {
+    if window.state::<DismissArmed>().take() {
+        let _ = window.hide();
+    }
+}
+
 /// Hotkey semantics: hidden → show + focus (start capturing), visible → hide
 /// (dismiss). A no-op if the window isn't built yet (very early startup).
 pub fn toggle_window(app: &AppHandle) {
@@ -78,6 +123,10 @@ pub fn toggle_window(app: &AppHandle) {
 /// The tray menu item and the command-palette action both call this.
 pub fn show_window(app: &AppHandle) {
     if let Some(window) = app.get_webview_window(WINDOW_LABEL) {
+        // Disarm blur-dismiss until the window genuinely gains focus, so the
+        // show/focus race can't hide it the instant it appears (see
+        // [`DismissArmed`]). `Focused(true)` re-arms it.
+        app.state::<DismissArmed>().disarm();
         let _ = window.show();
         let _ = window.set_focus();
         let _ = app.emit_to(WINDOW_LABEL, SHOWN_EVENT, ());
@@ -165,6 +214,22 @@ mod tests {
     use kodabi_core::note::{NoteId, NoteType, Routing, Source};
     use kodabi_core::routing::DEFAULT_THRESHOLD;
     use std::path::Path;
+
+    #[test]
+    fn dismiss_arms_only_after_a_real_focus() {
+        let armed = DismissArmed::default();
+        // Fresh (or just-shown, disarmed): a blur before any focus is the
+        // show/focus race — ignored.
+        assert!(!armed.take());
+        // A genuine `Focused(true)` arms exactly one dismiss.
+        armed.arm();
+        assert!(armed.take());
+        assert!(!armed.take());
+        // Disarm (on show) cancels a stale arm from a prior focus cycle.
+        armed.arm();
+        armed.disarm();
+        assert!(!armed.take());
+    }
 
     #[test]
     fn default_quick_capture_shortcut_parses() {
