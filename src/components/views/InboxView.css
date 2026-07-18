@@ -21,15 +21,17 @@
     opacity 0.2s ease;
 }
 
-/* The collapsing track needs an overflow-clipped child to hide the content as
-   the row's height eases to zero. */
-.inbox-row > div {
-  overflow: hidden;
-}
-
 .inbox-row--leaving {
   grid-template-rows: 0fr;
   opacity: 0;
+}
+
+/* Clip the child only while collapsing on exit — the grid track needs an
+   overflow-hidden child to hide content as its height eases to zero. In the
+   resting state overflow stays visible so the re-route dropdown, which
+   overflows the row, isn't cut off. */
+.inbox-row--leaving > div {
+  overflow: hidden;
 }
 
 /* Two-line body preview, ellipsized. */

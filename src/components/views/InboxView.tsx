@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigation } from "../../useNavigation";
 import {
   fileNoteToProject,
+  INBOX_PROJECT,
   notifyVaultChanged,
   useProjectNotes,
   type NoteSummary,
@@ -25,7 +26,7 @@ function inboxMeta(note: NoteSummary): string {
  * appears), matching ProjectView.
  */
 export function InboxView() {
-  const { notes, loading, error } = useProjectNotes("Inbox");
+  const { notes, loading, error } = useProjectNotes(INBOX_PROJECT);
   const { entries } = useProjects();
   // Real projects only — the Inbox itself is never a re-route target. Memoized
   // (entries is stable from useProjects) so the same array reference reaches
@@ -119,7 +120,11 @@ function InboxRow({
           <button
             type="button"
             onClick={() =>
-              navigate({ kind: "noteEditor", noteId: note.id, project: "Inbox" })
+              navigate({
+                kind: "noteEditor",
+                noteId: note.id,
+                project: INBOX_PROJECT,
+              })
             }
             className="flex min-w-0 flex-1 flex-col gap-3xs rounded-md text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
           >

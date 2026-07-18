@@ -14,6 +14,12 @@ export { notifyVaultChanged, onVaultChanged } from "./useVaultQuery";
 
 export type NoteType = "meeting" | "note" | "chat";
 
+/** The Inbox sentinel folder name (mirrors `note::INBOX` in kodabi-core). A
+ * note's `project` is `null` in the `NoteSummary` wire shape, but the folder —
+ * and the `list_notes`/`read_note` project argument for an unfiled note — is
+ * this literal string. */
+export const INBOX_PROJECT = "Inbox";
+
 export type NoteSummary = {
   id: string;
   path: string;
