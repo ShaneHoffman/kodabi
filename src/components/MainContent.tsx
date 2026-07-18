@@ -1,5 +1,4 @@
 import { useNavigation } from "../useNavigation";
-import { CaptureView } from "./views/CaptureView";
 import { InboxView } from "./views/InboxView";
 import { NoteEditorView } from "./views/NoteEditorView";
 import { ProjectView } from "./views/ProjectView";
@@ -28,8 +27,6 @@ export function MainContent() {
       );
     case "search":
       return <SearchView query={view.query} />;
-    case "capture":
-      return <CaptureView />;
     case "settings":
       return <SettingsView />;
     default: {

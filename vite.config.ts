@@ -9,6 +9,19 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
 
+  // Two HTML entries: the main app and the standalone quick-capture window
+  // (its own Tauri webview). Plain strings resolve against the Vite root, which
+  // avoids `__dirname`-in-ESM; Vite serves each as a real file in dev and emits
+  // `dist/capture.html` for the packaged app.
+  build: {
+    rollupOptions: {
+      input: {
+        main: "index.html",
+        capture: "capture.html",
+      },
+    },
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

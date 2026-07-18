@@ -170,12 +170,15 @@ fn broadcast_capture_phase(app: &AppHandle, state: &CaptureState) {
 pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     let toggle_item =
         MenuItem::with_id(app, "toggle_capture", "Start capture", true, None::<&str>)?;
+    let quick_capture_item =
+        MenuItem::with_id(app, "quick_capture", "Quick capture", true, None::<&str>)?;
     let show_item = MenuItem::with_id(app, "show", "Show Kodabi", true, None::<&str>)?;
     let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
     let menu = Menu::with_items(
         app,
         &[
             &toggle_item,
+            &quick_capture_item,
             &show_item,
             &PredefinedMenuItem::separator(app)?,
             &quit_item,
@@ -198,6 +201,7 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         .show_menu_on_left_click(false)
         .on_menu_event(|app, event| match event.id.as_ref() {
             "toggle_capture" => toggle_capture(app),
+            "quick_capture" => crate::quick_capture::show_window(app),
             "show" => show_main_window(app),
             "quit" => app.exit(0),
             _ => {}
