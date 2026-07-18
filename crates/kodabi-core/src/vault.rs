@@ -11,7 +11,8 @@ use std::time::SystemTime;
 
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 
-use crate::note::{self, Note, NoteEdit, NoteError, NoteId, NoteType, Result, INBOX};
+use crate::note::{self, Note, NoteEdit, NoteError, NoteId, NoteType, Result, Routing, INBOX};
+use crate::routing_examples::{self, RoutingExample, RoutingExamples, RoutingExamplesError};
 
 /// A note found on disk: its absolute path, display title, and parsed content.
 #[derive(Debug, Clone, PartialEq)]
@@ -170,6 +171,214 @@ pub fn save_note_edit(
         path: listed.path,
         title: listed.title,
     }))
+}
+
+/// Maximum length (in `char`s) of a correction reason — mirrors the MCP
+/// `file_note_to_project` `reason` `maxLength`.
+pub const REASON_MAX_CHARS: usize = 500;
+
+/// The optional inputs of [`file_note_to_project`], mirroring the optional MCP
+/// tool parameters.
+#[derive(Debug, Clone, Default)]
+pub struct FileNoteOptions {
+    /// Create the target project folder (and any missing parents) when it does
+    /// not exist. When `false`, a missing target is [`NoteError::MissingProject`].
+    pub create_project: bool,
+    /// Routing score to write. `None` records the human correction as `1.0`
+    /// (the contract default).
+    pub confidence: Option<f64>,
+    /// Optional human-readable reason (≤ [`REASON_MAX_CHARS`] chars), stored in
+    /// the target project's routing-examples log.
+    pub reason: Option<String>,
+}
+
+/// The outcome of a re-route, mirroring the MCP `file_note_to_project` output.
+#[derive(Debug)]
+pub struct RoutedNote {
+    /// The note after routing, at its new path (title re-derived from that path).
+    pub note: ListedNote,
+    /// The note's path before the move (equals the new path when `!moved`).
+    pub previous_path: PathBuf,
+    /// The note's project before the move; `None` when it was in the Inbox.
+    pub previous_project: Option<String>,
+    /// `false` when the note was already in the target project (no file move —
+    /// the frontmatter is still rewritten so a repeat call converges).
+    pub moved: bool,
+}
+
+/// Finds the note carrying `id` anywhere in the vault — the Inbox plus every
+/// discovered project ([`list_projects`]) — returning the owning project slug
+/// (`INBOX` for the Inbox) alongside the listing. `Ok(None)` when no note has
+/// the id. More than one file claiming it, in one folder or across projects, is
+/// [`NoteError::DuplicateNoteId`] with every path — the vault-wide analogue of
+/// [`find_note`]'s duplicate guard (a re-route has no source project to scope
+/// the search, so an id must be unique vault-wide before it can be moved).
+pub fn find_note_anywhere(vault_root: &Path, id: &NoteId) -> Result<Option<(String, ListedNote)>> {
+    let mut projects = vec![INBOX.to_string()];
+    projects.extend(list_projects(vault_root)?.into_iter().map(|p| p.slug));
+
+    let mut matches: Vec<(String, ListedNote)> = Vec::new();
+    for project in projects {
+        for listed in scan_project_notes(vault_root, &project)?.notes {
+            if listed.note.id == *id {
+                matches.push((project.clone(), listed));
+            }
+        }
+    }
+
+    if matches.len() > 1 {
+        return Err(NoteError::DuplicateNoteId {
+            id: id.as_str().to_string(),
+            paths: matches.into_iter().map(|(_, listed)| listed.path).collect(),
+        });
+    }
+    Ok(matches.into_iter().next())
+}
+
+/// Routes or re-routes the note `id` into `project` — the human correction loop
+/// (`docs/MCP_TOOL_SURFACE.md` §7). Locates the note vault-wide, rewrites its
+/// frontmatter `project` + `confidence` (preserving the stable `id` and every
+/// other field), moves the file into the target folder, and records the
+/// correction as a routing example in that folder. Returns `Ok(None)` when no
+/// note carries the id (mirroring [`save_note_edit`]).
+///
+/// This is the shared body of the Tauri `file_note_to_project` command and the
+/// future MCP tool of the same name, so both stay identical.
+///
+/// **Confidence:** `options.confidence` overrides the score; omitted, a manual
+/// correction is recorded as `1.0`. A re-route is always a routing action, so
+/// the note ends `Routed` with a `confidence` even when re-filed by hand
+/// (`docs/FRONTMATTER_SCHEMA.md`).
+///
+/// **Failure consistency:** the note files are the source of truth. A failure
+/// before or during the move leaves the vault untouched (the move rolls back
+/// its own link on a removal failure). A failure while writing the derived
+/// routing-examples log (after a completed move) returns an error but does *not*
+/// roll the move back — the note's location and frontmatter stay consistent;
+/// only the correction signal may be missing.
+pub fn file_note_to_project(
+    vault_root: &Path,
+    id: &NoteId,
+    project: &str,
+    options: &FileNoteOptions,
+) -> Result<Option<RoutedNote>> {
+    // ① The Inbox is a routing sentinel, never a re-route target. The exact
+    // sentinel slips past `validate_project`; other casings (`inbox`, `Inbox/x`)
+    // are rejected by `canonicalize_project` below.
+    if project == INBOX {
+        return Err(NoteError::InvalidField {
+            field: "project",
+            detail: "a note cannot be re-routed into the Inbox".to_string(),
+        });
+    }
+    // ② Bound the reason before doing any work.
+    if let Some(reason) = &options.reason {
+        if reason.chars().count() > REASON_MAX_CHARS {
+            return Err(NoteError::InvalidField {
+                field: "reason",
+                detail: format!("reason must be at most {REASON_MAX_CHARS} characters"),
+            });
+        }
+    }
+    // ③ Adopt on-disk casing and validate the slug shape.
+    let target = canonicalize_project(vault_root, project)?;
+
+    // ④ Locate the note (unknown id → Ok(None)).
+    let Some((source_project, listed)) = find_note_anywhere(vault_root, id)? else {
+        return Ok(None);
+    };
+    let previous_path = listed.path.clone();
+    let previous_project = (source_project != INBOX).then(|| source_project.clone());
+
+    // ⑤ Rebuild the note with the new routing; every other field verbatim.
+    // `Note::new` validates the confidence range.
+    let confidence = options.confidence.unwrap_or(1.0);
+    let example_excerpt = routing_examples::excerpt(&listed.note.body);
+    let example_title = listed.title.clone();
+    let moved_note = Note::new(
+        listed.note.id.clone(),
+        listed.note.note_type,
+        Routing::Routed {
+            project: target.clone(),
+            confidence,
+        },
+        listed.note.date.clone(),
+        listed.note.tags.clone(),
+        listed.note.source.clone(),
+        listed.note.body.clone(),
+    )?;
+
+    // ⑥ Enforce create_project *before* any directory is created (the writer
+    // would otherwise auto-create the folder). A same-project re-file always
+    // passes — the folder holding the note exists.
+    let target_dir = note::project_dir(vault_root, &target);
+    if !target_dir.is_dir() && !options.create_project {
+        return Err(NoteError::MissingProject { project: target });
+    }
+
+    // ⑦ Write: same project → rewrite in place; else move the file.
+    let (new_path, moved) = if source_project == target {
+        note::save_note_at(&previous_path, &moved_note)?;
+        (previous_path.clone(), false)
+    } else {
+        let new_path = note::relocate_note_file(&moved_note, &previous_path, &target_dir)?;
+        (new_path, true)
+    };
+
+    // ⑧ On a move out of a real project, first drop the note's stale entry from
+    // that project's log, *before* writing the new one — so if the write below
+    // fails the note is left with no correction record (the documented
+    // "signal may be missing" mode) rather than one in two logs at once. Skip
+    // the save when nothing was removed, so no empty log file sprouts.
+    if moved {
+        if let Some(prev) = &previous_project {
+            let prev_dir = note::project_dir(vault_root, prev);
+            let mut prev_log = RoutingExamples::load(&prev_dir).map_err(routing_example_err)?;
+            if prev_log.remove(id.as_str()) {
+                prev_log.save(&prev_dir).map_err(routing_example_err)?;
+            }
+        }
+    }
+
+    // ⑨ Log the correction in the target project (overwrites any prior entry
+    // for this note).
+    let mut target_log = RoutingExamples::load(&target_dir).map_err(routing_example_err)?;
+    target_log.upsert(RoutingExample {
+        note_id: id.as_str().to_string(),
+        title: example_title,
+        excerpt: example_excerpt,
+        previous_project: previous_project.clone(),
+        confidence,
+        corrected_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+        reason: options.reason.clone(),
+    });
+    target_log.save(&target_dir).map_err(routing_example_err)?;
+
+    // ⑩ Title is re-derived from the (possibly suffixed) new path.
+    Ok(Some(RoutedNote {
+        note: ListedNote {
+            title: title_from_path(&new_path),
+            path: new_path,
+            note: moved_note,
+        },
+        previous_path,
+        previous_project,
+        moved,
+    }))
+}
+
+/// Collapses a routing-examples log error into a [`NoteError`]: an I/O error
+/// keeps its path; a YAML error becomes an I/O error carrying its message (the
+/// log is a derived signal, so it borrows the note error surface rather than
+/// widening it).
+fn routing_example_err(err: RoutingExamplesError) -> NoteError {
+    match err {
+        RoutingExamplesError::Io { path, source } => NoteError::Io { path, source },
+        RoutingExamplesError::Yaml { path, source } => NoteError::Io {
+            path,
+            source: io::Error::other(source.to_string()),
+        },
+    }
 }
 
 /// Discovers project folders under the KB root, sorted by slug (so a parent
@@ -584,6 +793,388 @@ mod tests {
                 tags: vec![],
                 body: String::new(),
             },
+        )
+        .unwrap();
+        assert!(missing.is_none());
+    }
+
+    // --- file_note_to_project (re-route) -----------------------------------
+
+    /// A routed note in `project` with an explicit confidence (unlike `note_in`,
+    /// which files a non-Inbox note as `Manual`).
+    fn routed_note_in(project: &str, id: &str, date: &str, confidence: f64) -> Note {
+        Note::new(
+            NoteId::parse(id).unwrap(),
+            NoteType::Note,
+            Routing::Routed {
+                project: project.to_string(),
+                confidence,
+            },
+            date,
+            vec![Tag::parse("fixture").unwrap()],
+            Source::parse("manual").unwrap(),
+            "Body of the note to be re-routed.",
+        )
+        .unwrap()
+    }
+
+    /// Writes an Inbox note and returns its path.
+    fn write_inbox(vault: &Path, id: &str, title: &str) -> PathBuf {
+        note::write_note(
+            vault,
+            &note_in(INBOX, id, "2026-07-10", NoteType::Note),
+            Some(title),
+        )
+        .unwrap()
+    }
+
+    /// Re-parses the note file at `path`.
+    fn read_note_at(path: &Path) -> Note {
+        Note::from_markdown(&fs::read_to_string(path).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn find_note_anywhere_locates_in_inbox_and_projects_and_misses_unknown() {
+        let vault = tempdir().unwrap();
+        write_inbox(vault.path(), "n_aaaaaa", "unfiled");
+        write(vault.path(), "Ops", "n_bbbbbb", "2026-07-11", Some("filed"));
+
+        let (proj, listed) = find_note_anywhere(vault.path(), &NoteId::parse("n_aaaaaa").unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(proj, INBOX);
+        assert_eq!(listed.title, "unfiled");
+
+        let (proj, _) = find_note_anywhere(vault.path(), &NoteId::parse("n_bbbbbb").unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(proj, "Ops");
+
+        assert!(
+            find_note_anywhere(vault.path(), &NoteId::parse("n_zzzzzz").unwrap())
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn find_note_anywhere_errors_on_cross_project_duplicate_id() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Ops", "n_aaaaaa", "2026-07-10", Some("here"));
+        write(
+            vault.path(),
+            "Growth",
+            "n_aaaaaa",
+            "2026-07-11",
+            Some("there"),
+        );
+
+        let result = find_note_anywhere(vault.path(), &NoteId::parse("n_aaaaaa").unwrap());
+        assert!(matches!(
+            result,
+            Err(NoteError::DuplicateNoteId { ref paths, .. }) if paths.len() == 2
+        ));
+    }
+
+    #[test]
+    fn reroute_from_inbox_moves_file_updates_frontmatter_and_logs_example() {
+        let vault = tempdir().unwrap();
+        // A real target folder so create_project isn't needed.
+        write(
+            vault.path(),
+            "Ops",
+            "n_existing",
+            "2026-07-01",
+            Some("seed"),
+        );
+        let old_path = write_inbox(vault.path(), "n_aaaaaa", "Bright Idea");
+
+        let routed = file_note_to_project(
+            vault.path(),
+            &NoteId::parse("n_aaaaaa").unwrap(),
+            "Ops",
+            &FileNoteOptions::default(),
+        )
+        .unwrap()
+        .expect("note exists");
+
+        // Moved, stem preserved, previous location reported.
+        assert!(routed.moved);
+        assert_eq!(routed.previous_project, None);
+        assert_eq!(routed.previous_path, old_path);
+        assert_eq!(
+            routed.note.path,
+            vault.path().join("Ops").join("bright-idea.md")
+        );
+        assert!(!old_path.exists());
+
+        // Frontmatter: new project + 1.0 confidence, id preserved.
+        let on_disk = read_note_at(&routed.note.path);
+        assert_eq!(
+            on_disk.routing,
+            Routing::Routed {
+                project: "Ops".to_string(),
+                confidence: 1.0,
+            }
+        );
+        assert_eq!(on_disk.id, NoteId::parse("n_aaaaaa").unwrap());
+
+        // Correction logged in the target, previous_project null (was Inbox).
+        let log = RoutingExamples::load(&vault.path().join("Ops")).unwrap();
+        assert_eq!(log.examples().len(), 1);
+        assert_eq!(log.examples()[0].note_id, "n_aaaaaa");
+        assert_eq!(log.examples()[0].previous_project, None);
+        assert_eq!(log.examples()[0].confidence, 1.0);
+    }
+
+    #[test]
+    fn reroute_to_same_project_rewrites_in_place_moved_false() {
+        let vault = tempdir().unwrap();
+        let path = note::write_note(
+            vault.path(),
+            &routed_note_in("Ops", "n_aaaaaa", "2026-07-10", 0.7),
+            Some("keep"),
+        )
+        .unwrap();
+
+        let routed = file_note_to_project(
+            vault.path(),
+            &NoteId::parse("n_aaaaaa").unwrap(),
+            "Ops",
+            &FileNoteOptions::default(),
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(!routed.moved);
+        assert_eq!(routed.note.path, path);
+        assert_eq!(routed.previous_project, Some("Ops".to_string()));
+        // Confidence stamped to 1.0 in place.
+        assert_eq!(read_note_at(&path).routing.confidence(), Some(1.0));
+    }
+
+    #[test]
+    fn confidence_override_is_written_and_invalid_is_rejected() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Ops", "n_seedaa", "2026-07-01", Some("seed"));
+        write_inbox(vault.path(), "n_aaaaaa", "idea");
+
+        let routed = file_note_to_project(
+            vault.path(),
+            &NoteId::parse("n_aaaaaa").unwrap(),
+            "Ops",
+            &FileNoteOptions {
+                confidence: Some(0.42),
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            read_note_at(&routed.note.path).routing.confidence(),
+            Some(0.42)
+        );
+
+        write_inbox(vault.path(), "n_bbbbbb", "other");
+        let bad = file_note_to_project(
+            vault.path(),
+            &NoteId::parse("n_bbbbbb").unwrap(),
+            "Ops",
+            &FileNoteOptions {
+                confidence: Some(1.5),
+                ..Default::default()
+            },
+        );
+        assert!(matches!(
+            bad,
+            Err(NoteError::InvalidField {
+                field: "confidence",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn missing_target_without_create_errors_and_creates_nothing() {
+        let vault = tempdir().unwrap();
+        write_inbox(vault.path(), "n_aaaaaa", "idea");
+
+        let result = file_note_to_project(
+            vault.path(),
+            &NoteId::parse("n_aaaaaa").unwrap(),
+            "Brand New",
+            &FileNoteOptions::default(),
+        );
+        assert!(matches!(
+            result,
+            Err(NoteError::MissingProject { ref project }) if project == "Brand New"
+        ));
+        assert!(!vault.path().join("Brand New").exists());
+        // The note stayed put.
+        assert!(vault.path().join("Inbox").join("idea.md").exists());
+    }
+
+    #[test]
+    fn create_project_true_creates_the_folder_and_files_the_note() {
+        let vault = tempdir().unwrap();
+        write_inbox(vault.path(), "n_aaaaaa", "idea");
+
+        let routed = file_note_to_project(
+            vault.path(),
+            &NoteId::parse("n_aaaaaa").unwrap(),
+            "Growth/Q4",
+            &FileNoteOptions {
+                create_project: true,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
+
+        assert!(routed.moved);
+        assert_eq!(
+            routed.note.path,
+            vault.path().join("Growth").join("Q4").join("idea.md")
+        );
+        assert_eq!(
+            read_note_at(&routed.note.path).routing.project(),
+            "Growth/Q4"
+        );
+    }
+
+    #[test]
+    fn target_inbox_is_rejected_in_any_casing() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Ops", "n_aaaaaa", "2026-07-10", Some("filed"));
+        for target in ["Inbox", "inbox", "INBOX", "Inbox/x"] {
+            let result = file_note_to_project(
+                vault.path(),
+                &NoteId::parse("n_aaaaaa").unwrap(),
+                target,
+                &FileNoteOptions::default(),
+            );
+            assert!(result.is_err(), "target {target:?} should be rejected");
+        }
+    }
+
+    #[test]
+    fn reason_over_the_cap_is_rejected() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Ops", "n_seedaa", "2026-07-01", Some("seed"));
+        write_inbox(vault.path(), "n_aaaaaa", "idea");
+
+        let result = file_note_to_project(
+            vault.path(),
+            &NoteId::parse("n_aaaaaa").unwrap(),
+            "Ops",
+            &FileNoteOptions {
+                reason: Some("x".repeat(REASON_MAX_CHARS + 1)),
+                ..Default::default()
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(NoteError::InvalidField {
+                field: "reason",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn reason_is_stored_and_overwritten_on_a_second_correction() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Ops", "n_seedaa", "2026-07-01", Some("seed"));
+        write_inbox(vault.path(), "n_aaaaaa", "idea");
+        let id = NoteId::parse("n_aaaaaa").unwrap();
+
+        file_note_to_project(
+            vault.path(),
+            &id,
+            "Ops",
+            &FileNoteOptions {
+                reason: Some("first pass".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // Re-file to the same project with a new reason → the single entry updates.
+        file_note_to_project(
+            vault.path(),
+            &id,
+            "Ops",
+            &FileNoteOptions {
+                reason: Some("clearly operations".to_string()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        let log = RoutingExamples::load(&vault.path().join("Ops")).unwrap();
+        assert_eq!(log.examples().len(), 1);
+        assert_eq!(
+            log.examples()[0].reason.as_deref(),
+            Some("clearly operations")
+        );
+    }
+
+    #[test]
+    fn a_second_reroute_moves_the_example_between_project_logs() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Ops", "n_seedaa", "2026-07-01", Some("seed"));
+        write(
+            vault.path(),
+            "Growth",
+            "n_seedbb",
+            "2026-07-01",
+            Some("seed"),
+        );
+        write_inbox(vault.path(), "n_aaaaaa", "idea");
+        let id = NoteId::parse("n_aaaaaa").unwrap();
+
+        // Inbox → Ops, then Ops → Growth.
+        file_note_to_project(vault.path(), &id, "Ops", &FileNoteOptions::default()).unwrap();
+        file_note_to_project(vault.path(), &id, "Growth", &FileNoteOptions::default()).unwrap();
+
+        // Ops's log no longer holds the note; Growth's does, from Ops.
+        let ops_log = RoutingExamples::load(&vault.path().join("Ops")).unwrap();
+        assert!(ops_log.examples().iter().all(|e| e.note_id != "n_aaaaaa"));
+        let growth_log = RoutingExamples::load(&vault.path().join("Growth")).unwrap();
+        let entry = growth_log
+            .examples()
+            .iter()
+            .find(|e| e.note_id == "n_aaaaaa")
+            .expect("moved into Growth's log");
+        assert_eq!(entry.previous_project.as_deref(), Some("Ops"));
+    }
+
+    #[test]
+    fn target_casing_is_canonicalized_to_the_existing_folder() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Ops", "n_seedaa", "2026-07-01", Some("seed"));
+        write_inbox(vault.path(), "n_aaaaaa", "idea");
+
+        // Target typed lowercase; the existing `Ops/` casing must win.
+        let routed = file_note_to_project(
+            vault.path(),
+            &NoteId::parse("n_aaaaaa").unwrap(),
+            "ops",
+            &FileNoteOptions::default(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(read_note_at(&routed.note.path).routing.project(), "Ops");
+    }
+
+    #[test]
+    fn reroute_of_unknown_id_is_ok_none() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Ops", "n_seedaa", "2026-07-01", Some("seed"));
+        let missing = file_note_to_project(
+            vault.path(),
+            &NoteId::parse("n_zzzzzz").unwrap(),
+            "Ops",
+            &FileNoteOptions::default(),
         )
         .unwrap();
         assert!(missing.is_none());

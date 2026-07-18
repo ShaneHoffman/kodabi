@@ -9,8 +9,9 @@ use std::sync::Mutex;
 
 use kodabi_core::distill::{inbox_routing, DistillError};
 use kodabi_llm::{ClaudeConfig, ClaudeRunner};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
+use crate::settings_cmds::SettingsState;
 use crate::transcribe::knowledge_base_dir;
 
 /// Event the frontend subscribes to for distill progress.
@@ -76,9 +77,17 @@ pub(crate) fn spawn_distill(app: &AppHandle, session_path: PathBuf) {
         let outcome =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&app, &session_path)));
         let event = match outcome {
-            Ok(Ok(path)) => DistillStateEvent::Saved {
-                path: path.display().to_string(),
-            },
+            Ok(Ok(path)) => {
+                // The session distilled into a note — enforce a
+                // discard-after-distill retention policy now, on this thread,
+                // still holding DISTILL_LOCK so nothing is reading the file.
+                // Best-effort: a failed delete never turns a successful distill
+                // into an error the user sees.
+                apply_retention_after_distill(&app, &session_path);
+                DistillStateEvent::Saved {
+                    path: path.display().to_string(),
+                }
+            }
             Ok(Err(DistillFailure::EmptyTranscript { reason })) => {
                 DistillStateEvent::Skipped { reason }
             }
@@ -94,6 +103,24 @@ pub(crate) fn spawn_distill(app: &AppHandle, session_path: PathBuf) {
         };
         let _ = app.emit(DISTILL_STATE_EVENT, event);
     });
+}
+
+/// Applies the retention policy to a just-distilled session: under
+/// [`kodabi_core::settings::RetentionPolicy::DiscardAfterDistill`] the raw
+/// `.jsonl` is deleted now that its note exists. A no-op under every other
+/// policy. Missing settings state (very early startup) or a delete failure is
+/// logged and swallowed — the distill already succeeded.
+fn apply_retention_after_distill(app: &AppHandle, session_path: &Path) {
+    let Some(state) = app.try_state::<SettingsState>() else {
+        return;
+    };
+    let policy = state.snapshot().retention;
+    if let Err(err) = kodabi_core::retention::apply_post_distill(policy, session_path) {
+        eprintln!(
+            "retention: failed to discard distilled session {}: {err}",
+            session_path.display()
+        );
+    }
 }
 
 /// [`run`]'s failure split: an empty transcript is a benign skip — a silent
