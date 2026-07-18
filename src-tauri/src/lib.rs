@@ -81,6 +81,7 @@ pub fn run() {
             Ok(())
         })
         .manage(audio_cmds::CaptureState::default())
+        .manage(quick_capture::DismissArmed::default())
         .invoke_handler(tauri::generate_handler![
             device_id,
             audio_cmds::start_capture,
@@ -106,11 +107,18 @@ pub fn run() {
                 api.prevent_close();
                 let _ = window.hide();
             }
+            // The quick-capture window genuinely has focus now, so a later blur
+            // is a real dismiss — not the show/focus race. Arm dismiss-on-blur.
+            tauri::WindowEvent::Focused(true) if window.label() == quick_capture::WINDOW_LABEL => {
+                quick_capture::arm_dismiss(window);
+            }
             // The quick-capture window is a transient overlay: losing focus
-            // (clicking elsewhere, Alt+Tab) dismisses it. The draft survives —
-            // the webview is only hidden, never destroyed.
+            // (clicking elsewhere, Alt+Tab) dismisses it, but only once it had
+            // truly gained focus (else the spurious blur from a denied
+            // `set_focus` would hide it on arrival). The draft survives — the
+            // webview is only hidden, never destroyed.
             tauri::WindowEvent::Focused(false) if window.label() == quick_capture::WINDOW_LABEL => {
-                let _ = window.hide();
+                quick_capture::dismiss_on_focus_lost(window);
             }
             _ => {}
         })

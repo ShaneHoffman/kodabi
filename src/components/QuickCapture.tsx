@@ -4,15 +4,10 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { listen } from "@tauri-apps/api/event";
-import {
-  hideQuickCaptureWindow,
-  submitQuickCapture,
-} from "../quickCapture";
+import { hideQuickCaptureWindow, submitQuickCapture } from "../quickCapture";
+import { useTauriEvent } from "../useTauriEvent";
+import { QUICK_CAPTURE_SHOWN_EVENT } from "../events";
 import "./QuickCapture.css";
-
-/** The window came to the foreground (backend `show_window`): refocus + reset. */
-const SHOWN_EVENT = "quick-capture:shown";
 
 /** How long the destination flashes before the window dismisses itself. Short
  * enough to still feel instant, long enough to read where the note landed. */
@@ -35,28 +30,25 @@ export function QuickCapture() {
   const [text, setText] = useState("");
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  // A monotonic "capture session" counter, bumped every time the box comes
+  // forward. Captured when a submit starts; an in-flight submit that resolves
+  // after the box was re-shown (a new session) is stale and must not touch the
+  // UI — else its `setText("")` / flash-and-hide clobbers the fresh draft the
+  // user has since started (or its late error wipes a capture they've moved on
+  // to). See the guards in `submit`.
+  const sessionRef = useRef(0);
 
-  // Re-show resets to a clean, focused box. The draft in `text` is deliberately
+  // Re-show refocuses the box. A prior *error* keeps its message and draft so a
+  // blur-dismiss can't silently bury a failed capture — the user sees it on the
+  // next pop. Any other prior status (a stale success flash, a leftover
+  // "submitting") resets to a clean idle box. The draft in `text` is otherwise
   // left intact (an Escape'd thought survives the next pop); only a successful
   // submit clears it.
-  useEffect(() => {
-    let active = true;
-    let unlisten: (() => void) | undefined;
-
-    listen(SHOWN_EVENT, () => {
-      if (!active) return;
-      setStatus({ kind: "idle" });
-      textareaRef.current?.focus();
-    }).then((fn) => {
-      if (active) unlisten = fn;
-      else fn();
-    });
-
-    return () => {
-      active = false;
-      unlisten?.();
-    };
-  }, []);
+  useTauriEvent(QUICK_CAPTURE_SHOWN_EVENT, () => {
+    sessionRef.current += 1;
+    setStatus((prev) => (prev.kind === "error" ? prev : { kind: "idle" }));
+    textareaRef.current?.focus();
+  });
 
   // Flash the destination, then dismiss. The timer is the "then hide" half of
   // the submit; cleared on unmount or if status moves on (e.g. a re-show).
@@ -69,14 +61,23 @@ export function QuickCapture() {
   const submit = () => {
     const trimmed = text.trim();
     if (!trimmed || status.kind === "submitting") return; // guards Enter-repeat
+    const session = sessionRef.current;
     setStatus({ kind: "submitting" });
     submitQuickCapture(trimmed)
       .then((outcome) => {
+        // Re-shown since submit: the note still landed (and `vault:changed`
+        // already refreshed the main window) — just don't clear the new draft
+        // or dismiss the box out from under the user.
+        if (sessionRef.current !== session) return;
         setText("");
         setStatus({ kind: "filed", destination: outcome.project ?? "Inbox" });
       })
       .catch((err: unknown) => {
-        // Stay open with the draft intact so the thought isn't lost.
+        // Same guard: if the user already moved on to a new capture, don't
+        // clobber it with a stale failure. Otherwise stay open with the draft
+        // and error intact — preserved across a hide/show so a blur-dismiss
+        // can't lose the thought.
+        if (sessionRef.current !== session) return;
         setStatus({ kind: "error", message: String(err) });
       });
   };
