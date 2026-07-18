@@ -171,6 +171,9 @@ import { Select } from "./ui/Select";
 />
 ```
 
+Pass `hideLabel` when the control's purpose is clear from context (a per-row picker in a list): the `label`
+stays as the accessible name (`sr-only`) but takes no visual row. The Inbox re-route picker uses this.
+
 ---
 
 ## What consumes these today
