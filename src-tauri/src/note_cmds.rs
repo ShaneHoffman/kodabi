@@ -92,7 +92,7 @@ fn write_note_impl(app: &AppHandle, mut input: NewNoteInput) -> Result<WrittenNo
         &vault::display_title(&path),
         &rel.to_string_lossy().replace('\\', "/"),
     );
-    app.state::<IndexState>().index_note_best_effort(&indexed);
+    app.state::<IndexState>().index_note_best_effort(indexed);
 
     Ok(written_note(&note, title, rel))
 }
@@ -261,7 +261,7 @@ pub async fn save_note(app: AppHandle, input: SaveNoteInput) -> Result<NoteDetai
         &listed.title,
         &rel.to_string_lossy().replace('\\', "/"),
     );
-    app.state::<IndexState>().index_note_best_effort(&indexed);
+    app.state::<IndexState>().index_note_best_effort(indexed);
 
     Ok(note_detail(&listed, &kb))
 }

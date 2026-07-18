@@ -232,56 +232,116 @@ pub enum PipelineError {
     Embed(#[from] EmbedError),
 }
 
-/// Indexes a note and (if an embedder is supplied) keeps its embeddings current.
+/// The chunks of a note still needing embedding, as produced by
+/// [`upsert_and_plan`] and [`plan_from_content`].
 ///
-/// Upserts `note` into `index`, then embeds it when needed. This is the single
-/// entry point both the app's write path and the #49 rebuild use, so the
-/// chunk-and-embed logic lives here rather than in a Tauri command.
+/// `inputs` are the title-prefixed texts fed to the embedder (see
+/// [`passage_input`]); `chunks` are the bare chunk bodies stored beside each
+/// vector so a search hit's snippet is the note's own words. The two are
+/// parallel and equal-length — `inputs[i]` embeds the vector stored next to
+/// `chunks[i]`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PendingEmbeddings {
+    /// Title-prefixed embedder inputs, one per chunk.
+    pub inputs: Vec<String>,
+    /// Bare chunk bodies, one per input, stored alongside the vectors.
+    pub chunks: Vec<String>,
+}
+
+/// Chunks a note's `body` and builds the embedder inputs for it, or `None` when
+/// the body is empty or all whitespace (a title-only note stays findable through
+/// full-text search). Pure — no index access — so the app can call it off the
+/// index lock and only re-acquire the lock to store the finished vectors.
+pub fn plan_from_content(title: &str, body: &str) -> Option<PendingEmbeddings> {
+    let chunks = chunk_body(body);
+    if chunks.is_empty() {
+        return None;
+    }
+    let inputs = chunks
+        .iter()
+        .map(|chunk| passage_input(title, chunk))
+        .collect();
+    Some(PendingEmbeddings { inputs, chunks })
+}
+
+/// Upserts `note`, then reports what still needs embedding — `None` when the
+/// note's vectors are already current (a pure move kept its chunk rows) or its
+/// body is empty.
 ///
-/// It leans on [`upsert_note`](crate::index::NoteIndex::upsert_note)'s
-/// invalidation: an upsert that changes the title or body drops the note's
-/// chunk rows, and a pure move keeps them. So if chunk rows survive the upsert
-/// the stored vectors are still current and this re-embeds nothing; if they
-/// were dropped (or never existed) it chunks the body, embeds each chunk, and
-/// stores the result. Deterministic for a given (content, model). With no
-/// embedder the note is still upserted (full-text search works); only the
-/// vectors are skipped.
+/// This is the lock-holding half of the pipeline: it touches the index but does
+/// no embedding, so a caller that serializes index access can run the slow
+/// [`Embedder`] call *without* the lock and hand the result to
+/// [`store_embeddings`]. It leans on
+/// [`upsert_note`](crate::index::NoteIndex::upsert_note)'s invalidation — an
+/// upsert that changes the title or body drops the note's chunk rows, a pure
+/// move keeps them — so surviving chunk rows mean the vectors are still current.
+pub fn upsert_and_plan(
+    index: &mut NoteIndex,
+    note: &IndexedNote,
+) -> Result<Option<PendingEmbeddings>, PipelineError> {
+    index.upsert_note(note)?;
+    // Surviving chunk rows mean the content is unchanged and the vectors are
+    // current — nothing to embed.
+    if index.note_has_chunks(&note.id)? {
+        return Ok(None);
+    }
+    Ok(plan_from_content(&note.title, &note.body))
+}
+
+/// Stores freshly computed `embeddings` for `note_id`'s `chunks`, replacing any
+/// existing chunk rows. The two slices are parallel (see [`PendingEmbeddings`]);
+/// a length mismatch means the embedder broke its one-vector-per-input contract
+/// and is rejected rather than silently truncated.
+pub fn store_embeddings(
+    index: &mut NoteIndex,
+    note_id: &str,
+    chunks: &[String],
+    embeddings: Vec<Vec<f32>>,
+) -> Result<(), PipelineError> {
+    if chunks.len() != embeddings.len() {
+        return Err(EmbedError::Backend(format!(
+            "embedder returned {} vectors for {} chunks",
+            embeddings.len(),
+            chunks.len()
+        ))
+        .into());
+    }
+    // Store the bare chunk text (not the title-prefixed embedder input) beside
+    // each vector, so a search hit's snippet is the note's own words.
+    let embedded: Vec<EmbeddedChunk> = chunks
+        .iter()
+        .cloned()
+        .zip(embeddings)
+        .map(|(text, embedding)| EmbeddedChunk { text, embedding })
+        .collect();
+    index.set_note_chunks(note_id, &embedded)?;
+    Ok(())
+}
+
+/// Indexes a note and (if an embedder is supplied) keeps its embeddings current,
+/// in one call against an exclusively-held index.
+///
+/// This is the single entry point both tests and the #49 rebuild use when they
+/// own the index outright. The app's write path instead composes
+/// [`upsert_and_plan`] → embed → [`store_embeddings`] so it can drop the index
+/// lock across the slow embed. With no embedder the note is still upserted
+/// (full-text search works); only the vectors are skipped. Deterministic for a
+/// given (content, model).
 pub fn index_note(
     index: &mut NoteIndex,
     note: &IndexedNote,
     embedder: Option<&dyn Embedder>,
 ) -> Result<(), PipelineError> {
-    index.upsert_note(note)?;
-
     let Some(embedder) = embedder else {
+        index.upsert_note(note)?;
         return Ok(());
     };
-    // Surviving chunk rows mean the content is unchanged and the vectors are
-    // current — nothing to do.
-    if index.note_has_chunks(&note.id)? {
+
+    let Some(pending) = upsert_and_plan(index, note)? else {
         return Ok(());
-    }
-
-    let chunks = chunk_body(&note.body);
-    if chunks.is_empty() {
-        return Ok(());
-    }
-
-    let inputs: Vec<String> = chunks
-        .iter()
-        .map(|chunk| passage_input(&note.title, chunk))
-        .collect();
-    let embeddings = embedder.embed_passages(&inputs)?;
-
-    // Store the bare chunk text (not the title-prefixed embedder input) beside
-    // each vector, so a search hit's snippet is the note's own words.
-    let embedded: Vec<EmbeddedChunk> = chunks
-        .into_iter()
-        .zip(embeddings)
-        .map(|(text, embedding)| EmbeddedChunk { text, embedding })
-        .collect();
-    index.set_note_chunks(&note.id, &embedded)?;
-    Ok(())
+    };
+    let embeddings = embedder.embed_passages(&pending.inputs)?;
+    store_embeddings(index, &note.id, &pending.chunks, embeddings)
 }
 
 #[cfg(test)]
@@ -549,5 +609,55 @@ mod tests {
         index_note(&mut index, &note, Some(&FakeEmbedder)).unwrap();
         assert!(index.get_note("n_empty").unwrap().is_some());
         assert!(!index.note_has_chunks("n_empty").unwrap());
+    }
+
+    // --- composable seams (upsert_and_plan / plan_from_content / store) -------
+
+    #[test]
+    fn plan_from_content_prefixes_the_title_and_skips_empty_bodies() {
+        assert_eq!(plan_from_content("Title", "  \n\n  "), None);
+
+        let plan = plan_from_content("Title", "one paragraph").unwrap();
+        assert_eq!(plan.chunks, vec!["one paragraph".to_string()]);
+        assert_eq!(plan.inputs, vec!["Title\n\none paragraph".to_string()]);
+    }
+
+    #[test]
+    fn upsert_and_plan_re_plans_only_when_content_changes() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        let note = indexed("n_plan", "stable body");
+
+        // First time through there are no chunk rows, so it plans an embed.
+        let plan = upsert_and_plan(&mut index, &note).unwrap().unwrap();
+        store_embeddings(
+            &mut index,
+            &note.id,
+            &plan.chunks,
+            FakeEmbedder.embed_passages(&plan.inputs).unwrap(),
+        )
+        .unwrap();
+
+        // Unchanged content keeps the chunk rows, so nothing is planned.
+        assert_eq!(upsert_and_plan(&mut index, &note).unwrap(), None);
+
+        // Editing the body invalidates the rows, so a fresh plan appears.
+        let mut edited = note.clone();
+        edited.body = "a different body".to_string();
+        assert!(upsert_and_plan(&mut index, &edited).unwrap().is_some());
+    }
+
+    #[test]
+    fn store_embeddings_rejects_a_vector_count_mismatch() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        let chunks = vec!["a".to_string(), "b".to_string()];
+        // One vector for two chunks — a broken embedder contract.
+        let embeddings = FakeEmbedder.embed_passages(&["a".to_string()]).unwrap();
+        let err = store_embeddings(&mut index, "n_mismatch", &chunks, embeddings);
+        assert!(matches!(
+            err,
+            Err(PipelineError::Embed(EmbedError::Backend(_)))
+        ));
+        // Nothing was written.
+        assert!(!index.note_has_chunks("n_mismatch").unwrap());
     }
 }

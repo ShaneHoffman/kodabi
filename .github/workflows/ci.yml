@@ -188,9 +188,14 @@ jobs:
   # by default, so the `lint`/`test` jobs never compile it — same rationale as
   # the `transcribe` job above. No MSVC/bindgen step is needed (fastembed has no
   # C++ compile); the only extra cost is the one-time (cached) ONNX Runtime
-  # binary download `ort-download-binaries` performs at build time. Path-filtered
-  # to changes under the crate, and skips `--locked`'s dist/ dependency — this
-  # crate never touches `tauri::generate_context!`.
+  # binary download `ort-download-binaries` performs at build time. Skips
+  # `--locked`'s dist/ dependency — this crate never touches
+  # `tauri::generate_context!`.
+  #
+  # Path-filtered to the crate AND to `kodabi-core`: the `bge` backend
+  # structurally depends on it (e.g. the `BGE_DIM == EMBEDDING_DIM` compile-time
+  # assert), and since no default job compiles the `bge` feature, a core change
+  # that breaks it would otherwise merge green.
   embed:
     name: Rust (embed backend)
     runs-on: windows-latest
@@ -199,7 +204,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Check for changes under crates/kodabi-embed
+      - name: Check for changes under crates/kodabi-embed or crates/kodabi-core
         id: changed
         shell: bash
         run: |
@@ -210,7 +215,7 @@ jobs:
           if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
             base="HEAD~1"
           fi
-          changed="$(git diff --name-only "$base" HEAD -- crates/kodabi-embed)"
+          changed="$(git diff --name-only "$base" HEAD -- crates/kodabi-embed crates/kodabi-core)"
           if [ -n "$changed" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else

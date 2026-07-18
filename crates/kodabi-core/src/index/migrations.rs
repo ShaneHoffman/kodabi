@@ -186,23 +186,60 @@ mod tests {
 
     #[test]
     fn a_v1_database_upgrades_to_v2_on_open() {
-        // Simulate a database left at v1 (the schema that shipped before the
-        // embedding pipeline): apply only the first migration, then run the
-        // full sequence and confirm it advances to v2 and adds `note_chunks`.
+        use super::super::EMBEDDING_DIM;
+
+        // Reconstruct a genuine v1 database. The v1 `notes_vec` was a
+        // single-row-per-note vec0 table at 768 dimensions, and `note_chunks`
+        // did not exist. Roll the freshly-opened (v2) database back to exactly
+        // that shape so `apply` performs the real 768 -> EMBEDDING_DIM recreate a
+        // field upgrade would — not a same-dimension no-op.
         let mut index = NoteIndex::open_in_memory().unwrap();
         index
             .conn
-            .execute_batch("PRAGMA user_version = 1;")
+            .execute_batch(
+                "DROP TABLE note_chunks;
+                 DROP TABLE notes_vec;
+                 CREATE VIRTUAL TABLE notes_vec USING vec0(note_id TEXT PRIMARY KEY, embedding FLOAT[768]);
+                 PRAGMA user_version = 1;",
+            )
             .unwrap();
-        // `notes_vec` already exists from the full open; drop it so the v2
-        // `DROP TABLE notes_vec` in the re-applied migration has its target and
-        // the recreate lands, faithfully mimicking a real v1 → v2 upgrade.
-        index.conn.execute_batch("DROP TABLE note_chunks;").unwrap();
+
+        // Sanity: the reconstructed v1 table really is 768-wide, and holds a row
+        // (the DROP in the migration must cope with data present).
+        let v1_vec = format!("[{}]", vec!["0"; 768].join(","));
+        index
+            .conn
+            .execute(
+                "INSERT INTO notes_vec (note_id, embedding) VALUES ('n_old', ?1)",
+                [&v1_vec],
+            )
+            .expect("the v1 table holds 768-dim vectors");
 
         super::apply(&mut index.conn).unwrap();
 
         assert_eq!(user_version(&index), 2);
         assert!(table_exists(&index, "note_chunks"));
+
+        // The recreate actually changed the dimension: the upgraded table takes
+        // an EMBEDDING_DIM (384) chunk vector and rejects the old 768-dim width.
+        let new_vec = format!("[{}]", vec!["0"; EMBEDDING_DIM].join(","));
+        index
+            .conn
+            .execute(
+                "INSERT INTO notes_vec (chunk_id, note_id, seq, embedding)
+                 VALUES ('n_new#0000', 'n_new', 0, ?1)",
+                [&new_vec],
+            )
+            .expect("the upgraded table holds EMBEDDING_DIM vectors");
+        let old_width = index.conn.execute(
+            "INSERT INTO notes_vec (chunk_id, note_id, seq, embedding)
+             VALUES ('n_bad#0000', 'n_bad', 0, ?1)",
+            [&v1_vec],
+        );
+        assert!(
+            old_width.is_err(),
+            "the upgraded table must reject the old 768-dim width"
+        );
     }
 
     #[test]
