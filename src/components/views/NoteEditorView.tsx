@@ -46,7 +46,7 @@ export function NoteEditorView({ noteId, project }: Props) {
     return (
       <Frame>
         <p className="text-body text-text-soft">
-          This note arrived without its project — open it from a project list.
+          This note arrived without its project. Open it from a project list.
         </p>
       </Frame>
     );

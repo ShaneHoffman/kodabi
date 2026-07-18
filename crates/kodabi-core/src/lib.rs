@@ -5,6 +5,7 @@
 //! surface will live, kept out of the desktop shell.
 
 pub mod benchmark;
+pub mod capture;
 pub mod device;
 pub mod distill;
 pub mod glossary;
@@ -15,8 +16,10 @@ pub mod naming;
 pub mod note;
 pub mod pipeline;
 pub mod raw_session;
+pub mod retention;
 pub mod routing;
 pub mod routing_examples;
+pub mod settings;
 pub mod transcription;
 pub mod vault;
 
