@@ -1,0 +1,12 @@
+/* ============================================================
+   Consent nudge — the one-time recording-consent ask.
+
+   Only the non-bridged elevation token lives here (theme-aware, an inset
+   shadow like the command palette). No entrance animation, matching the
+   palette: everything but the distill-and-route moment is near-instant
+   (FOUNDING_DOC §4).
+   ============================================================ */
+
+.consent-nudge__panel {
+  box-shadow: var(--lift);
+}

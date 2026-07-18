@@ -91,6 +91,16 @@ export function Sidebar({ onOpenPalette }: Props) {
         <ListeningIndicator />
         <Button
           variant="quiet"
+          aria-current={view.kind === "settings" ? "page" : undefined}
+          onClick={() => navigate({ kind: "settings" })}
+          className={`flex w-full items-baseline text-left text-cap hover:text-text-soft ${
+            view.kind === "settings" ? "text-text-soft" : "text-text-faint"
+          }`}
+        >
+          <span>Settings</span>
+        </Button>
+        <Button
+          variant="quiet"
           onClick={onOpenPalette}
           className="flex w-full items-baseline justify-between text-left text-cap text-text-faint hover:text-text-soft"
         >

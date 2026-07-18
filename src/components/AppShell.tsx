@@ -1,5 +1,8 @@
 import { useCommandPalette } from "../useCommandPalette";
+import { useConsentNudge } from "../useConsentNudge";
+import { useVaultChangedBridge } from "../useVaultChangedBridge";
 import { CommandPalette } from "./CommandPalette";
+import { ConsentNudge } from "./ConsentNudge";
 import { MainContent } from "./MainContent";
 import { Sidebar } from "./Sidebar";
 
@@ -10,6 +13,9 @@ import { Sidebar } from "./Sidebar";
  */
 export function AppShell() {
   const { open, openPalette, closePalette } = useCommandPalette();
+  const { open: consentOpen, closeNudge } = useConsentNudge();
+  // Refresh this window's lists when another window (quick capture) writes.
+  useVaultChangedBridge();
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg font-sans text-text">
@@ -18,6 +24,7 @@ export function AppShell() {
         <MainContent />
       </main>
       {open && <CommandPalette onClose={closePalette} />}
+      {consentOpen && <ConsentNudge onClose={closeNudge} />}
     </div>
   );
 }

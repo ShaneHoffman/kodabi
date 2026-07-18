@@ -16,6 +16,21 @@
         "title": "Kodabi",
         "width": 960,
         "height": 640
+      },
+      {
+        "label": "quick-capture",
+        "title": "Quick capture",
+        "url": "capture.html",
+        "width": 560,
+        "height": 200,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "center": true
       }
     ],
     "security": {
