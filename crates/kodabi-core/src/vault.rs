@@ -325,7 +325,22 @@ pub fn file_note_to_project(
         (new_path, true)
     };
 
-    // ⑧ Log the correction in the target project (overwrites any prior entry
+    // ⑧ On a move out of a real project, first drop the note's stale entry from
+    // that project's log, *before* writing the new one — so if the write below
+    // fails the note is left with no correction record (the documented
+    // "signal may be missing" mode) rather than one in two logs at once. Skip
+    // the save when nothing was removed, so no empty log file sprouts.
+    if moved {
+        if let Some(prev) = &previous_project {
+            let prev_dir = note::project_dir(vault_root, prev);
+            let mut prev_log = RoutingExamples::load(&prev_dir).map_err(routing_example_err)?;
+            if prev_log.remove(id.as_str()) {
+                prev_log.save(&prev_dir).map_err(routing_example_err)?;
+            }
+        }
+    }
+
+    // ⑨ Log the correction in the target project (overwrites any prior entry
     // for this note).
     let mut target_log = RoutingExamples::load(&target_dir).map_err(routing_example_err)?;
     target_log.upsert(RoutingExample {
@@ -338,19 +353,6 @@ pub fn file_note_to_project(
         reason: options.reason.clone(),
     });
     target_log.save(&target_dir).map_err(routing_example_err)?;
-
-    // ⑨ On a move out of a real project, drop the note's stale entry from that
-    // project's log (so each note keeps one correction record vault-wide). Skip
-    // the save when nothing was removed, so no empty log file sprouts.
-    if moved {
-        if let Some(prev) = &previous_project {
-            let prev_dir = note::project_dir(vault_root, prev);
-            let mut prev_log = RoutingExamples::load(&prev_dir).map_err(routing_example_err)?;
-            if prev_log.remove(id.as_str()) {
-                prev_log.save(&prev_dir).map_err(routing_example_err)?;
-            }
-        }
-    }
 
     // ⑩ Title is re-derived from the (possibly suffixed) new path.
     Ok(Some(RoutedNote {

@@ -17,22 +17,56 @@ use crate::transcribe::knowledge_base_dir;
 /// Maximum length (in `char`s) of a note-list snippet.
 const SNIPPET_MAX_CHARS: usize = 160;
 
-/// A one-line snippet of a note body for list rows: leading Markdown line
-/// markers (`#` headings, `>` quotes, `-`/`*`/`+` bullets) are stripped, blank
-/// lines dropped, remaining lines joined with a space, and the result truncated
-/// on a `char` boundary. Pure (no filesystem), so it is unit-tested directly.
+/// A one-line snippet of a note body for list rows: leading Markdown *block*
+/// markers (`#` headings, `>` quotes, `-`/`*`/`+` bullets) are stripped,
+/// thematic breaks and blank lines dropped, remaining lines joined with a space,
+/// and the result truncated on a `char` boundary. Pure (no filesystem), so it is
+/// unit-tested directly.
 fn snippet(body: &str) -> String {
     let joined = body
         .lines()
-        .map(|line| {
-            line.trim_start()
-                .trim_start_matches(['#', '>', '-', '*', '+'])
-                .trim()
-        })
-        .filter(|line| !line.is_empty())
+        .map(strip_block_markers)
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !is_thematic_break(line))
         .collect::<Vec<_>>()
         .join(" ");
     joined.chars().take(SNIPPET_MAX_CHARS).collect()
+}
+
+/// Strips leading Markdown *block* markers (heading `#`s, a `>` quote, a
+/// `-`/`*`/`+` bullet) from one line, peeling nested ones (`> - item`). A marker
+/// only counts when whitespace (or end of line) follows it, so inline emphasis
+/// like `**bold**` — where the `*` is not followed by a space — is left intact.
+fn strip_block_markers(line: &str) -> &str {
+    let mut rest = line.trim_start();
+    loop {
+        let after_marker = match rest.chars().next() {
+            Some('#') => rest.trim_start_matches('#'),
+            Some('>' | '-' | '*' | '+') => &rest[1..],
+            _ => return rest,
+        };
+        // A genuine block marker is followed by whitespace (or line end);
+        // otherwise the char was inline punctuation, so keep the line as-is.
+        match after_marker.chars().next() {
+            Some(c) if c.is_whitespace() => rest = after_marker.trim_start(),
+            None => return "",
+            _ => return rest,
+        }
+    }
+}
+
+/// Whether a line is a Markdown thematic break or setext underline (a run of
+/// only `-`, `*`, `_`, or `=`, three or more), which carries no preview text.
+fn is_thematic_break(line: &str) -> bool {
+    let marks = line.chars().filter(|c| !c.is_whitespace());
+    let mut count = 0;
+    for c in marks {
+        if !matches!(c, '-' | '*' | '_' | '=') {
+            return false;
+        }
+        count += 1;
+    }
+    count >= 3
 }
 
 /// A note to create, as sent from the frontend. Fields mirror the flat
@@ -617,6 +651,22 @@ mod tests {
             snippet(body),
             "Heading A quote line first bullet second bullet"
         );
+    }
+
+    #[test]
+    fn snippet_keeps_inline_emphasis_and_only_strips_block_markers() {
+        // Leading block markers (heading, bullet) go; inline `**`/`*` — a marker
+        // char not followed by a space — stays, and nested `> -` is peeled.
+        let body = "## Decisions\n**Decision:** ship it\n- do *the* thing\n> - nested";
+        assert_eq!(
+            snippet(body),
+            "Decisions **Decision:** ship it do *the* thing nested"
+        );
+    }
+
+    #[test]
+    fn snippet_drops_thematic_breaks() {
+        assert_eq!(snippet("---\nReal text\n* * *"), "Real text");
     }
 
     #[test]
