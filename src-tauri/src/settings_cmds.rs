@@ -11,7 +11,14 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use kodabi_core::settings::{self, RetentionPolicy, Settings};
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
+
+/// Event emitted after settings change over IPC, carrying the new [`Settings`].
+/// Lets a view already mounted when the change lands (e.g. the Settings view
+/// open while the consent nudge acknowledges) refresh without a reload — the
+/// mutating caller still gets the echoed result directly, so this is only for
+/// the *other* listeners.
+pub const SETTINGS_CHANGED_EVENT: &str = "settings:changed";
 
 /// The app's settings, cached in memory over the on-disk `settings.toml`.
 ///
@@ -76,6 +83,7 @@ pub fn set_retention_policy(
     policy: RetentionPolicy,
 ) -> Result<Settings, String> {
     let settings = state.update(|s| s.retention = policy)?;
+    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
     crate::retention::spawn_prune(&app);
     Ok(settings)
 }
@@ -93,6 +101,7 @@ pub fn acknowledge_consent(
         s.consent_acknowledged = true;
         s.retention = retention;
     })?;
+    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
     // The chosen policy may prune immediately (e.g. KeepDays over pre-existing
     // sessions), same as an explicit policy change.
     crate::retention::spawn_prune(&app);
