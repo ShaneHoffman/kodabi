@@ -11,12 +11,15 @@
 //! query surface need — `project`, `date` (normalized to UTC for ordering,
 //! alongside the verbatim value), `tags`, `type`, `confidence`, plus `path`,
 //! `title`, `source`, and the `body` that backs full-text search. The
-//! `sqlite-vec` table is created here; embeddings are populated later (Phase 2
-//! embedding pipeline).
+//! `sqlite-vec` table holds one L2-normalized embedding per body chunk, keyed by
+//! the note's `id`; the embedding pipeline (`crate::embed`) owns writing it.
 
+mod embed;
 mod migrations;
 mod note;
 mod query;
+
+pub use embed::{ChunkHit, EmbeddedChunk};
 
 pub use note::{normalize_date_to_utc, IndexedNote, NoteRow, NoteType, UnknownNoteType};
 
@@ -25,15 +28,17 @@ use std::sync::Once;
 
 use rusqlite::Connection;
 
-/// Provisional embedding dimension for the `sqlite-vec` table.
+/// Embedding dimension for the `sqlite-vec` table.
 ///
-/// The embedding model is still an open Phase 2 decision (FOUNDING_DOC's
-/// "Embedding model" open question — bge-small=384 / nomic-embed=768 / other);
-/// 768 tracks nomic-embed as a placeholder. No embeddings are written by this
-/// crate yet (the embedding pipeline is a separate task), and the index is
-/// rebuildable, so settling on a different model is a one-line bump plus a new
-/// migration that recreates `notes_vec`.
-pub const EMBEDDING_DIM: usize = 768;
+/// Settled on **bge-small-en-v1.5** (FOUNDING_DOC's "Embedding model" open
+/// question, resolved in Phase 2): a 384-dimensional CLS-pooled sentence
+/// encoder. Stored vectors are L2-normalized, so `vec0`'s default L2 distance
+/// rank-orders identically to cosine similarity. Passages are embedded bare and
+/// queries carry the model's instruction prefix — that asymmetry lives in the
+/// `Embedder` impl (`crate::embed`), not here. The index is rebuildable, so
+/// changing models is a one-line bump plus a new migration that recreates
+/// `notes_vec` (see `migration_0002_chunked_embeddings`).
+pub const EMBEDDING_DIM: usize = 384;
 
 /// Errors from opening, migrating, or querying the note index.
 #[derive(Debug, thiserror::Error)]
@@ -48,6 +53,9 @@ pub enum IndexError {
         #[source]
         source: chrono::ParseError,
     },
+    /// An embedding handed to the vector store was not [`EMBEDDING_DIM`] long.
+    #[error("embedding dimension mismatch: expected {expected}, got {got}")]
+    EmbeddingDim { expected: usize, got: usize },
 }
 
 /// `Result` specialised to [`IndexError`].
@@ -145,12 +153,14 @@ mod tests {
     #[test]
     fn vec_table_accepts_and_knn_searches_embeddings() {
         // Proves the sqlite-vec extension actually loaded and the vec0 table is
-        // usable end-to-end — insert a vector, then find it by nearest-neighbour.
+        // usable end-to-end — insert a chunk vector, then find it by
+        // nearest-neighbour and read back its `note_id` metadata column.
         let index = NoteIndex::open_in_memory().unwrap();
         index
             .conn
             .execute(
-                "INSERT INTO notes_vec (note_id, embedding) VALUES ('n_abc123', ?1)",
+                "INSERT INTO notes_vec (chunk_id, note_id, seq, embedding)
+                 VALUES ('n_abc123#0000', 'n_abc123', 0, ?1)",
                 [vector_json(1.0)],
             )
             .unwrap();

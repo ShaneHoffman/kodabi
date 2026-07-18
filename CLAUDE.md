@@ -70,6 +70,12 @@ Commit subjects follow Conventional Commits: `<type>: <imperative summary>`, mat
   MSVC dev environment (`vcvars64.bat`) sourced and `LIBCLANG_PATH` set to an LLVM install — see
   `crates/kodabi-transcribe/src/whisper.rs`. `whisper-cuda` additionally needs the CUDA toolkit and
   is local-only (CI only checks the CPU `whisper` feature).
+  Likewise `kodabi-embed`'s `bge` feature (bge-small via fastembed/ONNX Runtime) is off by default —
+  before committing a change under `crates/kodabi-embed`, also run
+  `cargo clippy -p kodabi-embed --features bge --all-targets --locked -- -D warnings`. No MSVC or
+  bindgen is needed, but the first build downloads the ONNX Runtime binary (`ort-download-binaries`).
+  The model itself is never fetched at runtime — set `KODABI_EMBED_MODEL_DIR` to a local
+  bge-small-en-v1.5 directory to exercise the `#[ignore]`d integration tests.
 - **Core vs shell:** logic lives in `crates/kodabi-core` (pure, UI-agnostic, unit-testable);
   `src-tauri` commands stay thin wrappers around it. If a Tauri command grows a body, the body
   belongs in kodabi-core.
