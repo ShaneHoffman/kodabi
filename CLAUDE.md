@@ -105,7 +105,8 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
 
 Topical rules that aren't repo-wide engineering constraints live as modular files under
 `.claude/rules/`: `copy-style` (no em dashes in user-facing copy), `shell-discipline`,
-`docs-stay-in-sync`, `tauri-command-parity`, `no-personal-info`, `skill-authoring`,
+`docs-stay-in-sync`, `tauri-command-parity`, `no-personal-info`,
+`no-use-effect` (effects only in blessed bridge hooks), `skill-authoring`,
 `typescript-style`, `utc-timestamps`.
 
 ## Skills & agents
