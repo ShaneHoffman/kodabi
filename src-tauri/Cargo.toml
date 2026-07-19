@@ -21,6 +21,9 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-global-shortcut = "2"
+# The capture-start toast (FOUNDING_DOC §3.7): fired from the Rust shell, not a
+# webview, so it still appears when the window is hidden to the tray.
+tauri-plugin-notification = "2"
 kodabi-core = { path = "../crates/kodabi-core" }
 kodabi-audio = { path = "../crates/kodabi-audio" }
 kodabi-transcribe = { path = "../crates/kodabi-transcribe", optional = true }
