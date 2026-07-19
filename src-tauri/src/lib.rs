@@ -1,6 +1,8 @@
 mod audio_cmds;
 mod capture_control;
 mod distill_cmds;
+mod events;
+mod index_cmds;
 mod index_state;
 mod note_cmds;
 mod quick_capture;
@@ -115,6 +117,7 @@ pub fn run() {
             note_cmds::save_note,
             note_cmds::file_note_to_project,
             note_cmds::list_projects,
+            index_cmds::rebuild_index,
             quick_capture::show_quick_capture,
             quick_capture::hide_quick_capture,
             quick_capture::quick_capture_submit,

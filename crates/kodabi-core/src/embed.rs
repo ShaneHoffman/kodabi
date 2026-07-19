@@ -321,8 +321,8 @@ pub fn store_embeddings(
 /// Indexes a note and (if an embedder is supplied) keeps its embeddings current,
 /// in one call against an exclusively-held index.
 ///
-/// This is the single entry point both tests and the #49 rebuild use when they
-/// own the index outright. The app's write path instead composes
+/// This is the single entry point for callers that own the index outright (its
+/// tests, and any batch re-index). The app's write path instead composes
 /// [`upsert_and_plan`] → embed → [`store_embeddings`] so it can drop the index
 /// lock across the slow embed. With no embedder the note is still upserted
 /// (full-text search works); only the vectors are skipped. Deterministic for a

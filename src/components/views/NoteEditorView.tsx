@@ -5,7 +5,6 @@ import { useNavigation, type View } from "../../useNavigation";
 import {
   createNote,
   INBOX_PROJECT,
-  notifyVaultChanged,
   parseTagsInput,
   saveNote,
   todayIsoDate,
@@ -154,11 +153,11 @@ function CreateNote({ initialProject }: { initialProject: string | null }) {
       title: title.trim() || null,
     })
       .then((created) => {
-        notifyVaultChanged();
         // Land in the read view via read_note — the round trip through the
         // on-disk file is the proof the note was written schema-valid. The
         // echoed project is the backend-canonicalized casing, which may
-        // differ from what was typed.
+        // differ from what was typed. The new file's own lists refresh when the
+        // backend watcher broadcasts `vault:changed`.
         navigate({
           kind: "noteEditor",
           noteId: created.id,
@@ -258,9 +257,10 @@ function OpenedNote({ noteId, project }: { noteId: string; project: string }) {
       project={project}
       onCancel={() => setEditing(false)}
       onSaved={(saved) => {
+        // The editor shows the save's echo immediately; other windows' lists
+        // refresh when the backend watcher broadcasts `vault:changed`.
         setNote(saved);
         setEditing(false);
-        notifyVaultChanged();
       }}
     />
   ) : (

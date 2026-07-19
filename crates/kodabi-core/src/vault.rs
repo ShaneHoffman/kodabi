@@ -1,8 +1,9 @@
 //! Vault-level enumeration: discovering projects and listing notes directly
 //! from disk. The Markdown files are the source of truth
-//! (`docs/FRONTMATTER_SCHEMA.md`); the SQLite index is a derived cache that
-//! nothing populates yet, so browsing reads the vault itself — a scan stays
-//! O(notes-in-folder) parses, cheap for a per-project folder.
+//! (`docs/FRONTMATTER_SCHEMA.md`); the SQLite index mirrors them as a derived
+//! cache (kept live by `crate::watch` + `crate::reconcile`), but browsing still
+//! reads the vault itself — a scan stays O(notes-in-folder) parses, cheap for a
+//! per-project folder, and needs no index to be present or current.
 
 use std::fs;
 use std::io;
@@ -487,7 +488,7 @@ fn collect_project(dir: &Path, slug: String, out: &mut Vec<ProjectInfo>) -> bool
     qualifies
 }
 
-fn is_md_file(path: &Path) -> bool {
+pub(crate) fn is_md_file(path: &Path) -> bool {
     path.extension()
         .is_some_and(|ext| ext.eq_ignore_ascii_case("md"))
 }

@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /*
- * Vault change signal — the hand-rolled stand-in for a data layer: any write
- * announces itself, and every disk-reading hook refetches. Swaps out for the
- * Phase 2 file watcher's backend events without touching call sites.
+ * Vault change signal — a per-webview fan-out: something changed on disk, so
+ * every disk-reading hook refetches. Its sole writer is `useVaultChangedBridge`,
+ * which relays the backend `vault:changed` event; that event is now driven by
+ * the Phase 2 file watcher, which observes every note write (in-app, external
+ * editor, or git) and broadcasts once its debounce settles. Call sites don't
+ * announce writes themselves anymore — the watcher does.
  */
 
 const VAULT_CHANGED_EVENT = "kodabi:vault-changed";
