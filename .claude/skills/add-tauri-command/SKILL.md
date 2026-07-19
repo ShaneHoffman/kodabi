@@ -54,7 +54,7 @@ listener.
 
 Run the gates for the surface you touched (see the `/commit` matrix): Rust ⇒ fmt +
 clippy + test (with `dist/` present); frontend ⇒ `pnpm exec eslint . --max-warnings=0`
-+ `pnpm build`.
++ `pnpm test` + `pnpm build`.
 
 ## 7. Verify parity
 

@@ -196,6 +196,10 @@ Beyond spacing and primitives, a few consistency rules for any screen:
 - **`data-testid` discipline.** Interactive elements a screen adds carry a stable kebab-case `data-testid`
   so a future end-to-end harness can select them without depending on copy or DOM shape. The primitives
   spread native props, so a passed `data-testid` reaches the underlying element.
+- **No component-level `useEffect`.** External-system glue (focus hand-off, scroll-into-view,
+  outside-press dismissal, timers, Tauri events) comes from the blessed bridge hooks in `src/` — the
+  primitives here compose those hooks, derive during render, and act in event handlers. See
+  [`.claude/rules/no-use-effect.md`](../.claude/rules/no-use-effect.md); eslint enforces the list.
 
 ---
 

@@ -18,9 +18,11 @@ default to **quick** for a diff-scoped check.
   `dist/` needed when `src-tauri` isn't among them.
 - **full** — ensure `dist/` exists (`pnpm install --frozen-lockfile && pnpm build`),
   then `cargo test --workspace --locked`.
-- **frontend** — `pnpm exec eslint . --max-warnings=0` then `pnpm build`. State
-  plainly that there is **no JS test runner**; this is the whole of frontend
-  verification today.
+- **frontend** — `pnpm exec eslint . --max-warnings=0`, then `pnpm test`, then
+  `pnpm build`. `pnpm test` is vitest + Testing Library under jsdom, over
+  `src/**/*.test.{ts,tsx}`; coverage is the load-bearing seams (the distill/consent
+  state machines, the Inbox re-route, quick capture), not the whole UI, so a green
+  run is not a claim that everything is covered.
 - **audit** — spawn `test-builder` in **audit** mode with the diff scope; it returns
   a read-only coverage-gap table.
 - **write** — spawn `test-builder` in **write** mode for the target; then run
