@@ -1,6 +1,7 @@
 mod audio_cmds;
 mod capture_control;
 mod distill_cmds;
+mod index_state;
 mod note_cmds;
 mod quick_capture;
 mod retention;
@@ -71,6 +72,10 @@ pub fn run() {
             let settings_config = config_dir.join("settings.toml");
             let settings = kodabi_core::settings::load_or_create(&settings_config)?;
             app.manage(settings_cmds::SettingsState::new(settings_config, settings));
+
+            // Open the note index (best-effort — a cache, never a launch
+            // blocker) so the note commands can keep it in sync on write/edit.
+            app.manage(index_state::IndexState::initialize(app.handle()));
 
             // Build the tray (which manages `CaptureController`) BEFORE
             // registering the shortcut, so a hotkey firing in the first

@@ -81,10 +81,25 @@ breaking the pipeline.
 | VAD min silence duration (s) | 0.25 | `KODABI_VAD_MIN_SILENCE` | Transcription |
 | VAD min speech duration (s) | 0.25 | `KODABI_VAD_MIN_SPEECH` | Transcription |
 | VAD max speech duration (s) | 20.0 | `KODABI_VAD_MAX_SPEECH` | Transcription |
+| Embedding thread count (bge-small) | 1 | `KODABI_EMBED_THREADS` | Embedding |
+| Embedding model directory | — | `KODABI_EMBED_MODEL_DIR` | Embedding |
 
 "Batch vs. streaming" isn't a runtime knob — it's fixed per engine (Whisper is a batch
 engine; Parakeet is VAD-gated pseudo-streaming). Its tunable proxy is `KODABI_VAD_MAX_SPEECH`,
 which bounds both the recognizer's per-segment work and the VAD's internal buffer size.
+
+## Embedding (Phase 2 note index)
+
+The note index embeds bodies locally with **bge-small-en-v1.5** (384-d) via `fastembed` (ONNX
+Runtime, CPU), behind `kodabi-embed`'s `bge` feature. It follows the same resource discipline as
+transcription: the intra-op thread count defaults to **1** (`KODABI_EMBED_THREADS`, clamped to
+`1..=8`), and inference is serialized behind a mutex so at most one heavyweight model runs at a
+time. Unlike the STT engines, the ~150 MB session is kept resident after first use rather than
+dropped between calls — it is small enough to hold and re-loading per note would cost more than it
+saves. Model files load from `KODABI_EMBED_MODEL_DIR` (no network at runtime — data custody,
+FOUNDING_DOC §2); only the ONNX Runtime *binary* is fetched, once, at build time by
+`ort-download-binaries`. Embedding runs on note write/edit, off the capture path, so it doesn't
+compete with the capture/transcription budgets above.
 
 ## Chosen CPU ceiling
 
