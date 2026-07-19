@@ -88,6 +88,20 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   bindgen is needed, but the first build downloads the ONNX Runtime binary (`ort-download-binaries`).
   The model itself is never fetched at runtime — set `KODABI_EMBED_MODEL_DIR` to a local
   bge-small-en-v1.5 directory to exercise the `#[ignore]`d integration tests.
+  `src-tauri` forwards the engine features (`parakeet`, `whisper`) and is likewise never
+  compiled with one by the `--workspace` gates — before committing a change under `src-tauri`
+  **or `crates/`** (CI's app job path-filters on both, plus the workspace manifests, since the app
+  compiles the crates it forwards features to), also run
+  `cargo clippy -p kodabi --features parakeet --all-targets --locked -- -D warnings`
+  (CI's app job runs that exact leg, plus the release build, the real-model transcription tests,
+  and the release-guard check). Don't run the full release build per commit: it's the slowest
+  step, and `/pull-request` pays it once per PR via `pnpm tauri:build --no-bundle`.
+- **Release builds ship a real STT engine.** `pnpm tauri:build` passes `--features parakeet`
+  (the engine locked in by `docs/benchmarks/stt-engine-benchmark.md`). A release-profile build
+  with no engine feature **fails to compile by design** — the `compile_error!` guard in
+  `src-tauri/src/transcribe.rs` — so the `MockEngine` stub can never ship. Debug builds
+  (`pnpm tauri dev`, every cargo gate) still default to the mock, which keeps the gates free of
+  native model dependencies.
 - **Core vs shell:** logic lives in `crates/kodabi-core` (pure, UI-agnostic, unit-testable);
   `src-tauri` commands stay thin wrappers around it. If a Tauri command grows a body, the body
   belongs in kodabi-core.
