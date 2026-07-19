@@ -105,17 +105,25 @@ impl NoteIndex {
         Ok(found.is_some())
     }
 
-    /// The ids of indexed notes that have no chunk rows — notes whose vectors a
-    /// sweep still needs to compute (this pipeline, and the #49 rebuild).
-    /// Ordered by id for deterministic sweeps.
+    /// The ids of indexed notes that need embeddings computed — a non-empty
+    /// body but no chunk rows yet. This is the reconcile embed sweep's work-list
+    /// (after a watcher burst or rebuild). Ordered by id for deterministic
+    /// sweeps.
     ///
-    /// A note with an empty body legitimately has zero chunks, so it always
-    /// appears here; the pipeline no-ops on it, keeping repeated sweeps
-    /// idempotent.
+    /// Notes whose body is empty or all whitespace are *excluded*: the chunker
+    /// ([`crate::embed::chunk_body`]) yields no chunks for them, so they
+    /// legitimately have zero chunk rows and never need embedding. Excluding
+    /// them keeps a redundant sweep from re-reading every title-only note on
+    /// every pass — otherwise each such note would reappear here forever and the
+    /// sweep would lock the index and re-read it on every reconcile. The
+    /// whitespace set (`trim`'s second argument) is the ASCII whitespace the
+    /// chunker's `str::trim` collapses; an exotic-Unicode-only body is a
+    /// harmless, vanishingly rare miss (it just no-ops in the sweep as before).
     pub fn note_ids_missing_embeddings(&self) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
             "SELECT id FROM notes
              WHERE id NOT IN (SELECT DISTINCT note_id FROM note_chunks)
+               AND trim(body, ' ' || char(9) || char(10) || char(11) || char(12) || char(13)) != ''
              ORDER BY id",
         )?;
         let ids = stmt
@@ -341,6 +349,29 @@ mod tests {
         assert_eq!(
             index.note_ids_missing_embeddings().unwrap(),
             vec!["n_bbb".to_string()]
+        );
+    }
+
+    #[test]
+    fn missing_embeddings_excludes_empty_body_notes() {
+        // A title-only note chunks to nothing, so it never needs embedding and
+        // must not linger in the work-list (else every reconcile re-reads it).
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        let mut has_body = indexed("n_full0");
+        has_body.body = "some real content".to_string();
+        let mut empty = indexed("n_bare0");
+        empty.body = String::new();
+        let mut whitespace = indexed("n_ws000");
+        whitespace.body = "  \n\n\t ".to_string();
+        for note in [&has_body, &empty, &whitespace] {
+            index.upsert_note(note).unwrap();
+        }
+
+        // Only the note with real content appears; the empty/whitespace ones,
+        // which the chunker yields nothing for, are excluded.
+        assert_eq!(
+            index.note_ids_missing_embeddings().unwrap(),
+            vec!["n_full0".to_string()]
         );
     }
 

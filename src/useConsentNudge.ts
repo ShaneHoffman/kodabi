@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-
-const CONSENT_REQUIRED_EVENT = "consent:required";
+import { CONSENT_REQUIRED_EVENT } from "./events";
 
 /**
  * Opens the consent nudge when the backend blocks a capture for want of

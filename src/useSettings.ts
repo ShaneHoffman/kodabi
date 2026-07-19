@@ -1,12 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-
-/** Backend event carrying the new settings after a mutation, so a view already
- * mounted when the change lands (the Settings view open while the consent nudge
- * acknowledges) refreshes without a reload. Mirrors `SETTINGS_CHANGED_EVENT` in
- * `src-tauri/src/settings_cmds.rs`. */
-const SETTINGS_CHANGED_EVENT = "settings:changed";
+import { SETTINGS_CHANGED_EVENT } from "./events";
 
 /*
  * The settings wire shapes, mirroring the Rust DTOs in
