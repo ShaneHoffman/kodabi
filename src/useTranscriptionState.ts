@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import type { CapturePhase } from "./useCaptureState";
+import { isCaptureActive, type CapturePhase } from "./useCaptureState";
 
 export type TranscriptionState =
   | { status: "idle" }
@@ -17,17 +17,18 @@ const TRANSCRIPTION_STATE_EVENT = "transcription:state";
  * ever starts in response to a capture stop that happens while this is
  * mounted, so there is no missed-transition window to cover.
  *
- * Resets to `idle` whenever a new capture begins (`capturePhase` becomes
- * `listening`) so a terminal `saved`/`error` label from the previous meeting
+ * Resets to `idle` whenever a new capture begins (`capturePhase` leaves
+ * `idle`) so a terminal `saved`/`error` label from the previous meeting
  * doesn't linger on screen through the next recording.
  *
  * The previous meeting's cleanup stage runs a headless Claude subprocess that
  * can take seconds, so its terminal `saved`/`error` event may not land until
  * the next recording is already under way. Any event that arrives while a
- * capture is live (`capturePhase === "listening"`) therefore belongs to that
- * prior run and is dropped — transcription itself only ever starts after a
- * stop, so a genuine event for the current session never arrives while
- * listening.
+ * capture is engaged therefore belongs to that prior run and is dropped —
+ * transcription itself only ever starts after a stop, so a genuine event for
+ * the current session never arrives mid-capture. "Engaged" is every non-idle
+ * phase, not just `listening`: a starting or degraded capture is still the
+ * current meeting.
  */
 export function useTranscriptionState(capturePhase: CapturePhase): TranscriptionState {
   const [state, setState] = useState<TranscriptionState>({ status: "idle" });
@@ -35,7 +36,7 @@ export function useTranscriptionState(capturePhase: CapturePhase): Transcription
   capturePhaseRef.current = capturePhase;
 
   useEffect(() => {
-    if (capturePhase === "listening") setState({ status: "idle" });
+    if (isCaptureActive(capturePhase)) setState({ status: "idle" });
   }, [capturePhase]);
 
   useEffect(() => {
@@ -43,7 +44,7 @@ export function useTranscriptionState(capturePhase: CapturePhase): Transcription
     let unlisten: (() => void) | undefined;
 
     listen<TranscriptionState>(TRANSCRIPTION_STATE_EVENT, (event) => {
-      if (active && capturePhaseRef.current !== "listening") setState(event.payload);
+      if (active && !isCaptureActive(capturePhaseRef.current)) setState(event.payload);
     }).then((fn) => {
       if (active) {
         unlisten = fn;
