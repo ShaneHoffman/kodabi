@@ -32,8 +32,12 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 - **Mirror:** the "Pre-commit gates" paragraph in `CLAUDE.md`.
 - **Verify:** read the workflow's `run:` steps and confirm `CLAUDE.md` lists the same
   commands. In particular the transcribe matrix runs **three** feature legs
-  (`parakeet`, `vad`, `whisper`), and the embed `bge` leg is path-filtered to
-  changes under `crates/kodabi-embed` **or** `crates/kodabi-core`.
+  (`parakeet`, `vad`, `whisper`), the embed `bge` leg is path-filtered to
+  changes under `crates/kodabi-embed` **or** `crates/kodabi-core`, and the `app` job
+  runs four steps for the shipping configuration (the `--test parakeet_real --ignored`
+  real-model run, `cargo clippy -p kodabi --features parakeet …`, the
+  `--release --features parakeet` build, and the release-guard check). Only the clippy
+  leg is a per-commit gate in `CLAUDE.md`; the release build is `/pull-request`'s.
 - **Failure:** a gate CI runs that `CLAUDE.md` omits (or vice versa). The pre-commit
   gates promise to "mirror CI exactly", so any difference is a gap.
 
@@ -60,13 +64,17 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 ## Anchor 5 — Feature legs ↔ Cargo features
 
 - **Source of truth:** each crate's `Cargo.toml` `[features]` (e.g.
-  `kodabi-transcribe`'s `parakeet`/`vad`/`whisper`, `kodabi-embed`'s `bge`) and the
-  ci.yml matrix.
+  `kodabi-transcribe`'s `parakeet`/`vad`/`whisper`, `kodabi-embed`'s `bge`,
+  `src-tauri`'s forwarded `parakeet`/`whisper`/`embed`) and the ci.yml matrix plus
+  the `app` job.
 - **Mirror:** the feature-leg instructions in `CLAUDE.md` (which crates need which
   `cargo clippy --features …` legs before commit).
 - **Verify:** confirm every off-by-default feature that CI clippy-checks is named in
   `CLAUDE.md`'s pre-commit instructions, with the same build-environment notes
-  (whisper needs MSVC + `LIBCLANG_PATH`).
+  (whisper needs MSVC + `LIBCLANG_PATH`). Also confirm the feature release builds ship
+  with (`parakeet`, via `package.json`'s `tauri:build` script) matches what `CLAUDE.md`
+  and `README.md` claim, and that the `compile_error!` guard in
+  `src-tauri/src/transcribe.rs` still names it.
 - **Failure:** a feature CI checks that `CLAUDE.md`'s commit instructions don't
   mention.
 
