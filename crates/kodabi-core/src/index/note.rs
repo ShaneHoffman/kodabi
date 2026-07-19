@@ -17,7 +17,14 @@ use super::{IndexError, Result};
 /// A note's `type` frontmatter field — a closed enum (FRONTMATTER_SCHEMA
 /// "type"). Stored in the index as its lowercase string, guarded by a `CHECK`
 /// constraint in the schema.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// The serde impls render/parse the same lowercase spellings as [`as_str`], so
+/// the `search_notes` DTOs (`SearchParams.type`, `SearchHit.type`) match the
+/// `NoteType` `$def` in `docs/MCP_TOOL_SURFACE.md` on the wire.
+///
+/// [`as_str`]: NoteType::as_str
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum NoteType {
     Meeting,
     Note,
@@ -254,6 +261,16 @@ mod tests {
         }
         assert_eq!(NoteType::Meeting.as_str(), "meeting");
         assert!("transcript".parse::<NoteType>().is_err());
+    }
+
+    #[test]
+    fn note_type_serde_uses_the_lowercase_spelling() {
+        for ty in [NoteType::Meeting, NoteType::Note, NoteType::Chat] {
+            let json = serde_json::to_string(&ty).unwrap();
+            assert_eq!(json, format!("\"{}\"", ty.as_str()));
+            assert_eq!(serde_json::from_str::<NoteType>(&json).unwrap(), ty);
+        }
+        assert!(serde_json::from_str::<NoteType>("\"transcript\"").is_err());
     }
 
     #[test]

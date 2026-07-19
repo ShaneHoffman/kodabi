@@ -112,13 +112,13 @@ with snippets.
   "required": ["query"],
   "properties": {
     "query": { "type": "string", "minLength": 1, "description": "Natural-language or keyword query. Fed to both the FTS5 and vector indexes; results merged via RRF." },
-    "project": { "$ref": "#/$defs/ProjectSlug", "description": "Restrict to this project. Also matches descendants unless include_descendants is false." },
-    "include_descendants": { "type": "boolean", "default": true, "description": "When project is set, also search nested sub-projects (e.g. 'Growth' includes 'Growth/Q3')." },
-    "type": { "type": "array", "items": { "$ref": "#/$defs/NoteType" }, "uniqueItems": true, "description": "Restrict to these note types. Omit for all." },
-    "tags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true, "description": "Restrict to notes carrying these tags." },
+    "project": { "$ref": "#/$defs/ProjectSlug", "description": "Restrict to this project. Also matches descendants unless include_descendants is false. The reserved slug \"Inbox\" (any casing) is accepted here and matches unfiled notes (those whose project is null) rather than a real project." },
+    "include_descendants": { "type": "boolean", "default": true, "description": "When project is set, also search nested sub-projects (e.g. 'Growth' includes 'Growth/Q3'). Ignored for the \"Inbox\" sentinel, which has no descendants." },
+    "type": { "type": "array", "items": { "$ref": "#/$defs/NoteType" }, "uniqueItems": true, "maxItems": 64, "description": "Restrict to these note types. Omit for all. Repeats are ignored." },
+    "tags": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true, "maxItems": 64, "description": "Restrict to notes carrying these tags. Repeats are ignored; more than 64 distinct tags is an error, not a silent truncation." },
     "tag_match": { "type": "string", "enum": ["any", "all"], "default": "any", "description": "Whether a hit must carry any or all of the listed tags." },
-    "date_from": { "$ref": "#/$defs/IsoDate", "description": "Inclusive lower bound on note date." },
-    "date_to": { "$ref": "#/$defs/IsoDate", "description": "Inclusive upper bound on note date." },
+    "date_from": { "$ref": "#/$defs/IsoDate", "description": "Inclusive lower bound on note date, compared against the note's local calendar day as frontmatter stores it (not its UTC instant), so an evening note stays on the day the user saw it." },
+    "date_to": { "$ref": "#/$defs/IsoDate", "description": "Inclusive upper bound on note date, compared against the note's local calendar day as frontmatter stores it (not its UTC instant)." },
     "limit": { "type": "integer", "minimum": 1, "maximum": 50, "default": 10, "description": "Max hits in this page." },
     "cursor": { "type": "string", "description": "Opaque pagination token from a prior response's page.next_cursor." }
   }
@@ -553,7 +553,7 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
       "minLength": 1,
       "maxLength": 300,
       "pattern": "^[^/\\\\]+(?:/[^/\\\\]+)*$",
-      "description": "Hierarchical project path/slug relative to the KB root, e.g. \"Growth/Q3\". Segments are folder names; no leading/trailing or empty segments. Each segment must also be a legal Windows folder name (no reserved device names such as CON/PRN/NUL, no trailing dot or space, none of the characters Windows forbids in a path segment), and may not start with \".\" or \"_\" — those prefixes mark infra folders (\".obsidian\", \"_assets\") that routing discovery skips, so such a project would be writable yet invisible to routing. The Phase 2 writer rejects violations. \"Inbox\" (any casing) is a reserved folder name — a real project may not use it — and \"raw\" (any casing) is reserved as a first segment: <KB root>/raw/ holds raw session artifacts, never notes (a nested segment like \"Data/raw\" is fine). This is the canonical project handle accepted by tools."
+      "description": "Hierarchical project path/slug relative to the KB root, e.g. \"Growth/Q3\". Segments are folder names; no leading/trailing or empty segments. Each segment must also be a legal Windows folder name (no reserved device names such as CON/PRN/NUL, no trailing dot or space, none of the characters Windows forbids in a path segment), and may not start with \".\" or \"_\" — those prefixes mark infra folders (\".obsidian\", \"_assets\") that routing discovery skips, so such a project would be writable yet invisible to routing. The Phase 2 writer rejects violations. \"Inbox\" (any casing) is a reserved folder name — a real project may not use it — and \"raw\" (any casing) is reserved as a first segment: <KB root>/raw/ holds raw session artifacts, never notes (a nested segment like \"Data/raw\" is fine). This is the canonical project handle accepted by tools. Because no real project can be named \"Inbox\", read tools that filter by project reuse it as a sentinel meaning \"unfiled\" — see search_notes's project field."
     },
     "IsoDate": {
       "type": "string",
@@ -587,7 +587,7 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
       "properties": {
         "has_more": { "type": "boolean", "description": "True if more results exist beyond this page." },
         "next_cursor": { "type": ["string", "null"], "description": "Opaque token to pass as the next request's cursor; null when has_more is false." },
-        "total_estimate": { "type": ["integer", "null"], "minimum": 0, "description": "Approximate total matches, or null when not cheaply known." }
+        "total_estimate": { "type": ["integer", "null"], "minimum": 0, "description": "Total matches when the underlying candidate pool was exhausted (an exact count), or null when it was not — a truncated pool knows only its own size, which would understate the total. Never a value the caller can treat as a floor for how much is left; use has_more for that." }
       },
       "description": "Cursor-based pagination envelope. Cursors are opaque and mutation-safe (they encode sort key + id, not an offset)."
     },
@@ -721,7 +721,12 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
    no data loss.
 4. **Pagination.** Uniform **cursor-based** pagination (`limit` + opaque `cursor` in, `PageInfo` out)
    on every list-returning tool. Cursors are chosen over offsets because the knowledge base mutates
-   under a file watcher and re-routing; an offset would skip or duplicate rows across pages. The sole
+   under a file watcher and re-routing; an offset would skip or duplicate rows across pages. A cursor
+   names the boundary **row**, not its sort key, because a ranked surface's scores are not stable
+   either: `search_notes` fuses by rank, so one note arriving above the cursor shifts every score
+   below it. Resolving the boundary by id keeps the walk exact across that. The standard keyset
+   trade still applies: a row inserted *above* a position the caller has already passed is not seen
+   until the next walk. The sole
    exception is `get_project_context`, a deliberately bounded single-call briefing: its sections are
    hard-capped by their `*_limit` params and carry no cursor. Its `counts` report the true totals, so
    a caller that hits a cap falls back to the paginated tool for that slice (`list_outstanding_items`

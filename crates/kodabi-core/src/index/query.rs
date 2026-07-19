@@ -10,6 +10,11 @@ use super::{NoteIndex, Result};
 
 /// The columns [`map_row`] reads, in order — shared by the by-id and by-project
 /// queries so the two stay in lockstep.
+///
+/// Hybrid search (`super::search`) deliberately does *not* use this list: a
+/// `SearchHit` carries no body, so hydrating a page through these columns would
+/// read every hit's full text only to drop it. That surface has its own
+/// narrower list.
 const NOTE_COLUMNS: &str =
     "id, path, title, type, project, date_raw, date_utc, source, confidence, body";
 
@@ -212,7 +217,10 @@ impl NoteIndex {
     /// Loads the tags for many notes at once, keyed by note `id` and sorted
     /// within each note. Ids absent from the map (or the whole map, for an empty
     /// input) simply have no tags.
-    fn load_tags_by_ids(&self, ids: &[&str]) -> Result<HashMap<String, Vec<String>>> {
+    ///
+    /// Shared with `super::search`, which hydrates a search page's tags the same
+    /// batched way `notes_by_project` does.
+    pub(super) fn load_tags_by_ids(&self, ids: &[&str]) -> Result<HashMap<String, Vec<String>>> {
         let mut tags_by_id: HashMap<String, Vec<String>> = HashMap::new();
         if ids.is_empty() {
             return Ok(tags_by_id);
