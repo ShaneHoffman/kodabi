@@ -94,6 +94,31 @@
   animation: spirit-mark-blob-b 21s linear infinite;
 }
 
+/* starting — a start is in flight but nothing is recorded yet, so the mark
+   stays ink: the reserved green is reserved for audio actually being captured.
+   A slow opacity pulse reads as anticipation, distinguishing the negotiation
+   window from a press that never registered. */
+.spirit-mark.is-starting .spirit-mark__core {
+  animation: spirit-mark-wake 1.6s ease-in-out infinite;
+}
+
+/* degraded — one source is recording and the other isn't. The green stays
+   (audio IS being captured, and hiding it would falsely imply privacy), but
+   the field of ma collapses: no aura, so it is visibly not full listening. */
+.spirit-mark.is-degraded .spirit-mark__core {
+  background-color: var(--accent-dot);
+  animation: spirit-mark-breathe 4.2s ease-in-out infinite;
+}
+
+@keyframes spirit-mark-wake {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
 @keyframes spirit-mark-breathe {
   0%,
   100% {
@@ -136,13 +161,18 @@
 }
 
 /* accessibility floor: motion off → a still green mark, never a blank
-   or ambiguous state. Listening stays legible by reserved color alone. */
+   or ambiguous state. Listening and degraded stay legible by reserved color
+   alone; starting falls back to a still ink mark, its state carried by the
+   text label (which every phase pairs with). */
 @media (prefers-reduced-motion: reduce) {
   .spirit-mark__core,
   .spirit-mark__bloom,
   .spirit-mark__bloom::before,
   .spirit-mark__bloom::after {
     animation: none !important;
+  }
+  .spirit-mark.is-starting .spirit-mark__core {
+    opacity: 1;
   }
   .spirit-mark__bloom::before,
   .spirit-mark__bloom::after {

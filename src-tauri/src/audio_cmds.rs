@@ -7,7 +7,8 @@ use std::sync::Mutex;
 
 use chrono::Utc;
 use kodabi_audio::{
-    AudioFormat, CaptureTuning, CombinedSession, DualCapture, DualStatus, SourceStatus, SpillConfig,
+    AudioFormat, CaptureTuning, CombinedSession, DualCapture, DualHealth, DualStatus, SourceHealth,
+    SourceStatus, SpillConfig,
 };
 use kodabi_core::device::DeviceId;
 use kodabi_core::inflight::{self, InflightSession};
@@ -58,6 +59,13 @@ impl CaptureState {
         self.0.is_active().map_err(|e| e.to_string())
     }
 
+    /// Per-source health: what is *actually* recording right now. Delegates to
+    /// `DualCapture::health`, the liveness truth an honest indicator needs
+    /// (unlike `is_active`, which stays true through a device rebuild).
+    pub(crate) fn health(&self) -> Result<DualHealth, String> {
+        self.0.health().map_err(|e| e.to_string())
+    }
+
     /// Store the in-flight session for the current capture, returning any
     /// previously-stashed one (there should be none) so its lock is released.
     fn set_inflight(&self, session: Option<InflightSession>) -> Option<InflightSession> {
@@ -74,22 +82,117 @@ impl CaptureState {
 }
 
 /// Unambiguous capture state broadcast to the frontend on every start/stop —
-/// also the consent signal (a meeting is only ever recorded while
-/// `Listening`).
-#[derive(Clone, Copy, serde::Serialize)]
+/// also the consent signal (a meeting is only ever recorded while `Listening`
+/// or a `Degraded` state with a live source).
+///
+/// Richer than a start/stop boolean so an indicator can never claim capture is
+/// running when it isn't: the toggle path overlays `Starting` for the WASAPI
+/// negotiation window, and `Degraded` covers a source that failed to start or
+/// died mid-session (see [`phase_of`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CapturePhase {
     Idle,
+    /// A start is in flight (device negotiation can take ~1s). Never derived
+    /// from backend state — only overlaid by the path performing the start.
+    Starting,
+    /// Both sources are live.
     Listening,
+    /// Capture is engaged but not fully healthy: a source failed to start, or
+    /// its device dropped out and is being rebuilt. `sources` says which.
+    Degraded,
+}
+
+/// Whether one capture source is recording, and if not, why. Mirrors
+/// `kodabi_audio::SourceHealth`, minus the failure message (that stays
+/// available via [`capture_status`]) — the indicator's copy is derived from
+/// *which* source is down, not from the raw device error.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SourceState {
+    Off,
+    Live,
+    Stalled,
+    Failed,
+}
+
+impl From<&SourceHealth> for SourceState {
+    fn from(health: &SourceHealth) -> Self {
+        match health {
+            SourceHealth::Off => SourceState::Off,
+            SourceHealth::Failed(_) => SourceState::Failed,
+            SourceHealth::Live => SourceState::Live,
+            SourceHealth::Stalled => SourceState::Stalled,
+        }
+    }
+}
+
+/// Per-source breakdown carried by [`CaptureStateEvent`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct CaptureSources {
+    pub loopback: SourceState,
+    pub microphone: SourceState,
 }
 
 /// Event payload for [`crate::capture_control::CAPTURE_STATE_EVENT`], and the
 /// response of [`capture_phase`]. An object rather than a bare string so a
-/// future field (per-source breakdown, a since-timestamp) can be added
-/// without breaking the contract `feat/listening-indicator` depends on.
-#[derive(Clone, serde::Serialize)]
+/// future field could be added without breaking the contract
+/// `feat/listening-indicator` depends on — which is exactly what `sources` is:
+/// the per-source breakdown that lets the UI say *which* source is down
+/// instead of a bare "degraded".
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct CaptureStateEvent {
     pub phase: CapturePhase,
+    pub sources: CaptureSources,
+}
+
+/// The phase implied by both sources' health.
+///
+/// `Listening` requires *both* sources live, so the plain listening indicator
+/// only ever shows when everything the session expects is actually recording.
+/// A start where both sources failed derives `Idle` (nothing is installed, and
+/// the toggle contract is that such a start reports idle), with the failures
+/// still visible in `sources`.
+pub(crate) fn phase_of(health: &DualHealth) -> CapturePhase {
+    let engaged =
+        |source: &SourceHealth| matches!(source, SourceHealth::Live | SourceHealth::Stalled);
+    match (&health.loopback, &health.microphone) {
+        (SourceHealth::Live, SourceHealth::Live) => CapturePhase::Listening,
+        (loopback, microphone) if engaged(loopback) || engaged(microphone) => {
+            CapturePhase::Degraded
+        }
+        _ => CapturePhase::Idle,
+    }
+}
+
+fn sources_of(health: &DualHealth) -> CaptureSources {
+    CaptureSources {
+        loopback: (&health.loopback).into(),
+        microphone: (&health.microphone).into(),
+    }
+}
+
+/// The event describing the true current state.
+pub(crate) fn event_from_health(health: &DualHealth) -> CaptureStateEvent {
+    CaptureStateEvent {
+        phase: phase_of(health),
+        sources: sources_of(health),
+    }
+}
+
+/// The same per-source truth, but announcing an in-flight start. Used only by
+/// the path holding the toggle lock, which knows a start it just began has not
+/// finished negotiating yet.
+pub(crate) fn starting_event(health: &DualHealth) -> CaptureStateEvent {
+    CaptureStateEvent {
+        phase: CapturePhase::Starting,
+        sources: sources_of(health),
+    }
+}
+
+/// The event describing the true state of the managed capture engine.
+pub(crate) fn event_from_state(state: &CaptureState) -> Result<CaptureStateEvent, String> {
+    Ok(event_from_health(&state.health()?))
 }
 
 /// Serializable per-source status for IPC. Mirrors `kodabi_audio::SourceStatus`
@@ -278,15 +381,6 @@ fn capture_status_impl(state: &CaptureState) -> Result<CaptureStatus, String> {
     Ok(CaptureStatus::from_parts(status, None))
 }
 
-fn capture_phase_impl(state: &CaptureState) -> Result<CaptureStateEvent, String> {
-    let phase = if state.is_active()? {
-        CapturePhase::Listening
-    } else {
-        CapturePhase::Idle
-    };
-    Ok(CaptureStateEvent { phase })
-}
-
 #[tauri::command]
 pub fn start_capture(
     app: tauri::AppHandle,
@@ -309,7 +403,7 @@ pub fn start_capture(
     // hotkey/tray toggle and broadcasts the resulting phase (relabelling the
     // tray + emitting `capture:state`) — otherwise the UI would go stale
     // whenever capture is driven over IPC instead of the toggle.
-    crate::capture_control::run_under_toggle_lock(&app, state.inner(), |app, state| {
+    crate::capture_control::run_under_toggle_lock(&app, state.inner(), true, |app, state| {
         start_capture_impl(app, state)
     })
 }
@@ -319,7 +413,12 @@ pub fn stop_capture(
     app: tauri::AppHandle,
     state: tauri::State<'_, CaptureState>,
 ) -> Result<CaptureStatus, String> {
-    crate::capture_control::run_under_toggle_lock(&app, state.inner(), stop_capture_and_transcribe)
+    crate::capture_control::run_under_toggle_lock(
+        &app,
+        state.inner(),
+        false,
+        stop_capture_and_transcribe,
+    )
 }
 
 #[tauri::command]
@@ -327,13 +426,25 @@ pub fn capture_status(state: tauri::State<'_, CaptureState>) -> Result<CaptureSt
     capture_status_impl(&state)
 }
 
-/// The unambiguous idle/listening phase, derived from the true backend
-/// state. The frontend calls this once on mount to seed its state before
-/// subscribing to [`crate::capture_control::CAPTURE_STATE_EVENT`], so it
-/// can't miss a transition that happened before the listener attached.
+/// The unambiguous capture phase. The frontend calls this once on mount to
+/// seed its state before subscribing to
+/// [`crate::capture_control::CAPTURE_STATE_EVENT`], so it can't miss a
+/// transition that happened before the listener attached.
+///
+/// Returns the last broadcast event rather than re-deriving, so a mount during
+/// an in-flight start correctly seeds `Starting` (which is never derivable
+/// from backend state). The broadcaster keeps that value converged with truth,
+/// so this can't go stale. Before the controller exists (very early startup)
+/// there is nothing broadcast yet, so derive.
 #[tauri::command]
-pub fn capture_phase(state: tauri::State<'_, CaptureState>) -> Result<CaptureStateEvent, String> {
-    capture_phase_impl(&state)
+pub fn capture_phase(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, CaptureState>,
+) -> Result<CaptureStateEvent, String> {
+    match app.try_state::<crate::capture_control::CaptureController>() {
+        Some(controller) => Ok(controller.last_broadcast()),
+        None => event_from_state(&state),
+    }
 }
 
 #[cfg(test)]
@@ -362,24 +473,126 @@ mod tests {
     #[test]
     fn capture_phase_is_idle_before_any_start() {
         let state = CaptureState::default();
-        let event = capture_phase_impl(&state).unwrap();
+        let event = event_from_state(&state).unwrap();
         assert!(matches!(event.phase, CapturePhase::Idle));
+        assert!(matches!(event.sources.loopback, SourceState::Off));
+        assert!(matches!(event.sources.microphone, SourceState::Off));
+    }
+
+    fn health(loopback: SourceHealth, microphone: SourceHealth) -> DualHealth {
+        DualHealth {
+            loopback,
+            microphone,
+        }
+    }
+
+    #[test]
+    fn phase_of_derivation() {
+        // Nothing installed: idle, whether or not a start ever failed.
+        assert_eq!(
+            phase_of(&health(SourceHealth::Off, SourceHealth::Off)),
+            CapturePhase::Idle
+        );
+        assert_eq!(
+            phase_of(&health(
+                SourceHealth::Failed("no device".into()),
+                SourceHealth::Failed("no device".into())
+            )),
+            CapturePhase::Idle
+        );
+
+        // Plain listening requires BOTH sources actually recording.
+        assert_eq!(
+            phase_of(&health(SourceHealth::Live, SourceHealth::Live)),
+            CapturePhase::Listening
+        );
+
+        // Anything installed but not fully live is degraded — never listening,
+        // which is the lie this task exists to kill.
+        assert_eq!(
+            phase_of(&health(SourceHealth::Live, SourceHealth::Stalled)),
+            CapturePhase::Degraded
+        );
+        assert_eq!(
+            phase_of(&health(SourceHealth::Stalled, SourceHealth::Stalled)),
+            CapturePhase::Degraded
+        );
+        assert_eq!(
+            phase_of(&health(
+                SourceHealth::Live,
+                SourceHealth::Failed("no default microphone".into())
+            )),
+            CapturePhase::Degraded
+        );
+        assert_eq!(
+            phase_of(&health(SourceHealth::Live, SourceHealth::Off)),
+            CapturePhase::Degraded
+        );
+        assert_eq!(
+            phase_of(&health(
+                SourceHealth::Stalled,
+                SourceHealth::Failed("no default microphone".into())
+            )),
+            CapturePhase::Degraded
+        );
     }
 
     #[test]
     fn capture_state_event_wire_contract() {
         // Locks the JSON shape `feat/listening-indicator` depends on: an
-        // object with a lowercase `phase` string, not a bare string.
-        let idle = serde_json::to_string(&CaptureStateEvent {
-            phase: CapturePhase::Idle,
-        })
+        // object with a lowercase `phase` string, not a bare string, plus the
+        // per-source breakdown the indicator derives its copy from.
+        let idle = serde_json::to_string(&event_from_health(&health(
+            SourceHealth::Off,
+            SourceHealth::Off,
+        )))
         .unwrap();
-        assert_eq!(idle, r#"{"phase":"idle"}"#);
+        assert_eq!(
+            idle,
+            r#"{"phase":"idle","sources":{"loopback":"off","microphone":"off"}}"#
+        );
 
-        let listening = serde_json::to_string(&CaptureStateEvent {
-            phase: CapturePhase::Listening,
-        })
+        let listening = serde_json::to_string(&event_from_health(&health(
+            SourceHealth::Live,
+            SourceHealth::Live,
+        )))
         .unwrap();
-        assert_eq!(listening, r#"{"phase":"listening"}"#);
+        assert_eq!(
+            listening,
+            r#"{"phase":"listening","sources":{"loopback":"live","microphone":"live"}}"#
+        );
+
+        // A start where the mic failed but system audio came up.
+        let degraded = serde_json::to_string(&event_from_health(&health(
+            SourceHealth::Live,
+            SourceHealth::Failed("no default microphone".into()),
+        )))
+        .unwrap();
+        assert_eq!(
+            degraded,
+            r#"{"phase":"degraded","sources":{"loopback":"live","microphone":"failed"}}"#
+        );
+
+        // A device that dropped out mid-session and is being rebuilt.
+        let stalled = serde_json::to_string(&event_from_health(&health(
+            SourceHealth::Stalled,
+            SourceHealth::Live,
+        )))
+        .unwrap();
+        assert_eq!(
+            stalled,
+            r#"{"phase":"degraded","sources":{"loopback":"stalled","microphone":"live"}}"#
+        );
+
+        // `Starting` is overlaid, not derived: same sources, announcing phase.
+        let starting = serde_json::to_string(&starting_event(&health(
+            SourceHealth::Off,
+            SourceHealth::Off,
+        )))
+        .unwrap();
+        assert_eq!(
+            starting,
+            r#"{"phase":"starting","sources":{"loopback":"off","microphone":"off"}}"#
+        );
     }
 }
