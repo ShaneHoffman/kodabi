@@ -441,9 +441,25 @@ pub fn capture_phase(
     app: tauri::AppHandle,
     state: tauri::State<'_, CaptureState>,
 ) -> Result<CaptureStateEvent, String> {
-    match app.try_state::<crate::capture_control::CaptureController>() {
-        Some(controller) => Ok(controller.last_broadcast()),
-        None => event_from_state(&state),
+    let last_broadcast = app
+        .try_state::<crate::capture_control::CaptureController>()
+        .map(|controller| controller.last_broadcast());
+    seed_event(last_broadcast, &state)
+}
+
+/// The seed a mounting frontend gets, split from [`capture_phase`] so the
+/// choice is testable without a running Tauri app.
+///
+/// Prefers what was last broadcast (only that carries `Starting`, which is
+/// never derivable from backend state); falls back to deriving from the engine
+/// when nothing has been broadcast yet.
+pub(crate) fn seed_event(
+    last_broadcast: Option<CaptureStateEvent>,
+    state: &CaptureState,
+) -> Result<CaptureStateEvent, String> {
+    match last_broadcast {
+        Some(event) => Ok(event),
+        None => event_from_state(state),
     }
 }
 
@@ -477,6 +493,23 @@ mod tests {
         assert!(matches!(event.phase, CapturePhase::Idle));
         assert!(matches!(event.sources.loopback, SourceState::Off));
         assert!(matches!(event.sources.microphone, SourceState::Off));
+    }
+
+    #[test]
+    fn a_mounting_frontend_is_seeded_from_the_last_broadcast() {
+        let state = CaptureState::default();
+        // `Starting` is never derivable from backend state, so a mount during
+        // an in-flight start would seed `Idle` if this re-derived instead of
+        // returning what was last shown.
+        let starting = starting_event(&health(SourceHealth::Off, SourceHealth::Off));
+        assert_eq!(seed_event(Some(starting), &state).unwrap(), starting);
+
+        // Before anything has been broadcast (very early startup, no
+        // controller yet) there is nothing to return, so derive the truth.
+        let derived = seed_event(None, &state).unwrap();
+        assert_eq!(derived.phase, CapturePhase::Idle);
+        assert_eq!(derived.sources.loopback, SourceState::Off);
+        assert_eq!(derived.sources.microphone, SourceState::Off);
     }
 
     fn health(loopback: SourceHealth, microphone: SourceHealth) -> DualHealth {

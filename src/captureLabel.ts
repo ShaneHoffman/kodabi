@@ -44,13 +44,14 @@ export function captureLabel(state: CaptureStateEvent): CaptureLabel {
       if (!loopbackLive && !microphoneLive) {
         return { text: "Reconnecting", live: false, detail: null };
       }
-      // One source is still recording, so this IS on air: keep the green, and
-      // name the source that isn't.
-      return {
-        text: "Listening",
-        live: true,
-        detail: microphoneLive ? "System audio unavailable" : "Mic unavailable",
-      };
+      // One source is still recording, so this IS on air: keep the green. But
+      // the headline must not read "Listening" either, which would imply both
+      // sources are being captured. It names what IS recorded; the detail line
+      // names what isn't. This matches the tray tooltip, which never says
+      // plain "listening" for a degraded capture.
+      return microphoneLive
+        ? { text: "Mic only", live: true, detail: "System audio unavailable" }
+        : { text: "System audio only", live: true, detail: "Mic unavailable" };
     }
   }
 }
@@ -61,5 +62,8 @@ export function markMode(state: CaptureStateEvent): SpiritMarkMode {
   const anyLive =
     state.sources.loopback === "live" || state.sources.microphone === "live";
   // Degraded with nothing live is not on air, so it must not wear the green.
-  return anyLive ? "degraded" : "idle";
+  // It must not wear the *idle* mark either: that one means "no capture is
+  // running", and this session is still engaged and will resume recording
+  // with no further press. `reconnecting` is the ink mark, moving.
+  return anyLive ? "degraded" : "reconnecting";
 }

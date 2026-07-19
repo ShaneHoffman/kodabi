@@ -53,7 +53,8 @@ pub struct CaptureController {
     /// Set when a toggle press arrives while another toggle holds the lock.
     /// The in-flight toggle drains it before releasing, so any number of
     /// mid-flight presses coalesce into exactly one follow-up toggle instead
-    /// of being silently dropped.
+    /// of being silently dropped. That follow-up may only ever *stop* — see
+    /// [`TogglePress`].
     pub(crate) pending_toggle: AtomicBool,
     /// The last event handed to [`broadcast_event`]. Seeds [`crate::audio_cmds::capture_phase`]
     /// so a frontend mounting mid-start sees `Starting` (which is never
@@ -72,22 +73,49 @@ impl CaptureController {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
 enum ToggleAction {
     Start,
     Stop,
     /// Idle, but consent hasn't been acknowledged yet — surface the nudge
     /// instead of recording. Only ever reached on the very first capture.
     RequireConsent,
+    /// Do nothing at all. A replayed press that would have started a capture
+    /// (see [`TogglePress::Coalesced`]).
+    Nothing,
+}
+
+/// Where a toggle came from: a press acting on the state the user could see,
+/// or one replayed after the fact.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TogglePress {
+    /// The press that acquired the toggle lock. Acts as a full toggle.
+    Direct,
+    /// A press that landed while another toggle held the lock and is being
+    /// replayed once it finished.
+    ///
+    /// It may only ever *stop* capture, never start one. By the time it runs,
+    /// the state it was aimed at is gone: a press meant to interrupt a stop
+    /// would otherwise be replayed against the now-idle engine and begin a
+    /// brand-new recording the user never asked for. Since the mark and tray
+    /// are the consent signal, recording must only ever begin from a press
+    /// acting on state the user was actually looking at.
+    Coalesced,
 }
 
 /// Pure toggle decision, factored out of [`toggle_capture`] so it's testable
 /// without a running app. Stopping is always allowed; starting requires
-/// acknowledged consent, so the first-ever capture surfaces the nudge instead.
-fn next_action(active: bool, consent_acknowledged: bool) -> ToggleAction {
-    match (active, consent_acknowledged) {
-        (true, _) => ToggleAction::Stop,
-        (false, true) => ToggleAction::Start,
-        (false, false) => ToggleAction::RequireConsent,
+/// acknowledged consent (so the first-ever capture surfaces the nudge instead)
+/// *and* a direct press.
+fn next_action(active: bool, consent_acknowledged: bool, press: TogglePress) -> ToggleAction {
+    match (active, consent_acknowledged, press) {
+        // Stopping is always honored, however the press arrived — a press that
+        // means "stop recording" must never be dropped.
+        (true, _, _) => ToggleAction::Stop,
+        // Nothing is running and this press is a replay: never start.
+        (false, _, TogglePress::Coalesced) => ToggleAction::Nothing,
+        (false, true, TogglePress::Direct) => ToggleAction::Start,
+        (false, false, TogglePress::Direct) => ToggleAction::RequireConsent,
     }
 }
 
@@ -99,8 +127,9 @@ fn next_action(active: bool, consent_acknowledged: bool) -> ToggleAction {
 /// second). A press arriving while another toggle is in flight is *coalesced*,
 /// not dropped: it sets `pending_toggle`, which the in-flight toggle drains
 /// before releasing the lock. Any number of mid-flight presses therefore
-/// collapse into exactly one follow-up toggle, and no press is ever silently
-/// ignored.
+/// collapse into exactly one follow-up toggle, and a press that means "stop"
+/// is never silently ignored. A coalesced press can only ever stop, so an
+/// impatient double-press can't start a recording (see [`TogglePress`]).
 pub fn toggle_capture(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
@@ -113,7 +142,9 @@ pub fn toggle_capture(app: &AppHandle) {
             // Another toggle holds the lock and has been told about this press.
             return;
         };
-        drain_pending_toggles(&controller.pending_toggle, || perform_one_toggle(&app));
+        drain_pending_toggles(&controller.pending_toggle, TogglePress::Direct, |press| {
+            perform_one_toggle(&app, press)
+        });
     });
 }
 
@@ -150,21 +181,31 @@ pub(crate) fn try_lock_toggle(
 
 /// Run `do_toggle`, then keep running it while presses arrive mid-toggle.
 ///
+/// `first` is how the press that acquired the lock arrived; every pass after
+/// it is replaying a press that landed mid-toggle, so it is
+/// [`TogglePress::Coalesced`] and can only stop.
+///
 /// The flag is cleared *before* each toggle so a press that lands during one
 /// is always honored by the next pass; clearing after would let a press be
 /// swallowed by the toggle it arrived during. Call with the toggle lock held.
-pub(crate) fn drain_pending_toggles(pending: &AtomicBool, mut do_toggle: impl FnMut()) {
+pub(crate) fn drain_pending_toggles(
+    pending: &AtomicBool,
+    first: TogglePress,
+    mut do_toggle: impl FnMut(TogglePress),
+) {
+    let mut press = first;
     loop {
         pending.store(false, Ordering::SeqCst);
-        do_toggle();
+        do_toggle(press);
         if !pending.load(Ordering::SeqCst) {
             break;
         }
+        press = TogglePress::Coalesced;
     }
 }
 
 /// One read-decide-act toggle. Call with the toggle lock held.
-pub(crate) fn perform_one_toggle(app: &AppHandle) {
+pub(crate) fn perform_one_toggle(app: &AppHandle, press: TogglePress) {
     let state = app.state::<CaptureState>();
 
     // Decide from the TRUE backend state, act idempotently. Consent is read
@@ -172,7 +213,7 @@ pub(crate) fn perform_one_toggle(app: &AppHandle) {
     // NOT acknowledged, so nothing is ever recorded without consent.
     let active = state.is_active().unwrap_or(false);
     let consent = consent_acknowledged(app);
-    let result = match next_action(active, consent) {
+    let result = match next_action(active, consent, press) {
         ToggleAction::Start => {
             // Announce the start before negotiating: device negotiation can
             // block for ~1s, and an indicator that says nothing for that
@@ -189,6 +230,9 @@ pub(crate) fn perform_one_toggle(app: &AppHandle) {
             broadcast_truth(app, state.inner());
             return;
         }
+        // A replayed press with nothing to stop. Nothing changed, and the
+        // caller already has the indicator converged, so don't re-broadcast.
+        ToggleAction::Nothing => return,
     };
     if let Err(err) = result {
         eprintln!("capture toggle failed: {err}");
@@ -216,9 +260,7 @@ pub fn run_under_toggle_lock<T>(
     action: impl FnOnce(&AppHandle, &CaptureState) -> Result<T, String>,
 ) -> Result<T, String> {
     let announce = |app: &AppHandle, state: &CaptureState| {
-        // Only when this really is a start: re-announcing a start over an
-        // already-running capture would flash `Starting` over `Listening`.
-        if announce_start && !state.is_active().unwrap_or(false) {
+        if should_announce_start(announce_start, state.is_active().unwrap_or(false)) {
             broadcast_starting(app, state);
         }
     };
@@ -243,6 +285,13 @@ pub fn run_under_toggle_lock<T>(
     result
 }
 
+/// Whether an action about to run under the toggle lock should announce a
+/// start. Only when it really is one: re-announcing over an already-running
+/// capture would flash `Starting` over `Listening`.
+fn should_announce_start(announce_start: bool, active: bool) -> bool {
+    announce_start && !active
+}
+
 /// Broadcast the true current capture state to the frontend and tray.
 ///
 /// Derived from per-source liveness (not just "is a session installed"), so a
@@ -262,11 +311,20 @@ pub(crate) fn broadcast_truth(app: &AppHandle, state: &CaptureState) {
 /// Announce an in-flight start: the per-source truth (nothing live yet) with
 /// the phase overlaid, so the window and tray show a starting state for the
 /// device-negotiation window instead of nothing at all.
+///
+/// A failed health read must not turn that announcement back into silence —
+/// going quiet for the ~1s negotiation window is the exact failure `Starting`
+/// exists to remove — so it falls back to announcing the start with no source
+/// claimed live, which is the honest reading of "we can't tell yet".
 fn broadcast_starting(app: &AppHandle, state: &CaptureState) {
-    let Ok(health) = state.health() else {
-        return;
+    let event = match state.health() {
+        Ok(health) => starting_event(&health),
+        Err(err) => {
+            eprintln!("capture health read failed while starting: {err}");
+            starting_event_with_no_source_live()
+        }
     };
-    broadcast_event(app, starting_event(&health));
+    broadcast_event(app, event);
 }
 
 /// Push one capture state to the frontend and sync the tray (menu label +
@@ -295,6 +353,16 @@ fn idle_event() -> CaptureStateEvent {
             loopback: SourceState::Off,
             microphone: SourceState::Off,
         },
+    }
+}
+
+/// [`idle_event`]'s `Starting` counterpart: a start is under way but the
+/// per-source truth couldn't be read. Claims no source is live, so it can
+/// only ever under-report what is being recorded.
+fn starting_event_with_no_source_live() -> CaptureStateEvent {
+    CaptureStateEvent {
+        phase: CapturePhase::Starting,
+        ..idle_event()
     }
 }
 
@@ -421,15 +489,92 @@ mod tests {
 
     #[test]
     fn next_action_decides_stop_start_or_consent() {
+        use TogglePress::Direct;
         // Stopping is always allowed, regardless of the consent flag.
-        assert!(matches!(next_action(true, true), ToggleAction::Stop));
-        assert!(matches!(next_action(true, false), ToggleAction::Stop));
+        assert_eq!(next_action(true, true, Direct), ToggleAction::Stop);
+        assert_eq!(next_action(true, false, Direct), ToggleAction::Stop);
         // Starting requires acknowledged consent; without it, surface the nudge.
-        assert!(matches!(next_action(false, true), ToggleAction::Start));
-        assert!(matches!(
-            next_action(false, false),
+        assert_eq!(next_action(false, true, Direct), ToggleAction::Start);
+        assert_eq!(
+            next_action(false, false, Direct),
             ToggleAction::RequireConsent
-        ));
+        );
+    }
+
+    #[test]
+    fn a_coalesced_press_can_stop_but_never_start() {
+        use TogglePress::Coalesced;
+        // A press that means "stop" is honored however it arrived — dropping
+        // it would leave a meeting recording after the user asked it not to.
+        assert_eq!(next_action(true, true, Coalesced), ToggleAction::Stop);
+
+        // But a replayed press must never begin a recording. This is the
+        // impatient double-press during a stop: by the time the press is
+        // replayed the engine is idle, and a plain toggle would start a brand
+        // new capture the user never asked for.
+        assert_eq!(next_action(false, true, Coalesced), ToggleAction::Nothing);
+        // Not even the consent nudge — the user is not looking at a press
+        // they made against this state.
+        assert_eq!(next_action(false, false, Coalesced), ToggleAction::Nothing);
+    }
+
+    #[test]
+    fn drain_replays_only_the_first_press_as_direct() {
+        // The press that took the lock acts on state the user could see; every
+        // replayed press after it is coalesced, so it can only ever stop.
+        let pending = AtomicBool::new(false);
+        let mut presses = Vec::new();
+        drain_pending_toggles(&pending, TogglePress::Direct, |press| {
+            presses.push(press);
+            if presses.len() == 1 {
+                pending.store(true, Ordering::SeqCst);
+            }
+        });
+        assert_eq!(presses, vec![TogglePress::Direct, TogglePress::Coalesced]);
+    }
+
+    #[test]
+    fn watchdog_drain_treats_every_press_as_coalesced() {
+        // The watchdog only ever drains presses stranded by someone else, so
+        // none of them may start a capture.
+        let pending = AtomicBool::new(false);
+        let mut presses = Vec::new();
+        drain_pending_toggles(&pending, TogglePress::Coalesced, |press| {
+            presses.push(press);
+            if presses.len() == 1 {
+                pending.store(true, Ordering::SeqCst);
+            }
+        });
+        assert_eq!(
+            presses,
+            vec![TogglePress::Coalesced, TogglePress::Coalesced]
+        );
+    }
+
+    #[test]
+    fn start_is_announced_only_for_a_start_that_isnt_already_running() {
+        assert!(should_announce_start(true, false));
+        // Re-announcing over a live capture would flash `Starting` over
+        // `Listening`.
+        assert!(!should_announce_start(true, true));
+        // A stop never announces a start.
+        assert!(!should_announce_start(false, false));
+        assert!(!should_announce_start(false, true));
+    }
+
+    #[test]
+    fn a_failed_health_read_still_announces_the_start() {
+        // Going silent for the ~1s negotiation window is the exact failure
+        // `Starting` exists to remove, so the fallback announces the start
+        // while claiming no source is live.
+        let event = starting_event_with_no_source_live();
+        assert_eq!(event.phase, CapturePhase::Starting);
+        assert_eq!(event.sources.loopback, SourceState::Off);
+        assert_eq!(event.sources.microphone, SourceState::Off);
+        assert_eq!(
+            tray_copy(&event),
+            ("Stop capture", "Kodabi: starting capture")
+        );
     }
 
     #[test]
@@ -515,7 +660,7 @@ mod tests {
     fn drain_pending_toggles_runs_once_when_nothing_pending() {
         let pending = AtomicBool::new(false);
         let mut runs = 0;
-        drain_pending_toggles(&pending, || runs += 1);
+        drain_pending_toggles(&pending, TogglePress::Direct, |_| runs += 1);
         assert_eq!(runs, 1);
         assert!(!pending.load(Ordering::SeqCst));
     }
@@ -524,7 +669,7 @@ mod tests {
     fn drain_pending_toggles_coalesces_presses_into_one_extra_toggle() {
         let pending = AtomicBool::new(false);
         let mut runs = 0;
-        drain_pending_toggles(&pending, || {
+        drain_pending_toggles(&pending, TogglePress::Direct, |_| {
             runs += 1;
             // Several presses land during the first toggle. They must produce
             // exactly one follow-up toggle, not one per press, and must not be

@@ -4,10 +4,16 @@ import "./SpiritMark.css";
 /**
  * What the mark depicts. A *visual* mode rather than the capture phase
  * directly: the reserved green means "audio is being recorded", so a degraded
- * capture with nothing live renders the idle mark (with the surrounding label
- * carrying the reconnecting state) rather than implying it is on air.
+ * capture with nothing live renders `reconnecting` — ink, so it never implies
+ * it is on air, but moving, so it is never mistaken for the dormant `idle`
+ * mark of a session that isn't running at all.
  */
-export type SpiritMarkMode = "idle" | "starting" | "listening" | "degraded";
+export type SpiritMarkMode =
+  | "idle"
+  | "starting"
+  | "listening"
+  | "degraded"
+  | "reconnecting";
 
 type Props = {
   mode: SpiritMarkMode;
@@ -23,6 +29,7 @@ const MODE_CLASS: Record<SpiritMarkMode, string> = {
   starting: " is-starting",
   listening: " is-listening",
   degraded: " is-degraded",
+  reconnecting: " is-reconnecting",
 };
 
 /**
