@@ -112,9 +112,9 @@ The app never calls the Anthropic API directly. Instead:
 
 ### 3.4 Transcription
 
-- **Engine is a trait, not a dependency.** The Rust backend defines a `TranscriptionEngine` trait; concrete engines are swappable. This is the design decision that makes the model choice low-stakes.
+- **Engine is a trait, not a dependency.** The Rust backend defines a `TranscriptionEngine` trait; concrete engines are swappable. This is the design decision that makes the model choice low-stakes. Engines are **selected at build time via mutually exclusive cargo features** — sherpa-onnx's static (Parakeet) and shared (whisper.cpp) link modes cannot coexist in one binary — so a release build ships exactly one native engine (Parakeet by default; a multilingual build ships whisper.cpp instead). The default (feature-less) build compiles no native engine and falls back to a mock engine for UI development only; it must never be released (tracked: task #58, `chore/ship-real-stt-engine`).
 - **Default engine: NVIDIA Parakeet TDT via sherpa-onnx** (Apache 2.0). Rationale: near-Whisper-large English accuracy, dramatically faster, streaming-friendly, and — critically for meetings — its architecture doesn't hallucinate phantom text during silence, which Whisper is notorious for on pause-heavy audio. sherpa-onnx provides Rust bindings and bundled VAD with no Python/NeMo dependency.
-- **Fallback engine: whisper.cpp (large-v3-turbo)** for multilingual needs and the strongest glossary-biasing mechanism (initial prompt). Must be paired with **Silero VAD** to chop silence before it hallucinates.
+- **Fallback engine: whisper.cpp (large-v3-turbo)** for multilingual needs and the strongest glossary-biasing mechanism (initial prompt) — selected at build time in place of Parakeet, not a runtime fallback (the two link modes can't coexist in one binary). Must be paired with **Silero VAD** to chop silence before it hallucinates.
 - **Benchmarked both on one real recorded meeting (2026-07-15); default locked to Parakeet TDT** — silence-safe, ~10× faster, and no content-accuracy deficit (its lone proper-noun miss is exactly what the post-pass fixes). See `docs/benchmarks/stt-engine-benchmark.md`.
 - **Per-project glossary** — project names (MERIDIAN, TeeTrack), client names, teammate names, domain terms. Applied via initial-prompt bias where the engine supports it (Whisper); otherwise enforced entirely by the post-pass. This is the defense against mangled proper nouns poisoning categorization and search.
 - **Post-pass cleanup:** at meeting end, a cheap Claude pass ("here's the glossary; fix obvious misrecognitions") catches what biasing missed — and is engine-agnostic.
@@ -125,10 +125,10 @@ The app never calls the Anthropic API directly. Instead:
 
 At meeting end (batch, not continuous — keeps token usage sane):
 
-1. Clean transcript (glossary pass).
-2. Summarize + extract action items, decisions, open questions.
+1. Glossary cleanup already happened at transcription time (the Phase 1 post-pass), so distill starts from a clean transcript.
+2. A **single headless-Claude distill call** returns summary, action items, decisions, and open questions as one structured result. Transcripts over a configured token budget are chunked / map-reduced so a long meeting distills rather than erroring (tracked: task #59, `feat/distill-token-budget`).
 3. Route to a project with a **confidence split**: confident → filed directly; uncertain → an **Inbox** for one-click human routing. Miscategorized notes are worse than uncategorized ones.
-4. **Correction loop:** every manual re-route becomes a routing example for future categorization.
+4. **Correction loop:** every manual re-route **records** the correction as a routing example (`_routing_examples.yml` in the project folder) for future categorization. Wiring routing into the distill pipeline is tracked as task #55 (`feat/wire-distill-routing`); Phase 3 makes routing *read* these recorded corrections as an additive scoring signal, so a correction measurably changes future routing (task #56, `feat/routing-examples-signal`).
 
 ### 3.6 Storage & indexing
 
@@ -147,6 +147,7 @@ At meeting end (batch, not continuous — keeps token usage sane):
 - **Each device rebuilds its own SQLite index locally** from the synced files. The database is never synced (synced SQLite corrupts; the index is rebuildable by design).
 - **Glossaries, project config, and routing examples live as files inside the folder** so they sync with the knowledge.
   - Concretely, each project folder carries a `_glossary.yml` at its root — a plain YAML list of `{ term, definition, aliases }` entries (`crates/kodabi-core`'s `glossary` module owns load/save/upsert). The project itself is never a field in the file; it's implicit in which project folder the file sits in, which is what keeps the glossary per-project-isolated. The MCP `GlossaryTerm` shape's `project` field is filled in from that folder path when the API surfaces a term.
+  - Routing examples follow the same per-folder pattern: each project folder carries a `_routing_examples.yml` (`crates/kodabi-core`'s `routing_examples` module owns load/save/upsert), and a re-route moves the recorded example from the previous project's file into the target's. Like the glossary, the project is implicit in the folder, so the examples sync and stay project-isolated with the knowledge.
 - **Filenames include timestamp + device ID** so simultaneous capture on two machines can never collide; the append-mostly design makes conflicts nearly impossible (scheme: [`FILENAME_SCHEME.md`](FILENAME_SCHEME.md)).
 - V1 ships zero sync code — one README paragraph. Built-in git-backed sync is a Phase 5 candidate.
 - **Import/export (settings):** export = zip of the knowledge base (or a single project) with notes, glossaries, config, routing examples + a version manifest; import = *merge*, never overwrite (timestamp+device-ID filenames prevent collisions; index rebuilds after). Import doubles as the schema-migration hook for old archives. Single-project scope covers the consulting cases: archive a finished engagement, hand a project to a colleague. Import-from-Obsidian/plain-markdown is a Phase 5 onboarding ramp.
@@ -154,7 +155,7 @@ At meeting end (batch, not continuous — keeps token usage sane):
 ### 3.7 Trust, consent, and hygiene
 
 - **Recording consent:** Massachusetts (and many states) require two-party consent. One-time in-app nudge ("announce your recordings"), unambiguous listening indicator, and a clear statement in the README. This is both legal hygiene and a trust signal.
-- **Retention policy:** optional "distill then discard raw audio/transcript after N days." Raw client-call transcripts accumulating forever is a liability.
+- **Retention policy:** governs the stored transcript — optional "distill then discard the raw transcript after N days." Raw client-call transcripts accumulating forever is a liability. **No audio is *retained* in v1** — only the transcript + timestamps become a lasting on-disk artifact, so there is no retained audio for the retention policy to prune yet. (The task #57 incremental-capture spool flushes audio to disk *transiently* during a meeting for crash recovery, but that spool is cleared once the session distills, and an orphaned spool left by a crash is reclaimed on the next startup — not by retention.) When an opt-in audio-retention toggle is eventually pulled by a use case, the retention policy must cover it too. **One gap the in-app policy cannot reach:** the `claude` CLI that `kodabi-llm` spawns for distill keeps its *own* Claude Code session logs, which contain the transcript text passed to it — outside our retention control. Document this, and disable that logging where the CLI allows it, so the policy's promise is complete.
 - **Security at rest (v1 posture):** rely on OS disk encryption (BitLocker) + the retention policy. Say so explicitly in docs. App-level encryption is a later consideration.
 - **Resource budget:** idle ≈ zero; capturing under a target CPU ceiling (tune on real hardware); no fan spin-up during meetings. Treat as a requirement, not a bug report. Measurement procedure, tuning knobs, and the recorded numbers live in [`RESOURCE_BUDGET.md`](RESOURCE_BUDGET.md).
 
@@ -193,8 +194,8 @@ Principles:
 ### V1 scope
 
 - Windows only, WASAPI loopback + mic capture, hotkey + tray toggle
-- Local transcription via the engine trait (Parakeet default, whisper.cpp fallback) with per-project glossary
-- End-of-meeting Claude pass: cleanup, summary, action items, decisions
+- Local transcription via the engine trait (Parakeet default, whisper.cpp fallback; engine chosen at build time via mutually exclusive cargo features) with per-project glossary
+- End-of-meeting distill: a single headless-Claude call returning summary, action items, and decisions as one structured result (glossary cleanup already ran as the Phase 1 transcription post-pass)
 - **Manual notes as first-class:** global quick-capture hotkey (type a thought → routes like a meeting) + create/edit notes within a project. Same storage, routing, and indexing machinery — a text box in front of the existing pipeline
 - Confidence-split routing with Inbox + one-click correction
 - Markdown + frontmatter storage, per-project folders
@@ -233,8 +234,11 @@ kodabi.com (parked at GoDaddy, renew-prohibited, expires 2026-10-04). The GitHub
 ### Phase 1 — Capture & transcribe (the hard 20%)
 
 Capture (WASAPI loopback + mic, hotkey/tray, listening indicator), the `TranscriptionEngine`
-trait with Parakeet + whisper.cpp engines, the real-meeting benchmark that locks the default,
-glossaries, and raw session storage — tracked as individual tickets in the backlog.
+trait with Parakeet + whisper.cpp engines selected at build time via mutually exclusive cargo
+features (release builds ship Parakeet), the real-meeting benchmark that locks the default,
+glossaries, and raw session storage (transcript + timestamps; audio is not persisted in v1 — an
+opt-in audio-retention toggle is deferred until a use case pulls it, at which point the retention
+policy must cover it) — tracked as individual tickets in the backlog.
 
 **Milestone:** a full Teams meeting produces a clean, timestamped transcript with correct project nouns, hands-free after one hotkey.
 
@@ -294,7 +298,7 @@ order of expected value — each earns its place only after the core loop proves
 | ~~Frontend stack~~ | — | **DECIDED: React + Tailwind** | ✅ Closed |
 | ~~Default STT engine~~ | — | **DECIDED: Parakeet TDT (sherpa-onnx)** (real-meeting benchmark 2026-07-15 — silence-safe, ~10× faster, no content-accuracy deficit; whisper.cpp stays the fallback. See `docs/benchmarks/stt-engine-benchmark.md`) | ✅ Closed |
 | Embedding model | bge-small / nomic-embed / other | Benchmark retrieval quality on real notes | Phase 2 |
-| Audio retention default | keep / discard after distill | Discard raw audio by default, keep transcript N days | Phase 2 |
+| ~~Audio retention default~~ | — | **DECIDED: audio is not persisted in v1** (only transcript + timestamps); an opt-in audio-retention toggle is deferred until a use case pulls it, at which point the retention policy must cover it. Transcript retention (distill then discard after N days) stays the v1 policy. | ✅ Closed |
 | Claude Code invocation | headless CLI vs Agent SDK | Verify current docs at implementation time | Phase 3 |
 
 ## 8. Risks & mitigations

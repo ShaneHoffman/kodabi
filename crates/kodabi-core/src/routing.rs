@@ -43,7 +43,7 @@ const SATURATION_WEIGHT: f64 = 2.0;
 /// auto-filing requires net evidence worth three unopposed body-level signals
 /// (`3/(3+K)`, `0.6` at the current `K = 2`). Written in terms of
 /// [`SATURATION_WEIGHT`] so retuning the curve keeps that meaning instead of
-/// silently changing what the threshold demands. The future
+/// silently changing what the threshold demands. The
 /// `KODABI_ROUTING_THRESHOLD` env override is applied at the src-tauri
 /// boundary, never read here — core takes config as a parameter.
 pub const DEFAULT_THRESHOLD: f64 = 3.0 / (3.0 + SATURATION_WEIGHT);
@@ -124,7 +124,10 @@ pub struct ProjectScore {
     pub evidence: f64,
 }
 
-/// Errors produced while discovering projects or loading their signals.
+/// A fatal error discovering the vault's projects — the candidate set could not
+/// even be enumerated. A single project's *glossary* failing to load is not one
+/// of these: that is contained and reported as a [`GlossaryLoadFailure`], never
+/// aborting the whole load (see [`load_project_signals`]).
 #[derive(Debug, thiserror::Error)]
 pub enum RoutingError {
     #[error("project discovery I/O failed at {path}: {source}")]
@@ -133,8 +136,21 @@ pub enum RoutingError {
         #[source]
         source: io::Error,
     },
-    #[error(transparent)]
-    Glossary(#[from] GlossaryError),
+}
+
+/// A project whose `_glossary.yml` could not be loaded. Routing proceeds with
+/// this project treated as having no vocabulary — it still matches its own name
+/// and still receives notes — so a broken glossary is *contained* to its own
+/// project instead of disabling routing vault-wide. The error rides out for the
+/// caller to surface: a malformed or duplicate-term glossary is a user-fixable
+/// mistake worth reporting, just not worth losing the rest of the vault's
+/// routing over.
+#[derive(Debug)]
+pub struct GlossaryLoadFailure {
+    /// The project slug whose glossary failed to load.
+    pub project: String,
+    /// Why it failed (malformed YAML, duplicate term).
+    pub error: GlossaryError,
 }
 
 // ---------------------------------------------------------------------------
@@ -446,18 +462,40 @@ fn walk_projects(
 
 /// [`discover_projects`] plus each project's glossary — the one-call signal
 /// loader for [`route`]. A project without a `_glossary.yml` contributes an
-/// empty glossary; a malformed or duplicate-term file is surfaced as an error
-/// (a user-fixable mistake worth reporting, not routing around).
-pub fn load_project_signals(vault_root: &Path) -> Result<Vec<ProjectSignals>, RoutingError> {
+/// empty glossary.
+///
+/// Discovery I/O failure is fatal (the candidate set can't be enumerated), but a
+/// single project's malformed or duplicate-term glossary is *contained*: that
+/// project loads with an empty glossary — it still matches its own name and
+/// still receives notes — and its error is returned in the second field for the
+/// caller to surface. One project's broken `_glossary.yml` never disables
+/// routing for the rest of the vault; the mistake is reported, not allowed to
+/// take every other project's routing down with it. (The margin rule already
+/// guards against the miscategorization that a missing glossary might otherwise
+/// cause: routing into a project still demands net evidence over the runner-up.)
+pub fn load_project_signals(
+    vault_root: &Path,
+) -> Result<(Vec<ProjectSignals>, Vec<GlossaryLoadFailure>), RoutingError> {
     let projects = discover_projects(vault_root)?;
     let mut signals = Vec::with_capacity(projects.len());
+    let mut failures = Vec::new();
     for project in projects {
         // `note::project_dir` is the writer's slug→folder mapping; using it
         // here keeps glossaries loading from exactly the folder notes land in.
-        let glossary = Glossary::load(&project_dir(vault_root, &project))?;
-        signals.push(ProjectSignals { project, glossary });
+        match Glossary::load(&project_dir(vault_root, &project)) {
+            Ok(glossary) => signals.push(ProjectSignals { project, glossary }),
+            Err(error) => {
+                // Contain the failure: the project still routes on its name, and
+                // the error rides out for the caller to report.
+                signals.push(ProjectSignals {
+                    project: project.clone(),
+                    glossary: Glossary::default(),
+                });
+                failures.push(GlossaryLoadFailure { project, error });
+            }
+        }
     }
-    Ok(signals)
+    Ok((signals, failures))
 }
 
 #[cfg(test)]
@@ -976,23 +1014,29 @@ mod tests {
         fs::create_dir_all(vault.path().join("Growth")).unwrap();
         glossary(&[("MERIDIAN", &[])]).save(&golf_dir).unwrap();
 
-        let signals = load_project_signals(vault.path()).unwrap();
+        let (signals, failures) = load_project_signals(vault.path()).unwrap();
+        assert!(failures.is_empty());
         assert_eq!(signals.len(), 2);
         assert_eq!(signals[0].project, "Growth");
         assert!(signals[0].glossary.is_empty());
         assert_eq!(signals[1].project, "Briarwood Golf");
         assert!(signals[1].glossary.get("meridian").is_some());
 
-        // A malformed glossary is a surfaced error, not a silent skip.
+        // A malformed glossary is contained, not fatal: the project loads with
+        // an empty glossary and the error rides out in the failures list,
+        // leaving every other project's signals intact.
         fs::write(
             vault.path().join("Growth").join("_glossary.yml"),
             "terms: [\n",
         )
         .unwrap();
-        assert!(matches!(
-            load_project_signals(vault.path()),
-            Err(RoutingError::Glossary(_))
-        ));
+        let (signals, failures) = load_project_signals(vault.path()).unwrap();
+        assert_eq!(signals.len(), 2);
+        assert_eq!(failures.len(), 1);
+        assert_eq!(failures[0].project, "Growth");
+        assert_eq!(signals[0].project, "Growth");
+        assert!(signals[0].glossary.is_empty());
+        assert!(signals[1].glossary.get("meridian").is_some());
     }
 
     // -- integration: score → split → write_note → re-parse ----------------
@@ -1017,7 +1061,7 @@ mod tests {
         text: NoteText<'_>,
         title: Option<&str>,
     ) -> (Routing, std::path::PathBuf) {
-        let candidates = load_project_signals(vault).unwrap();
+        let (candidates, _) = load_project_signals(vault).unwrap();
         let routing = route(text, &candidates, &RoutingConfig::default());
         let note = Note::new(
             NoteId::generate().unwrap(),

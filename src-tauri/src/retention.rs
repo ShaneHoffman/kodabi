@@ -62,4 +62,18 @@ fn prune_once(app: &AppHandle) {
         }
         Err(err) => eprintln!("retention prune failed: {err}"),
     }
+
+    // Piggyback the in-flight sweep on this cadence: delete only un-recoverable
+    // spill directories that are safely past the grace window (recoverable ones
+    // are retried at launch, never swept). Independent of the retention policy —
+    // an in-flight leftover is process wreckage, not a kept session.
+    let inflight_root = kodabi_core::inflight::inflight_root(&sessions_dir);
+    if let Err(err) = kodabi_core::inflight::sweep_stale(
+        &inflight_root,
+        chrono::Utc::now(),
+        crate::transcribe::INFLIGHT_STALE_GRACE,
+        crate::transcribe::MIN_TRANSCRIBE_DURATION,
+    ) {
+        eprintln!("retention: in-flight sweep failed: {err}");
+    }
 }
