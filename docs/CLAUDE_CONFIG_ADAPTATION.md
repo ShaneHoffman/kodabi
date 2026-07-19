@@ -25,9 +25,11 @@ adaptation. Existing Kodabi config (`rules/copy-style.md`; skills `frontmatter-v
 The stack mismatch drives most skips: Kangentic is Electron + Vite + esbuild + better-sqlite3 with
 a 7-layer IPC bridge, a Zustand/HMR renderer, a PTY/session state machine, an activity engine, and
 a kanban board engine. Kodabi is Tauri + a Rust workspace + React, Windows-only for v1. Kangentic
-also enforces most rules with a `tests/unit/*.test.ts` (vitest) CI scan; Kodabi has no JS test
-runner, so every adopted rule states honest enforcement (the frontmatter validator, the cargo/eslint
-gates, an auditor agent, or review) rather than a ported test.
+also enforces most rules with a `tests/unit/*.test.ts` (vitest) CI scan; Kodabi had no JS test
+runner when this adaptation was made, so every adopted rule states honest enforcement (the
+frontmatter validator, the cargo/eslint gates, an auditor agent, or review) rather than a ported
+test. Kodabi has since gained vitest + Testing Library for the frontend, but it covers the
+load-bearing UI seams rather than scanning the config, so the dispositions below still stand.
 
 ## Agents (9)
 
