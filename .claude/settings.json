@@ -10,7 +10,7 @@
       "Bash(pnpm build:*)",
       "Bash(pnpm test:*)",
       "Bash(pnpm exec eslint:*)",
-      "Bash(pnpm tauri build --no-bundle:*)",
+      "Bash(pnpm tauri:build --no-bundle:*)",
       "Bash(git status:*)",
       "Bash(git diff:*)",
       "Bash(git log:*)",

@@ -5,9 +5,14 @@
 //! mutually-exclusive `parakeet`/`whisper` Cargo features (forwarded from
 //! `kodabi-transcribe`'s own — see that crate's Cargo.toml for the
 //! sherpa-onnx static/shared link-mode conflict that keeps them from ever
-//! coexisting in one binary). Neither is on by default, so the default build
+//! coexisting in one binary). Neither is on by default, so a *debug* build
 //! transcribes with `kodabi_core::transcription::MockEngine` and stays
-//! native-dependency-free (CI-green ahead of #37's benchmark-and-lock).
+//! native-dependency-free (keeping the workspace gates fast and CI-green).
+//!
+//! Release builds are different: the `compile_error!` guard below refuses to
+//! compile a release binary that picked no engine, so a mock build can never
+//! ship. Release builds pass `--features parakeet` (`pnpm tauri:build`), the
+//! engine locked in by `docs/benchmarks/stt-engine-benchmark.md`.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -271,8 +276,16 @@ fn recover_orphan(app: &AppHandle, orphan: RecoverableOrphan) {
             if let Err(err) = orphan.remove() {
                 eprintln!("capture recovery: failed to remove recovered session: {err}");
             }
+            // Same real-engines-only gate as the normal capture path above.
             #[cfg(any(feature = "parakeet", feature = "whisper"))]
-            crate::distill_cmds::spawn_distill(app, path);
+            if !crate::distill_cmds::spawn_distill(app, path.clone()) {
+                // Recovery runs at startup, before anything else can queue a
+                // distill, so this would mean a duplicate recovered path.
+                eprintln!(
+                    "distill: {} is already queued; not queuing it twice",
+                    path.display()
+                );
+            }
         }
         Err(message) => {
             eprintln!("capture recovery pipeline failed: {message}");
@@ -564,6 +577,23 @@ fn build_engine() -> transcription::Result<Box<dyn TranscriptionEngine>> {
     .apply_env_overrides();
     Ok(Box::new(whisper_with_vad(whisper_config, vad_config)?))
 }
+
+// Release builds must ship a real engine. A `MockEngine` release would
+// silently "transcribe" placeholder text and never run the distill pass (its
+// call sites above are cfg-gated to the real engines), so the flagship
+// capture -> note flow would not exist in the shipped binary. Debug builds
+// keep the mock, which is what every workspace gate and `pnpm tauri dev` uses.
+//
+// NOTE: CI's `app` job asserts this guard fires by grepping for the message
+// below. Reword it and `.github/workflows/ci.yml` must change with it.
+#[cfg(all(
+    not(debug_assertions),
+    not(any(feature = "parakeet", feature = "whisper"))
+))]
+compile_error!(
+    "release builds must ship a real STT engine: build with `--features parakeet` \
+     (canonical: `pnpm tauri:build`); the MockEngine fallback is debug-only"
+);
 
 #[cfg(not(any(feature = "parakeet", feature = "whisper")))]
 fn build_engine() -> transcription::Result<Box<dyn TranscriptionEngine>> {

@@ -48,13 +48,16 @@ investigate before doing anything with them.
   push or open a PR that omits changes currently sitting in the working tree.
 
 ## 3. Verify it builds
-CI never builds the Tauri desktop app. This step is the one place that actually confirms it
-compiles and links on Windows, so it runs before anything is pushed:
+CI's `app` job release-builds the desktop app, but only when a Rust surface changed. This step
+confirms it compiles and links on Windows unconditionally, before anything is pushed:
 - `pnpm install --frozen-lockfile` — installs frontend deps (worktrees start without `node_modules`).
-- `pnpm tauri build --no-bundle` — release compile + link of the desktop app (no installer
-  packaging). This one command covers everything: it runs `pnpm build` itself (the
-  `beforeBuildCommand` in `tauri.conf.json`, generating the `dist/` that
-  `tauri::generate_context!` embeds) and release-compiles the full Rust workspace.
+- `pnpm tauri:build --no-bundle` — release compile + link of the desktop app in its shipping
+  configuration (`--features parakeet`; no installer packaging). This one command covers
+  everything: it runs `pnpm build` itself (the `beforeBuildCommand` in `tauri.conf.json`,
+  generating the `dist/` that `tauri::generate_context!` embeds) and release-compiles the full
+  Rust workspace. Use the `tauri:build` script, not a bare `pnpm tauri build`: a release build
+  without an engine feature is rejected by the `compile_error!` guard in
+  `src-tauri/src/transcribe.rs`.
 
 If this fails, STOP — fix the build first. Do not push or open/update a PR for code that
 doesn't build.
@@ -116,8 +119,9 @@ diverged and still conflict with it.
 - If `mergeable` is `MERGEABLE`: no textual conflict. Continue to step 11. Note that a clean
   *textual* merge doesn't guarantee a clean *build* — if `main` has moved substantially since
   step 3 (e.g. a signature or symbol this branch uses changed without touching the same lines), a
-  semantic break can slip through, and CI never builds the Tauri app (see step 3). When main has
-  advanced non-trivially, re-run step 3's build to be sure before continuing.
+  semantic break can slip through, and CI only builds the Tauri app when a Rust surface changed
+  (see step 3). When main has advanced non-trivially, re-run step 3's build to be sure before
+  continuing.
 - If `mergeable` is `CONFLICTING`:
   1. `git merge origin/main --no-edit` to surface the conflicting files locally.
   2. Resolve each conflict on its actual merits — don't blindly keep "ours" or "theirs". A conflict
@@ -128,7 +132,7 @@ diverged and still conflict with it.
   3. Stage each resolved file (`git add <file>`), then confirm no markers remain anywhere:
      `grep -rn '^<<<<<<<\|^|||||||\|^=======\|^>>>>>>>'` (excluding build output). The `|||||||`
      alternative catches the base-section marker left by `diff3`/`zdiff3` conflict styles.
-  4. Re-run **step 3's build verification** (`pnpm tauri build --no-bundle`) — conflict resolution
+  4. Re-run **step 3's build verification** (`pnpm tauri:build --no-bundle`) — conflict resolution
      can silently break the compile/link step 3 already validated once. If your resolution touched
      Rust, also run the pre-commit gates from the repo `CLAUDE.md` (`cargo fmt --all --check`,
      `cargo clippy --workspace --all-targets --locked -- -D warnings`, `cargo test --workspace

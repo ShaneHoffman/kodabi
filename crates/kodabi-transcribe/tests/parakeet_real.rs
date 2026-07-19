@@ -4,10 +4,12 @@
 //! produces no phantom text.
 //!
 //! Every test is `#[ignore]` (mirrors `crates/kodabi-audio/tests/loopback.rs`)
-//! because it needs ~630 MB of locally-downloaded ONNX model files that are
-//! not committed to the repo and not available in CI. Run locally after
-//! downloading `sherpa-onnx-nemo-parakeet-tdt-0.6b-v2` (int8) and
-//! `silero_vad.onnx`, pointing the env vars below at them:
+//! because it needs ~630 MB of ONNX model files that are not committed to the
+//! repo. CI's `app` job downloads and caches them, then runs this target with
+//! `--ignored` so the shipping engine is proven end-to-end on every Rust
+//! change; the speech fixture it transcribes *is* committed. Run it locally
+//! the same way, after downloading `sherpa-onnx-nemo-parakeet-tdt-0.6b-v2`
+//! (int8) and `silero_vad.onnx` and pointing the env vars below at them:
 //!
 //! ```text
 //! PARAKEET_ENCODER=... PARAKEET_DECODER=... PARAKEET_JOINER=... \
