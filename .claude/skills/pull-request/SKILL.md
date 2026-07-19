@@ -137,5 +137,23 @@ diverged and still conflict with it.
      and resolve again. A `mergeStateStatus` of `UNSTABLE` once `mergeable` is `MERGEABLE` just
      means CI is still running on the fresh push — not a conflict.
 
-## 11. Stop
+## 11. Watch CI and fix failures
+Once the PR is open (and mergeable), hand the human a green PR rather than a pending one:
+- `gh pr checks --watch` — wait for the CI checks on this PR to settle.
+- If everything passes, continue to step 12.
+- If a check fails: find the failed run id with
+  `gh run list --branch <branch> --limit 10 --json databaseId,conclusion,workflowName`
+  (`<branch>` from `git branch --show-current`), then read its log with
+  `gh run view <run-id> --log-failed` — the bare `gh run view --log-failed` needs a run id and
+  errors non-interactively. Reproduce and fix
+  locally, then run the relevant pre-commit gates for the surface you touched (the `CLAUDE.md`
+  gates — `cargo fmt`/`clippy`/`test`, and `pnpm exec eslint . --max-warnings=0` + `pnpm build`
+  for frontend). Commit the fix as a **new** commit (never amend), then `git push` (plain push;
+  use `--force-with-lease` only if you had to rebase onto `main`, never a bare `--force`).
+- **Max 3 fix cycles.** If checks are still red after the third, stop and report the failure to
+  the user with the failing log — don't keep looping.
+- **Never bypass a failing check and never merge.** `--admin`, merge-queue overrides, and any
+  "skip checks" path are out of bounds; your job is a green PR, not a merged one.
+
+## 12. Stop
 Report the PR URL and a one-line summary of what shipped. Do not merge — a human reviews and merges.

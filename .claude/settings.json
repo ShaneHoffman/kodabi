@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo fmt:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo check:*)",
+      "Bash(cargo build:*)",
+      "Bash(pnpm install:*)",
+      "Bash(pnpm build:*)",
+      "Bash(pnpm exec eslint:*)",
+      "Bash(pnpm tauri build --no-bundle:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git show:*)",
+      "Bash(git branch:*)",
+      "Bash(git fetch:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(gh pr list:*)",
+      "Bash(gh pr view:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(node .claude/skills/frontmatter-validator/:*)",
+      "WebFetch(domain:tauri.app)",
+      "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:doc.rust-lang.org)",
+      "WebFetch(domain:react.dev)",
+      "WebFetch(domain:tailwindcss.com)"
+    ],
+    "deny": []
+  }
+}
