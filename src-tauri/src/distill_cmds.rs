@@ -1,16 +1,18 @@
 //! The end-of-meeting distill pass's shell wiring: a thin command + the
 //! background spawn that [`crate::transcribe`] chains after saving a raw
 //! session. All real logic lives in `kodabi_core::distill`; this module only
-//! resolves the KB root, builds the headless runner, and reports progress —
-//! same shape as `transcribe.rs`'s pipeline wiring.
+//! resolves the KB root, builds the headless runner, resolves the routing
+//! threshold from the environment (via [`crate::routing_env`]), and reports
+//! progress — same shape as `transcribe.rs`'s pipeline wiring.
 
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 
-use kodabi_core::distill::{inbox_routing, DistillError};
+use kodabi_core::distill::{route_distilled, DistillError};
 use kodabi_llm::{ClaudeConfig, ClaudeRunner};
 use tauri::{AppHandle, Emitter, Manager};
 
+use crate::routing_env::routing_config_from_env;
 use crate::settings_cmds::SettingsState;
 use crate::transcribe::knowledge_base_dir;
 
@@ -22,10 +24,19 @@ pub const DISTILL_STATE_EVENT: &str = "distill:state";
 /// matching variant (mirrors `transcription:state`). `Skipped` is terminal
 /// like `Saved`/`Error` but benign: nothing distillable (a silent capture),
 /// so no note — and no error to alarm anyone with.
+///
+/// `RoutingFallback` is the one *non-terminal* benign variant besides
+/// `Distilling`: project discovery failed outright (the vault is unreadable), so
+/// no project could be scored and the note files to Inbox, but the distill
+/// itself succeeds. Emitted between `Distilling` and the terminal event; the
+/// frontend logs it and leaves its terminal-state label machine untouched. (A
+/// single project's malformed `_glossary.yml` does *not* land here: it is
+/// contained to that project and merely logged, since routing still runs.)
 #[derive(Clone, serde::Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 enum DistillStateEvent {
     Distilling,
+    RoutingFallback { message: String },
     Saved { path: String },
     Skipped { reason: String },
     Error { message: String },
@@ -142,21 +153,48 @@ fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
 }
 
 /// Resolves the KB root, builds the distill-configured runner, and runs the
-/// pure `kodabi-core` pipeline. Routing is the pre-#43 Inbox placeholder.
+/// pure `kodabi-core` pipeline. Routing goes through the confidence-split
+/// router (`route_distilled`) with the threshold resolved from the environment
+/// at this boundary; if signals can't load it fails soft to Inbox and emits a
+/// [`DistillStateEvent::RoutingFallback`] warning rather than losing the note.
 /// Errors collapse to a message string — the house IPC/event convention —
 /// except the empty-transcript case, which stays typed so [`spawn_distill`]
 /// can report it as a skip rather than a failure.
 fn run(app: &AppHandle, session_path: &Path) -> Result<PathBuf, DistillFailure> {
     let kb = knowledge_base_dir(app).map_err(DistillFailure::Other)?;
     let runner = ClaudeRunner::new(ClaudeConfig::distill_from_env());
-    kodabi_core::distill::distill_session(&runner, &kb, session_path, &|_| inbox_routing())
-        .map(|distilled| distilled.path)
-        .map_err(|err| match err {
-            DistillError::EmptyTranscript => DistillFailure::EmptyTranscript {
-                reason: err.to_string(),
-            },
-            other => DistillFailure::Other(other.to_string()),
-        })
+    let config = routing_config_from_env();
+    kodabi_core::distill::distill_session(&runner, &kb, session_path, &|output, body| {
+        let (routing, diagnostics) = route_distilled(&kb, output, body, &config);
+        // Discovery failed outright: the note fell back to Inbox. Warn the UI so
+        // the misrouting is visible, not silent.
+        if let Some(err) = &diagnostics.discovery_failure {
+            let message =
+                format!("routing signals failed to load; filing this note to Inbox: {err}");
+            eprintln!("distill: {message}");
+            let _ = app.emit(
+                DISTILL_STATE_EVENT,
+                DistillStateEvent::RoutingFallback { message },
+            );
+        }
+        // A single project's glossary is broken but routing still ran (contained
+        // to that project). Log it so the user can fix the file; the note landed
+        // wherever the surviving signals sent it, so this is not a fallback.
+        for failure in &diagnostics.glossary_failures {
+            eprintln!(
+                "distill: project \"{}\" has an unreadable glossary; it routes on its name only until fixed: {}",
+                failure.project, failure.error
+            );
+        }
+        routing
+    })
+    .map(|distilled| distilled.path)
+    .map_err(|err| match err {
+        DistillError::EmptyTranscript => DistillFailure::EmptyTranscript {
+            reason: err.to_string(),
+        },
+        other => DistillFailure::Other(other.to_string()),
+    })
 }
 
 /// Validates an IPC-supplied session path: the absolute path of a `.jsonl`
@@ -191,6 +229,21 @@ fn validate_session_path(kb: &Path, raw: &str) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn routing_fallback_event_serializes_with_a_snake_case_status_tag() {
+        // The frontend's `useDistillState` switches on this exact wire shape;
+        // lock it so a rename can't silently break the pass-through filter.
+        let value = serde_json::to_value(DistillStateEvent::RoutingFallback {
+            message: "boom".into(),
+        })
+        .unwrap();
+
+        assert_eq!(
+            value,
+            serde_json::json!({ "status": "routing_fallback", "message": "boom" })
+        );
+    }
 
     #[test]
     fn accepts_a_jsonl_directly_inside_the_sessions_dir() {

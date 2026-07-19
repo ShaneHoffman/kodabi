@@ -92,7 +92,7 @@ pub fn toggle_capture(app: &AppHandle) {
         let active = state.is_active().unwrap_or(false);
         let consent = consent_acknowledged(&app);
         let result = match next_action(active, consent) {
-            ToggleAction::Start => start_capture_impl(&state),
+            ToggleAction::Start => start_capture_impl(&app, &state),
             ToggleAction::Stop => stop_capture_and_transcribe(&app, &state),
             ToggleAction::RequireConsent => {
                 // Surface the app window and let the frontend open the nudge.

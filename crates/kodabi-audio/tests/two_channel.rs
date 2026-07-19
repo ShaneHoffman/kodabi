@@ -1,7 +1,9 @@
 use std::time::Duration;
 
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
-use kodabi_audio::{Capture, CaptureSource, Combiner, ResampleParams, SessionChannel};
+use kodabi_audio::{
+    Capture, CaptureSource, CombinedSession, Combiner, ResampleParams, SessionChannel,
+};
 
 /// Direct verification of this ticket's "Done when": mic and loopback
 /// capture in parallel, get combined by `Combiner` into one time-aligned
@@ -21,7 +23,7 @@ fn two_channel_session_is_aligned_and_round_trips_through_wav() {
         Capture::start(CaptureSource::Microphone, 256).expect("failed to start microphone capture");
 
     let combiner =
-        Combiner::start(48_000, ResampleParams::default()).expect("failed to start combiner");
+        Combiner::start(48_000, ResampleParams::default(), None).expect("failed to start combiner");
     assert!(combiner.attach(SessionChannel::Mic, microphone.items()));
     assert!(combiner.attach(SessionChannel::System, loopback.items()));
 
@@ -32,7 +34,11 @@ fn two_channel_session_is_aligned_and_round_trips_through_wav() {
     // before `finish()` can observe disconnection and return.
     loopback.stop();
     microphone.stop();
-    let session = combiner.finish();
+    // No spill configured, so the combiner always finalizes in memory.
+    let session = match combiner.finish() {
+        CombinedSession::InMemory(session) => session,
+        CombinedSession::Spilled(_) => panic!("unexpected spilled session"),
+    };
 
     assert_eq!(session.sample_rate(), 48_000);
 
