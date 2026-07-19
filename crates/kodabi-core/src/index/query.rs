@@ -8,9 +8,14 @@ use rusqlite::{params, params_from_iter, OptionalExtension, Row};
 use super::note::{normalize_date_to_utc, IndexedNote, NoteRow};
 use super::{NoteIndex, Result};
 
-/// The columns [`map_row`] reads, in order — shared by the by-id, by-project,
-/// and hybrid-search (`super::search`) queries so they stay in lockstep.
-pub(super) const NOTE_COLUMNS: &str =
+/// The columns [`map_row`] reads, in order — shared by the by-id and by-project
+/// queries so the two stay in lockstep.
+///
+/// Hybrid search (`super::search`) deliberately does *not* use this list: a
+/// `SearchHit` carries no body, so hydrating a page through these columns would
+/// read every hit's full text only to drop it. That surface has its own
+/// narrower list.
+const NOTE_COLUMNS: &str =
     "id, path, title, type, project, date_raw, date_utc, source, confidence, body";
 
 impl NoteIndex {
@@ -244,7 +249,7 @@ impl NoteIndex {
 
 /// Builds a [`NoteRow`] from a `SELECT` of [`NOTE_COLUMNS`]. `tags` are filled
 /// separately by the caller.
-pub(super) fn map_row(row: &Row<'_>) -> rusqlite::Result<NoteRow> {
+fn map_row(row: &Row<'_>) -> rusqlite::Result<NoteRow> {
     Ok(NoteRow {
         id: row.get("id")?,
         path: row.get("path")?,

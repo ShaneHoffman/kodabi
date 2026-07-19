@@ -63,6 +63,15 @@ pub enum IndexError {
     /// produced (wrong version prefix, bad score encoding, or empty id).
     #[error("invalid search cursor {value:?}")]
     Cursor { value: String },
+    /// A `search_notes` filter array carried more values than the query planner
+    /// will bind. Rejected rather than truncated: silently dropping a value
+    /// would widen an `all`-style filter into a different question.
+    #[error("too many {field} filter values: {got} (maximum {max})")]
+    FilterTooLarge {
+        field: &'static str,
+        max: usize,
+        got: usize,
+    },
 }
 
 /// `Result` specialised to [`IndexError`].

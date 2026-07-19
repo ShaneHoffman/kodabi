@@ -19,6 +19,26 @@
 //! ties broken by `id` ascending, giving a total order that pagination cursors
 //! walk deterministically.
 //!
+//! ## Pagination
+//!
+//! An RRF score is derived from a note's *position* in each arm, not from
+//! anything intrinsic to the note, so every score in the list shifts when the
+//! corpus changes or when an arm drops out. That makes a stored score a poor
+//! resume key on its own. Two things keep the walk exact anyway:
+//!
+//! - A cursor names the boundary **note**, and the resume point is re-read from
+//!   *this* run's fused list by that id. The encoded score is only a fallback
+//!   for a boundary note that has since been deleted. So a note inserted above
+//!   the cursor — which shifts every score below it — no longer re-serves or
+//!   skips the rows around the boundary, and neither does the vector arm
+//!   dropping out mid-walk.
+//! - A cursor also carries how many positions have been served, and each arm
+//!   fetches that many candidates plus [`CANDIDATE_HEADROOM`]. The pool
+//!   therefore always extends past the page being built, so `has_more` reports
+//!   the corpus running out rather than the pool running out — up to the
+//!   [`MAX_CANDIDATES`] ceiling, past which `total_estimate` goes `null` to say
+//!   the count is no longer known.
+//!
 //! ## Degradation
 //!
 //! The default app build ships without an embedder (the `bge` backend is
@@ -32,11 +52,10 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use rusqlite::types::Value;
-use rusqlite::{params, params_from_iter, OptionalExtension};
+use rusqlite::{params_from_iter, Row};
 
 use super::embed::embedding_to_blob;
-use super::note::{NoteRow, NoteType};
-use super::query::{map_row, NOTE_COLUMNS};
+use super::note::NoteType;
 use super::{IndexError, NoteIndex, Result, EMBEDDING_DIM};
 use crate::embed::Embedder;
 
@@ -45,25 +64,37 @@ use crate::embed::Embedder;
 /// values flatten the contribution of top ranks (less weight on being #1).
 const RRF_K: f64 = 60.0;
 
-/// How many FTS hits enter fusion, by `bm25` order. A chatty query with a
-/// common term can match a lot of notes; the cap keeps fusion bounded while
-/// still covering far more than any one page.
-const FTS_CANDIDATES: i64 = 200;
+/// How far past the page being built each arm fetches candidates. The surplus
+/// is what lets `has_more` mean "the corpus has more" rather than "the pool
+/// ended here": if an arm comes back with fewer than the requested depth, its
+/// ranking really is exhausted.
+const CANDIDATE_HEADROOM: usize = 200;
 
-/// How many *chunk* vectors the KNN over-fetches before per-note dedup and
-/// filtering. Over-fetched because a note can own several chunks and because
-/// post-filtering shrinks the pool: v1 uses a fixed over-fetch rather than
-/// iterative widening, so under a highly selective filter only *semantic-only*
-/// recall degrades — the FTS arm still filters over the whole corpus in SQL.
-const VEC_CHUNK_CANDIDATES: i64 = 400;
+/// Multiplier applied to the vector arm's *chunk* depth before per-note dedup
+/// and filtering. Over-fetched because a note can own several chunks and
+/// because post-filtering shrinks the pool: v1 uses a fixed over-fetch rather
+/// than iterative widening, so under a highly selective filter only
+/// *semantic-only* recall degrades — the FTS arm still filters over the whole
+/// corpus in SQL.
+const VEC_CHUNK_OVERFETCH: usize = 2;
 
-/// How many notes the vector arm contributes after deduping to the nearest
-/// chunk per note.
-const VEC_NOTE_CANDIDATES: usize = 200;
+/// Ceiling on candidate depth however deep the caller pages. Each page re-runs
+/// both arms at `served + limit + headroom`, so an unbounded walk would grow
+/// without limit; past this depth the search stops widening and says so by
+/// reporting a `null` `total_estimate`.
+const MAX_CANDIDATES: usize = 5_000;
 
 /// Cap on query tokens fed to the FTS arm — a guard against a pathological
 /// multi-kilobyte query, not a limit real queries hit.
 const MAX_QUERY_TOKENS: usize = 64;
+
+/// Cap on distinct values in a `tags` or `type` filter. Each value binds one
+/// SQL parameter in both arms, and SQLite's `SQLITE_MAX_VARIABLE_NUMBER` is 999
+/// on common builds — without this, a large array fails deep in the driver with
+/// an opaque "too many SQL variables". Overflow is an error rather than a
+/// truncation because dropping a value from a `tag_match: all` filter would
+/// quietly widen it into a different question.
+const MAX_FILTER_VALUES: usize = 64;
 
 /// Character budget for a vector-only hit's snippet (the note's own chunk text).
 /// FTS hits get their snippet from `snippet()` instead.
@@ -158,10 +189,13 @@ pub struct SearchHit {
     pub snippet: String,
 }
 
-/// Cursor-based pagination envelope. Cursors are opaque and mutation-safe: they
-/// encode the fused sort key + id of the last hit, not an offset, so the index
-/// changing under the watcher between pages never skips or duplicates rows at
-/// the page boundary.
+/// Cursor-based pagination envelope. Cursors are opaque and name the boundary
+/// *note*, not an offset, so a note added or removed elsewhere in the ranking
+/// between pages never re-serves or skips the rows around that boundary (see
+/// the module's Pagination section for why the encoded score alone would not be
+/// enough). A note that is inserted *above* the boundary after the caller has
+/// already passed that position is simply not seen on this walk — the standard
+/// keyset trade, and the one the contract asks for.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct PageInfo {
     /// True if more results exist beyond this page.
@@ -169,8 +203,9 @@ pub struct PageInfo {
     /// Token to pass as the next request's `cursor`; `null` when `has_more` is
     /// false.
     pub next_cursor: Option<String>,
-    /// Approximate total matches (the fused candidate count — a lower bound,
-    /// since the candidate pools are capped), or `null` when not known.
+    /// Exact match count when both arms' rankings were exhausted, or `null`
+    /// once a candidate pool came back full — past that point the true total is
+    /// not known, and reporting the pool size would understate it.
     pub total_estimate: Option<u64>,
 }
 
@@ -181,11 +216,54 @@ pub struct SearchResults {
     pub page: PageInfo,
 }
 
-/// A decoded pagination cursor: the fused sort key of the last hit on the prior
-/// page.
+/// A decoded pagination cursor: which note the prior page ended on, and how
+/// many fused positions have been served so far.
 struct CursorKey {
+    /// The boundary note's fused score *as of the prior page* — a fallback used
+    /// only when that note is no longer in the fused list.
     score: f64,
+    /// Fused positions consumed by prior pages. Sizes this run's candidate
+    /// pools; never used to locate the boundary, so a stale value costs a
+    /// little work and cannot misplace a page.
+    served: usize,
     id: String,
+}
+
+/// The `notes` columns a [`SearchHit`] needs, in [`map_hit_row`]'s order.
+///
+/// Deliberately narrower than `query::NOTE_COLUMNS`: a hit carries a snippet
+/// rather than a body, so hydrating through the full list would read every
+/// hit's complete text — megabytes for a page of meeting notes — only to drop
+/// it. `date_utc` is likewise omitted; hits report the verbatim `date_raw`.
+const HIT_COLUMNS: &str = "id, path, title, type, project, date_raw, source, confidence";
+
+/// A hydrated `notes` row for one hit. `tags` are filled separately, batched
+/// across the page.
+struct HitRow {
+    id: String,
+    path: String,
+    title: String,
+    note_type: NoteType,
+    project: Option<String>,
+    date: String,
+    source: String,
+    confidence: Option<f64>,
+    tags: Vec<String>,
+}
+
+/// Builds a [`HitRow`] from a `SELECT` of [`HIT_COLUMNS`].
+fn map_hit_row(row: &Row<'_>) -> rusqlite::Result<HitRow> {
+    Ok(HitRow {
+        id: row.get("id")?,
+        path: row.get("path")?,
+        title: row.get("title")?,
+        note_type: row.get("type")?,
+        project: row.get("project")?,
+        date: row.get("date_raw")?,
+        source: row.get("source")?,
+        confidence: row.get("confidence")?,
+        tags: Vec::new(),
+    })
 }
 
 /// A shared filter fragment (`AND`-joined SQL clauses) plus its bound values,
@@ -220,80 +298,92 @@ impl NoteIndex {
     ) -> Result<SearchResults> {
         let limit = params.limit.clamp(MIN_LIMIT, MAX_LIMIT) as usize;
 
+        // Validate every input before the empty-query shortcut, so a malformed
+        // cursor or date bound is rejected the same way whatever the query says.
+        let filters = build_filters(params)?;
+        let cursor = params.cursor.as_deref().map(decode_cursor).transpose()?;
+
         // A query with nothing to match on: succeed with an empty page rather
         // than error — absence is a valid answer (MCP_TOOL_SURFACE.md §2).
         if params.query.trim().is_empty() {
             return Ok(empty_results());
         }
 
-        let filters = build_filters(params)?;
-        let cursor = params.cursor.as_deref().map(decode_cursor).transpose()?;
+        // Candidate depth covers everything already served plus this page plus
+        // headroom, so the pool outruns the walk instead of ending under it.
+        let served = cursor.as_ref().map_or(0, |key| key.served);
+        let depth = served
+            .saturating_add(limit)
+            .saturating_add(CANDIDATE_HEADROOM)
+            .min(MAX_CANDIDATES);
 
         // Arm 1: full-text. Skipped when sanitizing leaves no usable term, so no
         // invalid FTS5 MATCH expression ever reaches SQLite.
-        let fts = match sanitize_fts_query(&params.query) {
-            Some(expr) => self.fts_arm(&expr, &filters)?,
+        let fts_expr = sanitize_fts_query(&params.query);
+        let fts = match &fts_expr {
+            Some(expr) => self.fts_arm(expr, &filters, depth)?,
             None => Vec::new(),
         };
 
         // Arm 2: semantic. Degrades to empty on any embedding problem.
-        let vector = self.vector_candidates(&params.query, embedder, &filters)?;
+        let vector = self.vector_candidates(&params.query, embedder, &filters, depth)?;
+
+        // An arm that came back full was cut off, so the fused list is a prefix
+        // of the true ranking. `exact` gates `total_estimate`; `widenable` gates
+        // `has_more`, and excludes the ceiling case so the walk still ends.
+        let pools_full = fts.len() >= depth || vector.len() >= depth;
+        let exact = !pools_full;
+        let widenable = pools_full && depth < MAX_CANDIDATES;
 
         // Fuse via RRF: a note's score sums 1/(k+rank) over the arms it appears
         // in, so both-arms notes rise above single-arm ones.
-        let mut scores: HashMap<String, f64> = HashMap::new();
-        for (rank0, (id, _)) in fts.iter().enumerate() {
-            *scores.entry(id.clone()).or_insert(0.0) += rrf_term(rank0);
+        let mut scores: HashMap<&str, f64> = HashMap::new();
+        for (rank0, id) in fts.iter().enumerate() {
+            *scores.entry(id.as_str()).or_insert(0.0) += rrf_term(rank0);
         }
         for (rank0, (id, _)) in vector.iter().enumerate() {
-            *scores.entry(id.clone()).or_insert(0.0) += rrf_term(rank0);
+            *scores.entry(id.as_str()).or_insert(0.0) += rrf_term(rank0);
         }
 
         // Total order: score descending, ties by id ascending — the id tiebreak
         // is load-bearing because equal RRF scores are common and pagination
         // needs a deterministic order.
-        let mut fused: Vec<(String, f64)> = scores.into_iter().collect();
+        let mut fused: Vec<(&str, f64)> = scores.into_iter().collect();
         fused.sort_by(fused_order);
         let total = fused.len();
 
-        // Keyset pagination: resume strictly after the cursor's fused key.
+        // Keyset pagination: resume strictly after the boundary note. The
+        // boundary's key is re-read from *this* run's list, because an RRF score
+        // is a function of rank — one note inserted above the cursor shifts
+        // every score below it, and trusting the encoded score would then land
+        // the boundary in the wrong place and re-serve a row. The encoded score
+        // is the fallback for a boundary note that has since been deleted.
         let start = match &cursor {
             Some(key) => {
-                let cursor_item = (key.id.clone(), key.score);
-                fused.partition_point(|item| fused_order(item, &cursor_item) != Ordering::Greater)
+                let boundary = fused
+                    .iter()
+                    .find(|(id, _)| *id == key.id.as_str())
+                    .copied()
+                    .unwrap_or((key.id.as_str(), key.score));
+                fused.partition_point(|item| fused_order(item, &boundary) != Ordering::Greater)
             }
             None => 0,
         };
         let end = (start + limit).min(total);
         let page = &fused[start..end];
+        let page_ids: Vec<&str> = page.iter().map(|(id, _)| *id).collect();
 
-        // Hydrate only the page: one row fetch + one batched tag load.
-        let page_ids: Vec<&str> = page.iter().map(|(id, _)| id.as_str()).collect();
-        let mut rows = self.load_note_rows(&page_ids)?;
-        let fts_snippets: HashMap<&str, &str> = fts
-            .iter()
-            .map(|(id, s)| (id.as_str(), s.as_str()))
-            .collect();
-        let vec_seq: HashMap<&str, i64> =
-            vector.iter().map(|(id, seq)| (id.as_str(), *seq)).collect();
+        // Hydrate only the page: one row fetch, one batched tag load, and
+        // snippets sourced per hit below.
+        let mut rows = self.load_hit_rows(&page_ids)?;
+        let mut snippets = self.page_snippets(fts_expr.as_deref(), &fts, &vector, &page_ids)?;
 
         let mut hits = Vec::with_capacity(page.len());
         for (offset, (id, score)) in page.iter().enumerate() {
             // A row can vanish if a concurrent writer deletes it between the arm
             // query and hydration — drop it from the page rather than fail.
-            let Some(row) = rows.remove(id) else {
+            let Some(row) = rows.remove(*id) else {
                 continue;
-            };
-            let snippet = match fts_snippets.get(id.as_str()) {
-                // FTS snippet is query-aware and highlighted — prefer it.
-                Some(snippet) => (*snippet).to_string(),
-                // Vector-only hit: the nearest chunk's own words, truncated.
-                None => {
-                    let seq = vec_seq.get(id.as_str()).copied().unwrap_or(0);
-                    self.chunk_text(id, seq)?
-                        .map(|text| truncate_snippet(&text))
-                        .unwrap_or_default()
-                }
             };
             hits.push(SearchHit {
                 id: row.id,
@@ -307,16 +397,18 @@ impl NoteIndex {
                 confidence: row.confidence,
                 score: *score,
                 rank: (start + offset + 1) as u32,
-                snippet,
+                snippet: snippets.remove(*id).unwrap_or_default(),
             });
         }
 
-        let has_more = end < total;
+        // More results exist if the fused list has some, or if it was cut off
+        // and a deeper re-fetch could reveal some.
+        let has_more = end < total || (widenable && end > 0);
         // Encode from the last *fused* position consumed (not the last hydrated
         // hit) so a concurrently-deleted boundary row still advances the cursor.
         let next_cursor = has_more.then(|| {
-            let (id, score) = &fused[end - 1];
-            encode_cursor(*score, id)
+            let (id, score) = fused[end - 1];
+            encode_cursor(score, end, id)
         });
 
         Ok(SearchResults {
@@ -324,17 +416,22 @@ impl NoteIndex {
             page: PageInfo {
                 has_more,
                 next_cursor,
-                total_estimate: Some(total as u64),
+                total_estimate: exact.then_some(total as u64),
             },
         })
     }
 
-    /// Runs the FTS arm: notes matching `match_expr` (under `filters`), best
-    /// `bm25` first, each with a highlighted snippet. Returns `(id, snippet)`
-    /// in rank order, capped at [`FTS_CANDIDATES`].
-    fn fts_arm(&self, match_expr: &str, filters: &Filters) -> Result<Vec<(String, String)>> {
+    /// Runs the FTS arm: the ids of notes matching `match_expr` (under
+    /// `filters`), best `bm25` first, capped at `depth`.
+    ///
+    /// Ids only — `snippet()` re-reads and re-tokenizes the row's text out of
+    /// the external content table, so computing it for every candidate would
+    /// pay that cost hundreds of times per query to keep at most `limit` of the
+    /// results. [`page_snippets`](Self::page_snippets) does it once the page is
+    /// known.
+    fn fts_arm(&self, match_expr: &str, filters: &Filters, depth: usize) -> Result<Vec<String>> {
         let sql = format!(
-            "SELECT notes.id, snippet(notes_fts, -1, '**', '**', '…', 16)
+            "SELECT notes.id
              FROM notes_fts JOIN notes ON notes.pk = notes_fts.rowid
              WHERE notes_fts MATCH ?{filters}
              ORDER BY bm25(notes_fts) LIMIT ?",
@@ -345,14 +442,77 @@ impl NoteIndex {
         let mut values = Vec::with_capacity(filters.values.len() + 2);
         values.push(Value::Text(match_expr.to_string()));
         values.extend(filters.values.iter().cloned());
-        values.push(Value::Integer(FTS_CANDIDATES));
+        values.push(Value::Integer(depth as i64));
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_from_iter(values), |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        Ok(rows)
+    }
+
+    /// One snippet per hit on the page, keyed by note id.
+    ///
+    /// An FTS hit gets the query-aware highlighted `snippet()`; a vector-only
+    /// hit gets its nearest chunk's own words, truncated. Both are looked up in
+    /// a single batched query over just the page's ids.
+    fn page_snippets(
+        &self,
+        fts_expr: Option<&str>,
+        fts: &[String],
+        vector: &[(String, i64)],
+        page_ids: &[&str],
+    ) -> Result<HashMap<String, String>> {
+        let fts_ids: HashSet<&str> = fts.iter().map(String::as_str).collect();
+        let from_fts: Vec<&str> = page_ids
+            .iter()
+            .copied()
+            .filter(|id| fts_ids.contains(id))
+            .collect();
+
+        let mut snippets = match fts_expr {
+            Some(expr) if !from_fts.is_empty() => self.fts_snippets(expr, &from_fts)?,
+            _ => HashMap::new(),
+        };
+
+        // Whatever the FTS arm didn't cover falls back to the note's nearest
+        // chunk: vector-only hits, plus the rare FTS hit whose row was deleted
+        // between the arm query and the snippet lookup.
+        let vec_seq: HashMap<&str, i64> =
+            vector.iter().map(|(id, seq)| (id.as_str(), *seq)).collect();
+        let chunk_keys: Vec<(&str, i64)> = page_ids
+            .iter()
+            .filter(|id| !snippets.contains_key(**id))
+            .filter_map(|id| vec_seq.get(id).map(|seq| (*id, *seq)))
+            .collect();
+
+        for (note_id, text) in self.chunk_texts(&chunk_keys)? {
+            snippets.insert(note_id, truncate_snippet(&text));
+        }
+        Ok(snippets)
+    }
+
+    /// Highlighted `snippet()` text for the given note ids, in one query. The
+    /// ids are already filtered by the arm that produced them, so this repeats
+    /// only the `MATCH` — the filter clauses would be redundant.
+    fn fts_snippets(&self, match_expr: &str, ids: &[&str]) -> Result<HashMap<String, String>> {
+        let sql = format!(
+            "SELECT notes.id, snippet(notes_fts, -1, '**', '**', '…', 16)
+             FROM notes_fts JOIN notes ON notes.pk = notes_fts.rowid
+             WHERE notes_fts MATCH ? AND notes.id IN ({placeholders})",
+            placeholders = sql_placeholders(ids.len())
+        );
+
+        let mut values = Vec::with_capacity(ids.len() + 1);
+        values.push(Value::Text(match_expr.to_string()));
+        values.extend(ids.iter().map(|id| Value::Text((*id).to_string())));
 
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
             .query_map(params_from_iter(values), |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
             })?
-            .collect::<rusqlite::Result<Vec<(String, String)>>>()?;
+            .collect::<rusqlite::Result<HashMap<String, String>>>()?;
         Ok(rows)
     }
 
@@ -365,6 +525,7 @@ impl NoteIndex {
         query: &str,
         embedder: Option<&dyn Embedder>,
         filters: &Filters,
+        depth: usize,
     ) -> Result<Vec<(String, i64)>> {
         let Some(embedder) = embedder else {
             return Ok(Vec::new());
@@ -375,14 +536,19 @@ impl NoteIndex {
         if query_vec.len() != EMBEDDING_DIM {
             return Ok(Vec::new());
         }
-        self.vector_arm(&query_vec, filters)
+        self.vector_arm(&query_vec, filters, depth)
     }
 
     /// Runs the KNN vector arm: the chunks nearest `query_vec` (under
     /// `filters`), deduped to the nearest chunk per note. Returns `(note_id,
-    /// seq)` in distance order, capped at [`VEC_NOTE_CANDIDATES`]. The `seq` is
-    /// the nearest chunk's index, used to source the note's snippet.
-    fn vector_arm(&self, query_vec: &[f32], filters: &Filters) -> Result<Vec<(String, i64)>> {
+    /// seq)` in distance order, capped at `depth` notes. The `seq` is the
+    /// nearest chunk's index, used to source the note's snippet.
+    fn vector_arm(
+        &self,
+        query_vec: &[f32],
+        filters: &Filters,
+        depth: usize,
+    ) -> Result<Vec<(String, i64)>> {
         // The KNN LIMIT must live inside the subquery (the `vec0` constraint);
         // the join + filter run in the outer query.
         let sql = format!(
@@ -396,9 +562,10 @@ impl NoteIndex {
         );
 
         // Bind order: embedding blob, KNN LIMIT, then the outer filter values.
+        let chunk_depth = depth.saturating_mul(VEC_CHUNK_OVERFETCH);
         let mut values = Vec::with_capacity(filters.values.len() + 2);
         values.push(Value::Blob(embedding_to_blob(query_vec)));
-        values.push(Value::Integer(VEC_CHUNK_CANDIDATES));
+        values.push(Value::Integer(chunk_depth as i64));
         values.extend(filters.values.iter().cloned());
 
         let mut stmt = self.conn.prepare(&sql)?;
@@ -414,7 +581,7 @@ impl NoteIndex {
             let (note_id, seq) = row?;
             if seen.insert(note_id.clone()) {
                 out.push((note_id, seq));
-                if out.len() == VEC_NOTE_CANDIDATES {
+                if out.len() == depth {
                     break;
                 }
             }
@@ -422,23 +589,23 @@ impl NoteIndex {
         Ok(out)
     }
 
-    /// Loads the [`NoteRow`]s for a page of ids (with tags), keyed by id. Ids
+    /// Loads the [`HitRow`]s for a page of ids (with tags), keyed by id. Ids
     /// absent from the index — deleted since the arm queries ran — simply don't
     /// appear in the map.
-    fn load_note_rows(&self, ids: &[&str]) -> Result<HashMap<String, NoteRow>> {
+    fn load_hit_rows(&self, ids: &[&str]) -> Result<HashMap<String, HitRow>> {
         if ids.is_empty() {
             return Ok(HashMap::new());
         }
-        let placeholders = std::iter::repeat_n("?", ids.len())
-            .collect::<Vec<_>>()
-            .join(",");
-        let sql = format!("SELECT {NOTE_COLUMNS} FROM notes WHERE id IN ({placeholders})");
+        let sql = format!(
+            "SELECT {HIT_COLUMNS} FROM notes WHERE id IN ({placeholders})",
+            placeholders = sql_placeholders(ids.len())
+        );
         let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt
-            .query_map(params_from_iter(ids.iter()), map_row)?
-            .collect::<rusqlite::Result<Vec<NoteRow>>>()?;
+            .query_map(params_from_iter(ids.iter()), map_hit_row)?
+            .collect::<rusqlite::Result<Vec<HitRow>>>()?;
 
-        let mut by_id: HashMap<String, NoteRow> =
+        let mut by_id: HashMap<String, HitRow> =
             rows.into_iter().map(|row| (row.id.clone(), row)).collect();
         let present: Vec<&str> = by_id.keys().map(String::as_str).collect();
         let mut tags = self.load_tags_by_ids(&present)?;
@@ -448,16 +615,33 @@ impl NoteIndex {
         Ok(by_id)
     }
 
-    /// The stored text of one chunk, or `None` if it isn't present (a note
-    /// re-chunked between the vector query and this lookup).
-    fn chunk_text(&self, note_id: &str, seq: i64) -> Result<Option<String>> {
-        let mut stmt = self
-            .conn
-            .prepare_cached("SELECT text FROM note_chunks WHERE note_id = ?1 AND seq = ?2")?;
-        let text = stmt
-            .query_row(params![note_id, seq], |row| row.get::<_, String>(0))
-            .optional()?;
-        Ok(text)
+    /// The stored text of each `(note_id, seq)` chunk, keyed by note id, in one
+    /// query. A key with no row — a note re-chunked between the vector query
+    /// and this lookup — is simply absent from the map.
+    fn chunk_texts(&self, keys: &[(&str, i64)]) -> Result<HashMap<String, String>> {
+        if keys.is_empty() {
+            return Ok(HashMap::new());
+        }
+        // One `OR`-ed pair per key rather than a row-value `IN`, which needs a
+        // newer SQLite than the bundled floor guarantees.
+        let predicate = std::iter::repeat_n("(note_id = ? AND seq = ?)", keys.len())
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let sql = format!("SELECT note_id, text FROM note_chunks WHERE {predicate}");
+
+        let mut values = Vec::with_capacity(keys.len() * 2);
+        for (note_id, seq) in keys {
+            values.push(Value::Text((*note_id).to_string()));
+            values.push(Value::Integer(*seq));
+        }
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_from_iter(values), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<HashMap<String, String>>>()?;
+        Ok(rows)
     }
 }
 
@@ -469,8 +653,8 @@ fn rrf_term(rank0: usize) -> f64 {
 /// The fused total order: score descending, ties broken by id ascending.
 /// `total_cmp` gives a deterministic total order over the f64 scores (no NaN is
 /// produced, but this keeps the sort total and clippy-clean).
-fn fused_order(a: &(String, f64), b: &(String, f64)) -> Ordering {
-    b.1.total_cmp(&a.1).then_with(|| a.0.cmp(&b.0))
+fn fused_order(a: &(&str, f64), b: &(&str, f64)) -> Ordering {
+    b.1.total_cmp(&a.1).then_with(|| a.0.cmp(b.0))
 }
 
 /// An empty successful page — the answer for a no-op query or no matches.
@@ -532,24 +716,33 @@ fn build_filters(params: &SearchParams) -> Result<Filters> {
         }
     }
 
-    if !params.types.is_empty() {
-        let placeholders = sql_placeholders(params.types.len());
+    // Both arrays are deduplicated first. The schema marks them `uniqueItems`,
+    // but nothing enforces that on the wire, and a repeat is not harmless: the
+    // `all` branch below compares a DISTINCT count against the list length, so
+    // `["a", "a"]` would demand two distinct tags from a note that can only
+    // ever supply one, and silently match nothing.
+    let types = dedup_types(&params.types);
+    check_filter_size("type", types.len())?;
+    if !types.is_empty() {
+        let placeholders = sql_placeholders(types.len());
         clauses.push(format!("notes.type IN ({placeholders})"));
-        for note_type in &params.types {
+        for note_type in &types {
             values.push(Value::Text(note_type.as_str().to_string()));
         }
     }
 
-    if !params.tags.is_empty() {
-        let placeholders = sql_placeholders(params.tags.len());
+    let tags = dedup_strings(&params.tags);
+    check_filter_size("tags", tags.len())?;
+    if !tags.is_empty() {
+        let placeholders = sql_placeholders(tags.len());
         match params.tag_match {
             TagMatch::Any => {
                 clauses.push(format!(
                     "EXISTS (SELECT 1 FROM note_tags
                      WHERE note_tags.note_pk = notes.pk AND note_tags.tag IN ({placeholders}))"
                 ));
-                for tag in &params.tags {
-                    values.push(Value::Text(tag.clone()));
+                for tag in &tags {
+                    values.push(Value::Text((*tag).to_string()));
                 }
             }
             TagMatch::All => {
@@ -558,28 +751,65 @@ fn build_filters(params: &SearchParams) -> Result<Filters> {
                       WHERE note_tags.note_pk = notes.pk AND note_tags.tag IN ({placeholders}))
                      = ?"
                 ));
-                for tag in &params.tags {
-                    values.push(Value::Text(tag.clone()));
+                for tag in &tags {
+                    values.push(Value::Text((*tag).to_string()));
                 }
-                values.push(Value::Integer(params.tags.len() as i64));
+                values.push(Value::Integer(tags.len() as i64));
             }
         }
     }
 
-    // Date bounds compare against `date_utc` (always `…T..:..:..Z`), so the
-    // filter is by absolute instant, not wall clock. Inclusive both ends.
+    // Date bounds are the note's *local* calendar day — the one the frontmatter
+    // `date` shows the user — not its UTC instant. `date_raw` starts with
+    // `YYYY-MM-DD` in both shapes the schema accepts (date-only, or RFC 3339
+    // with an offset), so its first 10 characters are exactly that day.
+    // Comparing against `date_utc` instead would push an evening note into the
+    // following day: `2026-07-09T20:00:00-07:00` is local July 9 but
+    // `2026-07-10T03:00:00Z` in UTC, and a `date_from: 2026-07-10` filter would
+    // wrongly return it. Inclusive both ends.
     if let Some(from) = &params.date_from {
-        let day = parse_iso_date(from)?;
-        clauses.push("notes.date_utc >= ?".to_string());
-        values.push(Value::Text(format!("{day}T00:00:00Z")));
+        clauses.push("substr(notes.date_raw, 1, 10) >= ?".to_string());
+        values.push(Value::Text(parse_iso_date(from)?));
     }
     if let Some(to) = &params.date_to {
-        let day = parse_iso_date(to)?;
-        clauses.push("notes.date_utc <= ?".to_string());
-        values.push(Value::Text(format!("{day}T23:59:59Z")));
+        clauses.push("substr(notes.date_raw, 1, 10) <= ?".to_string());
+        values.push(Value::Text(parse_iso_date(to)?));
     }
 
     Ok(Filters { clauses, values })
+}
+
+/// Rejects a filter array too large to bind (see [`MAX_FILTER_VALUES`]).
+fn check_filter_size(field: &'static str, got: usize) -> Result<()> {
+    if got > MAX_FILTER_VALUES {
+        return Err(IndexError::FilterTooLarge {
+            field,
+            max: MAX_FILTER_VALUES,
+            got,
+        });
+    }
+    Ok(())
+}
+
+/// The distinct values of `tags`, in first-seen order.
+fn dedup_strings(tags: &[String]) -> Vec<&str> {
+    let mut seen = HashSet::new();
+    tags.iter()
+        .map(String::as_str)
+        .filter(|tag| seen.insert(*tag))
+        .collect()
+}
+
+/// The distinct values of `types`, in first-seen order. A linear scan rather
+/// than a set: [`NoteType`] has three variants, so the list is tiny.
+fn dedup_types(types: &[NoteType]) -> Vec<NoteType> {
+    let mut unique: Vec<NoteType> = Vec::new();
+    for note_type in types {
+        if !unique.contains(note_type) {
+            unique.push(*note_type);
+        }
+    }
+    unique
 }
 
 /// `?,?,…` for `n` bound values.
@@ -610,11 +840,12 @@ fn parse_iso_date(raw: &str) -> Result<String> {
         })
 }
 
-/// Encodes a fused sort key (`score` bits + `id`) as an opaque cursor token.
-/// The f64 is stored as its exact 64-bit pattern (16 hex chars) so a recomputed
-/// score round-trips bit-for-bit; a `NoteId` never contains `:`.
-fn encode_cursor(score: f64, id: &str) -> String {
-    format!("v1:{:016x}:{}", score.to_bits(), id)
+/// Encodes a cursor: the boundary note's fallback `score` bits, how many fused
+/// positions have been served, and the note's id. The f64 is stored as its
+/// exact 64-bit pattern (16 hex chars) so it round-trips bit-for-bit; a
+/// `NoteId` never contains `:`, so it can occupy the unbounded last field.
+fn encode_cursor(score: f64, served: usize, id: &str) -> String {
+    format!("v2:{:016x}:{served}:{id}", score.to_bits())
 }
 
 /// Decodes a cursor token, rejecting anything this index didn't produce.
@@ -622,16 +853,21 @@ fn decode_cursor(raw: &str) -> Result<CursorKey> {
     let bad = || IndexError::Cursor {
         value: raw.to_string(),
     };
-    let mut parts = raw.splitn(3, ':');
+    let mut parts = raw.splitn(4, ':');
     let version = parts.next().ok_or_else(bad)?;
     let bits_hex = parts.next().ok_or_else(bad)?;
+    let served = parts.next().ok_or_else(bad)?;
     let id = parts.next().ok_or_else(bad)?;
-    if version != "v1" || bits_hex.len() != 16 || id.is_empty() {
+    if version != "v2" || bits_hex.len() != 16 || id.is_empty() {
         return Err(bad());
     }
     let bits = u64::from_str_radix(bits_hex, 16).map_err(|_| bad())?;
+    let served: usize = served.parse().map_err(|_| bad())?;
     Ok(CursorKey {
         score: f64::from_bits(bits),
+        // Clamped, not trusted: `served` only sizes the candidate pools, so a
+        // tampered value must not turn into an enormous `LIMIT`.
+        served: served.min(MAX_CANDIDATES),
         id: id.to_string(),
     })
 }
@@ -1263,14 +1499,47 @@ mod tests {
         params.tag_match = TagMatch::All;
         let all = index.search_notes(&params, None).unwrap();
         assert_eq!(hit_ids(&all), vec!["n_t1"]);
+
+        // A repeated tag is deduplicated, not counted twice. Counting it twice
+        // would demand two distinct tags a note can only supply one of, and
+        // silently match nothing.
+        params.tags = vec!["a".to_string(), "a".to_string(), "b".to_string()];
+        let deduped = index.search_notes(&params, None).unwrap();
+        assert_eq!(hit_ids(&deduped), vec!["n_t1"], "duplicate tag ignored");
+
+        params.tag_match = TagMatch::Any;
+        params.tags = vec!["a".to_string(), "a".to_string()];
+        let any_dup = index.search_notes(&params, None).unwrap();
+        assert_eq!(
+            id_set(&any_dup),
+            HashSet::from(["n_t1".to_string(), "n_t2".to_string()])
+        );
+    }
+
+    #[test]
+    fn oversized_filter_arrays_are_rejected() {
+        let index = NoteIndex::open_in_memory().unwrap();
+        let mut params = query("report");
+        // Distinct values, so dedup can't bring it under the cap.
+        params.tags = (0..MAX_FILTER_VALUES + 1)
+            .map(|i| format!("t{i}"))
+            .collect();
+        assert!(matches!(
+            index.search_notes(&params, None),
+            Err(IndexError::FilterTooLarge { field: "tags", .. })
+        ));
+
+        // Duplicates collapse below the cap and are fine.
+        params.tags = vec!["a".to_string(); MAX_FILTER_VALUES + 10];
+        assert!(index.search_notes(&params, None).is_ok());
     }
 
     // --- 10. Date bounds ----------------------------------------------------
 
     #[test]
-    fn date_bounds_are_inclusive_and_utc_normalized() {
+    fn date_bounds_are_inclusive_and_use_the_local_calendar_day() {
         let mut index = NoteIndex::open_in_memory().unwrap();
-        // Local date-only, normalizes to 2026-07-10T00:00:00Z.
+        // Local date-only.
         put(
             &mut index,
             &note(
@@ -1283,29 +1552,44 @@ mod tests {
                 "report",
             ),
         );
-        // Wall clock 2026-07-09 20:00 -07:00 is 2026-07-10T03:00:00Z — inside
-        // the 7/10 bound despite its local calendar day being 7/9.
+        // Local calendar day 7/10, late enough that its UTC instant
+        // (2026-07-11T02:00:00Z) falls on the next day. Filtering by UTC would
+        // wrongly drop it.
         put(
             &mut index,
             &note(
                 "n_d2",
                 None,
                 NoteType::Note,
-                "2026-07-09T20:00:00-07:00",
+                "2026-07-10T19:00:00-07:00",
                 &[],
                 "D2",
                 "report",
             ),
         );
+        // Local calendar day 7/9, whose UTC instant (2026-07-10T03:00:00Z)
+        // falls inside the bound. Filtering by UTC would wrongly include it.
         put(
             &mut index,
             &note(
                 "n_d3",
                 None,
                 NoteType::Note,
-                "2026-07-11",
+                "2026-07-09T20:00:00-07:00",
                 &[],
                 "D3",
+                "report",
+            ),
+        );
+        put(
+            &mut index,
+            &note(
+                "n_d4",
+                None,
+                NoteType::Note,
+                "2026-07-11",
+                &[],
+                "D4",
                 "report",
             ),
         );
@@ -1317,7 +1601,7 @@ mod tests {
         assert_eq!(
             id_set(&results),
             HashSet::from(["n_d1".to_string(), "n_d2".to_string()]),
-            "UTC day, inclusive both ends"
+            "the user's local day, inclusive both ends"
         );
     }
 
@@ -1515,6 +1799,99 @@ mod tests {
         assert!(page2.hits.iter().all(|h| !page1_ids.contains(&h.id)));
     }
 
+    #[test]
+    fn pagination_is_stable_when_a_higher_ranked_note_arrives() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        for i in 2..=6 {
+            put_vec(
+                &mut index,
+                &note(
+                    &format!("n_q{i}"),
+                    None,
+                    NoteType::Note,
+                    "2026-07-01",
+                    &[],
+                    "Q",
+                    "body",
+                ),
+                near(i),
+                &format!("chunk {i}"),
+            );
+        }
+
+        let embedder = FixedEmbedder(axis(0));
+        let mut params = query("nomatchterm");
+        params.limit = 2;
+        let page1 = index.search_notes(&params, Some(&embedder)).unwrap();
+        assert_eq!(hit_ids(&page1), vec!["n_q2", "n_q3"]);
+
+        // Insert a note nearer than everything else: it takes rank 1 and pushes
+        // every other note down one rank, so every RRF score changes. A cursor
+        // that trusted its encoded score would land before the boundary and
+        // re-serve n_q3.
+        put_vec(
+            &mut index,
+            &note(
+                "n_q0",
+                None,
+                NoteType::Note,
+                "2026-07-01",
+                &[],
+                "Q0",
+                "body",
+            ),
+            near(1),
+            "chunk one",
+        );
+
+        params.cursor = page1.page.next_cursor.clone();
+        let page2 = index.search_notes(&params, Some(&embedder)).unwrap();
+        assert_eq!(
+            hit_ids(&page2),
+            vec!["n_q4", "n_q5"],
+            "resumes after the boundary note, no repeat"
+        );
+    }
+
+    #[test]
+    fn pagination_survives_the_vector_arm_dropping_out_mid_walk() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        // Notes carrying both the FTS term and a vector, so losing the vector
+        // arm halves every score.
+        for i in 1..=5 {
+            put_vec(
+                &mut index,
+                &note(
+                    &format!("n_w{i}"),
+                    None,
+                    NoteType::Note,
+                    "2026-07-01",
+                    &[],
+                    "W",
+                    "alpha",
+                ),
+                near(i),
+                "alpha",
+            );
+        }
+
+        let embedder = FixedEmbedder(axis(0));
+        let mut params = query("alpha");
+        params.limit = 2;
+        let page1 = index.search_notes(&params, Some(&embedder)).unwrap();
+        let served = hit_ids(&page1);
+        assert_eq!(served.len(), 2);
+
+        // The embedder breaks between pages: page 2 fuses FTS-only, so every
+        // score differs from the one the cursor was minted against.
+        params.cursor = page1.page.next_cursor.clone();
+        let page2 = index.search_notes(&params, Some(&FailingEmbedder)).unwrap();
+        assert!(
+            page2.hits.iter().all(|hit| !served.contains(&hit.id)),
+            "no page-1 row re-served after the arm dropped out"
+        );
+    }
+
     // --- 15. Cursor tampering -----------------------------------------------
 
     #[test]
@@ -1522,10 +1899,13 @@ mod tests {
         let index = NoteIndex::open_in_memory().unwrap();
         for bad in [
             "garbage",
+            "v1:0000000000000000:0:n_x",
+            "v3:0000000000000000:0:n_x",
+            "v2:xyz:0:n_x",
+            "v2:00:0:n_x",
+            "v2:0000000000000000:0:",
             "v2:0000000000000000:n_x",
-            "v1:xyz:n_x",
-            "v1:00:n_x",
-            "v1:0000000000000000:",
+            "v2:0000000000000000:notanumber:n_x",
         ] {
             let mut params = query("report");
             params.cursor = Some(bad.to_string());
@@ -1537,6 +1917,60 @@ mod tests {
                 "cursor {bad:?} should be rejected"
             );
         }
+    }
+
+    #[test]
+    fn pagination_walks_past_the_candidate_headroom() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        // More matches than one candidate pool holds, so a fixed-depth pool
+        // would report has_more: false partway through and the caller would
+        // conclude it had seen every match.
+        let corpus = CANDIDATE_HEADROOM + 50;
+        for i in 0..corpus {
+            put(
+                &mut index,
+                &note(
+                    &format!("n_h{i:05}"),
+                    None,
+                    NoteType::Note,
+                    "2026-07-01",
+                    &[],
+                    "H",
+                    "report",
+                ),
+            );
+        }
+
+        let mut params = query("report");
+        params.limit = 50;
+
+        // The first page can't know the true total: its pool came back full.
+        let page1 = index.search_notes(&params, None).unwrap();
+        assert!(page1.page.has_more);
+        assert!(
+            page1.page.total_estimate.is_none(),
+            "a truncated pool reports an unknown total, not its own size"
+        );
+
+        let mut seen = Vec::new();
+        let mut page = page1;
+        loop {
+            seen.extend(hit_ids(&page));
+            match page.page.next_cursor.clone() {
+                Some(cursor) => params.cursor = Some(cursor),
+                None => break,
+            }
+            page = index.search_notes(&params, None).unwrap();
+        }
+
+        assert_eq!(seen.len(), corpus, "every match served exactly once");
+        assert_eq!(
+            seen.iter().collect::<HashSet<_>>().len(),
+            corpus,
+            "no duplicates"
+        );
+        // The final page's pool outran the corpus, so the count is exact again.
+        assert_eq!(page.page.total_estimate, Some(corpus as u64));
     }
 
     // --- 16. Query safety ---------------------------------------------------
