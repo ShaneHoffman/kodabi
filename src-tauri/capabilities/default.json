@@ -4,6 +4,7 @@
   "description": "Capability for the main and quick-capture windows",
   "windows": ["main", "quick-capture"],
   "permissions": [
-    "core:default"
+    "core:default",
+    "notification:default"
   ]
 }
