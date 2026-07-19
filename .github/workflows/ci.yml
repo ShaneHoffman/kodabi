@@ -20,7 +20,7 @@ jobs:
   # and shared with the Rust jobs as an artifact instead of being rebuilt in
   # each of them.
   frontend:
-    name: Frontend (lint + build)
+    name: Frontend (lint + test + build)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -35,6 +35,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Lint (strict — warnings fail)
         run: pnpm exec eslint . --max-warnings=0
+      - name: Test (vitest, jsdom)
+        run: pnpm test
       - name: Build (typecheck + Vite)
         run: pnpm build
       - name: Upload dist/ for the Rust jobs (generate_context! embeds it)

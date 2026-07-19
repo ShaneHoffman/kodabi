@@ -65,7 +65,8 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
 - **Pre-commit gates (mirror CI exactly):** `cargo fmt --all --check`,
   `cargo clippy --workspace --all-targets --locked -- -D warnings`, and
   `cargo test --workspace --locked` must pass before every commit that touches Rust;
-  `pnpm exec eslint . --max-warnings=0` and `pnpm build` before commits that touch the frontend.
+  `pnpm exec eslint . --max-warnings=0`, `pnpm test`, and `pnpm build` before commits that touch
+  the frontend.
   The clippy/test gates need `dist/` to exist — `src-tauri` embeds it via
   `tauri::generate_context!`, which fails the compile when it's missing — so in a fresh worktree
   run `pnpm install --frozen-lockfile && pnpm build` first (CI's Rust jobs do the same).
@@ -91,6 +92,10 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
 - **Core vs shell:** logic lives in `crates/kodabi-core` (pure, UI-agnostic, unit-testable);
   `src-tauri` commands stay thin wrappers around it. If a Tauri command grows a body, the body
   belongs in kodabi-core.
+- **Frontend tests:** vitest + Testing Library under jsdom, colocated as
+  `src/**/*.test.{ts,tsx}` and run by `pnpm test`. Mock **only** the Tauri IPC boundary — the
+  `src/test/tauri.ts` harness stands in for `@tauri-apps/api`'s `invoke`/`listen`, and the
+  component under test keeps its real hooks. Coverage is the load-bearing seams, not the whole UI.
 - **Design tokens:** never hard-code a color, font, or spacing value. `design/tokens.css` is the
   single source of truth, bridged into Tailwind by `src/index.css` — consume tokens, never
   duplicate them.
