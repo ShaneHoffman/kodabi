@@ -12,7 +12,8 @@
 //! entry (the contract's "stored as the note's last-correction note, overwrites
 //! any prior"), and a later re-route moves the entry into the new target's file
 //! (the mover removes it from the previous one), so a note has at most one
-//! correction record vault-wide.
+//! correction record vault-wide. A project's log is capped at [`MAX_EXAMPLES`],
+//! oldest evicted first, so it stays bounded over a vault's lifetime.
 //!
 //! The scorer reads these: [`crate::routing::load_project_signals`] loads each
 //! candidate's examples alongside its glossary, and scoring credits a project
@@ -38,27 +39,74 @@ static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// so it never appears as a note or a project.
 pub const ROUTING_EXAMPLES_FILE: &str = "_routing_examples.yml";
 
-/// Maximum length (in `char`s) of a stored body excerpt. Enough to give a
-/// future signal blender lexical context without copying whole notes into the
-/// per-project config file.
+/// Maximum length (in `char`s) of a stored body excerpt. Enough to give the
+/// scorer lexical context without copying whole notes into the per-project
+/// config file.
 pub const EXCERPT_MAX_CHARS: usize = 300;
+
+/// Maximum number of examples kept in one project's log. The scorer aggregates
+/// with `max`, not a sum (`routing::EXAMPLE_WEIGHT`), so only the single
+/// best-matching example ever affects a routing decision — every entry past it
+/// is file bulk and per-capture tokenizing work on the global-hotkey path. The
+/// cap keeps both bounded no matter how long the vault is in use; the oldest
+/// corrections are the ones dropped, since a project's recent vocabulary is what
+/// its next note is likely to resemble.
+pub const MAX_EXAMPLES: usize = 200;
 
 /// The on-disk path of a project's routing-examples file.
 pub fn routing_examples_path(project_dir: &Path) -> PathBuf {
     project_dir.join(ROUTING_EXAMPLES_FILE)
 }
 
-/// Derives a compact, single-line excerpt of a note body for a routing example:
-/// whitespace runs collapse to a single space, the result is trimmed, and it is
-/// truncated to [`EXCERPT_MAX_CHARS`] on a `char` boundary (so a multibyte
-/// character is never split).
+/// Derives a compact, single-line **prose** excerpt of a note body for a routing
+/// example: Markdown structure is dropped, whitespace runs collapse to a single
+/// space, the result is trimmed, and it is truncated to [`EXCERPT_MAX_CHARS`] on
+/// a `char` boundary (so a multibyte character is never split).
+///
+/// Dropping structure matters because the excerpt is scoring input, not just a
+/// human-readable snippet. A distilled body opens with `distill::render_body`'s
+/// `# Summary` / `## Decisions` / `## Action items` scaffolding, which *every*
+/// distilled note carries — keeping it would hand each recorded correction a
+/// handful of tokens that match every future note regardless of topic. Heading
+/// lines go entirely (their text is a section label, not content); list and
+/// task markers are stripped from the front of their line, keeping the item's
+/// prose.
 pub fn excerpt(body: &str) -> String {
-    body.split_whitespace()
+    let prose = body
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.starts_with('#'))
+        .map(strip_list_marker)
+        .collect::<Vec<_>>()
+        .join(" ");
+    prose
+        .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ")
         .chars()
         .take(EXCERPT_MAX_CHARS)
         .collect()
+}
+
+/// Strips a leading Markdown list or task marker (`- `, `* `, `- [ ] `,
+/// `- [x] `) from an already-trimmed line, leaving the item's own text. A line
+/// that isn't a list item is returned unchanged.
+fn strip_list_marker(line: &str) -> &str {
+    let Some(rest) = line
+        .strip_prefix("- ")
+        .or_else(|| line.strip_prefix("* "))
+        .or_else(|| line.strip_prefix("+ "))
+    else {
+        return line;
+    };
+    let rest = rest.trim_start();
+    // `render_body` writes action items as `- [ ] …`; the checkbox is structure.
+    for checkbox in ["[ ] ", "[x] ", "[X] "] {
+        if let Some(after) = rest.strip_prefix(checkbox) {
+            return after.trim_start();
+        }
+    }
+    rest
 }
 
 /// A single routing correction: which note was re-filed, where it came from,
@@ -151,7 +199,12 @@ impl RoutingExamples {
     }
 
     /// Records a correction, replacing any prior entry for the same `note_id`
-    /// (the contract's overwrite semantics) or appending a new one.
+    /// (the contract's overwrite semantics) or appending a new one, then evicts
+    /// the oldest entries beyond [`MAX_EXAMPLES`].
+    ///
+    /// Eviction only ever runs on the append path — an overwrite can't grow the
+    /// log — and never drops the entry just recorded, so the correction a user
+    /// just made always takes effect.
     pub fn upsert(&mut self, example: RoutingExample) {
         if let Some(existing) = self
             .examples
@@ -159,9 +212,43 @@ impl RoutingExamples {
             .find(|e| e.note_id == example.note_id)
         {
             *existing = example;
-        } else {
-            self.examples.push(example);
+            return;
         }
+        self.examples.push(example);
+        let just_recorded = self.examples.len() - 1;
+        self.evict_oldest_beyond_cap(just_recorded);
+    }
+
+    /// Drops oldest-first until at most [`MAX_EXAMPLES`] remain, never touching
+    /// `protected`. Ordered by `corrected_at` (RFC 3339 UTC, so a lexical sort
+    /// *is* a chronological one — see `.claude/rules/utc-timestamps.md`) with
+    /// `note_id` breaking ties, so eviction is deterministic even for
+    /// corrections recorded in the same second. A hand-authored file with a
+    /// malformed timestamp sorts as very old and is evicted first, which is the
+    /// right bias for an unparseable entry.
+    fn evict_oldest_beyond_cap(&mut self, protected: usize) {
+        if self.examples.len() <= MAX_EXAMPLES {
+            return;
+        }
+        let mut order: Vec<usize> = (0..self.examples.len())
+            .filter(|&i| i != protected)
+            .collect();
+        order.sort_by(|&a, &b| {
+            let (left, right) = (&self.examples[a], &self.examples[b]);
+            left.corrected_at
+                .cmp(&right.corrected_at)
+                .then_with(|| left.note_id.cmp(&right.note_id))
+        });
+        let doomed: std::collections::HashSet<usize> = order
+            .into_iter()
+            .take(self.examples.len() - MAX_EXAMPLES)
+            .collect();
+        let mut index = 0;
+        self.examples.retain(|_| {
+            let keep = !doomed.contains(&index);
+            index += 1;
+            keep
+        });
     }
 
     /// Removes the entry for `note_id` if present. Returns whether anything was
@@ -312,6 +399,108 @@ examples:
     fn excerpt_collapses_whitespace_and_trims() {
         let body = "  First line.\n\nSecond   line.\t Third.  ";
         assert_eq!(excerpt(body), "First line. Second line. Third.");
+    }
+
+    #[test]
+    fn excerpt_drops_markdown_structure() {
+        // A distilled body's scaffolding: every distilled note carries these
+        // exact headings, so keeping them would give each recorded correction a
+        // handful of tokens that match every future note regardless of topic.
+        let body = "# Summary\n\nThe clubhouse migration cutover slipped a week.\n\n\
+                    ## Decisions\n\n- Hold the vendor to the original date\n\n\
+                    ## Action items\n\n- [ ] Draft the irrigation schedule";
+        let out = excerpt(body);
+
+        assert!(!out.contains('#'), "heading markers survived: {out}");
+        for heading in ["Summary", "Decisions", "Action items"] {
+            assert!(!out.contains(heading), "heading text survived: {out}");
+        }
+        assert!(!out.contains("- "), "list markers survived: {out}");
+        assert!(!out.contains("[ ]"), "task checkbox survived: {out}");
+        // The prose itself is kept, in order.
+        assert_eq!(
+            out,
+            "The clubhouse migration cutover slipped a week. \
+             Hold the vendor to the original date Draft the irrigation schedule"
+        );
+    }
+
+    #[test]
+    fn excerpt_keeps_a_plain_prose_body_intact() {
+        // A quick capture has no Markdown structure to strip; stripping must not
+        // eat ordinary text that merely starts with a dash-like character.
+        assert_eq!(
+            excerpt("Call the vendor about the renewal."),
+            "Call the vendor about the renewal."
+        );
+        assert_eq!(excerpt("-5 degrees overnight"), "-5 degrees overnight");
+    }
+
+    #[test]
+    fn upsert_evicts_the_oldest_beyond_the_cap() {
+        let mut log = RoutingExamples::default();
+        // Fill past the cap with strictly increasing timestamps.
+        for index in 0..MAX_EXAMPLES + 5 {
+            let mut entry = example(&format!("n_{index:04}"), None, 1.0);
+            entry.corrected_at = format!("2026-07-18T20:{:02}:{:02}Z", index / 60, index % 60);
+            log.upsert(entry);
+        }
+
+        assert_eq!(log.examples().len(), MAX_EXAMPLES);
+        // The five oldest are gone; the newest (recorded last) is kept.
+        for index in 0..5 {
+            assert!(
+                !log.examples()
+                    .iter()
+                    .any(|e| e.note_id == format!("n_{index:04}")),
+                "n_{index:04} should have been evicted"
+            );
+        }
+        assert!(log
+            .examples()
+            .iter()
+            .any(|e| e.note_id == format!("n_{:04}", MAX_EXAMPLES + 4)));
+        // Eviction preserves the relative order of the survivors.
+        let ids: Vec<&str> = log.examples().iter().map(|e| e.note_id.as_str()).collect();
+        let mut sorted = ids.clone();
+        sorted.sort_unstable();
+        assert_eq!(ids, sorted);
+    }
+
+    #[test]
+    fn upsert_never_evicts_the_correction_just_recorded() {
+        // A backdated correction at a full log is still the user's latest
+        // action: it must take effect, not be evicted as "oldest" on arrival.
+        let mut log = RoutingExamples::default();
+        for index in 0..MAX_EXAMPLES {
+            let mut entry = example(&format!("n_{index:04}"), None, 1.0);
+            entry.corrected_at = format!("2026-07-18T20:{:02}:{:02}Z", index / 60, index % 60);
+            log.upsert(entry);
+        }
+        let mut backdated = example("n_backdated", None, 1.0);
+        backdated.corrected_at = "2001-01-01T00:00:00Z".to_string();
+        log.upsert(backdated);
+
+        assert_eq!(log.examples().len(), MAX_EXAMPLES);
+        assert!(log.examples().iter().any(|e| e.note_id == "n_backdated"));
+    }
+
+    #[test]
+    fn upsert_of_an_existing_note_never_evicts() {
+        // An overwrite can't grow the log, so a full log stays exactly full.
+        let mut log = RoutingExamples::default();
+        for index in 0..MAX_EXAMPLES {
+            log.upsert(example(&format!("n_{index:04}"), None, 1.0));
+        }
+        log.upsert(example("n_0000", Some("Growth"), 0.5));
+
+        assert_eq!(log.examples().len(), MAX_EXAMPLES);
+        let stored = log
+            .examples()
+            .iter()
+            .find(|e| e.note_id == "n_0000")
+            .expect("the overwritten entry is still present");
+        assert_eq!(stored.previous_project.as_deref(), Some("Growth"));
     }
 
     #[test]

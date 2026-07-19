@@ -51,22 +51,81 @@ const TITLE_MULTIPLIER: f64 = 2.0;
 /// how many examples a project has, since aggregation takes the max, not a sum).
 const EXAMPLE_WEIGHT: f64 = 2.0;
 /// Minimum length (in `char`s) of a token that may count toward example
-/// similarity. No stopword list exists, so this filter stands in for one: it
-/// drops the head of the English frequency list ("the", "and", "for", "with")
-/// that would otherwise inflate overlap between unrelated notes. A cost: short
-/// acronyms ("OKR", "Q3") don't ride the example channel — but those are
-/// glossary vocabulary, which scores on its own separate channel.
+/// similarity — a cheap first pass that drops the shortest function words
+/// ("the", "and", "for") before the [`EXAMPLE_STOPWORDS`] lookup. It is *not* a
+/// stopword list on its own: every four-letter function word ("with", "that",
+/// "from", "will") clears it, which is exactly why the explicit list exists. A
+/// cost: short acronyms ("OKR", "Q3") don't ride the example channel — but those
+/// are glossary vocabulary, which scores on its own separate channel.
 const EXAMPLE_MIN_TOKEN_CHARS: usize = 4;
 /// Absolute floor on shared content tokens before an example counts at all.
 /// Guards short notes: any two English notes share a couple of long words by
 /// chance, so a single coincidental overlap must not register — three or more
 /// distinct content words in common is a topic, not noise.
 const EXAMPLE_MIN_SHARED_TOKENS: usize = 3;
-/// Relative floor on the overlap coefficient before an example counts. Guards
-/// long notes: a long note can share a handful of common long words with a short
-/// excerpt (a low coefficient) without being about the same thing — below this,
-/// the example contributes exactly `0.0`.
+/// Relative floor on the overlap coefficient before an example counts: the note
+/// must reuse this fraction of the *smaller* vocabulary, so a note that touches
+/// only a corner of a recorded correction contributes nothing.
+///
+/// Note what this floor does **not** do: because the coefficient normalizes by
+/// `min(|note|, |example|)`, a long note is judged by how much of the (capped,
+/// short) excerpt it covers, and that fraction *rises* with note length rather
+/// than falling. That asymmetry is deliberate — [`crate::routing_examples::EXCERPT_MAX_CHARS`]
+/// caps an example at a few dozen tokens, so normalizing by the larger side
+/// would put the signal permanently out of reach of any full-length meeting
+/// note. The defense against a long note matching by chance is therefore token
+/// *quality* ([`EXAMPLE_STOPWORDS`] and the prose-only excerpt), not this ratio.
 const EXAMPLE_MIN_SIMILARITY: f64 = 0.3;
+
+/// Function words and meeting-transcript filler excluded from example
+/// similarity, sorted for [`slice::binary_search`]. Everything here survives the
+/// [`EXAMPLE_MIN_TOKEN_CHARS`] length filter (shorter stopwords need no entry),
+/// and everything here is a word two unrelated business notes are *expected* to
+/// share — counting them would let a project earn similarity from grammar alone.
+///
+/// The tail of the list is structural rather than grammatical: `render_body`'s
+/// section headings ("summary", "decisions", "action items", "open questions")
+/// and generic meeting vocabulary appear in essentially every distilled note, so
+/// they carry no topical information even though they are content words in the
+/// ordinary sense.
+///
+/// `rustfmt::skip` keeps this as a packed word list: one entry per line is ~230
+/// lines of noise, and the packed form is what makes the sorting scannable by
+/// eye (`example_stopwords_is_sorted_and_deduped` enforces it either way).
+#[rustfmt::skip]
+const EXAMPLE_STOPWORDS: &[&str] = &[
+    "about", "action", "after", "again", "against", "agenda", "almost", "along", "already", "also",
+    "although", "always", "among", "another", "anyone", "anything", "around", "attendees", "back",
+    "because", "been", "before", "being", "below", "best", "better", "between", "both", "bring",
+    "call", "came", "cannot", "come", "comes", "coming", "could", "currently", "decision",
+    "decisions", "discuss", "discussed", "discussion", "does", "doing", "done", "down", "during",
+    "each", "either", "else", "enough", "even", "ever", "every", "everyone", "everything",
+    "exactly", "from", "full", "gets", "give", "given", "gives", "goes", "going", "gone", "good",
+    "great", "have", "having", "here", "however", "into", "issue", "issues", "item", "items",
+    "just", "keep", "kind", "know", "last", "later", "least", "less", "like", "likely", "little",
+    "long", "look", "looking", "made", "make", "makes", "making", "many", "maybe", "mean", "means",
+    "meeting", "might", "more", "most", "much", "must", "need", "needs", "next", "note", "notes",
+    "nothing", "only", "onto", "open", "other", "others", "over", "overall", "part", "people",
+    "perhaps", "place", "point", "points", "probably", "question", "questions", "quite", "rather",
+    "really", "right", "said", "same", "says", "seem", "seems", "seen", "several", "should",
+    "side", "since", "some", "something", "sometimes", "soon", "sort", "start", "started", "steps",
+    "still", "such", "summary", "sure", "take", "taken", "takes", "talk", "talked", "than", "that",
+    "their", "them", "themselves", "then", "there", "therefore", "these", "they", "thing",
+    "things", "think", "this", "those", "though", "thought", "three", "through", "thus", "time",
+    "times", "today", "together", "told", "took", "topic", "topics", "toward", "towards",
+    "transcript", "tried", "trying", "turn", "under", "until", "upon", "used", "uses", "using",
+    "very", "want", "wanted", "wants", "ways", "week", "well", "went", "were", "what", "whatever",
+    "when", "where", "whether", "which", "while", "whole", "whom", "whose", "will", "with",
+    "within", "without", "word", "words", "work", "working", "works", "would", "yeah", "your",
+    "yours",
+];
+
+/// Whether `token` is excluded from example similarity: too short to be
+/// meaningful, or a known function word / structural heading.
+fn is_example_stopword(token: &str) -> bool {
+    token.chars().count() < EXAMPLE_MIN_TOKEN_CHARS
+        || EXAMPLE_STOPWORDS.binary_search(&token).is_ok()
+}
 
 /// Saturation constant `K` in `evidence = w / (w + K)` — diminishing returns.
 const SATURATION_WEIGHT: f64 = 2.0;
@@ -278,16 +337,17 @@ fn best_location(
     None
 }
 
-/// The distinct "content tokens" of some already-tokenized text: every token at
-/// least [`EXAMPLE_MIN_TOKEN_CHARS`] long, deduplicated. Borrows from the input
+/// The distinct "content tokens" of some already-tokenized text: every token
+/// that survives [`is_example_stopword`], deduplicated. Borrows from the input
 /// slices so example scoring allocates only the (small) example-side sets. This
-/// is the note-side vocabulary the corrections signal compares against; the
-/// length filter is the stand-in stopword list (see [`EXAMPLE_MIN_TOKEN_CHARS`]).
+/// is the vocabulary the corrections signal compares on, and dropping function
+/// words here is what keeps two unrelated notes from sharing "similarity" they
+/// owe entirely to English grammar.
 fn content_token_set<'a>(token_slices: &[&'a [String]]) -> HashSet<&'a str> {
     token_slices
         .iter()
         .flat_map(|slice| slice.iter())
-        .filter(|token| token.chars().count() >= EXAMPLE_MIN_TOKEN_CHARS)
+        .filter(|token| !is_example_stopword(token))
         .map(String::as_str)
         .collect()
 }
@@ -299,10 +359,15 @@ fn content_token_set<'a>(token_slices: &[&'a [String]]) -> HashSet<&'a str> {
 /// so a short quick-capture that reuses the example's vocabulary scores near
 /// `1.0` even against a longer note, and a long note is judged by how much of
 /// the (capped, short) excerpt it reuses. Two gates return exactly `0.0`
-/// otherwise, so an unrelated note contributes nothing: fewer than
-/// [`EXAMPLE_MIN_SHARED_TOKENS`] shared tokens, or a coefficient below
-/// [`EXAMPLE_MIN_SIMILARITY`]. Deterministic: integer counts and one division,
-/// no model call.
+/// otherwise: fewer than [`EXAMPLE_MIN_SHARED_TOKENS`] shared tokens, or a
+/// coefficient below [`EXAMPLE_MIN_SIMILARITY`]. Deterministic: integer counts
+/// and one division, no model call.
+///
+/// The `min` denominator makes the coefficient *easier* to clear as the note
+/// grows, so neither gate is what stops a long unrelated note from matching —
+/// [`content_token_set`] is, by refusing to count the function words and
+/// section headings that any two notes share (see [`EXAMPLE_STOPWORDS`]). What
+/// reaches the arithmetic below is topical vocabulary only.
 fn example_similarity(note_content: &HashSet<&str>, example: &RoutingExample) -> f64 {
     if note_content.is_empty() {
         return 0.0;
@@ -435,17 +500,15 @@ fn score_candidate(
     // examples it has. An example's tokens are compared against `note_content`
     // without deduping the note's name/glossary spellings first: resembling a
     // corrected note legitimately includes sharing its project's name, and the
-    // double count is bounded by that same cap. The explicit `> 0.0` guard keeps
-    // a project with no examples byte-identical to before this signal existed.
+    // double count is bounded by that same cap. A project with no examples folds
+    // to exactly `0.0` and so adds nothing.
     let example_sim = candidate
         .examples
         .examples()
         .iter()
         .map(|example| example_similarity(note_content, example))
         .fold(0.0_f64, f64::max);
-    if example_sim > 0.0 {
-        weight += EXAMPLE_WEIGHT * example_sim;
-    }
+    weight += EXAMPLE_WEIGHT * example_sim;
 
     ProjectScore {
         project: candidate.project.clone(),
@@ -593,14 +656,23 @@ fn walk_projects(
     Ok(())
 }
 
-/// What [`load_project_signals`] yields: the scored candidates, plus the two
-/// independent per-project signal-load failure reports (glossary, routing
-/// examples). Both failure lists are empty on the happy path.
-pub type LoadedProjectSignals = (
-    Vec<ProjectSignals>,
-    Vec<GlossaryLoadFailure>,
-    Vec<ExamplesLoadFailure>,
-);
+/// What [`load_project_signals`] yields: the scored candidates, plus one
+/// independent per-project failure report per signal that can fail to load.
+/// Every failure list is empty on the happy path.
+///
+/// A struct rather than a tuple on purpose. [`ProjectSignals`] is shaped so the
+/// next signal (the distill pass's model proposal) is one more field; this is
+/// the loader's half of that promise, so adding a fourth report names itself at
+/// every call site instead of silently shifting a positional binding.
+#[derive(Debug, Default)]
+pub struct LoadedProjectSignals {
+    /// The candidates to score, in [`discover_projects`] order.
+    pub signals: Vec<ProjectSignals>,
+    /// Projects whose `_glossary.yml` could not be loaded.
+    pub glossary_failures: Vec<GlossaryLoadFailure>,
+    /// Projects whose `_routing_examples.yml` could not be loaded.
+    pub example_failures: Vec<ExamplesLoadFailure>,
+}
 
 /// [`discover_projects`] plus each project's glossary and recorded routing
 /// examples — the one-call signal loader for [`route`], and the *only* place the
@@ -660,7 +732,11 @@ pub fn load_project_signals(vault_root: &Path) -> Result<LoadedProjectSignals, R
             examples,
         });
     }
-    Ok((signals, glossary_failures, example_failures))
+    Ok(LoadedProjectSignals {
+        signals,
+        glossary_failures,
+        example_failures,
+    })
 }
 
 #[cfg(test)]
@@ -1212,9 +1288,10 @@ mod tests {
         fs::create_dir_all(vault.path().join("Growth")).unwrap();
         glossary(&[("OKIES", &[])]).save(&golf_dir).unwrap();
 
-        let (signals, failures, example_failures) = load_project_signals(vault.path()).unwrap();
-        assert!(failures.is_empty());
-        assert!(example_failures.is_empty());
+        let loaded = load_project_signals(vault.path()).unwrap();
+        assert!(loaded.glossary_failures.is_empty());
+        assert!(loaded.example_failures.is_empty());
+        let signals = &loaded.signals;
         assert_eq!(signals.len(), 2);
         assert_eq!(signals[0].project, "Growth");
         assert!(signals[0].glossary.is_empty());
@@ -1229,10 +1306,11 @@ mod tests {
             "terms: [\n",
         )
         .unwrap();
-        let (signals, failures, _) = load_project_signals(vault.path()).unwrap();
+        let loaded = load_project_signals(vault.path()).unwrap();
+        let signals = &loaded.signals;
         assert_eq!(signals.len(), 2);
-        assert_eq!(failures.len(), 1);
-        assert_eq!(failures[0].project, "Growth");
+        assert_eq!(loaded.glossary_failures.len(), 1);
+        assert_eq!(loaded.glossary_failures[0].project, "Growth");
         assert_eq!(signals[0].project, "Growth");
         assert!(signals[0].glossary.is_empty());
         assert!(signals[1].glossary.get("okies").is_some());
@@ -1448,6 +1526,75 @@ mod tests {
     }
 
     #[test]
+    fn shared_function_words_alone_earn_no_example_similarity() {
+        // The regression this list exists for. Both texts are ordinary English,
+        // so they share "with", "that", "before", "these", "would" — every one
+        // of them four-plus chars, so a length filter alone would count all five
+        // as topical overlap. Against a short excerpt the coefficient normalizes
+        // by the *example* side, so five function words out of ten tokens reads
+        // as similarity 0.5 and hands Ops a full EXAMPLE_WEIGHT/2 of evidence for
+        // a note about golf-course maintenance. Only the stopword filter stops
+        // it, so the credited similarity must be exactly 0.0.
+        let candidates = vec![signals_with_examples(
+            "Ops",
+            &[],
+            &[example(
+                "",
+                "vendor contract signed with legal before that renewal would take these steps",
+            )],
+        )];
+        let unrelated = body(
+            "clubhouse irrigation schedule rebuilt greens fairway drainage survey \
+             with that before these would replaced entirely",
+        );
+        let scores = score_projects(unrelated, &candidates);
+        assert_eq!(score_of(&scores, "Ops").example_sim, 0.0);
+        assert_eq!(score_of(&scores, "Ops").weight, 0.0);
+
+        // The flip side, pinning that the `min` denominator is deliberate and
+        // still reachable: the same long note against an example that shares its
+        // *topical* vocabulary matches at full strength. A capped excerpt can
+        // never be more than a few dozen tokens, so normalizing by the larger
+        // side instead would put this case permanently out of reach.
+        let topical = vec![signals_with_examples(
+            "Ops",
+            &[],
+            &[example("", "clubhouse irrigation drainage survey")],
+        )];
+        let scores = score_projects(unrelated, &topical);
+        assert_eq!(score_of(&scores, "Ops").example_sim, 1.0);
+    }
+
+    #[test]
+    fn example_stopwords_is_sorted_and_deduped() {
+        // `is_example_stopword` binary-searches the list, which silently misses
+        // entries if it is ever left unsorted — and a duplicate is a sign of a
+        // hand-merge gone wrong.
+        let mut sorted = EXAMPLE_STOPWORDS.to_vec();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(sorted.as_slice(), EXAMPLE_STOPWORDS);
+
+        // Every entry must survive the length pre-filter, or it is dead weight:
+        // shorter tokens are already dropped before the lookup runs.
+        for word in EXAMPLE_STOPWORDS {
+            assert!(
+                word.chars().count() >= EXAMPLE_MIN_TOKEN_CHARS,
+                "{word} is already dropped by the length filter"
+            );
+        }
+
+        // The words the old doc comment wrongly claimed the length filter
+        // dropped, spot-checked through the real predicate.
+        for word in ["with", "that", "this", "from", "will", "have", "been"] {
+            assert!(is_example_stopword(word), "{word} should be a stopword");
+        }
+        for word in ["clubhouse", "irrigation", "vendor"] {
+            assert!(!is_example_stopword(word), "{word} is topical vocabulary");
+        }
+    }
+
+    #[test]
     fn load_project_signals_loads_examples_and_contains_failures() {
         let vault = tempdir().unwrap();
         let alpha_dir = vault.path().join("Alpha");
@@ -1468,18 +1615,18 @@ mod tests {
         )
         .unwrap();
 
-        let (signals, glossary_failures, example_failures) =
-            load_project_signals(vault.path()).unwrap();
+        let loaded = load_project_signals(vault.path()).unwrap();
 
+        let signals = &loaded.signals;
         assert_eq!(signals.len(), 2);
-        assert!(glossary_failures.is_empty());
+        assert!(loaded.glossary_failures.is_empty());
         // Alpha (sorted first) carries its example; Beta is contained to empty.
         assert_eq!(signals[0].project, "Alpha");
         assert_eq!(signals[0].examples.examples().len(), 1);
         assert_eq!(signals[1].project, "Beta");
         assert!(signals[1].examples.is_empty());
-        assert_eq!(example_failures.len(), 1);
-        assert_eq!(example_failures[0].project, "Beta");
+        assert_eq!(loaded.example_failures.len(), 1);
+        assert_eq!(loaded.example_failures[0].project, "Beta");
     }
 
     // -- integration: score → split → write_note → re-parse ----------------
@@ -1504,7 +1651,7 @@ mod tests {
         text: NoteText<'_>,
         title: Option<&str>,
     ) -> (Routing, std::path::PathBuf) {
-        let (candidates, _, _) = load_project_signals(vault).unwrap();
+        let candidates = load_project_signals(vault).unwrap().signals;
         let routing = route(text, &candidates, &RoutingConfig::default());
         let note = Note::new(
             NoteId::generate().unwrap(),

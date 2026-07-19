@@ -76,8 +76,8 @@ pub fn quick_capture(
     // is skipped entirely. Title is `None` — a quick capture has no separate
     // title; the first body line only seeds the filename, never a routing
     // signal (that would double-count the same words as both title and body).
-    let (signals, glossary_failures, example_failures) = routing::load_project_signals(vault_root)?;
-    let routing = routing::route(NoteText { title: None, body }, &signals, config);
+    let loaded = routing::load_project_signals(vault_root)?;
+    let routing = routing::route(NoteText { title: None, body }, &loaded.signals, config);
 
     let id = NoteId::generate().map_err(QuickCaptureError::IdGeneration)?;
     let note = Note::new(
@@ -93,8 +93,8 @@ pub fn quick_capture(
     Ok(QuickCaptured {
         note,
         path,
-        glossary_failures,
-        example_failures,
+        glossary_failures: loaded.glossary_failures,
+        example_failures: loaded.example_failures,
     })
 }
 

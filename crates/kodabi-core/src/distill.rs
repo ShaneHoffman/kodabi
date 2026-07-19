@@ -497,18 +497,18 @@ pub fn route_distilled(
     config: &RoutingConfig,
 ) -> (Routing, RoutingDiagnostics) {
     match routing::load_project_signals(vault_root) {
-        Ok((signals, glossary_failures, example_failures)) => {
+        Ok(loaded) => {
             let text = NoteText {
                 title: output.title.as_deref(),
                 body,
             };
-            let routing = routing::route(text, &signals, config);
+            let routing = routing::route(text, &loaded.signals, config);
             (
                 routing,
                 RoutingDiagnostics {
                     discovery_failure: None,
-                    glossary_failures,
-                    example_failures,
+                    glossary_failures: loaded.glossary_failures,
+                    example_failures: loaded.example_failures,
                 },
             )
         }
