@@ -67,7 +67,7 @@ load-bearing UI seams rather than scanning the config, so the dispositions below
 | keybindings-registry | Skip | Kodabi has a command palette and few shortcuts; no registry to guard yet. |
 | mcp-tool-list-parity | Skip | Kodabi's MCP server isn't built yet. Revisit in **Phase 3** — the manifest + honest read/mutating annotations pattern applies to `MCP_TOOL_SURFACE.md` then. |
 | no-personal-info | Adopt | `.claude/rules/no-personal-info.md` — public AGPL repo + temp-dir test discipline. |
-| pop-out-surface-registry | Skip | Electron multi-window registry; Kodabi's two windows are static Tauri config. |
+| pop-out-surface-registry | Skip | Electron multi-window registry; Kodabi's three windows are static Tauri config. |
 | project-scoped-ipc | Skip | No multi-project ambient-context switch hazard in a single-vault app. |
 | restore-no-animation-replay | Skip | Their workspace-restore animation system. |
 | skill-authoring | Adopt | `.claude/rules/skill-authoring.md` — fork-vs-inline framework + the Kodabi skill→agent delegation map. |

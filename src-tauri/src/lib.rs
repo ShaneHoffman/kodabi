@@ -6,6 +6,7 @@ mod events;
 mod index_cmds;
 mod index_state;
 mod note_cmds;
+mod overlay;
 mod quick_capture;
 mod retention;
 mod routing_env;
@@ -89,6 +90,11 @@ pub fn run() {
             // it depends on exists.
             capture_control::build_tray(app.handle())?;
 
+            // Park the capture pill before anything can show it. Done here,
+            // not on first show: the monitor query blocks on the main thread,
+            // and first show happens under the capture toggle lock.
+            overlay::place_initially(app.handle());
+
             // Windows drops every new tray icon into the hidden overflow, and
             // a mark behind a chevron can't be read at a glance. Lift it onto
             // the taskbar unless the user has already said otherwise. Runs in
@@ -130,6 +136,9 @@ pub fn run() {
         })
         .manage(audio_cmds::CaptureState::default())
         .manage(quick_capture::DismissArmed::default())
+        // Managed at builder level so it exists before the first capture-state
+        // broadcast can reach `overlay::sync`.
+        .manage(overlay::OverlayController::default())
         .invoke_handler(tauri::generate_handler![
             device_id,
             audio_cmds::start_capture,
@@ -148,8 +157,10 @@ pub fn run() {
             quick_capture::show_quick_capture,
             quick_capture::hide_quick_capture,
             quick_capture::quick_capture_submit,
+            overlay::dismiss_capture_overlay,
             settings_cmds::get_settings,
             settings_cmds::set_retention_policy,
+            settings_cmds::set_capture_overlay,
             settings_cmds::acknowledge_consent,
         ])
         .on_window_event(|window, event| match event {

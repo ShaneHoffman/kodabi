@@ -399,6 +399,10 @@ pub fn start_capture(
         );
         return Err("consent required before first capture".to_string());
     }
+    // An IPC start is still a start the user asked for (the consent nudge and
+    // the in-window control both land here), so the pill reads the manual
+    // setting. Recorded before the toggle path broadcasts.
+    crate::overlay::note_capture_start(&app, kodabi_core::overlay::CaptureOrigin::Manual);
     // Route through the shared toggle path so this serializes with the
     // hotkey/tray toggle and broadcasts the resulting phase (relabelling the
     // tray + emitting `capture:state`) — otherwise the UI would go stale
