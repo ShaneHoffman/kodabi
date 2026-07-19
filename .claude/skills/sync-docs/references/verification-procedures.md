@@ -1,0 +1,77 @@
+# Verification procedures — Kodabi doc anchors
+
+This is the **canonical anchor list**: the enumerable promises Kodabi's docs make
+about the code, and exactly how to check each one. The `doc-auditor` agent and the
+`/sync-docs` skill both read this file; the summary in
+[`.claude/agents/doc-auditor.md`](../../../agents/doc-auditor.md) must be kept in
+step with it.
+
+An *anchor* is a place where a doc enumerates something the code (or another doc)
+also defines, so the two can silently disagree. Prose that merely describes
+behavior is audited separately (the sync-docs "prose audit" step), not here.
+
+---
+
+## Anchor 1 — Frontmatter schema ↔ MCP tool surface
+
+- **Source of truth:** `docs/FRONTMATTER_SCHEMA.md` (the note frontmatter field set,
+  key order `id, type, project, date, tags, source, confidence`, the `NoteId`
+  pattern `^n_[0-9a-z]{6,}$`, the `NoteType` enum).
+- **Mirror:** `docs/MCP_TOOL_SURFACE.md`, the `$defs.NoteSummary` shape.
+- **Verify:** run
+  `node .claude/skills/frontmatter-validator/validate.mjs --check-schema`.
+  It reads both docs and cross-checks field set, `NoteId` pattern, `NoteType` enum,
+  and key order.
+- **Failure:** non-zero exit = the two docs have drifted (or the validator's encoded
+  rules no longer match them). This is the one anchor `CLAUDE.md` calls a hard gate.
+
+## Anchor 2 — Pre-commit gates ↔ CI
+
+- **Source of truth:** `.github/workflows/ci.yml` (the actual `run:` lines each job
+  executes).
+- **Mirror:** the "Pre-commit gates" paragraph in `CLAUDE.md`.
+- **Verify:** read the workflow's `run:` steps and confirm `CLAUDE.md` lists the same
+  commands. In particular the transcribe matrix runs **three** feature legs
+  (`parakeet`, `vad`, `whisper`), and the embed `bge` leg is path-filtered to
+  changes under `crates/kodabi-embed` **or** `crates/kodabi-core`.
+- **Failure:** a gate CI runs that `CLAUDE.md` omits (or vice versa). The pre-commit
+  gates promise to "mirror CI exactly", so any difference is a gap.
+
+## Anchor 3 — Repository layout ↔ tree
+
+- **Source of truth:** the actual top-level tree (crates under `crates/`, top-level
+  directories).
+- **Mirror:** the "Repository layout" block in `README.md`.
+- **Verify:** Glob the top level and each `crates/*`; confirm every path the README
+  lists exists, and that new top-level directories or crates appear in the block.
+- **Failure:** a listed path that no longer exists, or a new crate/dir the block
+  doesn't mention.
+
+## Anchor 4 — UI primitives ↔ docs/UI_CONVENTIONS.md
+
+- **Source of truth:** `src/components/ui/` (the exported primitives and their props).
+- **Mirror:** the "Primitives" section of `docs/UI_CONVENTIONS.md` (`Button` variants,
+  `TextField` props, `Select` behavior).
+- **Verify:** read each primitive's exported prop types and compare against the
+  documented variants/props/behavior claims.
+- **Failure:** a documented variant or prop the component no longer has, or a new
+  primitive the doc omits.
+
+## Anchor 5 — Feature legs ↔ Cargo features
+
+- **Source of truth:** each crate's `Cargo.toml` `[features]` (e.g.
+  `kodabi-transcribe`'s `parakeet`/`vad`/`whisper`, `kodabi-embed`'s `bge`) and the
+  ci.yml matrix.
+- **Mirror:** the feature-leg instructions in `CLAUDE.md` (which crates need which
+  `cargo clippy --features …` legs before commit).
+- **Verify:** confirm every off-by-default feature that CI clippy-checks is named in
+  `CLAUDE.md`'s pre-commit instructions, with the same build-environment notes
+  (whisper needs MSVC + `LIBCLANG_PATH`).
+- **Failure:** a feature CI checks that `CLAUDE.md`'s commit instructions don't
+  mention.
+
+---
+
+**Adding an anchor:** add its section here *and* the one-line entry in the
+doc-auditor agent's anchor summary — the agent works from that summary, so an anchor
+present in only one of the two files goes unchecked.

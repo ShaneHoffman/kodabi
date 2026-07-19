@@ -174,6 +174,25 @@ import { Select } from "./ui/Select";
 Pass `hideLabel` when the control's purpose is clear from context (a per-row picker in a list): the `label`
 stays as the accessible name (`sr-only`) but takes no visual row. The Inbox re-route picker uses this.
 
+**Never a raw `<select>`.** The native control ignores the token theme entirely (system chrome, no focus
+ring, no value wash), so this primitive is the only dropdown.
+
+---
+
+## Interaction conventions
+
+Beyond spacing and primitives, a few consistency rules for any screen:
+
+- **Type floor.** The smallest named steps (`text-eyebrow`, `text-cap`) are for labels, captions, and
+  eyebrows only; readable body copy uses `text-body` or larger. Sizes always come from the named scale —
+  never a hard-coded `text-[13px]` (same reasoning as the named-spacing rule).
+- **No hover-only affordances.** Every action is reachable by keyboard and discoverable without hovering;
+  the primitives' `:focus-visible` ring is the baseline. Hover may *enhance* an always-visible control, but
+  it must never be the only way to reveal or trigger one.
+- **`data-testid` discipline.** Interactive elements a screen adds carry a stable kebab-case `data-testid`
+  so a future end-to-end harness can select them without depending on copy or DOM shape. The primitives
+  spread native props, so a passed `data-testid` reaches the underlying element.
+
 ---
 
 ## What consumes these today

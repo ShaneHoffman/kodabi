@@ -61,17 +61,21 @@ Commit subjects follow Conventional Commits: `<type>: <imperative summary>`, mat
   The clippy/test gates need `dist/` to exist — `src-tauri` embeds it via
   `tauri::generate_context!`, which fails the compile when it's missing — so in a fresh worktree
   run `pnpm install --frozen-lockfile && pnpm build` first (CI's Rust jobs do the same).
-  `kodabi-transcribe`'s `parakeet` feature (sherpa-onnx) and `whisper` feature (whisper.cpp via
-  whisper-rs) are off by default, so the gates above don't compile or lint them — before committing
-  a change under `crates/kodabi-transcribe`, also run
-  `cargo clippy -p kodabi-transcribe --features parakeet --all-targets --locked -- -D warnings` and
-  `cargo clippy -p kodabi-transcribe --features whisper --all-targets --locked -- -D warnings`.
+  `kodabi-transcribe`'s `parakeet` feature (sherpa-onnx), `vad` feature, and `whisper` feature
+  (whisper.cpp via whisper-rs) are off by default, so the gates above don't compile or lint them —
+  before committing a change under `crates/kodabi-transcribe`, also run
+  `cargo clippy -p kodabi-transcribe --features parakeet --all-targets --locked -- -D warnings`,
+  `cargo clippy -p kodabi-transcribe --features vad --all-targets --locked -- -D warnings`, and
+  `cargo clippy -p kodabi-transcribe --features whisper --all-targets --locked -- -D warnings`
+  (CI checks all three legs as a matrix).
   The `whisper` feature compiles whisper.cpp from source (CMake + bindgen/libclang), so it needs an
   MSVC dev environment (`vcvars64.bat`) sourced and `LIBCLANG_PATH` set to an LLVM install — see
   `crates/kodabi-transcribe/src/whisper.rs`. `whisper-cuda` additionally needs the CUDA toolkit and
   is local-only (CI only checks the CPU `whisper` feature).
   Likewise `kodabi-embed`'s `bge` feature (bge-small via fastembed/ONNX Runtime) is off by default —
-  before committing a change under `crates/kodabi-embed`, also run
+  before committing a change under `crates/kodabi-embed` **or `crates/kodabi-core`** (CI's embed job
+  path-filters on both, since the `bge` backend has a `BGE_DIM == EMBEDDING_DIM` compile-time
+  assert against core), also run
   `cargo clippy -p kodabi-embed --features bge --all-targets --locked -- -D warnings`. No MSVC or
   bindgen is needed, but the first build downloads the ONNX Runtime binary (`ort-download-binaries`).
   The model itself is never fetched at runtime — set `KODABI_EMBED_MODEL_DIR` to a local
@@ -85,6 +89,36 @@ Commit subjects follow Conventional Commits: `<type>: <imperative summary>`, mat
 - **Spec agreement:** `docs/FRONTMATTER_SCHEMA.md` and `docs/MCP_TOOL_SURFACE.md` mirror each
   other (frontmatter fields ≡ the MCP `NoteSummary` shape). Editing one requires checking the
   other in the same change.
+- **UTC storage:** internal and derived timestamps are UTC RFC 3339 (`Z`); the frontmatter `date`
+  field is the sanctioned exception (offset-preserving or local date-only). See
+  `.claude/rules/utc-timestamps.md`.
+- **Public repo:** no real personal data, emails, or machine paths in committed files, and tests
+  write only under temp dirs. See `.claude/rules/no-personal-info.md`.
 
 Topical rules that aren't repo-wide engineering constraints live as modular files under
-`.claude/rules/` (e.g. `copy-style.md`).
+`.claude/rules/`: `copy-style` (no em dashes in user-facing copy), `shell-discipline`,
+`docs-stay-in-sync`, `tauri-command-parity`, `no-personal-info`, `skill-authoring`,
+`typescript-style`, `utc-timestamps`.
+
+## Skills & agents
+
+Task-shaped workflows live under `.claude/skills/`:
+
+- `frontmatter-validator` — validate a note's YAML frontmatter against the schema.
+- `preview` — launch Tauri dev and smoke-test the app.
+- `pull-request` — open a PR against main (Open PR board column; never merges).
+- `add-tauri-command` — scaffold a command across all layers, then audit parity.
+- `add-migration` — append a note-index migration safely, then audit.
+- `commit` — run the gates for the changed surface, then commit (never pushes).
+- `scaffold-feature` — plan and build a full-stack feature bottom-up.
+- `sync-docs` — reconcile docs with code via the anchor list.
+- `test` — run the tiers, or delegate audit/write to `test-builder`.
+
+Read-only auditor agents live under `.claude/agents/` and are spawned by the skills above:
+
+- `doc-auditor` — docs match code and each other.
+- `tauri-command-auditor` — command layers stay in lockstep; wrappers stay thin.
+- `migration-safety` — migrations are append-only, tested, and schema-aligned.
+- `test-builder` — the one exception: Rust-first, and it can write tests.
+
+The skill→agent delegation map lives in `.claude/rules/skill-authoring.md`.
