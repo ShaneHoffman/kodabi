@@ -15,7 +15,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::note::{self, Note, NoteError, NoteId, NoteType, Source, SourceKeyword};
-use crate::routing::{self, NoteText, RoutingConfig, RoutingError};
+use crate::routing::{self, GlossaryLoadFailure, NoteText, RoutingConfig, RoutingError};
 
 /// Errors produced while quick-capturing a note.
 #[derive(Debug, thiserror::Error)]
@@ -36,6 +36,11 @@ pub enum QuickCaptureError {
 pub struct QuickCaptured {
     pub note: Note,
     pub path: PathBuf,
+    /// Projects whose glossary could not load. Routing proceeded treating each
+    /// as having no vocabulary (they still match their own name), so this is a
+    /// non-fatal "fix your glossary" report, empty on the happy path. See
+    /// [`GlossaryLoadFailure`].
+    pub glossary_failures: Vec<GlossaryLoadFailure>,
 }
 
 /// Files `body` as a routed `type: note`, `source: quick-capture` note under
@@ -64,7 +69,7 @@ pub fn quick_capture(
     // is skipped entirely. Title is `None` — a quick capture has no separate
     // title; the first body line only seeds the filename, never a routing
     // signal (that would double-count the same words as both title and body).
-    let signals = routing::load_project_signals(vault_root)?;
+    let (signals, glossary_failures) = routing::load_project_signals(vault_root)?;
     let routing = routing::route(NoteText { title: None, body }, &signals, config);
 
     let id = NoteId::generate().map_err(QuickCaptureError::IdGeneration)?;
@@ -78,7 +83,11 @@ pub fn quick_capture(
         body,
     )?;
     let path = note::write_note(vault_root, &note, filename_seed(body))?;
-    Ok(QuickCaptured { note, path })
+    Ok(QuickCaptured {
+        note,
+        path,
+        glossary_failures,
+    })
 }
 
 /// The first non-empty line of `body`, seeding the note's filename. Returns

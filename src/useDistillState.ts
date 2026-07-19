@@ -53,13 +53,16 @@ export function useDistillState(capturePhase: CapturePhase): DistillState {
     let unlisten: (() => void) | undefined;
 
     listen<DistillEvent>(DISTILL_STATE_EVENT, (event) => {
+      // Respect teardown for every branch: an event delivered in the async gap
+      // after cleanup must not log or set state.
+      if (!active) return;
       if (event.payload.status === "routing_fallback") {
         console.warn(
           `distill routing fell back to Inbox: ${event.payload.message}`,
         );
         return;
       }
-      if (active && capturePhaseRef.current !== "listening") setState(event.payload);
+      if (capturePhaseRef.current !== "listening") setState(event.payload);
     }).then((fn) => {
       if (active) {
         unlisten = fn;

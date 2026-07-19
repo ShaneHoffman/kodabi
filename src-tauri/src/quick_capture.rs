@@ -166,6 +166,15 @@ fn submit_impl(app: &AppHandle, text: &str) -> Result<QuickCaptureOutcome, Strin
     let captured = quick_capture(&kb, text, &date, &routing_config_from_env())
         .map_err(|err| err.to_string())?;
 
+    // A broken glossary is contained to its own project (routing still ran); log
+    // it so the user can fix the file. The capture itself succeeded.
+    for failure in &captured.glossary_failures {
+        eprintln!(
+            "quick-capture: project \"{}\" has an unreadable glossary; it routes on its name only until fixed: {}",
+            failure.project, failure.error
+        );
+    }
+
     // Broadcast to every window so the main window's lists refresh even while it
     // is hidden to the tray.
     let _ = app.emit(VAULT_CHANGED_EVENT, ());
