@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -8,6 +9,16 @@ const host = process.env.TAURI_DEV_HOST;
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
+
+  // Vitest shares this config so tests compile through the same React plugin
+  // the app builds with. jsdom gives the DOM the component tests render into;
+  // the setup file registers jest-dom matchers and RTL cleanup. The build and
+  // server blocks below are build/serve-only and ignored here.
+  test: {
+    environment: "jsdom",
+    setupFiles: ["src/test/setup.ts"],
+    include: ["src/**/*.test.{ts,tsx}"],
+  },
 
   // Two HTML entries: the main app and the standalone quick-capture window
   // (its own Tauri webview). Plain strings resolve against the Vite root, which

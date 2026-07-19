@@ -10,8 +10,10 @@ import { QUICK_CAPTURE_SHOWN_EVENT } from "../events";
 import "./QuickCapture.css";
 
 /** How long the destination flashes before the window dismisses itself. Short
- * enough to still feel instant, long enough to read where the note landed. */
-const FLASH_MS = 600;
+ * enough to still feel instant, long enough to read where the note landed.
+ * Exported so the test asserts against this value rather than a copy of it —
+ * a copy only catches the constant growing, never it shrinking to nothing. */
+export const FLASH_MS = 600;
 
 type Status =
   | { kind: "idle" }
