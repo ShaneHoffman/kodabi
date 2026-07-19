@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "capture-overlay",
+  "description": "Capability for the always-on-top capture pill. Scoped to that window alone so the drag permission, which `core:default` does not grant, reaches only the one window that needs it.",
+  "windows": ["capture-overlay"],
+  "permissions": [
+    "core:default",
+    "core:window:allow-start-dragging"
+  ]
+}

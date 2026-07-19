@@ -4,13 +4,16 @@ import {
   buildRetentionPolicy,
   DEFAULT_KEEP_DAYS,
   RETENTION_OPTIONS,
+  setCaptureOverlay,
   setRetentionPolicy,
   useSettings,
+  type OverlaySettings,
   type RetentionKind,
 } from "../../useSettings";
 import { INDEX_STATE_EVENT } from "../../events";
 import { useTauriEvent } from "../../useTauriEvent";
 import { Button } from "../ui/Button";
+import { Checkbox } from "../ui/Checkbox";
 import { Select } from "../ui/Select";
 import { TextField } from "../ui/TextField";
 
@@ -80,6 +83,7 @@ export function SettingsView() {
   // to 0; `buildRetentionPolicy` parses and clamps it on apply.
   const [days, setDays] = useState(String(DEFAULT_KEEP_DAYS));
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [overlayError, setOverlayError] = useState<string | null>(null);
 
   // Seed the day field from the stored policy the first time a keep_days value
   // is seen, so editing starts from the stored value rather than the
@@ -101,6 +105,21 @@ export function SettingsView() {
       setSettings(updated);
     } catch (err) {
       setSaveError(String(err));
+    }
+  };
+
+  // Both flags travel together (the command takes the whole struct), so each
+  // toggle sends the stored pair with its own field replaced. Its own error
+  // slot, not the retention one: an error has to appear beside the control
+  // that failed, or it reads as a failure of whatever it sits under.
+  const applyOverlay = async (change: Partial<OverlaySettings>) => {
+    if (!settings) return;
+    setOverlayError(null);
+    try {
+      const updated = await setCaptureOverlay({ ...settings.overlay, ...change });
+      setSettings(updated);
+    } catch (err) {
+      setOverlayError(String(err));
     }
   };
 
@@ -149,6 +168,31 @@ export function SettingsView() {
                 </p>
               )}
             </div>
+          </div>
+        )}
+
+        {settings && (
+          <div className="flex max-w-measure flex-col gap-sm">
+            <h3 className="font-serif text-h3 text-text">Capture</h3>
+            <Checkbox
+              label="Show the capture pill during captures you start"
+              hint="A small pill stays on top of full screen apps while a capture is running, so a recording is never invisible. Drag it anywhere, or hide it for the current capture."
+              data-testid="overlay-manual-captures"
+              checked={settings.overlay.manual_captures}
+              onChange={(checked) => applyOverlay({ manual_captures: checked })}
+            />
+            <Checkbox
+              label="Show the capture pill for auto detected captures"
+              hint="Applies when meeting auto detection arrives. Kodabi does not detect meetings on its own yet, so this setting has nothing to act on today."
+              data-testid="overlay-auto-captures"
+              checked={settings.overlay.auto_captures}
+              onChange={(checked) => applyOverlay({ auto_captures: checked })}
+            />
+            {overlayError && (
+              <p role="alert" className="text-cap text-text-soft">
+                Couldn't save: {overlayError}
+              </p>
+            )}
           </div>
         )}
 

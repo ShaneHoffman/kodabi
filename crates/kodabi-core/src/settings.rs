@@ -1,5 +1,5 @@
-//! Machine-local app settings: the recording-consent acknowledgement and the
-//! raw-transcript retention policy.
+//! Machine-local app settings: the recording-consent acknowledgement, the
+//! raw-transcript retention policy, and the capture-overlay visibility flags.
 //!
 //! Like [`crate::device`], this lives in local, per-machine app config rather
 //! than inside the synced knowledge-base folder — consent and retention are a
@@ -37,6 +37,40 @@ pub enum RetentionPolicy {
     DiscardAfterDistill,
 }
 
+/// Whether the always-on-top capture pill shows while a capture runs, split by
+/// how the capture began.
+///
+/// The split exists because the two cases carry different amounts of surprise:
+/// a capture the user started by pressing a key needs no reminder (default
+/// `false`), while one an automatic detector started needs the strongest
+/// possible one (default `true`) — it is the only thing standing between an
+/// unattended start and an invisible recording.
+///
+/// A nested struct rather than two flat `Settings` fields so this asymmetry can
+/// live in a hand-written [`Default`]; the derive on `Settings` would force both
+/// to `false`. Auto-detection does not exist yet (see `docs/FOUNDING_DOC.md` §7):
+/// `auto_captures` is modeled now so the setting predates the feature that reads
+/// it, and so an existing install inherits the default-on choice when it lands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OverlaySettings {
+    /// Show the pill for captures the user starts (hotkey, tray, or IPC).
+    pub manual_captures: bool,
+    /// Show the pill for captures started by meeting auto-detection. Dormant
+    /// until that feature ships; nothing passes
+    /// [`crate::overlay::CaptureOrigin::AutoDetected`] today.
+    pub auto_captures: bool,
+}
+
+impl Default for OverlaySettings {
+    fn default() -> Self {
+        Self {
+            manual_captures: false,
+            auto_captures: true,
+        }
+    }
+}
+
 /// The persisted app settings. `#[serde(default)]` makes every field optional
 /// on load, so an older file missing a field (or a future file with an extra
 /// one) still deserializes — forward/backward compatibility for a config the
@@ -50,6 +84,10 @@ pub struct Settings {
     pub consent_acknowledged: bool,
     /// The raw-transcript retention policy.
     pub retention: RetentionPolicy,
+    /// Capture-overlay visibility. Last field deliberately: serde emits fields
+    /// in declaration order, so appending leaves the existing JSON/TOML prefix
+    /// byte-identical for anything mirroring the older shape.
+    pub overlay: OverlaySettings,
 }
 
 /// Loads the settings stored at `config_path`, writing defaults on first run.
@@ -149,6 +187,15 @@ mod tests {
     }
 
     #[test]
+    fn overlay_defaults_are_off_for_manual_and_on_for_auto_detected() {
+        // The asymmetry is the whole point of the hand-written Default: a
+        // capture the user started needs no pill, an auto-detected one does.
+        let overlay = Settings::default().overlay;
+        assert!(!overlay.manual_captures);
+        assert!(overlay.auto_captures);
+    }
+
+    #[test]
     fn load_or_create_writes_defaults_once_and_persists() {
         let dir = temp_dir("create");
         let path = dir.join("settings.toml");
@@ -177,10 +224,32 @@ mod tests {
             let settings = Settings {
                 consent_acknowledged: true,
                 retention: policy,
+                overlay: OverlaySettings::default(),
             };
             save(&path, &settings).unwrap();
             assert_eq!(load_or_create(&path).unwrap(), settings);
         }
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn overlay_flags_round_trip_through_toml() {
+        let dir = temp_dir("overlay-roundtrip");
+        let path = dir.join("settings.toml");
+
+        // Both flags flipped away from their defaults, so a round trip that
+        // silently fell back to `Default` would fail rather than coincide.
+        let settings = Settings {
+            consent_acknowledged: true,
+            retention: RetentionPolicy::KeepAll,
+            overlay: OverlaySettings {
+                manual_captures: true,
+                auto_captures: false,
+            },
+        };
+        save(&path, &settings).unwrap();
+        assert_eq!(load_or_create(&path).unwrap(), settings);
 
         fs::remove_dir_all(&dir).unwrap();
     }
@@ -192,12 +261,56 @@ mod tests {
         let toml = toml::to_string_pretty(&Settings {
             consent_acknowledged: true,
             retention: keep_days(14),
+            overlay: OverlaySettings::default(),
         })
         .unwrap();
         assert!(toml.contains("consent_acknowledged = true"), "{toml}");
         assert!(toml.contains("[retention]"), "{toml}");
         assert!(toml.contains(r#"policy = "keep_days""#), "{toml}");
         assert!(toml.contains("days = 14"), "{toml}");
+        assert!(toml.contains("[overlay]"), "{toml}");
+        assert!(toml.contains("manual_captures = false"), "{toml}");
+        assert!(toml.contains("auto_captures = true"), "{toml}");
+    }
+
+    #[test]
+    fn a_file_written_before_the_overlay_setting_existed_loads_with_defaults() {
+        let dir = temp_dir("overlay-backcompat");
+        let path = dir.join("settings.toml");
+        // Verbatim shape of a pre-overlay install's settings.toml. It must load
+        // without a migration, and must inherit auto_captures = true rather
+        // than the `false` a derived Default would have produced.
+        fs::write(
+            &path,
+            "consent_acknowledged = true\n\n[retention]\npolicy = \"keep_all\"\n",
+        )
+        .unwrap();
+
+        let settings = load_or_create(&path).unwrap();
+        assert!(settings.consent_acknowledged);
+        assert_eq!(settings.overlay, OverlaySettings::default());
+        assert!(settings.overlay.auto_captures);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_partial_overlay_table_fills_the_missing_flag_from_default() {
+        let dir = temp_dir("overlay-partial");
+        let path = dir.join("settings.toml");
+        // `#[serde(default)]` on OverlaySettings itself (not just Settings) is
+        // what makes a half-written table fill in rather than fail to parse.
+        fs::write(
+            &path,
+            "consent_acknowledged = true\n\n[retention]\npolicy = \"keep_all\"\n\n[overlay]\nmanual_captures = true\n",
+        )
+        .unwrap();
+
+        let settings = load_or_create(&path).unwrap();
+        assert!(settings.overlay.manual_captures);
+        assert!(settings.overlay.auto_captures);
+
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
@@ -257,17 +370,21 @@ mod tests {
         let json = serde_json::to_string(&Settings::default()).unwrap();
         assert_eq!(
             json,
-            r#"{"consent_acknowledged":false,"retention":{"policy":"keep_all"}}"#
+            r#"{"consent_acknowledged":false,"retention":{"policy":"keep_all"},"overlay":{"manual_captures":false,"auto_captures":true}}"#
         );
 
         let keep = serde_json::to_string(&Settings {
             consent_acknowledged: true,
             retention: keep_days(30),
+            overlay: OverlaySettings {
+                manual_captures: true,
+                auto_captures: false,
+            },
         })
         .unwrap();
         assert_eq!(
             keep,
-            r#"{"consent_acknowledged":true,"retention":{"policy":"keep_days","days":30}}"#
+            r#"{"consent_acknowledged":true,"retention":{"policy":"keep_days","days":30},"overlay":{"manual_captures":true,"auto_captures":false}}"#
         );
     }
 }

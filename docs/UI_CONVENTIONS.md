@@ -181,6 +181,29 @@ stays as the accessible name (`sr-only`) but takes no visual row. The Inbox re-r
 **Never a raw `<select>`.** The native control ignores the token theme entirely (system chrome, no focus
 ring, no value wash), so this primitive is the only dropdown.
 
+### `Checkbox` — labelled boolean
+
+A real `<input type="checkbox">` under a token skin (`appearance: none`), so keyboard behaviour, form
+semantics, and screen-reader state come from the platform rather than re-implemented ARIA — the opposite
+call from `Select`, where no native control could carry the theme at all. The label sits inline a `gap-2xs`
+beside the box and is bound by `id` (generated via `useId` when omitted); an optional `hint` renders below,
+indented to the label column and wired through `aria-describedby`. `onChange` receives the new boolean, not
+the event.
+
+```tsx
+import { Checkbox } from "./ui/Checkbox";
+
+<Checkbox
+  label="Show the capture pill during captures you start"
+  hint="A small pill stays on top of full screen apps while a capture is running."
+  checked={enabled}
+  onChange={setEnabled}
+/>
+```
+
+The checked state is ink on surface — **value, not hue**. The reserved green is never used here: it means
+audio is actually being recorded, and a settings control wearing it would be claiming something false.
+
 ---
 
 ## Interaction conventions
@@ -211,6 +234,16 @@ Beyond spacing and primitives, a few consistency rules for any screen:
   inline so it overrides the primitive's symmetric padding.
 - **`TextField` / `Select`** — built here as foundation; their first screen consumers arrive with the note
   create/edit work (board #46). Until then the usage examples above are the reference.
+- **`Checkbox`** — the Settings view's Capture section, where the two capture-overlay flags live.
+- **`CaptureOverlayPill`** — the always-on-top capture pill. Two deliberate departures, both forced by
+  what the window is rather than by preference:
+  - `rounded-full` rather than a radius step. The pill's rounded edge *is* the window's apparent shape
+    (the window itself is `transparent: true`), which is the genuine off-scale one-off the named-steps
+    rule allows.
+  - Its dismiss button is mouse-only, bending the keyboard rule above. The window is `focusable: false`
+    so appearing over a full-screen app never steals focus from it — which also puts it out of the tab
+    order. The keyboard paths that remain are the ones that matter: the capture hotkey stops the capture
+    and the pill with it, and the Settings toggle turns it off for good.
 - **`NeedsAttentionSection`** (in the Inbox) — the per-row Retry for a session whose distill failed is a
   `Button variant="quiet"`, matching the weight of the Inbox's own right-column controls; a row-level
   action shouldn't shout. Its emphasis is value and type only, never the reserved green.
