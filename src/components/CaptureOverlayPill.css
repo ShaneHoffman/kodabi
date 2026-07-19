@@ -1,0 +1,57 @@
+/* ============================================================
+   Capture overlay pill — the always-on-top on-air surface.
+
+   Only non-bridged tokens live here: the hairline ring and the elevation that
+   let the pill read as a distinct object over whatever is behind it, plus the
+   drag/press affordances. Showing and hiding the window IS the motion (the
+   same reasoning as the quick-capture box), so there is no entrance animation
+   and nothing for prefers-reduced-motion to disable.
+
+   This window is `transparent: true`, so the page itself must not paint a
+   background — only the pill does, and its rounded edge is the window's
+   apparent shape. The window is sized larger than the pill so the drop shadow
+   has transparent room to fade out in: with the pill flush to the window
+   bounds the shadow is clipped flat and reads as a rectangle around it.
+   ============================================================ */
+
+html,
+body,
+#root {
+  background: transparent;
+}
+
+/* The padded frame around the pill. Paints nothing itself — it exists purely
+   as the fade-out room described above. */
+.capture-overlay-pill__frame {
+  /* The whole window is the drag handle, so it advertises itself as one. */
+  cursor: grab;
+  user-select: none;
+}
+.capture-overlay-pill__frame:active {
+  cursor: grabbing;
+}
+
+.capture-overlay-pill {
+  /* The ring separates the pill from a light background; the lift separates it
+     from a busy one. Together they keep it legible over arbitrary content. */
+  box-shadow: var(--hairline), var(--lift-soft);
+}
+
+.capture-overlay-pill__label {
+  /* The pill is sized to the longest state text; nothing should reflow the
+     window if a label runs long. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.capture-overlay-pill__dismiss {
+  /* A pointer (not the pill's grab cursor) marks the one spot that isn't a
+     drag handle. */
+  cursor: pointer;
+  line-height: 1;
+}
+.capture-overlay-pill__dismiss:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

@@ -20,15 +20,17 @@ export default defineConfig(async () => ({
     include: ["src/**/*.test.{ts,tsx}"],
   },
 
-  // Two HTML entries: the main app and the standalone quick-capture window
-  // (its own Tauri webview). Plain strings resolve against the Vite root, which
-  // avoids `__dirname`-in-ESM; Vite serves each as a real file in dev and emits
-  // `dist/capture.html` for the packaged app.
+  // Three HTML entries: the main app plus the two standalone windows (the
+  // quick-capture box and the capture overlay pill), each its own Tauri
+  // webview. Plain strings resolve against the Vite root, which avoids
+  // `__dirname`-in-ESM; Vite serves each as a real file in dev and emits
+  // `dist/capture.html` / `dist/overlay.html` for the packaged app.
   build: {
     rollupOptions: {
       input: {
         main: "index.html",
         capture: "capture.html",
+        overlay: "overlay.html",
       },
     },
   },

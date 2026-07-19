@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use kodabi_core::settings::{self, RetentionPolicy, Settings};
+use kodabi_core::settings::{self, OverlaySettings, RetentionPolicy, Settings};
 use tauri::{AppHandle, Emitter, State};
 
 /// Event emitted after settings change over IPC, carrying the new [`Settings`].
@@ -88,6 +88,23 @@ pub fn set_retention_policy(
     Ok(settings)
 }
 
+/// Sets the capture-overlay visibility flags and brings the pill in line with
+/// them immediately, so flipping the toggle during a running capture shows or
+/// hides it right then rather than at the next capture. That includes a capture
+/// whose pill the user already dismissed — see
+/// [`crate::overlay::apply_settings_change`].
+#[tauri::command]
+pub fn set_capture_overlay(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+    overlay: OverlaySettings,
+) -> Result<Settings, String> {
+    let settings = state.update(|s| s.overlay = overlay)?;
+    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
+    crate::overlay::apply_settings_change(&app);
+    Ok(settings)
+}
+
 /// Records that the user acknowledged the recording-consent nudge and stores
 /// the retention policy they chose in the same write. After this, the capture
 /// gate lets recording proceed.
@@ -141,6 +158,30 @@ mod tests {
                 .unwrap()
                 .consent_acknowledged
         );
+
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn overlay_flags_persist_through_update() {
+        let (state, path) = temp_settings_state("overlay");
+        assert_eq!(state.snapshot().overlay, OverlaySettings::default());
+
+        let updated = state
+            .update(|s| {
+                s.overlay = OverlaySettings {
+                    manual_captures: true,
+                    auto_captures: false,
+                }
+            })
+            .unwrap();
+        assert!(updated.overlay.manual_captures);
+        assert!(!updated.overlay.auto_captures);
+
+        // Persisted, so a restart keeps the user's choice.
+        let reloaded = settings::load_or_create(&path).unwrap();
+        assert!(reloaded.overlay.manual_captures);
+        assert!(!reloaded.overlay.auto_captures);
 
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }

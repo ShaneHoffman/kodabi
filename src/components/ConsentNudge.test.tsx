@@ -16,6 +16,7 @@ vi.mock("@tauri-apps/api/event", () => import("../test/tauri"));
 const ACKNOWLEDGED: Settings = {
   consent_acknowledged: true,
   retention: { policy: "keep_all" },
+  overlay: { manual_captures: false, auto_captures: true },
 };
 
 function primaryButton(): HTMLElement {

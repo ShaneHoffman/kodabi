@@ -43,4 +43,4 @@ in `eslint.config.js` fail any non-blessed file at the
 - **One-time DOM bootstrap is not an effect.** Document-level setup that runs
   once at startup (the theme class, font loading) lives in `src/theme.ts` and
   `src/fonts.ts`, called imperatively from the entry modules (`src/main.tsx`,
-  `src/capture.tsx`) — not from a component.
+  `src/capture.tsx`, `src/overlay.tsx`) — not from a component.

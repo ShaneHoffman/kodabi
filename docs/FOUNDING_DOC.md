@@ -172,12 +172,12 @@ At meeting end (batch, not continuous — keeps token usage sane):
   5. **Symmetry:** indicators also make NOT-capturing unambiguous, protecting against both failure
      modes: accidental capture and silently missed meetings.
 
-  This is the bar, not the shipped state. Task #71 (indicator truthfulness — capture failures are
-  broadcast so the in-window indicator never claims a capture that isn't running) has landed, as has
-  the capture-start toast (#69) — fired from the Rust shell, so it appears even with the window
-  hidden to the tray, and only for a start whose re-derived state proves audio is actually being
-  recorded. Enforcement of the remaining surfaces is outstanding, tracked as tasks #68 (tray) and
-  #70 (overlay). The indicator surfaces themselves are designed in §4.
+  Task #71 (indicator truthfulness — capture failures are broadcast so the in-window indicator
+  never claims a capture that isn't running) has landed, as have #68 (the capturing-vs-idle tray
+  icon), #69 (the capture-start toast, fired from the Rust shell so it appears even with the
+  window hidden to the tray, and only for a start whose re-derived state proves audio is actually
+  being recorded), and #70 (the full-screen overlay pill). The indicator surfaces themselves are
+  designed in §4.
 - **Retention policy:** governs the stored transcript — optional "distill then discard the raw transcript after N days." Raw client-call transcripts accumulating forever is a liability. **No audio is *retained* in v1** — only the transcript + timestamps become a lasting on-disk artifact, so there is no retained audio for the retention policy to prune yet. (The task #57 incremental-capture spool flushes audio to disk *transiently* during a meeting for crash recovery, but that spool is cleared once the session distills, and an orphaned spool left by a crash is reclaimed on the next startup — not by retention.) When an opt-in audio-retention toggle is eventually pulled by a use case, the retention policy must cover it too. **One gap the in-app policy cannot reach:** the `claude` CLI that `kodabi-llm` spawns for distill keeps its *own* Claude Code session logs, which contain the transcript text passed to it — outside our retention control. Document this, and disable that logging where the CLI allows it, so the policy's promise is complete.
 - **Security at rest (v1 posture):** rely on OS disk encryption (BitLocker) + the retention policy. Say so explicitly in docs. App-level encryption is a later consideration.
 - **Resource budget:** idle ≈ zero; capturing under a target CPU ceiling (tune on real hardware); no fan spin-up during meetings. Treat as a requirement, not a bug report. Measurement procedure, tuning knobs, and the recorded numbers live in [`RESOURCE_BUDGET.md`](RESOURCE_BUDGET.md).
@@ -225,7 +225,7 @@ Principles:
 - SQLite FTS5 + sqlite-vec hybrid index, local embeddings, rebuildable
 - MCP server exposing the knowledge base
 - Claude Code integration: embedded terminal first, designed chat UI second
-- Retention setting, consent nudge, and the capture-visibility indicators the §3.7 invariant requires (in-window listening indicator, capturing-vs-idle tray icon, capture-start toast; the full-screen overlay pill may follow)
+- Retention setting, consent nudge, and the capture-visibility indicators the §3.7 invariant requires (in-window listening indicator, capturing-vs-idle tray icon, capture-start toast, full-screen overlay pill)
 
 ### V1 anti-scope (explicitly not building)
 
