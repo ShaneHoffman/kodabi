@@ -43,7 +43,7 @@ These mirror CI exactly (`CLAUDE.md`). Match every surface the diff touches:
 | `crates/kodabi-transcribe` | + `cargo clippy -p kodabi-transcribe --features parakeet …`, `--features vad …`, `--features whisper …` (each `--all-targets --locked -- -D warnings`) |
 | `crates/kodabi-embed` **or** `crates/kodabi-core` | + `cargo clippy -p kodabi-embed --features bge --all-targets --locked -- -D warnings` |
 | `src-tauri/**` **or** `crates/**` | + `cargo clippy -p kodabi --features parakeet --all-targets --locked -- -D warnings` (the shipping engine feature; the `--workspace` legs cfg it out) |
-| Frontend (`src/**`, `index.css`, frontend config) | `pnpm exec eslint . --max-warnings=0` + `pnpm build` |
+| Frontend (`src/**`, `index.css`, frontend config) | `pnpm exec eslint . --max-warnings=0` + `pnpm test` + `pnpm build` |
 | Docs / `.claude` only | No build gates. `validate.mjs --check-schema` if either schema doc changed; the validator's `test.mjs` if the validator itself changed |
 
 Notes: the `whisper` leg needs an MSVC dev environment (`vcvars64.bat`) and

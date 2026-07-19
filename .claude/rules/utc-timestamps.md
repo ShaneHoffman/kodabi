@@ -14,11 +14,17 @@ lexical order equals chronological order and nothing depends on the machine's zo
   RFC 3339 timestamp **or** a local date-only `YYYY-MM-DD`. Quick capture
   legitimately writes a local calendar date
   (`chrono::Local::now().format("%Y-%m-%d")`, `src-tauri/src/quick_capture.rs`).
-  The index preserves this verbatim in `date_raw` and derives `date_utc` only for
-  ordering. **Do not "fix" that `Local::now()` call** — it is the sanctioned case.
+  Distill is the same carve-out in its offset-bearing form: `frontmatter_date_parts`
+  (`crates/kodabi-core/src/distill.rs`) renders the UTC capture instant through
+  `with_timezone(&Local)`, so the note's `date` keeps the exact instant but carries
+  the device's local offset and files under the user's own day. The index preserves
+  both verbatim in `date_raw` and derives `date_utc` only for ordering. **Do not
+  "fix" either to UTC** — they are the sanctioned cases.
 - **Never `DEFAULT CURRENT_TIMESTAMP` or `datetime('now')`** for a stored value.
   SQLite's default renders without a `Z` and is parsed as local time by consumers.
   Timestamps are written explicitly by Rust with a controlled format. (The v1 index
   DDL is frozen regardless — see [`.claude/agents/migration-safety.md`](../agents/migration-safety.md).)
-- **Never `Local::now()` for a stored or compared instant.** The calendar-date
-  frontmatter case above is the only sanctioned local read.
+- **Never `Local::now()` for a stored or compared instant.** The frontmatter `date`
+  cases above are the only sanctioned local reads, and neither reads the clock in
+  local time for an instant: quick capture takes a calendar date, distill converts an
+  instant it already holds.

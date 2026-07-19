@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { useDialogFocus } from "../useDialogFocus";
 import {
   acknowledgeConsent,
   buildRetentionPolicy,
@@ -46,15 +47,7 @@ export function ConsentNudge({ onClose }: Props) {
 
   // Focus the primary action on open; restore focus on close. Focused by id
   // rather than a ref since `Button` doesn't forward one.
-  useEffect(() => {
-    const previous = document.activeElement;
-    document.getElementById(PRIMARY_ID)?.focus();
-    return () => {
-      if (previous instanceof HTMLElement && previous.isConnected) {
-        previous.focus();
-      }
-    };
-  }, []);
+  useDialogFocus(() => document.getElementById(PRIMARY_ID));
 
   const acknowledge = async () => {
     setSubmitting(true);

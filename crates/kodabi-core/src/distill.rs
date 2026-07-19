@@ -52,7 +52,7 @@
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
-use chrono::{SecondsFormat, Utc};
+use chrono::{DateTime, Local, SecondsFormat, TimeZone, Utc};
 
 use crate::llm::{extract_balanced_spans, HeadlessClaude, LlmRequest, LlmRunError};
 use crate::naming;
@@ -1029,6 +1029,30 @@ fn distill_chunked(
     )
 }
 
+/// Render a capture instant as the frontmatter `date` plus its calendar day,
+/// both in `tz`'s wall clock.
+///
+/// Per `docs/FRONTMATTER_SCHEMA.md`, the canonical `date` carries the device's
+/// **local** offset at capture time (`2026-07-09T20:00:00-04:00`), not the
+/// `…Z` UTC form: the offset preserves the exact instant, but the digits are
+/// the user's own day, so an evening meeting near the UTC day boundary files
+/// under today rather than tomorrow. Generic over the zone so production passes
+/// `&Local` — [`DateTime::with_timezone`] resolves the offset in effect *at
+/// that instant*, so a DST-era capture keeps its era's offset — while tests
+/// pass a `FixedOffset` and pin exact strings on any host.
+fn frontmatter_date_parts<Tz: TimeZone>(at: DateTime<Utc>, tz: &Tz) -> (String, String)
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let local = at.with_timezone(tz);
+    (
+        // `use_z = false`: a device actually on UTC emits `+00:00`, which is
+        // its local offset, rather than the `Z` this pass used to force.
+        local.to_rfc3339_opts(SecondsFormat::Millis, false),
+        local.format("%Y-%m-%d").to_string(),
+    )
+}
+
 /// Distills the raw session at `session_path` into a meeting note under
 /// `vault_root`, returning where it landed.
 ///
@@ -1037,11 +1061,12 @@ fn distill_chunked(
 /// with the write) — to its `project` + `confidence`: production wraps
 /// [`route_distilled`] (resolving config at the src-tauri boundary); tests stub
 /// it. The note's `date` is recovered from the session
-/// filename's capture timestamp; a hand-imported file that doesn't match the
-/// scheme falls back to the file's modification time (then today) in
-/// date-only form — the closest honest stand-in, since stamping "now" would
-/// fabricate chronology for a weeks-old import. The note's `source` is the
-/// session's vault-relative path.
+/// filename's capture timestamp, rendered with the device's local offset at
+/// that instant (see [`frontmatter_date_parts`]); a hand-imported file that
+/// doesn't match the scheme falls back to the file's modification time (then
+/// today) as a local calendar date — the closest honest stand-in, since
+/// stamping "now" would fabricate chronology for a weeks-old import. The note's
+/// `source` is the session's vault-relative path.
 ///
 /// One model call for a transcript inside [`DISTILL_INPUT_BUDGET_CHARS`];
 /// a longer one is chunked and merged by [`distill_chunked`], which costs one
@@ -1074,10 +1099,10 @@ pub fn distill_session(
         .as_ref()
         .and_then(|parsed| naming::parse_session_timestamp(&parsed.timestamp));
     let (date, meeting_date) = match captured_at {
-        Some(at) => (
-            at.to_rfc3339_opts(SecondsFormat::Millis, true),
-            at.format("%Y-%m-%d").to_string(),
-        ),
+        // Local wall clock for both: the prompt's meeting date is what the
+        // model resolves relative due dates against, so it has to agree with
+        // the day the note files under.
+        Some(at) => frontmatter_date_parts(at, &Local),
         None => {
             // No capture timestamp to recover: prefer the file's mtime (an
             // import usually preserves it) over "today", which would stamp a
@@ -1086,9 +1111,9 @@ pub fn distill_session(
             // omit.
             let fallback = std::fs::metadata(session_path)
                 .and_then(|meta| meta.modified())
-                .map(chrono::DateTime::<Utc>::from)
+                .map(DateTime::<Utc>::from)
                 .unwrap_or_else(|_| Utc::now());
-            let date = fallback.format("%Y-%m-%d").to_string();
+            let date = frontmatter_date_parts(fallback, &Local).1;
             (date.clone(), date)
         }
     };
@@ -1145,7 +1170,7 @@ mod tests {
     use crate::glossary::{Glossary, GlossaryTerm, OnConflict};
     use crate::note::project_dir;
     use crate::routing::DEFAULT_THRESHOLD;
-    use chrono::{DateTime, TimeZone, Timelike, Utc};
+    use chrono::{DateTime, FixedOffset, TimeZone, Timelike, Utc};
     use tempfile::tempdir;
 
     fn segment(index: u64, channel: Channel, text: &str) -> TranscriptSegment {
@@ -1168,6 +1193,15 @@ mod tests {
             .unwrap()
             .with_nanosecond(123_000_000)
             .unwrap()
+    }
+
+    /// The calendar day [`instant`] falls on in *this host's* zone — what the
+    /// prompt's meeting date and a date-only frontmatter value resolve to.
+    fn local_day() -> String {
+        instant()
+            .with_timezone(&Local)
+            .format("%Y-%m-%d")
+            .to_string()
     }
 
     /// Writes a two-line session into `<vault>/sessions/` and returns its path.
@@ -1653,6 +1687,62 @@ mod tests {
     // ------------------------------------------------------------------
 
     #[test]
+    fn a_hand_imported_session_dates_to_its_local_mtime_day() {
+        let vault = tempdir().unwrap();
+        let written = write_session(vault.path(), None);
+        // A filename outside the capture scheme: no timestamp to recover, so
+        // the writer falls back to the file's mtime as a local calendar date.
+        let imported = vault.path().join("sessions").join("imported-meeting.jsonl");
+        std::fs::rename(&written, &imported).unwrap();
+        let runner = MockRunner(Ok(full_output_json()));
+
+        let distilled = distill_session(&runner, vault.path(), &imported, &|_, _| inbox_routing())
+            .expect("distill should succeed");
+
+        let mtime =
+            DateTime::<Utc>::from(std::fs::metadata(&imported).unwrap().modified().unwrap());
+        let note = Note::from_markdown(&std::fs::read_to_string(&distilled.path).unwrap()).unwrap();
+        assert_eq!(
+            note.date,
+            mtime.with_timezone(&Local).format("%Y-%m-%d").to_string()
+        );
+    }
+
+    #[test]
+    fn frontmatter_date_carries_the_zones_offset_not_z() {
+        let (date, day) =
+            frontmatter_date_parts(instant(), &FixedOffset::west_opt(4 * 3600).unwrap());
+
+        assert_eq!(date, "2026-07-12T10:03:35.123-04:00");
+        assert_eq!(day, "2026-07-12");
+        // The offset moved the digits without moving the instant.
+        assert_eq!(DateTime::parse_from_rfc3339(&date).unwrap(), instant());
+    }
+
+    #[test]
+    fn frontmatter_date_files_an_east_of_utc_capture_under_its_local_day() {
+        // 14:03Z is already tomorrow at +10:00 — the whole point of the local
+        // rendering, in the direction the old UTC form got wrong.
+        let (date, day) =
+            frontmatter_date_parts(instant(), &FixedOffset::east_opt(10 * 3600).unwrap());
+
+        assert_eq!(date, "2026-07-13T00:03:35.123+10:00");
+        assert_eq!(day, "2026-07-13");
+        assert_eq!(DateTime::parse_from_rfc3339(&date).unwrap(), instant());
+    }
+
+    #[test]
+    fn frontmatter_date_writes_a_utc_device_as_plus_zero_not_z() {
+        // A device actually on UTC still emits its offset numerically: `Z` is
+        // the shape the schema calls non-canonical, whatever the zone.
+        let (date, day) = frontmatter_date_parts(instant(), &Utc);
+
+        assert_eq!(date, "2026-07-12T14:03:35.123+00:00");
+        assert_eq!(day, "2026-07-12");
+        assert_eq!(DateTime::parse_from_rfc3339(&date).unwrap(), instant());
+    }
+
+    #[test]
     fn distills_a_session_into_a_schema_valid_inbox_note() {
         let vault = tempdir().unwrap();
         let session_path = write_session(vault.path(), None);
@@ -1675,7 +1765,17 @@ mod tests {
         assert_eq!(note.note_type, NoteType::Meeting);
         assert_eq!(note.routing.project(), INBOX);
         assert_eq!(note.routing.confidence(), Some(0.0));
-        assert_eq!(note.date, "2026-07-12T14:03:35.123Z");
+        // The capture instant in this device's own wall clock: exact digits are
+        // host-zone dependent, so pin the properties that must hold everywhere.
+        // `frontmatter_date_parts` carries the exact-string pins.
+        assert_eq!(
+            note.date,
+            instant()
+                .with_timezone(&Local)
+                .to_rfc3339_opts(SecondsFormat::Millis, false)
+        );
+        assert!(!note.date.ends_with('Z'));
+        assert_eq!(DateTime::parse_from_rfc3339(&note.date).unwrap(), instant());
         assert_eq!(
             note.source,
             Source::parse(&format!(
@@ -2729,9 +2829,11 @@ mod tests {
         .unwrap();
 
         // Byte-for-byte the request this pass has always sent, and only one.
+        // The meeting date is the capture instant's *local* day, so derive it
+        // rather than pinning a literal that only holds west of the dateline.
         assert_eq!(
             runner.requests(),
-            vec![build_request(&segments, "2026-07-12")]
+            vec![build_request(&segments, &local_day())]
         );
     }
 
@@ -2739,14 +2841,17 @@ mod tests {
     fn a_session_exactly_at_the_budget_stays_single_call() {
         let vault = tempdir().unwrap();
         // "Meeting date: 2026-07-12\n\nTranscript:\n" is 38 characters; the
-        // one rendered line must bring the prompt to exactly the budget.
-        let preamble = "Meeting date: 2026-07-12\n\nTranscript:\n".chars().count();
+        // one rendered line must bring the prompt to exactly the budget. Every
+        // `%Y-%m-%d` day is 10 characters, so the local day keeps that count.
+        let preamble = format!("Meeting date: {}\n\nTranscript:\n", local_day())
+            .chars()
+            .count();
         let text = "a".repeat(DISTILL_INPUT_BUDGET_CHARS - preamble - LINE_OVERHEAD);
         let segments = vec![segment(0, Channel::You, &text)];
         let session_path = write_session_with(vault.path(), &segments);
         let runner = SequenceRunner::ok(vec![full_output_json()]);
 
-        let request = build_request(&segments, "2026-07-12");
+        let request = build_request(&segments, &local_day());
         assert_eq!(request.prompt.chars().count(), DISTILL_INPUT_BUDGET_CHARS);
 
         distill_session(&runner, vault.path(), &session_path, &|_, _| {

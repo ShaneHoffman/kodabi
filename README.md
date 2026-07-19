@@ -67,6 +67,7 @@ pnpm tauri dev     # run the desktop app in dev mode
 pnpm tauri:build   # build the installer bundle (real Parakeet engine)
 pnpm dev           # frontend only, in a browser
 pnpm build         # typecheck + Vite build
+pnpm test          # frontend tests (vitest + Testing Library, jsdom)
 pnpm lint          # frontend lint
 ```
 

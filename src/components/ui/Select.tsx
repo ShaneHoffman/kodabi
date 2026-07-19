@@ -1,11 +1,12 @@
 import {
-  useEffect,
   useId,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
+import { useOutsidePointerDown } from "../../useOutsidePointerDown";
+import { useScrollIntoView } from "../../useScrollIntoView";
 import "./Select.css";
 
 export type SelectOption = { value: string; label: string };
@@ -83,22 +84,10 @@ export function Select({
   };
 
   // Close on an outside pointer press while open.
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [open]);
+  useOutsidePointerDown(open, rootRef, () => setOpen(false));
 
   // Keep the highlighted option in view as it walks past the list's edge.
-  useEffect(() => {
-    if (!open) return;
-    document
-      .getElementById(`${baseId}-option-${active}`)
-      ?.scrollIntoView({ block: "nearest" });
-  }, [open, active, baseId]);
+  useScrollIntoView(open ? optionId(active) : null);
 
   const typeahead = (char: string) => {
     if (typedTimer.current !== null) window.clearTimeout(typedTimer.current);
