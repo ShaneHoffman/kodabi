@@ -27,29 +27,32 @@ so a rename permanently breaks the link. Set it correctly up front; there is no 
 **Passing `branchName` is not enough — the `column: "Backlog"` argument silently drops it.**
 `kangentic_create_task` routes `column: "Backlog"` (case-insensitive) through its backlog-creation
 path, which **ignores `branchName`**, leaving `branch_name` NULL — the auto-default trap above. To
-put a branch-bearing card in the Backlog column, **omit `column`**: the board's To Do lane *is*
-"Backlog", so the task lands there as a proper board task with the branch honored. The create
+put a branch-bearing card in the board's To Do lane, **omit `column`**: that lane is named
+**"Ready"** (`role: todo` in `kangentic.json`), and omitting `column` lands the task there as a
+proper board task with the branch honored. Note the asymmetry: "Backlog" is *not* a column name at
+all — it is the literal argument value that diverts creation into the separate backlog store. The create
 response never echoes the branch, so verify with
 `SELECT branch_name FROM tasks WHERE display_id = <N>` (via `kangentic_query_db`) — and note that
 `kangentic_update_task` has no `branchName` field, so the only fix is delete + recreate.
 
 ## Board flow
 
-`Backlog → Planning → Executing → Code Review → Open PR → Done`
+`Ready → Planning → Executing → Code Review → Open PR → Done`
 
-(The Executing column is literally named **"Write Me Code"** on the board — use that name in any
-`kangentic_move_task` call; "Executing" below refers to that column.)
+(Two column names differ from the stage names used below — pass the **board** name to any
+`kangentic_move_task` call: the To Do lane is **"Ready"**, and the Executing column is literally
+named **"Write Me Code"**.)
 
 - **Manual gate between every stage** — a human drags each card onward. The one exception:
   **Planning → Executing auto-advances on plan approval** (plan approval *is* the gate there).
 - **Executing** implements the task and **commits on the task branch — but never pushes.**
 - **Code Review** is a fresh, independent session running the `/code-review-fix` skill: it reviews
-  `git diff main...HEAD` at high rigor, fixes the real in-scope findings, runs the gates, and
+  `git diff origin/main...HEAD` at high rigor, fixes the real in-scope findings, runs the gates, and
   **commits on the task branch — but never pushes.** Findings too large to fix during review are
   reported as skips for the human gate.
 - **Open PR** runs the `/pull-request` skill: push → `gh pr create --base main` → `kangentic_link_pr`.
   **It never merges** — a human merges on GitHub, then drags the card to Done.
-- **Never drag a card back to Backlog** — that kills the session and removes its worktree.
+- **Never drag a card back to Ready** — that kills the session and removes its worktree.
   "Request changes" from Code Review goes back to **Executing**.
 
 Commit subjects follow Conventional Commits: `<type>: <imperative summary>`, matching the branch's

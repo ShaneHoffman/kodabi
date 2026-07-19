@@ -26,6 +26,13 @@ Message hint from the caller (may be empty): $ARGUMENTS
 `node_modules/`. Scan the diff for personal info (real emails, machine paths) per
 [`.claude/rules/no-personal-info.md`](../../rules/no-personal-info.md).
 
+**If the caller named specific paths, commit only those.** A caller that passes a path
+list (`/code-review-fix` does) is telling you the rest of the working tree is not its
+work — another session's edits share this worktree. Treat the unnamed paths as
+read-only: they still inform the gate matrix in step 2 if they were already committed,
+but they are never staged, never reverted, and never mentioned in the message. Without
+a path list, the whole working tree is in scope as usual.
+
 ## 2. Run the gates for the changed surface
 
 These mirror CI exactly (`CLAUDE.md`). Match every surface the diff touches:
@@ -49,7 +56,8 @@ gate.
 
 ## 4. Commit
 
-Stage explicitly (`git add <paths>`) and commit `<type>: <imperative summary>`. For
+Stage explicitly (`git add <paths>`) — the caller's path list from step 1 when there
+was one — and commit `<type>: <imperative summary>`. For
 a multiline body, write the message with the Write tool to a temp file and
 `git commit -F <file>`; end with the `Co-Authored-By: Claude …` trailer when the
 repo convention calls for it.
