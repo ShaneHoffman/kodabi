@@ -108,7 +108,11 @@ fn char_count(s: &str) -> usize {
 /// budget, breaking at the last whitespace before the limit (falling back to a
 /// char boundary at the limit when a piece has no interior whitespace). Walks
 /// `char_indices` so a split never lands mid-codepoint.
-fn hard_split(paragraph: &str, budget: usize) -> Vec<String> {
+///
+/// Crate-visible because [`crate::distill`] needs the same budget-bounded split
+/// for an over-long utterance; keeping one implementation keeps the two from
+/// drifting.
+pub(crate) fn hard_split(paragraph: &str, budget: usize) -> Vec<String> {
     let mut pieces = Vec::new();
     let mut rest = paragraph.trim();
 
