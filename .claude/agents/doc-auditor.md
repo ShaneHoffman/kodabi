@@ -19,27 +19,23 @@ as `file:line`.
 
 Read
 [`.claude/skills/sync-docs/references/verification-procedures.md`](../skills/sync-docs/references/verification-procedures.md).
-It is the authority; the summary below is a convenience. If the two disagree, the
-reference file wins and you should note the drift.
+It is the authority — the source of truth, mirror, and check procedure for every
+anchor. Work from it, not from memory; the titles below are only an index so you
+know the full set is covered.
 
 ## The five anchors
 
-1. **Frontmatter schema ↔ MCP tool surface** — run
-   `node .claude/skills/frontmatter-validator/validate.mjs --check-schema`. A
-   non-zero exit is a FAIL; capture the reported drift.
-2. **Pre-commit gates ↔ CI** — read every `run:` line in
-   `.github/workflows/ci.yml` and confirm `CLAUDE.md`'s pre-commit paragraph lists
-   the same commands. Watch the transcribe matrix (`parakeet`, `vad`, `whisper`)
-   and the embed `bge` leg's `crates/kodabi-core` path trigger.
-3. **Repository layout ↔ tree** — Glob the top level and `crates/*`; every path the
-   README "Repository layout" block lists must exist, and new crates/top-level dirs
-   must appear in the block.
-4. **UI primitives ↔ docs/UI_CONVENTIONS.md** — compare the exported props of each
-   file in `src/components/ui/` against the "Primitives" section (Button variants,
-   TextField props, Select behavior).
-5. **Feature legs ↔ Cargo features** — every off-by-default feature CI clippy-checks
-   (`kodabi-transcribe` `parakeet`/`vad`/`whisper`, `kodabi-embed` `bge`) must be
-   named in `CLAUDE.md`'s commit instructions with its build-env notes.
+Check each against its full entry in the reference file above:
+
+1. **Frontmatter schema ↔ MCP tool surface** — the one hard gate; run
+   `node .claude/skills/frontmatter-validator/validate.mjs --check-schema`.
+2. **Pre-commit gates ↔ CI**
+3. **Repository layout ↔ tree**
+4. **UI primitives ↔ docs/UI_CONVENTIONS.md**
+5. **Feature legs ↔ Cargo features**
+
+If the reference lists an anchor not named here (or vice versa), that drift is
+itself a finding — flag it.
 
 ## What you may run
 

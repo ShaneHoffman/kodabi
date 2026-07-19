@@ -8,14 +8,14 @@ argument-hint: [optional message hint or scope]
 
 Snapshot the working tree on the current branch, gates first.
 
-Message hint from the caller (may be empty): $ARGUMENTS
-
 Hard rules:
 - **Never push.** Pushing happens only in `/pull-request` (the Open PR board column).
 - **Never amend** — always a new commit.
 - **Never skip a gate** that the changed surface requires.
 - Subject is `<type>: <imperative summary>`, `<type>` matching the branch prefix
   (`feat/…` → `feat:`), per Conventional Commits.
+
+Message hint from the caller (may be empty): $ARGUMENTS
 
 ## 1. Understand the change
 
