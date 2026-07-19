@@ -8,6 +8,7 @@ import {
 } from "../../useNotes";
 import { formatSlug, useProjects } from "../../useProjects";
 import { Select, type SelectOption } from "../ui/Select";
+import { NeedsAttentionSection } from "./NeedsAttentionSection";
 import "./InboxView.css";
 
 /** The quiet meta line for an unfiled note: day, routing score, then tags. */
@@ -49,6 +50,11 @@ export function InboxView() {
           </p>
           <h2 className="font-serif text-h2 text-text">Inbox</h2>
         </header>
+
+        {/* Captured meetings that never became a note: they need an action
+            (a retry), so they sit above the notes waiting to be filed. Renders
+            nothing when there are none, which is the normal case. */}
+        <NeedsAttentionSection />
 
         {error ? (
           <p className="text-body text-text-soft">{error}</p>
