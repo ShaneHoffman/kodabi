@@ -89,8 +89,10 @@ fn distills_a_stored_transcript_into_a_schema_valid_meeting_note() {
     .expect("session should persist");
 
     let runner = ClaudeRunner::new(ClaudeConfig::distill());
-    let distilled = distill_session(&runner, vault.path(), &session_path, &|_| inbox_routing())
-        .expect("distill should succeed");
+    let distilled = distill_session(&runner, vault.path(), &session_path, &|_, _| {
+        inbox_routing()
+    })
+    .expect("distill should succeed");
 
     let written = std::fs::read_to_string(&distilled.path).expect("note file should exist");
     let note = Note::from_markdown(&written).expect("note should be schema-valid");
