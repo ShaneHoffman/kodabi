@@ -472,9 +472,17 @@ fn capture_start_notification(
 /// Fire the capture-start toast, if this start earns one. The OS dismisses it
 /// on its own after the default banner duration.
 ///
-/// A notification that can't be shown is logged and swallowed: the capture is
-/// already running, and failing it because an announcement didn't render would
-/// trade a missing toast for a missing meeting.
+/// Fired through the Rust `NotificationExt` API, which is not ACL-gated — the
+/// notification permission in `capabilities/` gates only the plugin's *webview*
+/// commands, so deliberately none is granted: nothing in the window should be
+/// able to mint the banner that says "you are being recorded".
+///
+/// Errors are logged and swallowed rather than failing the capture, which is
+/// already running. On desktop that logging is belt-and-braces: the plugin
+/// spawns the real OS call onto the async runtime and drops its result, so
+/// `show()` returns `Ok` even when the banner never renders. A toast that
+/// silently doesn't appear is therefore possible, and by design preferable to
+/// trading a missing announcement for a missing meeting.
 fn notify_capture_start(app: &AppHandle, fresh_start: bool, event: &CaptureStateEvent) {
     let Some((title, body)) = capture_start_notification(fresh_start, event) else {
         return;
