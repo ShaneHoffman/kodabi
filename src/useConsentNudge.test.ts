@@ -2,7 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CONSENT_REQUIRED_EVENT } from "./events";
 import { useConsentNudge } from "./useConsentNudge";
-import { emit, listenerCount, resetTauriMocks } from "./test/tauri";
+import { emitFromBackend, listenerCount, resetTauriMocks } from "./test/tauri";
 
 vi.mock("@tauri-apps/api/core", () => import("./test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("./test/tauri"));
@@ -20,7 +20,7 @@ describe("useConsentNudge", () => {
     expect(result.current.open).toBe(false);
 
     act(() => {
-      emit(CONSENT_REQUIRED_EVENT);
+      emitFromBackend(CONSENT_REQUIRED_EVENT);
     });
 
     expect(result.current.open).toBe(true);
@@ -29,7 +29,7 @@ describe("useConsentNudge", () => {
   it("closes on closeNudge", () => {
     const { result } = renderHook(() => useConsentNudge());
     act(() => {
-      emit(CONSENT_REQUIRED_EVENT);
+      emitFromBackend(CONSENT_REQUIRED_EVENT);
     });
 
     act(() => {

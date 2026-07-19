@@ -3,7 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConsentNudge } from "./ConsentNudge";
 import type { Settings } from "../useSettings";
-import { invoke, onCommand, resetTauriMocks } from "../test/tauri";
+import {
+  invoke,
+  invokedCommands,
+  onCommand,
+  resetTauriMocks,
+} from "../test/tauri";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../test/tauri"));
@@ -13,13 +18,22 @@ const ACKNOWLEDGED: Settings = {
   retention: { policy: "keep_all" },
 };
 
-/** The commands `invoke` was asked for, in order. */
-function invokedCommands(): string[] {
-  return invoke.mock.calls.map(([command]) => command);
-}
-
 function primaryButton(): HTMLElement {
   return screen.getByRole("button", { name: "I understand, start capture" });
+}
+
+/** Pick a retention option by its visible label (`RETENTION_OPTIONS`). */
+async function chooseRetention(
+  user: ReturnType<typeof userEvent.setup>,
+  label: string,
+): Promise<void> {
+  await user.click(screen.getByRole("combobox", { name: /retention/i }));
+  await user.click(screen.getByRole("option", { name: label }));
+}
+
+/** The day count, which only exists while `keep_days` is the chosen policy. */
+function daysField(): HTMLInputElement {
+  return screen.getByRole("spinbutton", { name: "Days to keep" });
 }
 
 describe("ConsentNudge", () => {
@@ -51,12 +65,46 @@ describe("ConsentNudge", () => {
     onCommand("start_capture", () => null);
     render(<ConsentNudge onClose={vi.fn()} />);
 
-    await user.click(screen.getByRole("combobox", { name: /retention/i }));
-    await user.click(screen.getByRole("option", { name: "Discard after distilling" }));
+    await chooseRetention(user, "Discard after distilling");
     await user.click(primaryButton());
 
     expect(invoke).toHaveBeenCalledWith("acknowledge_consent", {
       retention: { policy: "discard_after_distill" },
+    });
+  });
+
+  it("carries an edited day count into a keep_days policy", async () => {
+    const user = userEvent.setup();
+    onCommand("acknowledge_consent", () => ACKNOWLEDGED);
+    onCommand("start_capture", () => null);
+    render(<ConsentNudge onClose={vi.fn()} />);
+
+    // The only option with a second control behind it, and the only one whose
+    // policy isn't a constant.
+    await chooseRetention(user, "Keep for a number of days");
+    await user.clear(daysField());
+    await user.type(daysField(), "7");
+    await user.click(primaryButton());
+
+    expect(invoke).toHaveBeenCalledWith("acknowledge_consent", {
+      retention: { policy: "keep_days", days: 7 },
+    });
+  });
+
+  it("clamps an emptied day count instead of sending an invalid policy", async () => {
+    const user = userEvent.setup();
+    onCommand("acknowledge_consent", () => ACKNOWLEDGED);
+    onCommand("start_capture", () => null);
+    render(<ConsentNudge onClose={vi.fn()} />);
+
+    await chooseRetention(user, "Keep for a number of days");
+    // The field is held as a raw string so it can be cleared mid-edit; blank
+    // parses to NaN, and the backend's NonZeroU32 rejects the 0 that implies.
+    await user.clear(daysField());
+    await user.click(primaryButton());
+
+    expect(invoke).toHaveBeenCalledWith("acknowledge_consent", {
+      retention: { policy: "keep_days", days: 1 },
     });
   });
 

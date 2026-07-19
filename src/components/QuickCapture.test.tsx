@@ -1,16 +1,19 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { QuickCapture } from "./QuickCapture";
+import { FLASH_MS, QuickCapture } from "./QuickCapture";
 import type { QuickCaptureOutcome } from "../quickCapture";
-import { invoke, onCommand, resetTauriMocks } from "../test/tauri";
+import { QUICK_CAPTURE_SHOWN_EVENT } from "../events";
+import {
+  emitFromBackend,
+  invoke,
+  invokedCommands,
+  onCommand,
+  resetTauriMocks,
+} from "../test/tauri";
 
 vi.mock("@tauri-apps/api/core", () => import("../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../test/tauri"));
-
-/** How long the destination flashes before the window hides itself
- * (`FLASH_MS` in QuickCapture.tsx). */
-const FLASH_MS = 600;
 
 function outcome(project: string | null): QuickCaptureOutcome {
   return {
@@ -25,8 +28,31 @@ function box(): HTMLTextAreaElement {
   return screen.getByRole("textbox", { name: "Capture a thought" });
 }
 
-function invokedCommands(): string[] {
-  return invoke.mock.calls.map(([command]) => command);
+/** A `quick_capture_submit` the test settles by hand, so a submit can still be
+ * in flight while the window is dismissed and popped again. */
+function deferredSubmit(): {
+  resolve: (outcome: QuickCaptureOutcome) => void;
+  reject: (reason: unknown) => void;
+} {
+  let resolve!: (outcome: QuickCaptureOutcome) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<QuickCaptureOutcome>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  onCommand("quick_capture_submit", () => promise);
+  return {
+    resolve: (settled) => resolve(settled),
+    reject: (reason) => reject(reason),
+  };
+}
+
+/** The backend bringing the window forward again (Rust emits this on show +
+ * focus), which is what starts a new capture session. */
+async function reshow(): Promise<void> {
+  await act(async () => {
+    emitFromBackend(QUICK_CAPTURE_SHOWN_EVENT);
+  });
 }
 
 describe("QuickCapture", () => {
@@ -118,5 +144,85 @@ describe("QuickCapture", () => {
     await user.type(box(), "   {Enter}");
 
     expect(invokedCommands()).not.toContain("quick_capture_submit");
+  });
+
+  it("keeps a failed capture's message across a dismiss and re-show", async () => {
+    const user = userEvent.setup();
+    onCommand("quick_capture_submit", () => {
+      throw "the vault is not writable";
+    });
+    render(<QuickCapture />);
+
+    await user.type(box(), "ring the vendor back{Enter}");
+    await screen.findByText("the vault is not writable");
+
+    await reshow();
+
+    // A blur-dismiss must not bury a failed capture: the error and the draft
+    // are both still there the next time the box pops.
+    expect(screen.getByText("the vault is not writable")).toBeInTheDocument();
+    expect(box()).toHaveValue("ring the vendor back");
+  });
+
+  it("clears a stale success flash on re-show", async () => {
+    const user = userEvent.setup();
+    onCommand("quick_capture_submit", () => outcome("paradise-golf"));
+    render(<QuickCapture />);
+
+    await user.type(box(), "ring the vendor back{Enter}");
+    await screen.findByText("→ paradise-golf");
+
+    await reshow();
+
+    // Unlike an error, a spent success flash is noise on a fresh box.
+    expect(screen.queryByText("→ paradise-golf")).not.toBeInTheDocument();
+  });
+
+  it("leaves a fresh draft alone when a stale submit lands", async () => {
+    const user = userEvent.setup();
+    const filing = deferredSubmit();
+    render(<QuickCapture />);
+
+    await user.type(box(), "ring the vendor back{Enter}");
+    expect(screen.getByText("Filing…")).toBeInTheDocument();
+
+    // Dismissed and popped again while the write is still in flight, and the
+    // user has moved on to a different thought.
+    await reshow();
+    await user.clear(box());
+    await user.type(box(), "book the flights");
+
+    await act(async () => {
+      filing.resolve(outcome("paradise-golf"));
+    });
+
+    // The first thought did land — but its success belongs to a capture
+    // session that is over, so it may not clear, flash over, or dismiss the
+    // one the user is in the middle of.
+    expect(box()).toHaveValue("book the flights");
+    expect(screen.queryByText("→ paradise-golf")).not.toBeInTheDocument();
+    expect(invokedCommands()).not.toContain("hide_quick_capture");
+  });
+
+  it("leaves a fresh draft alone when a stale failure lands", async () => {
+    const user = userEvent.setup();
+    const filing = deferredSubmit();
+    render(<QuickCapture />);
+
+    await user.type(box(), "ring the vendor back{Enter}");
+    await reshow();
+    await user.clear(box());
+    await user.type(box(), "book the flights");
+
+    await act(async () => {
+      filing.reject("the vault is not writable");
+    });
+
+    // Same guard from the other side: a late failure must not wipe the draft
+    // or pin an error on a capture it has nothing to do with.
+    expect(box()).toHaveValue("book the flights");
+    expect(
+      screen.queryByText("the vault is not writable"),
+    ).not.toBeInTheDocument();
   });
 });
