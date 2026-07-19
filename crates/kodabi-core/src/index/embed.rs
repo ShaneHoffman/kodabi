@@ -35,7 +35,10 @@ pub struct ChunkHit {
 
 /// Encodes a vector as the little-endian `f32` byte blob `sqlite-vec` reads as a
 /// `FLOAT[N]` value — the compact binding, versus a JSON array text literal.
-fn embedding_to_blob(embedding: &[f32]) -> Vec<u8> {
+///
+/// Shared with `super::search`, whose vector arm binds the query embedding the
+/// same way [`nearest_chunks`](NoteIndex::nearest_chunks) binds its query.
+pub(super) fn embedding_to_blob(embedding: &[f32]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(embedding.len() * 4);
     for value in embedding {
         bytes.extend_from_slice(&value.to_le_bytes());

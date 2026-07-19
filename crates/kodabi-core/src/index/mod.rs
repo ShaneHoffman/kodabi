@@ -18,10 +18,13 @@ mod embed;
 mod migrations;
 mod note;
 mod query;
+mod search;
 
 pub use embed::{ChunkHit, EmbeddedChunk};
 
 pub use note::{normalize_date_to_utc, IndexedNote, NoteRow, NoteType, UnknownNoteType};
+
+pub use search::{PageInfo, SearchHit, SearchParams, SearchResults, TagMatch};
 
 use std::path::Path;
 use std::sync::Once;
@@ -56,6 +59,19 @@ pub enum IndexError {
     /// An embedding handed to the vector store was not [`EMBEDDING_DIM`] long.
     #[error("embedding dimension mismatch: expected {expected}, got {got}")]
     EmbeddingDim { expected: usize, got: usize },
+    /// A `search_notes` pagination `cursor` was malformed — not one this index
+    /// produced (wrong version prefix, bad score encoding, or empty id).
+    #[error("invalid search cursor {value:?}")]
+    Cursor { value: String },
+    /// A `search_notes` filter array carried more values than the query planner
+    /// will bind. Rejected rather than truncated: silently dropping a value
+    /// would widen an `all`-style filter into a different question.
+    #[error("too many {field} filter values: {got} (maximum {max})")]
+    FilterTooLarge {
+        field: &'static str,
+        max: usize,
+        got: usize,
+    },
 }
 
 /// `Result` specialised to [`IndexError`].
