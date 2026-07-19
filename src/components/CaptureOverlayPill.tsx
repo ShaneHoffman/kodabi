@@ -31,33 +31,44 @@ export function CaptureOverlayPill() {
   if (!isCaptureActive(captureState.phase)) return null;
 
   return (
-    // `deep` (not the bare attribute) so a press anywhere on the pill drags it,
-    // not just the exact root element. Tauri's drag script excludes <button>
-    // subtrees on its own, which is what keeps the dismiss control clickable.
+    // The window is deliberately larger than the pill: the pill's drop shadow
+    // needs transparent room to fade into, or it is clipped flat at the window
+    // bounds and reads as a rectangle around a rounded pill. This padded frame
+    // is that room.
+    //
+    // `deep` (not the bare attribute) so a press anywhere — pill or the
+    // transparent frame, which swallows clicks regardless — drags the window.
+    // Tauri's drag script excludes <button> subtrees on its own, which is what
+    // keeps the dismiss control clickable.
     <div
       data-tauri-drag-region="deep"
-      data-testid="capture-overlay-pill"
-      className="capture-overlay-pill flex h-screen items-center gap-2xs rounded-full bg-surface px-xs py-2xs"
+      data-testid="capture-overlay-root"
+      className="capture-overlay-pill__frame flex h-screen items-center p-sm"
     >
-      <SpiritMark mode={markMode(captureState)} size="0.85rem" halo="0.8rem" />
-      <p
-        role="status"
-        className={`capture-overlay-pill__label grow text-cap uppercase tracking-wide ${
-          label.live ? "text-accent-dot" : "text-text-faint"
-        }`}
+      <div
+        data-testid="capture-overlay-pill"
+        className="capture-overlay-pill flex h-full w-full items-center gap-2xs rounded-full bg-surface px-xs"
       >
-        {label.text}
-      </p>
-      <button
-        type="button"
-        aria-label="Hide capture pill"
-        data-testid="capture-overlay-dismiss"
-        className="capture-overlay-pill__dismiss text-text-faint"
-        onClick={() => void dismissCaptureOverlay()}
-      >
-        {/* Decorative: the accessible name is on the button. */}
-        <span aria-hidden="true">✕</span>
-      </button>
+        <SpiritMark mode={markMode(captureState)} size="0.85rem" halo="0.8rem" />
+        <p
+          role="status"
+          className={`capture-overlay-pill__label grow text-cap uppercase tracking-wide ${
+            label.live ? "text-accent-dot" : "text-text-faint"
+          }`}
+        >
+          {label.text}
+        </p>
+        <button
+          type="button"
+          aria-label="Hide capture pill"
+          data-testid="capture-overlay-dismiss"
+          className="capture-overlay-pill__dismiss text-text-faint"
+          onClick={() => void dismissCaptureOverlay()}
+        >
+          {/* Decorative: the accessible name is on the button. */}
+          <span aria-hidden="true">✕</span>
+        </button>
+      </div>
     </div>
   );
 }
