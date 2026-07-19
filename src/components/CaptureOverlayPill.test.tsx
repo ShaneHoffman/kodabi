@@ -146,13 +146,23 @@ describe("CaptureOverlayPill", () => {
     await renderSeeded(LISTENING);
 
     // `deep`, not the bare attribute: bare drags only on a press landing
-    // exactly on the root, so the label and mark would be dead zones.
-    expect(screen.getByTestId("capture-overlay-pill")).toHaveAttribute(
+    // exactly on the root, so the pill inside it would be a dead zone.
+    expect(screen.getByTestId("capture-overlay-root")).toHaveAttribute(
       "data-tauri-drag-region",
       "deep",
     );
     // Tauri's drag script excludes <button> subtrees, which is the only reason
     // a control inside a deep drag region stays pressable. A div would drag.
     expect(screen.getByTestId("capture-overlay-dismiss").tagName).toBe("BUTTON");
+  });
+
+  it("keeps the pill inset from the window edge so its shadow can fade out", async () => {
+    await renderSeeded(LISTENING);
+
+    // The pill carries a drop shadow. Flush to the window bounds that shadow is
+    // clipped flat and reads as a rectangle around a rounded pill, which is
+    // exactly what the transparent window is meant to avoid. The padded frame
+    // is the fade-out room, and the window is sized for it.
+    expect(screen.getByTestId("capture-overlay-root")).toHaveClass("p-sm");
   });
 });
