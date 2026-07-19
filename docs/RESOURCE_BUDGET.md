@@ -299,6 +299,30 @@ unchanged by this branch) that blocks the production Whisper fallback path on Wi
 entirely, not just this measurement. Tracked as board task **#53**
 (`fix/sherpa-onnx-ort-mismatch`).
 
+##### Deferral decision (2026-07-19)
+
+**Parakeet is the sole shipping engine for v1; the Whisper fallback stays blocked on Windows
+and is deferred.** Rationale: `sherpa-onnx` 1.13.4 is the newest version published to
+crates.io as of this date, so there is no upstream fix to take — closing #53 would mean
+either patching the crate's Windows shared-link artifact ourselves or vendoring a matching
+`onnxruntime.dll`, neither of which is worth doing for a fallback engine that the
+[STT engine benchmark](benchmarks/stt-engine-benchmark.md) already declined to ship (Parakeet
+runs ~10x faster with equivalent silence-safety and near-equal accuracy).
+
+What this decision changes, so the state stops being ambient:
+
+- Release builds now hard-require a real engine. The `compile_error!` guard in
+  `src-tauri/src/transcribe.rs` rejects a release-profile build with neither engine feature,
+  and `pnpm tauri:build` passes `--features parakeet`, so the `MockEngine` stub cannot ship.
+- CI's `app` job release-builds that shipping configuration and runs the real-model Parakeet
+  transcription tests, so the engine we actually ship is compiled and exercised on every
+  Rust-touching change (previously nothing built the app with any real engine).
+- Whisper keeps its clippy leg in CI and remains buildable and testable locally without VAD
+  (`whisper_real.rs` passes), so the code path does not rot while it waits.
+
+Task **#53** stays open to adopt a fixed `sherpa-onnx` when one ships. Until then, treat
+Whisper as a documented non-option on Windows rather than a working fallback.
+
 ## Final tuned constants
 
 **No changes needed.** The compiled-in defaults (Parakeet, 1 thread; `FRAME_CAPACITY=256`;
