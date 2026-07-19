@@ -11,6 +11,7 @@ pub mod distill;
 pub mod embed;
 pub mod glossary;
 pub mod index;
+pub mod inflight;
 pub mod llm;
 pub mod metrics;
 pub mod naming;

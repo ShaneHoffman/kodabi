@@ -7,14 +7,21 @@
 
 use std::sync::Mutex;
 use std::thread;
+use std::time::Duration;
 
 use crate::capture::Capture;
-use crate::combine::{AlignedSession, Combiner, SessionChannel};
+use crate::combine::{CombinedSession, Combiner, SessionChannel};
 use crate::error::{AudioError, Result};
 use crate::format::AudioFormat;
 use crate::resample::ResampleParams;
 use crate::source::CaptureSource;
+use crate::spill::SpillConfig;
 use crate::tuning::apply_positive_usize_override;
+
+/// Default flush interval: how many seconds of captured audio accumulate in
+/// memory before the combiner spills them to disk. Overridable via
+/// `KODABI_FLUSH_SECS`.
+const DEFAULT_FLUSH_SECS: usize = 10;
 
 /// One source's live capture plus the error (if any) from its last start
 /// attempt. `last_error` is retained after a failed start — with no `capture`
@@ -96,12 +103,16 @@ struct Inner {
     /// [`DualCapture::attach_source`]). Taken and finalized in
     /// [`DualCapture::stop`].
     combiner: Option<CombinerState>,
+    /// The spill configuration to hand the combiner when it is spawned. Set by
+    /// [`DualCapture::start`] and consumed by the first [`DualCapture::attach_source`]
+    /// that spawns the combiner; `None` keeps the session in memory.
+    pending_spill: Option<SpillConfig>,
 }
 
 /// The running combiner plus which channels have been attached to it this
 /// session. Both flags gate two things: an attach happens at most once per
 /// channel (a mid-session device rebuild re-runs `start` without re-attaching
-/// an already-live source), and a two-channel [`AlignedSession`] is only
+/// an already-live source), and a two-channel [`CombinedSession`] is only
 /// returned from [`DualCapture::stop`] once *both* channels attached — a
 /// single source produces no two-channel artifact, matching the pre-existing
 /// contract.
@@ -146,24 +157,30 @@ pub struct CaptureTuning {
     pub target_rate: u32,
     /// Live resampler chunk size + sinc quality (see [`ResampleParams`]).
     pub resample: ResampleParams,
+    /// How much captured audio accumulates in memory before the combiner
+    /// flushes it to the in-flight spill file. Larger = fewer disk writes but
+    /// more resident memory and more audio lost on a crash. Env
+    /// `KODABI_FLUSH_SECS`.
+    pub flush_interval: Duration,
 }
 
 impl CaptureTuning {
-    /// `frame_capacity`/`target_rate` as given; `resample` defaults to
-    /// [`ResampleParams::default`]. The plain constructor callers (tests, the
-    /// `record_meeting` example) use when they don't need env overrides.
+    /// `frame_capacity`/`target_rate` as given; `resample` and `flush_interval`
+    /// default. The plain constructor callers (tests, the `record_meeting`
+    /// example) use when they don't need env overrides.
     pub fn new(frame_capacity: usize, target_rate: u32) -> Self {
         CaptureTuning {
             frame_capacity,
             target_rate,
             resample: ResampleParams::default(),
+            flush_interval: Duration::from_secs(DEFAULT_FLUSH_SECS as u64),
         }
     }
 
-    /// [`CaptureTuning::new`] with `KODABI_FRAME_CAPACITY` and the resample
-    /// env overrides ([`ResampleParams::from_env`]) applied — the production
-    /// entry point, so a resource-budget pass can iterate on real hardware
-    /// without recompiling.
+    /// [`CaptureTuning::new`] with `KODABI_FRAME_CAPACITY`, `KODABI_FLUSH_SECS`,
+    /// and the resample env overrides ([`ResampleParams::from_env`]) applied —
+    /// the production entry point, so a resource-budget pass can iterate on real
+    /// hardware without recompiling.
     pub fn from_env(frame_capacity: usize, target_rate: u32) -> Self {
         let mut tuning = CaptureTuning::new(frame_capacity, target_rate);
         tuning.frame_capacity = apply_positive_usize_override(
@@ -171,17 +188,23 @@ impl CaptureTuning {
             std::env::var("KODABI_FRAME_CAPACITY").ok(),
         );
         tuning.resample = ResampleParams::from_env();
+        let flush_secs = apply_positive_usize_override(
+            DEFAULT_FLUSH_SECS,
+            std::env::var("KODABI_FLUSH_SECS").ok(),
+        );
+        tuning.flush_interval = Duration::from_secs(flush_secs as u64);
         tuning
     }
 }
 
 /// A two-channel capture session: loopback (system audio) + microphone,
-/// combined into one time-aligned [`AlignedSession`] at stop.
+/// combined into one time-aligned [`CombinedSession`] at stop.
 pub struct DualCapture {
     inner: Mutex<Inner>,
     frame_capacity: usize,
     target_rate: u32,
     resample: ResampleParams,
+    flush_interval: Duration,
 }
 
 impl DualCapture {
@@ -192,7 +215,15 @@ impl DualCapture {
             frame_capacity: tuning.frame_capacity,
             target_rate: tuning.target_rate,
             resample: tuning.resample,
+            flush_interval: tuning.flush_interval,
         }
+    }
+
+    /// The `out`-buffer threshold, in samples, at which the combiner flushes a
+    /// channel to its spill file — `flush_interval * target_rate`. The shell
+    /// reads this to build the [`SpillConfig`] it passes to [`DualCapture::start`].
+    pub fn flush_threshold_samples(&self) -> usize {
+        (self.flush_interval.as_secs_f64() * self.target_rate as f64) as usize
     }
 
     fn lock(&self) -> Result<std::sync::MutexGuard<'_, Inner>> {
@@ -213,7 +244,13 @@ impl DualCapture {
     /// permission denied, unsupported format) is retained on its slot and
     /// reported in the returned status rather than failing the whole start —
     /// the two sources are independent, and one must never take down the other.
-    pub fn start(&self) -> Result<DualStatus> {
+    pub fn start(&self, spill: Option<SpillConfig>) -> Result<DualStatus> {
+        // Stash the spill config for the first source that spawns the combiner
+        // to consume. Set before any source attaches, so whichever wins the
+        // spawn race picks it up. A `None` (spill file creation refused, or a
+        // test/example) keeps the session in memory.
+        self.lock()?.pending_spill = spill;
+
         let (loopback, microphone) = thread::scope(|scope| {
             let loopback = scope.spawn(|| self.start_and_attach(CaptureSource::Loopback));
             let microphone = self.start_and_attach(CaptureSource::Microphone);
@@ -313,9 +350,11 @@ impl DualCapture {
         let items = capture.items();
 
         // Spawn the combiner lazily on the first source; a spawn failure means
-        // no combiner this session (best-effort, as above).
+        // no combiner this session (best-effort, as above). The pending spill
+        // config (if any) is consumed here so the combiner streams to disk.
         if guard.combiner.is_none() {
-            match Combiner::start(self.target_rate, self.resample) {
+            let spill = guard.pending_spill.take();
+            match Combiner::start(self.target_rate, self.resample, spill) {
                 Ok(combiner) => {
                     guard.combiner = Some(CombinerState {
                         combiner,
@@ -348,9 +387,13 @@ impl DualCapture {
     /// two-channel session only when both sources attached to it (a lone
     /// source yields no two-channel artifact). Idempotent: stopping while idle
     /// is a no-op that returns idle statuses and `None`.
-    pub fn stop(&self) -> Result<(DualStatus, Option<AlignedSession>)> {
+    pub fn stop(&self) -> Result<(DualStatus, Option<CombinedSession>)> {
         let (loopback, microphone, combiner) = {
             let mut guard = self.lock()?;
+            // Drop any spill config that was never consumed (both sources
+            // failed before a combiner spawned) so it can't leak into a later
+            // session with stale paths.
+            guard.pending_spill = None;
             (
                 take_slot(&mut guard.loopback),
                 take_slot(&mut guard.microphone),
@@ -368,7 +411,7 @@ impl DualCapture {
         // Always finalize (to join the coordinator thread), but only surface a
         // two-channel session when both sources actually attached — a lone
         // source yields no two-channel artifact.
-        let aligned_session = combiner.and_then(|state| {
+        let combined_session = combiner.and_then(|state| {
             let both = state.both_attached();
             let session = state.combiner.finish();
             both.then_some(session)
@@ -379,7 +422,7 @@ impl DualCapture {
                 loopback: loopback_status,
                 microphone: microphone_status,
             },
-            aligned_session,
+            combined_session,
         ))
     }
 
@@ -505,8 +548,8 @@ mod tests {
     #[ignore = "starts real capture streams (mic/loopback) — requires audio hardware"]
     fn starting_twice_is_idempotent_per_stream() {
         let dual = DualCapture::new(CaptureTuning::new(256, 48_000));
-        let first = dual.start().unwrap();
-        let second = dual.start().unwrap();
+        let first = dual.start(None).unwrap();
+        let second = dual.start(None).unwrap();
 
         assert_eq!(first.loopback.running, second.loopback.running);
         assert_eq!(first.microphone.running, second.microphone.running);

@@ -162,6 +162,55 @@ pub fn transcribe_all(
     })
 }
 
+/// A pull-based source of mono 16 kHz `f32` chunks for a transcription engine.
+///
+/// This is what lets the pipeline transcribe a long meeting without ever
+/// holding a whole channel in memory: a recovered or just-stopped capture is
+/// read back from its spill file a chunk at a time (resampling 48 kHz → 16 kHz
+/// as it goes), while a caller that already has the samples in memory wraps
+/// them in [`SliceSource`]. Errors are I/O-shaped because the disk-backed
+/// implementation reads files.
+pub trait AudioSource {
+    /// The next chunk of samples, or `None` at end of audio. The returned
+    /// slice may borrow the source's internal buffer, so it is only valid
+    /// until the next call.
+    fn next_chunk(&mut self) -> std::io::Result<Option<&[f32]>>;
+}
+
+/// Feeds an in-memory slice to the pipeline in fixed-size chunks — the
+/// in-memory counterpart of a disk-backed [`AudioSource`]. Used by tests and
+/// by the degraded in-memory capture fallback (when spill files couldn't be
+/// created).
+pub struct SliceSource<'a> {
+    samples: &'a [f32],
+    cursor: usize,
+    chunk_len: usize,
+}
+
+impl<'a> SliceSource<'a> {
+    /// Wrap `samples`, yielding at most `chunk_len` samples per call (clamped
+    /// to at least 1 so it always makes progress).
+    pub fn new(samples: &'a [f32], chunk_len: usize) -> Self {
+        SliceSource {
+            samples,
+            cursor: 0,
+            chunk_len: chunk_len.max(1),
+        }
+    }
+}
+
+impl AudioSource for SliceSource<'_> {
+    fn next_chunk(&mut self) -> std::io::Result<Option<&[f32]>> {
+        if self.cursor >= self.samples.len() {
+            return Ok(None);
+        }
+        let end = (self.cursor + self.chunk_len).min(self.samples.len());
+        let chunk = &self.samples[self.cursor..end];
+        self.cursor = end;
+        Ok(Some(chunk))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

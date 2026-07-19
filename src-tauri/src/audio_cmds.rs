@@ -3,9 +3,15 @@
 //! these commands only own the managed [`DualCapture`] and map its status /
 //! aligned-session outputs to serializable IPC DTOs.
 
+use std::sync::Mutex;
+
+use chrono::Utc;
 use kodabi_audio::{
-    AlignedSession, AudioFormat, CaptureTuning, DualCapture, DualStatus, SourceStatus,
+    AudioFormat, CaptureTuning, CombinedSession, DualCapture, DualStatus, SourceStatus, SpillConfig,
 };
+use kodabi_core::device::DeviceId;
+use kodabi_core::inflight::{self, InflightSession};
+use tauri::Manager;
 
 /// Default bound on each source's capture-item channel — the slack between a
 /// cpal callback enqueuing a frame and the combiner's coordinator thread
@@ -26,14 +32,21 @@ const FRAME_CAPACITY: usize = 256;
 /// 16 kHz mono need is a downstream downsample, not this layer's concern.
 const TWO_CHANNEL_SAMPLE_RATE: u32 = 48_000;
 
-pub struct CaptureState(DualCapture);
+/// The managed capture state: the two-channel capture engine plus the
+/// currently-open in-flight session (the on-disk spill it streams to). The
+/// in-flight session is set at `start` and taken at `stop`; `None` between
+/// captures, or when spill setup failed and capture ran in memory.
+pub struct CaptureState(DualCapture, Mutex<Option<InflightSession>>);
 
 impl Default for CaptureState {
     fn default() -> Self {
-        CaptureState(DualCapture::new(CaptureTuning::from_env(
-            FRAME_CAPACITY,
-            TWO_CHANNEL_SAMPLE_RATE,
-        )))
+        CaptureState(
+            DualCapture::new(CaptureTuning::from_env(
+                FRAME_CAPACITY,
+                TWO_CHANNEL_SAMPLE_RATE,
+            )),
+            Mutex::new(None),
+        )
     }
 }
 
@@ -43,6 +56,20 @@ impl CaptureState {
     /// on, not a UI guess.
     pub(crate) fn is_active(&self) -> Result<bool, String> {
         self.0.is_active().map_err(|e| e.to_string())
+    }
+
+    /// Store the in-flight session for the current capture, returning any
+    /// previously-stashed one (there should be none) so its lock is released.
+    fn set_inflight(&self, session: Option<InflightSession>) -> Option<InflightSession> {
+        std::mem::replace(
+            &mut self.1.lock().unwrap_or_else(|p| p.into_inner()),
+            session,
+        )
+    }
+
+    /// Take the in-flight session out (at stop).
+    fn take_inflight(&self) -> Option<InflightSession> {
+        self.1.lock().unwrap_or_else(|p| p.into_inner()).take()
     }
 }
 
@@ -99,9 +126,10 @@ impl From<SourceStatus> for StreamStatus {
     }
 }
 
-/// A verification summary of a finalized two-channel [`AlignedSession`]:
-/// enough to confirm a stopped session produced one time-aligned artifact
-/// with both channels present, without exposing the raw PCM over IPC.
+/// A verification summary of a finalized two-channel session: enough to
+/// confirm a stopped session produced one time-aligned artifact with both
+/// channels present, without exposing the raw PCM over IPC. Works whether the
+/// session streamed to disk or stayed in memory.
 #[derive(serde::Serialize)]
 pub struct AlignedSessionStats {
     sample_rate: u32,
@@ -109,12 +137,19 @@ pub struct AlignedSessionStats {
     duration_ms: u64,
 }
 
-impl From<&AlignedSession> for AlignedSessionStats {
-    fn from(session: &AlignedSession) -> Self {
-        AlignedSessionStats {
-            sample_rate: session.sample_rate(),
-            frames: session.frames(),
-            duration_ms: session.duration().as_millis() as u64,
+impl From<&CombinedSession> for AlignedSessionStats {
+    fn from(session: &CombinedSession) -> Self {
+        match session {
+            CombinedSession::InMemory(session) => AlignedSessionStats {
+                sample_rate: session.sample_rate(),
+                frames: session.frames(),
+                duration_ms: session.duration().as_millis() as u64,
+            },
+            CombinedSession::Spilled(spilled) => AlignedSessionStats {
+                sample_rate: spilled.sample_rate,
+                frames: spilled.frames as usize,
+                duration_ms: spilled.duration().as_millis() as u64,
+            },
         }
     }
 }
@@ -142,14 +177,66 @@ impl CaptureStatus {
 
 /// `pub(crate)` so `capture_control`'s shared toggle can drive start/stop
 /// through the same path `start_capture`/`stop_capture` use over IPC.
-pub(crate) fn start_capture_impl(state: &CaptureState) -> Result<CaptureStatus, String> {
-    let status = state.0.start().map_err(|e| e.to_string())?;
+///
+/// Creates an in-flight spill directory so capture streams to disk (bounded
+/// memory + crash recovery). A failure to set that up never fails the capture:
+/// it logs and falls back to capturing in memory, exactly as before this
+/// feature. The `AppHandle` resolves the sessions directory and device identity
+/// for the spill.
+pub(crate) fn start_capture_impl(
+    app: &tauri::AppHandle,
+    state: &CaptureState,
+) -> Result<CaptureStatus, String> {
+    // Only set up a fresh spill for a genuinely new capture. An idempotent
+    // re-start of an already-live session (e.g. a mid-session device rebuild)
+    // must keep the existing spill, not mint a second directory.
+    let spill = if state.is_active()? {
+        None
+    } else {
+        create_inflight_spill(app, state)
+    };
+    let status = state.0.start(spill).map_err(|e| e.to_string())?;
     Ok(CaptureStatus::from_parts(status, None))
+}
+
+/// Create the in-flight session for a new capture, stash it on `state`, and
+/// return the [`SpillConfig`] the combiner streams through. Returns `None`
+/// (capture proceeds in memory) if the directory can't be created — capture
+/// must never fail because durability couldn't be arranged.
+fn create_inflight_spill(app: &tauri::AppHandle, state: &CaptureState) -> Option<SpillConfig> {
+    let sessions_dir = match crate::transcribe::knowledge_base_dir(app) {
+        Ok(kb) => kb.join("sessions"),
+        Err(err) => {
+            eprintln!("capture spill setup skipped: {err}");
+            return None;
+        }
+    };
+    let device = app.state::<DeviceId>().inner().clone();
+    let session =
+        match inflight::create_session(&sessions_dir, &device, Utc::now(), TWO_CHANNEL_SAMPLE_RATE)
+        {
+            Ok(session) => session,
+            Err(err) => {
+                eprintln!("capture spill setup failed, capturing in memory: {err}");
+                return None;
+            }
+        };
+    let spill = SpillConfig {
+        mic_path: session.mic_path(),
+        system_path: session.system_path(),
+        flush_threshold_samples: state.0.flush_threshold_samples(),
+    };
+    // Any previously-stashed session (there should be none) is dropped, freeing
+    // its lock.
+    let _ = state.set_inflight(Some(session));
+    Some(spill)
 }
 
 /// Stops capture, and — when both sources ran long enough to produce a
 /// finalized two-channel session — spawns the transcribe → clean → persist
-/// pipeline on it (`crate::transcribe`).
+/// pipeline on it (`crate::transcribe`), which removes the in-flight directory
+/// once the transcript lands. A lone-source / no-combiner stop removes the
+/// in-flight directory directly (there is nothing to transcribe).
 ///
 /// Takes the `AppHandle` the pipeline needs to resolve the app-data
 /// directory, read the managed device identity, and emit
@@ -161,14 +248,26 @@ pub(crate) fn stop_capture_and_transcribe(
     state: &CaptureState,
 ) -> Result<CaptureStatus, String> {
     let (status, session) = stop_and_finalize(state)?;
+    let inflight = state.take_inflight();
     let aligned_session = session.as_ref().map(AlignedSessionStats::from);
-    if let Some(session) = session {
-        crate::transcribe::spawn_transcription(app, session);
+    match session {
+        Some(session) => crate::transcribe::spawn_transcription(app, session, inflight),
+        None => {
+            // No two-channel artifact (a lone source, or a combiner that never
+            // spawned). Nothing to transcribe — drop the spill directory.
+            if let Some(inflight) = inflight {
+                if let Err(err) = inflight.remove() {
+                    eprintln!("capture: failed to remove in-flight session: {err}");
+                }
+            }
+        }
     }
     Ok(CaptureStatus::from_parts(status, aligned_session))
 }
 
-fn stop_and_finalize(state: &CaptureState) -> Result<(DualStatus, Option<AlignedSession>), String> {
+fn stop_and_finalize(
+    state: &CaptureState,
+) -> Result<(DualStatus, Option<CombinedSession>), String> {
     state.0.stop().map_err(|e| e.to_string())
 }
 
@@ -210,8 +309,8 @@ pub fn start_capture(
     // hotkey/tray toggle and broadcasts the resulting phase (relabelling the
     // tray + emitting `capture:state`) — otherwise the UI would go stale
     // whenever capture is driven over IPC instead of the toggle.
-    crate::capture_control::run_under_toggle_lock(&app, state.inner(), |_app, state| {
-        start_capture_impl(state)
+    crate::capture_control::run_under_toggle_lock(&app, state.inner(), |app, state| {
+        start_capture_impl(app, state)
     })
 }
 
