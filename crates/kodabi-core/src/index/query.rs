@@ -96,6 +96,52 @@ impl NoteIndex {
         Ok(())
     }
 
+    /// Deletes the note with this `id`, returning whether a row existed.
+    ///
+    /// The reconcile pass calls this for ids whose file has left the vault. The
+    /// `notes_ad` trigger clears the FTS row and the `note_tags` foreign key
+    /// cascades, but `notes_vec`/`note_chunks` are *not* keyed to `notes`, so
+    /// their rows are cleared explicitly (by the `note_id` metadata column) in
+    /// the same transaction — a partial delete is impossible.
+    pub fn delete_note(&mut self, id: &str) -> Result<bool> {
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM notes_vec WHERE note_id = ?1", [id])?;
+        tx.execute("DELETE FROM note_chunks WHERE note_id = ?1", [id])?;
+        let removed = tx.execute("DELETE FROM notes WHERE id = ?1", [id])?;
+        tx.commit()?;
+        Ok(removed > 0)
+    }
+
+    /// Every indexed `(id, path)` pair, ordered by `id` — the reconcile pass's
+    /// stale-diff input: any id here but absent from a full disk scan is a
+    /// candidate for deletion, and its stored `path` decides whether a
+    /// mid-write file earns a reprieve.
+    pub fn note_ids_and_paths(&self) -> Result<Vec<(String, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, path FROM notes ORDER BY id")?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<(String, String)>>>()?;
+        Ok(rows)
+    }
+
+    /// Empties the whole index — notes, tags, FTS, vectors, and chunk text — so
+    /// a rebuild can repopulate it from files alone. Truncates the tables in one
+    /// transaction; it never deletes or reopens the database file (WAL and
+    /// Windows file locks make that fragile, and the schema is already correct).
+    pub fn clear(&mut self) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM notes_vec", [])?;
+        tx.execute("DELETE FROM note_chunks", [])?;
+        // Clearing `notes` fires `notes_ad` per row (FTS) and cascades tags.
+        tx.execute("DELETE FROM notes", [])?;
+        tx.commit()?;
+        Ok(())
+    }
+
     /// Fetches the note with this `id`, or `None` if it isn't indexed.
     pub fn get_note(&self, id: &str) -> Result<Option<NoteRow>> {
         let row = self
@@ -476,5 +522,117 @@ mod tests {
         retitled.title = "A New Title".to_string();
         index.upsert_note(&retitled).unwrap();
         assert_eq!(rows(&index), (0, 0), "a title change must drop the chunks");
+    }
+
+    #[test]
+    fn delete_note_removes_the_row_fts_tags_and_chunks() {
+        use crate::index::{EmbeddedChunk, EMBEDDING_DIM};
+
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        let mut input = note("n_del001", Some("Acme"), "2026-07-11");
+        input.body = "walrus body".to_string();
+        input.tags = vec!["a-tag".to_string()];
+        index.upsert_note(&input).unwrap();
+        index
+            .set_note_chunks(
+                "n_del001",
+                &[EmbeddedChunk {
+                    text: "walrus body".to_string(),
+                    embedding: vec![0.0; EMBEDDING_DIM],
+                }],
+            )
+            .unwrap();
+
+        assert!(index.delete_note("n_del001").unwrap());
+
+        // The row, its FTS entry, its tags, and its chunk rows are all gone.
+        assert!(index.get_note("n_del001").unwrap().is_none());
+        assert!(fts_ids(&index, "walrus").is_empty());
+        let tag_rows: i64 = index
+            .conn
+            .query_row("SELECT count(*) FROM note_tags", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(tag_rows, 0);
+        let vec_rows: i64 = index
+            .conn
+            .query_row(
+                "SELECT count(*) FROM notes_vec WHERE note_id = 'n_del001'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        let text_rows: i64 = index
+            .conn
+            .query_row(
+                "SELECT count(*) FROM note_chunks WHERE note_id = 'n_del001'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!((vec_rows, text_rows), (0, 0));
+    }
+
+    #[test]
+    fn delete_of_an_unknown_id_reports_no_row() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        assert!(!index.delete_note("n_ghost0").unwrap());
+    }
+
+    #[test]
+    fn note_ids_and_paths_lists_every_row_ordered_by_id() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        index
+            .upsert_note(&note("n_zzz999", Some("Acme"), "2026-07-11"))
+            .unwrap();
+        index
+            .upsert_note(&note("n_aaa111", None, "2026-07-11"))
+            .unwrap();
+
+        assert_eq!(
+            index.note_ids_and_paths().unwrap(),
+            vec![
+                ("n_aaa111".to_string(), "Inbox/n_aaa111.md".to_string()),
+                ("n_zzz999".to_string(), "Acme/n_zzz999.md".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn clear_empties_every_table() {
+        use crate::index::{EmbeddedChunk, EMBEDDING_DIM};
+
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        let mut input = note("n_clr001", Some("Acme"), "2026-07-11");
+        input.tags = vec!["t".to_string()];
+        index.upsert_note(&input).unwrap();
+        index
+            .set_note_chunks(
+                "n_clr001",
+                &[EmbeddedChunk {
+                    text: "body".to_string(),
+                    embedding: vec![0.0; EMBEDDING_DIM],
+                }],
+            )
+            .unwrap();
+
+        index.clear().unwrap();
+
+        for (table, count) in [
+            ("notes", 0i64),
+            ("note_tags", 0),
+            ("notes_vec", 0),
+            ("note_chunks", 0),
+        ] {
+            let got: i64 = index
+                .conn
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(got, count, "{table} should be empty after clear");
+        }
+        // A cleared index still works: upsert after clear round-trips.
+        index
+            .upsert_note(&note("n_after0", Some("Acme"), "2026-07-11"))
+            .unwrap();
+        assert!(index.get_note("n_after0").unwrap().is_some());
     }
 }

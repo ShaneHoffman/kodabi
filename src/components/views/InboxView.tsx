@@ -1,9 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigation } from "../../useNavigation";
 import {
   fileNoteToProject,
   INBOX_PROJECT,
-  notifyVaultChanged,
   useProjectNotes,
   type NoteSummary,
 } from "../../useNotes";
@@ -76,9 +75,11 @@ export function InboxView() {
 /**
  * One unfiled note. Opening it (the left region) navigates to the editor;
  * choosing a project (the right picker) re-routes it. On success the row plays
- * its collapse/fade exit, and `notifyVaultChanged` — fired once the transition
- * has run — refetches the list and the sidebar badge together. A failed
- * re-route keeps the row and surfaces the backend message.
+ * its collapse/fade exit; the backend file watcher observes the move and
+ * broadcasts `vault:changed`, which refetches the list and the sidebar badge
+ * together. The watcher's debounce outlasts the 0.2s exit transition, so the
+ * row finishes animating out before the list drops it. A failed re-route keeps
+ * the row and surfaces the backend message.
  */
 function InboxRow({
   note,
@@ -91,21 +92,16 @@ function InboxRow({
   const [pending, setPending] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // The pending exit-transition timer, cleared on unmount so a row dropped by
-  // an unrelated refetch before it fires can't leak a stray timer or trigger a
-  // redundant vault-changed refetch.
-  const exitTimer = useRef<number | undefined>(undefined);
-  useEffect(() => () => window.clearTimeout(exitTimer.current), []);
 
   const route = (slug: string) => {
     setPending(true);
     setError(null);
     fileNoteToProject({ id: note.id, project: slug })
       .then(() => {
+        // Play the exit transition (InboxView.css, 0.2s). The backend watcher
+        // sees the file move and broadcasts `vault:changed` after its debounce,
+        // which refetches and drops the row — by then the fade has finished.
         setLeaving(true);
-        // The exit transition (InboxView.css, 0.2s) covers the gap until the
-        // vault-changed refetch drops the row from the list.
-        exitTimer.current = window.setTimeout(notifyVaultChanged, 220);
       })
       .catch((err: unknown) => {
         setPending(false);

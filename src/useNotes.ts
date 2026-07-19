@@ -2,8 +2,6 @@ import { useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useVaultQuery } from "./useVaultQuery";
 
-export { notifyVaultChanged, onVaultChanged } from "./useVaultQuery";
-
 /*
  * The note wire shapes, mirroring the Rust DTOs in `src-tauri/src/note_cmds.rs`
  * (which in turn mirror the MCP `NoteSummary` — docs/MCP_TOOL_SURFACE.md):

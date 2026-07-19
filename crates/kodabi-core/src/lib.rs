@@ -17,12 +17,14 @@ pub mod naming;
 pub mod note;
 pub mod pipeline;
 pub mod raw_session;
+pub mod reconcile;
 pub mod retention;
 pub mod routing;
 pub mod routing_examples;
 pub mod settings;
 pub mod transcription;
 pub mod vault;
+pub mod watch;
 
 /// Crate version — a trivial placeholder proving the crate compiles, links,
 /// and is unit-testable from the Tauri binary and from `cargo test`.

@@ -106,8 +106,9 @@ impl NoteIndex {
     }
 
     /// The ids of indexed notes that have no chunk rows — notes whose vectors a
-    /// sweep still needs to compute (this pipeline, and the #49 rebuild).
-    /// Ordered by id for deterministic sweeps.
+    /// sweep still needs to compute (the write pipeline, and the reconcile embed
+    /// sweep after a watcher burst or rebuild). Ordered by id for deterministic
+    /// sweeps.
     ///
     /// A note with an empty body legitimately has zero chunks, so it always
     /// appears here; the pipeline no-ops on it, keeping repeated sweeps
