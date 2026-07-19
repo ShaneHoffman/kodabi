@@ -18,7 +18,8 @@ use crate::llm::HeadlessClaude;
 use crate::metrics::PipelineTimings;
 use crate::raw_session::{self, RawSessionError};
 use crate::transcription::{
-    self, clean_transcript, glossary_bias_terms, Channel, TranscriptionEngine, TranscriptionError,
+    self, clean_transcript, glossary_bias_terms, AudioChunk, AudioSource, Channel,
+    TranscriptionEngine, TranscriptionError,
 };
 
 /// Failure transcribing or persisting a session.
@@ -28,6 +29,9 @@ pub enum PipelineError {
     Transcription(#[from] TranscriptionError),
     #[error(transparent)]
     Persist(#[from] RawSessionError),
+    /// Reading a channel's audio (e.g. a spill file) failed mid-pipeline.
+    #[error("audio read failed: {0}")]
+    AudioRead(#[from] std::io::Error),
 }
 
 /// [`transcribe_and_persist`]'s successful result: the path
@@ -46,9 +50,11 @@ pub struct PipelineOutcome {
 /// `make_engine` is called once per channel — a fresh engine, not a shared
 /// one, because an engine's internal VAD sample clock is not reset by
 /// `finish()`; reusing one engine across channels would offset every channel
-/// but the first onto the wrong session clock. `channels` must already be
-/// resampled to `sample_rate` (engines expect 16 kHz mono `f32`); this module
-/// has no audio-processing dependency of its own.
+/// but the first onto the wrong session clock. Each channel is a pull-based
+/// [`AudioSource`] already yielding `sample_rate` mono `f32` (engines expect
+/// 16 kHz), so a long meeting streams from its spill file a chunk at a time
+/// rather than materialising in memory; this module has no audio-processing
+/// dependency of its own.
 ///
 /// Every stage is timed (an `Instant` read is ~free) and returned in
 /// [`PipelineOutcome::timings`] regardless of whether the caller looks at
@@ -59,7 +65,7 @@ pub fn transcribe_and_persist(
     make_engine: &mut dyn FnMut() -> transcription::Result<Box<dyn TranscriptionEngine>>,
     cleaner: &dyn HeadlessClaude,
     glossary: &Glossary,
-    channels: &[(Channel, Vec<f32>)],
+    channels: &mut [(Channel, &mut dyn AudioSource)],
     sample_rate: u32,
     dir: &Path,
     captured_at: DateTime<Utc>,
@@ -73,17 +79,28 @@ pub fn transcribe_and_persist(
     let mut engine_build_ms: u64 = 0;
     let mut transcribe_ms = Vec::with_capacity(channels.len());
     let mut audio_secs = 0.0f64;
-    for (channel, samples) in channels {
+    for (channel, source) in channels.iter_mut() {
         let build_start = Instant::now();
         let mut engine = make_engine()?;
         engine.set_bias(&bias_terms)?;
         engine_build_ms += build_start.elapsed().as_millis() as u64;
 
         let transcribe_start = Instant::now();
-        let segments = transcription::transcribe_all(engine.as_mut(), samples, sample_rate)?;
+        // Pull the channel chunk by chunk, feeding each straight to the engine
+        // so nothing but the current chunk is ever resident.
+        let mut segments = Vec::new();
+        let mut channel_samples: u64 = 0;
+        while let Some(chunk) = source.next_chunk()? {
+            channel_samples += chunk.len() as u64;
+            segments.extend(engine.accept(AudioChunk {
+                samples: chunk,
+                sample_rate,
+            })?);
+        }
+        segments.extend(engine.finish()?);
         transcribe_ms.push(transcribe_start.elapsed().as_millis() as u64);
 
-        audio_secs += samples.len() as f64 / sample_rate.max(1) as f64;
+        audio_secs += channel_samples as f64 / sample_rate.max(1) as f64;
         per_channel.push((*channel, segments));
     }
 
@@ -116,7 +133,7 @@ pub fn transcribe_and_persist(
 mod tests {
     use super::*;
     use crate::llm::{LlmRequest, LlmRunError};
-    use crate::transcription::MockEngine;
+    use crate::transcription::{MockEngine, SliceSource};
     use chrono::TimeZone;
     use tempfile::tempdir;
 
@@ -147,9 +164,15 @@ mod tests {
     #[test]
     fn transcribes_and_persists_both_channels() {
         let dir = tempdir().unwrap();
-        let channels = vec![
-            (Channel::You, silence(16_000)),
-            (Channel::Them, silence(8_000)),
+        let you = silence(16_000);
+        let them = silence(8_000);
+        // One chunk per channel (chunk_len >= the channel) so MockEngine emits
+        // exactly one segment each — the wiring check.
+        let mut you_source = SliceSource::new(&you, usize::MAX);
+        let mut them_source = SliceSource::new(&them, usize::MAX);
+        let mut channels: [(Channel, &mut dyn AudioSource); 2] = [
+            (Channel::You, &mut you_source),
+            (Channel::Them, &mut them_source),
         ];
         let mut make_engine = mock_engine_factory();
 
@@ -157,7 +180,7 @@ mod tests {
             &mut make_engine,
             &NoopRunner,
             &Glossary::default(),
-            &channels,
+            &mut channels,
             16_000,
             dir.path(),
             instant(),
@@ -178,6 +201,39 @@ mod tests {
     }
 
     #[test]
+    fn streams_a_channel_in_chunks_with_cumulative_timestamps() {
+        // Feed one channel in several small chunks. MockEngine emits one
+        // segment per chunk with advancing timestamps, proving the pipeline
+        // streams rather than materialising the whole channel.
+        let dir = tempdir().unwrap();
+        let audio = silence(16_000); // 1000 ms at 16 kHz
+        let mut source = SliceSource::new(&audio, 4_000); // 4 chunks of 250 ms
+        let mut channels: [(Channel, &mut dyn AudioSource); 1] = [(Channel::You, &mut source)];
+        let mut make_engine = mock_engine_factory();
+
+        let outcome = transcribe_and_persist(
+            &mut make_engine,
+            &NoopRunner,
+            &Glossary::default(),
+            &mut channels,
+            16_000,
+            dir.path(),
+            instant(),
+            &device(),
+            None,
+        )
+        .expect("pipeline should succeed");
+
+        let segments = raw_session::read_raw_session(&outcome.path).unwrap();
+        assert_eq!(segments.len(), 4, "one segment per streamed chunk");
+        // Timestamps advance 0→250→500→750→1000 across the chunks.
+        assert_eq!(segments[0].start_ms, 0);
+        assert_eq!(segments[3].end_ms, 1_000);
+        // Audio duration is summed across chunks, not lost to chunking.
+        assert_eq!(outcome.timings.audio_secs, 1.0);
+    }
+
+    #[test]
     fn empty_channels_persist_an_empty_transcript() {
         let dir = tempdir().unwrap();
         let mut make_engine = mock_engine_factory();
@@ -186,7 +242,7 @@ mod tests {
             &mut make_engine,
             &NoopRunner,
             &Glossary::default(),
-            &[],
+            &mut [],
             16_000,
             dir.path(),
             instant(),
@@ -204,7 +260,9 @@ mod tests {
     #[test]
     fn engine_build_failure_surfaces_as_a_pipeline_error() {
         let dir = tempdir().unwrap();
-        let channels = vec![(Channel::You, silence(16_000))];
+        let you = silence(16_000);
+        let mut source = SliceSource::new(&you, usize::MAX);
+        let mut channels: [(Channel, &mut dyn AudioSource); 1] = [(Channel::You, &mut source)];
         let mut make_engine = || {
             Err(TranscriptionError::ModelLoad(
                 "model file missing".to_owned(),
@@ -215,7 +273,7 @@ mod tests {
             &mut make_engine,
             &NoopRunner,
             &Glossary::default(),
-            &channels,
+            &mut channels,
             16_000,
             dir.path(),
             instant(),
@@ -225,6 +283,38 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(err, PipelineError::Transcription(_)));
+    }
+
+    #[test]
+    fn audio_read_failure_surfaces_as_a_pipeline_error() {
+        // A source whose read fails mid-pipeline must surface as AudioRead, not
+        // be silently swallowed.
+        struct FailingSource;
+        impl AudioSource for FailingSource {
+            fn next_chunk(&mut self) -> std::io::Result<Option<&[f32]>> {
+                Err(std::io::Error::other("disk gone"))
+            }
+        }
+
+        let dir = tempdir().unwrap();
+        let mut source = FailingSource;
+        let mut channels: [(Channel, &mut dyn AudioSource); 1] = [(Channel::You, &mut source)];
+        let mut make_engine = mock_engine_factory();
+
+        let err = transcribe_and_persist(
+            &mut make_engine,
+            &NoopRunner,
+            &Glossary::default(),
+            &mut channels,
+            16_000,
+            dir.path(),
+            instant(),
+            &device(),
+            None,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, PipelineError::AudioRead(_)));
     }
 
     #[test]
@@ -240,7 +330,7 @@ mod tests {
             &mut make_engine,
             &NoopRunner,
             &Glossary::default(),
-            &[],
+            &mut [],
             16_000,
             &blocked,
             instant(),

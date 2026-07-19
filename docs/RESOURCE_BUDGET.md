@@ -73,6 +73,7 @@ breaking the pipeline.
 | Per-source capture channel depth | 256 | `KODABI_FRAME_CAPACITY` | Capture |
 | Live resampler input chunk | 1024 | `KODABI_RESAMPLE_CHUNK` | Capture |
 | Live resampler sinc taps | 128 | `KODABI_RESAMPLE_TAPS` | Capture (main CPU lever) |
+| Capture spill flush interval (s) | 10 | `KODABI_FLUSH_SECS` | Capture (memory vs. crash-loss lever) |
 | Parakeet thread count (VAD + recognizer) | 1 | `KODABI_PARAKEET_THREADS` | Transcription |
 | Whisper thread count | 4 | `KODABI_WHISPER_THREADS` | Transcription |
 | Whisper GPU (CUDA) | true | `KODABI_WHISPER_GPU` | Transcription |
@@ -145,13 +146,90 @@ alongside a real `Ctrl+Shift+K` start→stop cycle. **Well within the chosen cei
 
 | Process | CPU% avg | CPU% peak | Working set |
 |---|---|---|---|
-| `kodabi.exe` | 1.00% | 1.67% | 3.6 MB → 37.5 MB (grows with buffered audio; ≈ expected for ~93s of 48 kHz stereo two-channel f32 PCM) |
+| `kodabi.exe` | 1.00% | 1.67% | 3.6 MB → 37.5 MB (grew with buffered audio; ≈ expected for ~93s of 48 kHz stereo two-channel f32 PCM) |
 | `msedgewebview2.exe` fleet (summed) | 0.03% | 0.38% | avg 295.5 MB, peak 302.3 MB |
 
 `frames_dropped`: not observed this pass (no IPC status poll was run alongside the profiler).
 
 **Fan observation: no spin-up** — confirmed by the human running the session, during both
 capturing and the transcription burst that followed.
+
+> **Superseded by the spill path (see next section).** This 2026-07-15 pass predates incremental
+> capture. The `3.6 MB → 37.5 MB` climb over ~93s (~24 MB/min, a whole session held in RAM) is
+> exactly the unbounded growth the spill path removes: capture now flushes to disk on a cadence
+> and the in-memory buffer plateaus instead of tracking session length. The CPU numbers still
+> stand (spilling is a periodic buffered write, not a per-frame cost).
+
+### Incremental capture durability (spill + recovery)
+
+Capture streams its aligned two-channel audio to disk during the meeting instead of holding the
+whole session in RAM, so (a) a crash or `kill -9` mid-meeting loses at most the last flush
+interval rather than everything, and (b) memory stays bounded no matter how long the meeting runs.
+Design and code: `crates/kodabi-audio/src/spill.rs` + `combine.rs` (the spill sink and flushed-length
+accounting), `crates/kodabi-core/src/inflight.rs` (the on-disk session + recovery scan), and
+`src-tauri/src/transcribe.rs` (streamed transcription + startup recovery).
+
+**How it works.** The combiner drains each channel's accumulated output to its own raw
+little-endian `f32` file under `<sessions>/inflight/<timestamp>-<device>/` once it reaches
+`KODABI_FLUSH_SECS` (default 10s) of audio, then clears the in-memory buffer (retaining capacity).
+At stop, transcription streams the files back a chunk at a time (resampling 48 kHz → 16 kHz on the
+fly) rather than materialising the session, writes the atomic `.jsonl`, then deletes the directory.
+A directory still present at the next launch is an orphan (a crash): startup recovers it through the
+same transcribe → distill chain. Retention never touches `inflight/` (it prunes only top-level
+`.jsonl`); un-recoverable leftovers are swept after a 48h grace by `inflight::sweep_stale`, piggybacked
+on the retention cadence.
+
+**Memory target.**
+
+- Combiner in-memory audio: **≤ ~16 MB**. Per channel the resident buffer plateaus near one flush
+  interval (10s × 48 kHz × 4 B ≈ 1.9 MB) plus retained `Vec` capacity and resampler/scratch state;
+  ×2 channels with generous headroom. This is the bound the old ~24 MB/min growth violated.
+- `kodabi.exe` sustained working set during a multi-hour capture: **target ≤ 100 MB** (a
+  conservative ceiling well under the pre-spill trajectory, which would have reached multiple GB
+  over 3h).
+
+The bound itself is proven deterministically by `combine.rs`'s
+`spilling_keeps_the_in_memory_buffer_bounded` unit test (drives ~20s of synthetic frames and asserts
+the resident buffer never exceeds the flush threshold plus one resample chunk — nowhere near the
+~960k samples an unbounded buffer would reach). An empirical working-set measurement over a real
+multi-hour capture needs a human-driven session (as the Capturing numbers above did) and is the
+follow-up verification for this line; the design target is recorded here so that pass has a bar to
+check against.
+
+**Transient disk cost.** The spill is 48 kHz `f32` per channel — byte-identical to the timeline the
+session held in memory before — so it costs **~1.4 GB/hour** for both channels (~4.2 GB peak for a
+3h meeting), deleted within minutes of stop once the transcript lands. `meta.json` records the
+sample rate and format, so a later switch to a smaller on-disk encoding (e.g. 16 kHz `i16`, ~6×
+smaller) is a metadata version bump rather than a format break.
+
+**Durability boundary (fsync policy).** Each flush is a buffered write followed by `flush()` — the
+bytes reach the OS page cache, which **survives process death** (a crash or `kill -9`, the acceptance
+case). It deliberately does **not** `sync_all`/`FlushFileBuffers`, so a hard power loss can still lose
+the last unsynced flush interval; that is the accepted bound, not a bug. If a full disk makes a spill
+write fail, capture logs once and keeps that session's audio in memory (degrading to the old
+behaviour) rather than dropping audio or failing the capture.
+
+**Engine-buffer exception (Whisper).** This work bounds the *capture* path and streams the transcript
+input from disk in chunks. It does **not** change an engine's own internal buffering:
+`WhisperEngine` is a batch engine whose `accept` appends the whole session into a `Vec<f32>`
+(`crates/kodabi-transcribe/src/whisper.rs`) and runs whisper.cpp once at `finish` — roughly
+**~230 MB per channel-hour** at 16 kHz `f32`, resident only during the post-meeting burst, one engine
+at a time. Parakeet (the working engine) is VAD-gated and already bounded, and the VAD-gated Whisper
+path is blocked on Windows anyway (task #53), so windowed Whisper feeding is deferred to a follow-up
+rather than done here.
+
+**Kill -9 acceptance procedure.** To verify "a crash loses at most the last flush interval and the
+recovered session produces a routed note":
+
+1. Build a real-engine app (`cargo build -p kodabi --features parakeet`, models via env — see
+   *How to reproduce*), launch it, and start a consented capture with audio on both channels.
+2. After a few minutes, kill it hard from another shell: `Stop-Process -Name kodabi -Force`.
+3. Confirm the spill survived: `<app-data>/sessions/inflight/<…>/mic.f32le` and `system.f32le` exist
+   and their size corresponds to roughly (elapsed − ≤`KODABI_FLUSH_SECS`) of 48 kHz `f32`
+   (4 bytes/sample). Lower `KODABI_FLUSH_SECS` to tighten the worst-case loss.
+4. Relaunch the app. Startup recovery transcribes the orphan (watch the sidebar status:
+   "Transcribing…" → "Saved" → "Note saved") and deletes the `inflight/` directory; a routed note
+   appears in the vault.
 
 ### Transcription burst
 

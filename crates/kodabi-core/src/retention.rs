@@ -237,6 +237,35 @@ mod tests {
     }
 
     #[test]
+    fn sweep_leaves_the_inflight_subdirectory_untouched() {
+        // The in-flight spill layout lives in sessions/inflight/. Retention's
+        // claim is top-level `.jsonl` only, so a full in-flight session — even
+        // one whose directory name dates it well past the cutoff — must survive
+        // a sweep untouched. Guards the interaction with `crate::inflight`.
+        let dir = temp_dir("inflight-untouched");
+        let inflight = dir.join(crate::inflight::INFLIGHT_DIR);
+        let session_dir = inflight.join("20250101T000000000Z-k4m2xp7q");
+        fs::create_dir_all(&session_dir).unwrap();
+        fs::write(session_dir.join(crate::inflight::META_FILE), "{}").unwrap();
+        fs::write(session_dir.join(crate::inflight::MIC_PCM_FILE), [0u8; 16]).unwrap();
+        fs::write(
+            session_dir.join(crate::inflight::SYSTEM_PCM_FILE),
+            [0u8; 16],
+        )
+        .unwrap();
+        // A genuinely expired top-level session, to prove the sweep still runs.
+        let expired = seed_session(&dir, now() - chrono::Duration::days(400));
+
+        let report = prune_sessions(&dir, keep_days(7), now()).unwrap();
+
+        assert_eq!(report.deleted, vec![expired]);
+        assert!(session_dir.exists(), "in-flight session must be untouched");
+        assert!(session_dir.join(crate::inflight::MIC_PCM_FILE).exists());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn missing_sessions_dir_is_a_noop() {
         let dir = temp_dir("missing");
         let missing = dir.join("does-not-exist");

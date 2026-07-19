@@ -60,6 +60,16 @@ pub fn numbered_slug(base: Option<&str>, n: u32) -> String {
     }
 }
 
+/// Directory name for an in-flight capture session: `{timestamp}-{deviceID}`.
+/// Reuses the session timestamp format so the sweep can recover its start
+/// instant from the part before the first `-` (via [`parse_session_timestamp`]),
+/// and so it sorts chronologically alongside finished `.jsonl` sessions. No
+/// slug or extension: an in-flight session is a directory of raw spill files,
+/// not a single file. See [`crate::inflight`].
+pub fn session_dir_name(started_at: DateTime<Utc>, device: &DeviceId) -> String {
+    format!("{}-{}", started_at.format(TIMESTAMP_FORMAT), device)
+}
+
 /// The parsed components of a session filename produced by [`session_filename`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ParsedSessionName {
