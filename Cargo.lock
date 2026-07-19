@@ -2176,6 +2176,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-global-shortcut",
+ "winreg",
 ]
 
 [[package]]

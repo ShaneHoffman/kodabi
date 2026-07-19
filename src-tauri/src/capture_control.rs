@@ -8,6 +8,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
+use tauri::image::Image;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, Wry};
@@ -327,20 +328,31 @@ fn broadcast_starting(app: &AppHandle, state: &CaptureState) {
     broadcast_event(app, event);
 }
 
-/// Push one capture state to the frontend and sync the tray (menu label +
-/// tooltip) to it. The single point where capture state reaches the UI, so the
-/// two can never disagree.
+/// Push one capture state to the frontend and sync the tray (menu label,
+/// tooltip and icon) to it. The single point where capture state reaches the
+/// UI, so they can never disagree.
 pub(crate) fn broadcast_event(app: &AppHandle, event: CaptureStateEvent) {
     let (label, tooltip) = tray_copy(&event);
+    // No controller means no tray either (`build_tray` manages the controller
+    // before building the tray), so the fallback is unreachable in practice
+    // and merely redundant if it ever isn't.
+    let mut update_icon = true;
     if let Some(controller) = app.try_state::<CaptureController>() {
-        *controller
-            .last_broadcast
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = event;
+        let previous = {
+            let mut last = controller
+                .last_broadcast
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            std::mem::replace(&mut *last, event)
+        };
+        update_icon = icon_needs_update(&previous, &event);
         let _ = controller.toggle_item.set_text(label);
     }
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_tooltip(Some(tooltip));
+        if update_icon {
+            let _ = tray.set_icon(Some(tray_icon_image(tray_icon_kind(&event))));
+        }
     }
     let _ = app.emit(CAPTURE_STATE_EVENT, event);
 }
@@ -395,6 +407,75 @@ fn tray_copy(event: &CaptureStateEvent) -> (&'static str, &'static str) {
     }
 }
 
+/// Which SpiritMark the tray wears. The window can be hidden or closed, so
+/// the tray icon is often the only surface answering "am I being recorded?" —
+/// a tooltip needs a hover and a menu label needs a click, but the icon is
+/// read at a glance.
+///
+/// The three marks are `src/captureLabel.ts`'s `markMode` collapsed to what a
+/// static icon can carry: `Starting` and `reconnecting` are one ink mark here
+/// because both mean "engaged, nothing recorded yet" and neither may wear the
+/// green (`docs/SPIRIT_MARK.md` — the green means audio is actually being
+/// recorded, and nothing else).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TrayIconKind {
+    /// No capture is running: the still ink disc, the resting logo.
+    Idle,
+    /// A capture is engaged but nothing reaches disk (starting, or every
+    /// source dropped and is rebuilding): the hollow ink ring. Visibly
+    /// neither idle nor on air.
+    Engaged,
+    /// Audio is genuinely being recorded: the green disc with its aura.
+    Recording,
+}
+
+/// The mark a capture state calls for.
+///
+/// Degraded splits: with a source still live, audio *is* being captured, so
+/// the green stays (withdrawing it would falsely suggest privacy); with
+/// nothing live, nothing is recorded, so the green goes.
+fn tray_icon_kind(event: &CaptureStateEvent) -> TrayIconKind {
+    match event.phase {
+        CapturePhase::Idle => TrayIconKind::Idle,
+        CapturePhase::Starting => TrayIconKind::Engaged,
+        CapturePhase::Listening => TrayIconKind::Recording,
+        CapturePhase::Degraded => {
+            let any_live = matches!(event.sources.loopback, SourceState::Live)
+                || matches!(event.sources.microphone, SourceState::Live);
+            if any_live {
+                TrayIconKind::Recording
+            } else {
+                TrayIconKind::Engaged
+            }
+        }
+    }
+}
+
+/// The 32x32 asset for a mark, embedded at compile time.
+///
+/// Drawn by `scripts/generate-tray-icons.ps1` from the `design/tokens.css`
+/// values — regenerate there rather than editing the PNGs, and touch this
+/// file afterwards (cargo doesn't track `include_image!` inputs, so a stale
+/// embedding otherwise survives the rebuild).
+fn tray_icon_image(kind: TrayIconKind) -> Image<'static> {
+    match kind {
+        TrayIconKind::Idle => tauri::include_image!("icons/tray/tray-idle.png"),
+        TrayIconKind::Engaged => tauri::include_image!("icons/tray/tray-engaged.png"),
+        TrayIconKind::Recording => tauri::include_image!("icons/tray/tray-recording.png"),
+    }
+}
+
+/// Whether a broadcast actually changes the mark.
+///
+/// Most broadcasts don't: every IPC command re-broadcasts the truth, and the
+/// watchdog re-broadcasts whenever per-source health shifts (a degraded
+/// capture flapping stalled/failed keeps the same mark). Setting the icon
+/// rebuilds the tray's native icon handle, which can blink it, so a
+/// same-mark broadcast leaves it alone.
+fn icon_needs_update(previous: &CaptureStateEvent, next: &CaptureStateEvent) -> bool {
+    tray_icon_kind(previous) != tray_icon_kind(next)
+}
+
 /// Build the tray icon, its Start/Stop + Show + Quit menu, and manage the
 /// [`CaptureController`] the shared toggle needs. Called once from `setup`.
 pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
@@ -419,17 +500,18 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
         toggle_lock: Mutex::new(()),
         toggle_item: toggle_item.clone(),
         pending_toggle: AtomicBool::new(false),
-        // Matches the menu label and tooltip this tray is built with; the
-        // first broadcast (or the watchdog's first tick) replaces it.
+        // Matches the menu label, tooltip and icon this tray is built with —
+        // also the baseline `icon_needs_update` compares the first broadcast
+        // against, so the stored state and the shown mark agree from the
+        // start. The first broadcast (or the watchdog's first tick) replaces it.
         last_broadcast: Mutex::new(idle_event()),
     });
 
     TrayIconBuilder::with_id("main")
-        .icon(
-            app.default_window_icon()
-                .expect("tauri.conf.json bundles a default window icon")
-                .clone(),
-        )
+        // The idle SpiritMark, not the window icon: the tray is the capture
+        // indicator, so it starts on the same mark `broadcast_event` keeps
+        // truthful from here on.
+        .icon(tray_icon_image(TrayIconKind::Idle))
         .tooltip("Kodabi: idle")
         .menu(&menu)
         .show_menu_on_left_click(false)
@@ -654,6 +736,182 @@ mod tests {
             )),
             ("Stop capture", "Kodabi: reconnecting audio devices")
         );
+    }
+
+    #[test]
+    fn tray_icon_kind_per_phase() {
+        // Mirrors `markMode` in src/captureLabel.ts: the in-window mark and
+        // the tray mark must not tell different stories about the same state.
+        assert_eq!(tray_icon_kind(&idle_event()), TrayIconKind::Idle);
+        assert_eq!(
+            tray_icon_kind(&event(
+                CapturePhase::Starting,
+                SourceState::Off,
+                SourceState::Off
+            )),
+            TrayIconKind::Engaged
+        );
+        assert_eq!(
+            tray_icon_kind(&event(
+                CapturePhase::Listening,
+                SourceState::Live,
+                SourceState::Live
+            )),
+            TrayIconKind::Recording
+        );
+
+        // Degraded with one source still live IS on air — the green stays,
+        // because withdrawing it would falsely suggest privacy.
+        for sources in [
+            (SourceState::Live, SourceState::Failed),
+            (SourceState::Stalled, SourceState::Live),
+        ] {
+            assert_eq!(
+                tray_icon_kind(&event(CapturePhase::Degraded, sources.0, sources.1)),
+                TrayIconKind::Recording
+            );
+        }
+
+        // Degraded with nothing live records nothing, so it wears no green.
+        // But it isn't the idle mark either: the session is still engaged and
+        // will resume with no further press.
+        for sources in [
+            (SourceState::Stalled, SourceState::Stalled),
+            (SourceState::Failed, SourceState::Failed),
+            (SourceState::Stalled, SourceState::Failed),
+        ] {
+            assert_eq!(
+                tray_icon_kind(&event(CapturePhase::Degraded, sources.0, sources.1)),
+                TrayIconKind::Engaged
+            );
+        }
+    }
+
+    #[test]
+    fn tray_icon_kind_never_disagrees_with_tray_copy() {
+        // The icon, the menu label and the tooltip come from the same event,
+        // so no combination of them may contradict another: a green mark over
+        // an "idle" tooltip would be the exact failure the mark exists to
+        // prevent.
+        //
+        // Swept over every event the two broadcasters can actually produce —
+        // the derived truth and its `Starting` overlay for every per-source
+        // health pair — rather than the phase x sources cross product, most of
+        // which `phase_of` can never derive.
+        let healths = [
+            kodabi_audio::SourceHealth::Off,
+            kodabi_audio::SourceHealth::Live,
+            kodabi_audio::SourceHealth::Stalled,
+            kodabi_audio::SourceHealth::Failed("device gone".into()),
+        ];
+        for loopback in &healths {
+            for microphone in &healths {
+                let health = kodabi_audio::DualHealth {
+                    loopback: loopback.clone(),
+                    microphone: microphone.clone(),
+                };
+                for event in [
+                    crate::audio_cmds::event_from_health(&health),
+                    starting_event(&health),
+                ] {
+                    let (label, tooltip) = tray_copy(&event);
+                    let kind = tray_icon_kind(&event);
+
+                    // The idle mark shows exactly when the menu offers a
+                    // start, and never over any other tooltip.
+                    assert_eq!(
+                        kind == TrayIconKind::Idle,
+                        label == "Start capture",
+                        "{event:?} disagrees on idle"
+                    );
+                    match kind {
+                        TrayIconKind::Idle => assert_eq!(tooltip, "Kodabi: idle", "{event:?}"),
+                        // The green only ever sits over copy that names
+                        // audio being captured.
+                        TrayIconKind::Recording => assert!(
+                            [
+                                "Kodabi: listening",
+                                "Kodabi: mic unavailable, capturing system audio",
+                                "Kodabi: system audio unavailable, capturing mic",
+                            ]
+                            .contains(&tooltip),
+                            "{event:?} shows the green over {tooltip:?}"
+                        ),
+                        // And the ink ring only ever over copy that claims
+                        // nothing is being captured yet.
+                        TrayIconKind::Engaged => assert!(
+                            [
+                                "Kodabi: starting capture",
+                                "Kodabi: reconnecting audio devices",
+                            ]
+                            .contains(&tooltip),
+                            "{event:?} shows the engaged mark over {tooltip:?}"
+                        ),
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn tray_icon_assets_are_32px_rgba() {
+        // A regenerated asset at the wrong size would ship a blurry or
+        // cropped mark; the wrong colour type fails the compile instead.
+        for kind in [
+            TrayIconKind::Idle,
+            TrayIconKind::Engaged,
+            TrayIconKind::Recording,
+        ] {
+            let image = tray_icon_image(kind);
+            assert_eq!(image.width(), 32, "{kind:?}");
+            assert_eq!(image.height(), 32, "{kind:?}");
+            assert_eq!(image.rgba().len(), 32 * 32 * 4, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn tray_icon_assets_are_distinct() {
+        // Three states that render the same pixels would satisfy every other
+        // test here and still leave the tray ambiguous.
+        let idle = tray_icon_image(TrayIconKind::Idle);
+        let engaged = tray_icon_image(TrayIconKind::Engaged);
+        let recording = tray_icon_image(TrayIconKind::Recording);
+        assert_ne!(idle.rgba(), engaged.rgba());
+        assert_ne!(idle.rgba(), recording.rgba());
+        assert_ne!(engaged.rgba(), recording.rgba());
+    }
+
+    #[test]
+    fn icon_updates_only_when_the_mark_changes() {
+        let idle = idle_event();
+        let starting = event(CapturePhase::Starting, SourceState::Off, SourceState::Off);
+        let listening = event(
+            CapturePhase::Listening,
+            SourceState::Live,
+            SourceState::Live,
+        );
+        let one_live = event(
+            CapturePhase::Degraded,
+            SourceState::Live,
+            SourceState::Failed,
+        );
+        let none_live = event(
+            CapturePhase::Degraded,
+            SourceState::Stalled,
+            SourceState::Stalled,
+        );
+
+        // Every real transition repaints.
+        assert!(icon_needs_update(&idle, &starting));
+        assert!(icon_needs_update(&starting, &listening));
+        assert!(icon_needs_update(&listening, &none_live));
+        assert!(icon_needs_update(&none_live, &idle));
+
+        // Re-broadcasts that don't change the mark leave the icon alone: a
+        // no-op toggle, and the watchdog noticing one source drop out of a
+        // capture that is still recording the other.
+        assert!(!icon_needs_update(&idle, &idle));
+        assert!(!icon_needs_update(&listening, &one_live));
     }
 
     #[test]
