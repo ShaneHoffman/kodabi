@@ -48,10 +48,28 @@ impractical, say why. Match the house naming — snake_case sentence names like
 
 ## Frontend
 
-There is **no JS test runner** in this repo, and you do not introduce one. Frontend
-verification is `pnpm exec eslint . --max-warnings=0` + `pnpm build` (which
-typechecks). At most, *recommend* adding a runner as a follow-up — don't add one
-mid-task.
+The frontend runs vitest + Testing Library under jsdom. Tests are colocated with
+what they cover (`src/**/*.test.{ts,tsx}`) and verified with `pnpm test`, alongside
+`pnpm exec eslint . --max-warnings=0` + `pnpm build` (which typechecks the tests
+too).
+
+The house pattern is to mock **only the Tauri IPC boundary** — `src/test/tauri.ts`
+stands in for `@tauri-apps/api`'s `invoke`/`listen`, wired per test file with
+`vi.mock`. A component under test keeps its real hooks, real state machine, and
+real wire types; stubbing hooks instead would test the stub. Three gotchas that file
+documents: `listen` callbacks receive `{ payload }`, not the payload; Tauri rejects
+with plain strings (not `Error`s), so failure fixtures must too; and no export there
+may shadow a real `@tauri-apps/api` name, which is why "pretend Rust fired an event"
+is `emitFromBackend` rather than `emit`.
+
+Prefer a test that fails when the guard it describes is deleted. A teardown or
+stale-response guard in particular is easy to "cover" from the wrong side — assert
+it from the window where the guard is the only thing standing between the event and
+the torn-down consumer.
+
+Coverage is deliberately partial — the load-bearing seams, not the whole UI. Rust
+remains the first place logic should be tested; a behavior that could live in
+kodabi-core is better covered there than through the DOM.
 
 ## Output
 

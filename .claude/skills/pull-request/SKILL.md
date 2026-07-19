@@ -149,8 +149,8 @@ Once the PR is open (and mergeable), hand the human a green PR rather than a pen
   `gh run view <run-id> --log-failed` — the bare `gh run view --log-failed` needs a run id and
   errors non-interactively. Reproduce and fix
   locally, then run the relevant pre-commit gates for the surface you touched (the `CLAUDE.md`
-  gates — `cargo fmt`/`clippy`/`test`, and `pnpm exec eslint . --max-warnings=0` + `pnpm build`
-  for frontend). Commit the fix as a **new** commit (never amend), then `git push` (plain push;
+  gates — `cargo fmt`/`clippy`/`test`, and `pnpm exec eslint . --max-warnings=0` + `pnpm test` +
+  `pnpm build` for frontend). Commit the fix as a **new** commit (never amend), then `git push` (plain push;
   use `--force-with-lease` only if you had to rebase onto `main`, never a bare `--force`).
 - **Max 3 fix cycles.** If checks are still red after the third, stop and report the failure to
   the user with the failing log — don't keep looping.
