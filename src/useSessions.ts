@@ -35,8 +35,10 @@ export function useFailedSessions(): {
 /**
  * Queues a failed session for another distill run. Resolves as soon as the run
  * is *queued*, not when it finishes: progress and the outcome arrive on the
- * `distill:state` event. A rejection here is a validation failure (a path that
- * isn't a session file), not a failed distill.
+ * `distill:state` event. A rejection here means the run never started, not that
+ * a distill failed: either the path isn't a session file, or a run for it is
+ * already going (the backend refuses to distill one session twice, since
+ * nothing downstream dedupes the two notes that would produce).
  *
  * Mirrors `distill_cmds::distill_session`; Tauri exposes its `session_path`
  * argument as `sessionPath` on the wire.
