@@ -1,26 +1,42 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { DISTILL_STATE_EVENT } from "./events";
 import type { CapturePhase } from "./useCaptureState";
 
+/**
+ * How a distill run ended. Every variant carries `session_path` — the session
+ * the outcome belongs to — so a list of retryable sessions can pin each outcome
+ * to the right row; without it, a `saved` for one session is indistinguishable
+ * from the retry a row is waiting on. This hook ignores the field.
+ */
+export type DistillOutcome =
+  | { status: "saved"; path: string; session_path: string }
+  | { status: "skipped"; reason: string; session_path: string }
+  | { status: "error"; message: string; session_path: string };
+
+/** The label state machine: the wire statuses plus a local `idle` that no
+ * event ever carries. */
 export type DistillState =
   | { status: "idle" }
   | { status: "distilling" }
-  | { status: "saved"; path: string }
-  | { status: "skipped"; reason: string }
-  | { status: "error"; message: string };
+  | DistillOutcome;
 
 /**
- * The wire payload, which is `DistillState` plus one non-terminal warning the
- * label state machine deliberately never adopts: `routing_fallback` means the
- * routing signals failed to load and the note filed to Inbox anyway. It arrives
- * mid-distill, so treating it as label state would clobber "Distilling…"; it is
- * logged and dropped instead (like `skipped`, but not even terminal).
+ * The wire payload (mirrors `distill_cmds::DistillStateEvent`): the run's
+ * progress plus one non-terminal warning the label state machine deliberately
+ * never adopts. `routing_fallback` means the routing signals failed to load and
+ * the note filed to Inbox anyway; it arrives mid-distill, so treating it as
+ * label state would clobber "Distilling…", and it is logged and dropped instead
+ * (like `skipped`, but not even terminal).
+ *
+ * Exported because more than one surface subscribes to `distill:state`: the
+ * shape is the contract with Rust, and restating it per subscriber is how the
+ * two drift apart.
  */
-type DistillEvent =
-  | DistillState
+export type DistillEvent =
+  | { status: "distilling" }
+  | DistillOutcome
   | { status: "routing_fallback"; message: string };
-
-const DISTILL_STATE_EVENT = "distill:state";
 
 /**
  * Subscribes to the backend's end-of-meeting distill progress: `distilling`
