@@ -10,11 +10,11 @@ Wire a new backend capability through every layer so it works at runtime and
 typechecks. Follow [`.claude/rules/tauri-command-parity.md`](../../rules/tauri-command-parity.md)
 — the five layers and the "touch them all in one change" rule.
 
-What to build (may be empty): $ARGUMENTS
-
 **Hard rule: the command body stays thin.** Logic lives in a `kodabi-*` crate; the
 `#[tauri::command]` wrapper only owns DTOs, resolves state/paths, calls core once,
 and maps errors. If the wrapper grows a body, move the body to kodabi-core.
+
+What to build (may be empty): $ARGUMENTS
 
 ## 1. Locate the homes
 

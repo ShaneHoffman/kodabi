@@ -141,7 +141,11 @@ diverged and still conflict with it.
 Once the PR is open (and mergeable), hand the human a green PR rather than a pending one:
 - `gh pr checks --watch` — wait for the CI checks on this PR to settle.
 - If everything passes, continue to step 12.
-- If a check fails: read the failing job with `gh run view --log-failed`, reproduce and fix
+- If a check fails: find the failed run id with
+  `gh run list --branch <branch> --limit 10 --json databaseId,conclusion,workflowName`
+  (`<branch>` from `git branch --show-current`), then read its log with
+  `gh run view <run-id> --log-failed` — the bare `gh run view --log-failed` needs a run id and
+  errors non-interactively. Reproduce and fix
   locally, then run the relevant pre-commit gates for the surface you touched (the `CLAUDE.md`
   gates — `cargo fmt`/`clippy`/`test`, and `pnpm exec eslint . --max-warnings=0` + `pnpm build`
   for frontend). Commit the fix as a **new** commit (never amend), then `git push` (plain push;

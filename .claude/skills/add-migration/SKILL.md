@@ -9,10 +9,10 @@ argument-hint: [what the schema change is and why]
 Change the note index schema in `crates/kodabi-core/src/index/migrations.rs` without
 breaking databases in the field.
 
-What's changing (may be empty): $ARGUMENTS
-
 **Hard rules:** never edit or reorder an existing `migration_XXXX_*` entry — append a
 new one. The v1 DDL is frozen (byte-stable, including `FLOAT[768]`).
+
+What's changing (may be empty): $ARGUMENTS
 
 ## 1. Read the module doc first
 
