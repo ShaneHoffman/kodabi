@@ -1,13 +1,14 @@
 import {
-  useEffect,
   useMemo,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { useCommands, type Command } from "../useCommands";
+import { useDialogFocus } from "../useDialogFocus";
 import { useFilteredCommands } from "../useFilteredCommands";
 import { useNavigation } from "../useNavigation";
+import { useScrollIntoView } from "../useScrollIntoView";
 import "./CommandPalette.css";
 
 type Props = {
@@ -63,20 +64,12 @@ export function CommandPalette({ onClose }: Props) {
 
   // Focus the input on open; on close hand focus back to wherever it came
   // from — unless a run command unmounted that element in the meantime.
-  useEffect(() => {
-    const previous = document.activeElement;
-    inputRef.current?.focus();
-    return () => {
-      if (previous instanceof HTMLElement && previous.isConnected) {
-        previous.focus();
-      }
-    };
-  }, []);
+  useDialogFocus(() => inputRef.current);
 
   // Keep the keyboard highlight visible when it walks past the list's edge.
-  useEffect(() => {
-    document.getElementById(optionId(active))?.scrollIntoView({ block: "nearest" });
-  }, [active, rows]);
+  // `rows` is the refresh key: re-filtering can swap what sits at a given
+  // option id while the highlight stays put.
+  useScrollIntoView(optionId(active), rows);
 
   const runCommand = (command: Command) => {
     command.run();
