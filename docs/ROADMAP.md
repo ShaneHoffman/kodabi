@@ -17,7 +17,7 @@ ship Parakeet) · Glossary-cleanup post-pass pulled forward into Phase 1.
 **Milestone:** the v1 definition-of-done sentence is true, **minus chat**.
 
 - [ ] End-of-meeting pipeline: glossary cleanup at transcription time (Phase 1 post-pass), then a single headless-Claude distill call returning summary, action items, and decisions as one structured result
-- [ ] Distill token budgeting: chunk or map-reduce transcripts that exceed a configured token budget; a 2-hour meeting must distill, not error (#59 `feat/distill-token-budget`)
+- [x] Distill token budgeting: chunk or map-reduce transcripts that exceed a configured token budget; a 2-hour meeting must distill, not error (#59 `feat/distill-token-budget`)
 - [ ] Confidence-split routing; Inbox UI; one-click re-route that **records** each correction as a routing example (`_routing_examples.yml`, in the KB folder) **and feeds them back** as an additive similarity signal so a correction changes future routing (#56 `feat/routing-examples-signal`) — wiring routing into the distill pipeline tracked as #55 `feat/wire-distill-routing`
 - [ ] Incremental capture durability: flush audio/segments to a **transient** on-disk recovery spool during capture (cleared once the session distills; recovered on next startup after a crash, so no audio is *retained*) so a crash mid-meeting loses at most the last flush interval, and memory stays bounded for multi-hour meetings (#57 `feat/incremental-capture-flush`)
 - [ ] Quick-capture window (global hotkey → text box → same routing pipeline) + basic note create/edit within a project

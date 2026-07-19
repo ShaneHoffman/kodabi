@@ -10,6 +10,17 @@
 //! output writes no note at all (a missing note is retryable — the raw
 //! session persists; a fabricated note is not).
 //!
+//! # Long transcripts
+//!
+//! A prompt over [`DISTILL_INPUT_BUDGET_CHARS`] would overflow the model rather
+//! than distill, and retrying the same oversized transcript would fail
+//! identically — so instead it is split on segment boundaries, each chunk
+//! distilled into the same JSON shape, and the parts merged by one final call
+//! ([`distill_chunked`]). Both paths converge on a single [`DistillOutput`], so
+//! the rendered body, the frontmatter contract, and the fail-hard rule above
+//! are the same either way: a failure part-way through a chunk sequence writes
+//! no note at all.
+//!
 //! # Action-item line grammar
 //!
 //! Every action item renders as exactly one of these lines (this is the
@@ -57,6 +68,25 @@ const MAX_TITLE_LEN: usize = 120;
 /// Most tags kept from the model. The schema puts no cap on `tags`, but a
 /// distill that "tags" a meeting with a dozen topics has stopped tagging.
 const MAX_TAGS: usize = 8;
+
+/// Longest distill prompt sent in one call, in characters (~4 chars per token,
+/// the same heuristic [`crate::embed`] documents for its chunk cap — no
+/// tokenizer dependency). A transcript whose prompt exceeds this is chunked and
+/// map-reduced by [`distill_chunked`] instead of failing.
+///
+/// The binding constraint is the runner's per-call timeout (kodabi-llm's
+/// `DISTILL_DEFAULT_TIMEOUT_SECS`, 180s), not the model's context window: ~25k
+/// tokens of transcript plus a schema-bounded JSON response finishes well
+/// inside it, while the window is several times larger again. At ~140 words per
+/// minute a meeting under about 90 minutes stays on the single-call path (the
+/// common case, unchanged), and a 2-3 hour meeting splits into two or three
+/// chunks plus one merge.
+const DISTILL_INPUT_BUDGET_CHARS: usize = 100_000;
+
+/// Characters reserved out of the budget for a chunk prompt's non-transcript
+/// framing (the meeting date and the "part N of M" preamble), so a packed chunk
+/// plus its framing still fits.
+const CHUNK_PROMPT_OVERHEAD_CHARS: usize = 512;
 
 /// Failure distilling a session. Every variant is fatal to this run — no
 /// note is written — and the raw session on disk is untouched, so the caller
@@ -117,7 +147,7 @@ pub struct DistillOutput {
 /// One extracted action item, pre-rendering. "Draft" because the durable
 /// `ActionItem` shape (id, status, source note) is minted downstream — this
 /// carries only what the meeting itself said.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ActionItemDraft {
     /// What is to be done, as a verb phrase; never empty, never owner- or
     /// date-suffixed (the renderer adds those).
@@ -180,23 +210,192 @@ fn channel_label(channel: Channel) -> &'static str {
     }
 }
 
+/// One transcript line — `"{channel}: {text}\n"` — or `None` for a segment
+/// with nothing but whitespace. The single place a line is shaped, so the
+/// chunked path packs exactly the text the single-call path would have sent.
+fn render_segment_line(segment: &TranscriptSegment) -> Option<String> {
+    let text = collapse_ws(&segment.text);
+    if text.is_empty() {
+        return None;
+    }
+    let mut line = String::new();
+    let _ = writeln!(line, "{}: {}", channel_label(segment.channel), text);
+    Some(line)
+}
+
+/// The transcript block of the prompt: one line per non-empty segment.
+fn render_transcript(segments: &[TranscriptSegment]) -> String {
+    let mut transcript = String::new();
+    for segment in segments {
+        if let Some(line) = render_segment_line(segment) {
+            transcript.push_str(&line);
+        }
+    }
+    transcript
+}
+
 /// Builds the headless request for `segments`. `meeting_date` (`YYYY-MM-DD`)
 /// is included so relative phrasings ("by Friday") can resolve to real
 /// dates. Timestamps are deliberately omitted — they cost tokens and carry
 /// no extraction value at this granularity.
 pub fn build_request(segments: &[TranscriptSegment], meeting_date: &str) -> LlmRequest {
-    let mut transcript = String::new();
-    for segment in segments {
-        let text = collapse_ws(&segment.text);
-        if text.is_empty() {
-            continue;
-        }
-        let _ = writeln!(transcript, "{}: {}", channel_label(segment.channel), text);
-    }
     LlmRequest {
         system_prompt: SYSTEM_PROMPT.to_owned(),
-        prompt: format!("Meeting date: {meeting_date}\n\nTranscript:\n{transcript}"),
+        prompt: format!(
+            "Meeting date: {meeting_date}\n\nTranscript:\n{}",
+            render_transcript(segments)
+        ),
     }
+}
+
+/// Splits the transcript into chunk bodies of at most `budget_chars`
+/// characters, cutting **only between rendered lines** so every line keeps its
+/// `You:`/`Them:`/`Unknown:` prefix and the channel attribution survives the
+/// split. Characters, not bytes, so a multibyte transcript isn't over-counted.
+///
+/// Concatenating the result reproduces [`render_transcript`] exactly, except
+/// where a single utterance longer than the whole budget had to be
+/// word-split ([`split_oversized_line`]).
+fn plan_chunk_transcripts(segments: &[TranscriptSegment], budget_chars: usize) -> Vec<String> {
+    let budget = budget_chars.max(1);
+    let mut chunks: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut current_chars = 0usize;
+
+    for segment in segments {
+        let Some(line) = render_segment_line(segment) else {
+            continue;
+        };
+        let pieces = if line.chars().count() > budget {
+            split_oversized_line(
+                channel_label(segment.channel),
+                &collapse_ws(&segment.text),
+                budget,
+            )
+        } else {
+            vec![line]
+        };
+        for piece in pieces {
+            let piece_chars = piece.chars().count();
+            if current_chars > 0 && current_chars + piece_chars > budget {
+                chunks.push(std::mem::take(&mut current));
+                current_chars = 0;
+            }
+            current.push_str(&piece);
+            current_chars += piece_chars;
+        }
+    }
+    if !current.is_empty() {
+        chunks.push(current);
+    }
+    chunks
+}
+
+/// Word-packs one utterance that is longer than the whole chunk budget into
+/// lines of at most `limit_chars`, **re-carrying `label` on every piece** —
+/// that is what keeps you/them attribution intact through a mid-utterance cut.
+/// A single unbroken run longer than the budget is split on char boundaries
+/// (the same last resort `chunk_body` takes in [`crate::embed`]).
+fn split_oversized_line(label: &str, collapsed_text: &str, limit_chars: usize) -> Vec<String> {
+    // `label` + ": " + the text + "\n".
+    let overhead = label.chars().count() + 3;
+    let text_budget = limit_chars.saturating_sub(overhead).max(1);
+
+    let mut pieces = Vec::new();
+    let mut current = String::new();
+    let mut current_chars = 0usize;
+
+    for word in collapsed_text.split_whitespace() {
+        let word_chars = word.chars().count();
+        if word_chars > text_budget {
+            if current_chars > 0 {
+                pieces.push(format!("{label}: {current}\n"));
+                current.clear();
+                current_chars = 0;
+            }
+            for ch in word.chars() {
+                current.push(ch);
+                current_chars += 1;
+                if current_chars == text_budget {
+                    pieces.push(format!("{label}: {current}\n"));
+                    current.clear();
+                    current_chars = 0;
+                }
+            }
+            continue;
+        }
+        let with_word = if current_chars == 0 {
+            word_chars
+        } else {
+            current_chars + 1 + word_chars
+        };
+        if with_word > text_budget {
+            pieces.push(format!("{label}: {current}\n"));
+            current = word.to_string();
+            current_chars = word_chars;
+        } else {
+            if current_chars > 0 {
+                current.push(' ');
+            }
+            current.push_str(word);
+            current_chars = with_word;
+        }
+    }
+    if current_chars > 0 {
+        pieces.push(format!("{label}: {current}\n"));
+    }
+    pieces
+}
+
+/// Builds the request for chunk `part` of `total` (1-based). Reuses
+/// [`SYSTEM_PROMPT`] unchanged — a chunk is asked for exactly the same JSON
+/// shape as a whole meeting, so [`parse_output`] handles both — and frames the
+/// partiality in the user prompt so the model doesn't guess at what it can't see.
+fn build_chunk_request(
+    chunk_transcript: &str,
+    meeting_date: &str,
+    part: usize,
+    total: usize,
+) -> LlmRequest {
+    LlmRequest {
+        system_prompt: SYSTEM_PROMPT.to_owned(),
+        prompt: format!(
+            "Meeting date: {meeting_date}\n\nThis is part {part} of {total} of one continuous \
+meeting transcript, split only for length; the other parts are distilled separately and merged \
+afterward. Report only what appears in this part.\n\nTranscript (part {part} of {total}):\n\
+{chunk_transcript}"
+        ),
+    }
+}
+
+/// The response-shape sentence of [`SYSTEM_PROMPT`], sliced out of it rather
+/// than restated, so the merge pass and the distill pass can never disagree
+/// about the JSON contract. The bounds are pinned by a unit test.
+fn response_shape_spec() -> &'static str {
+    let start = SYSTEM_PROMPT
+        .find("Respond with ONLY")
+        .expect("system prompt states the response shape");
+    let end = SYSTEM_PROMPT
+        .find(" Only report decisions")
+        .expect("system prompt states the reporting rules after the response shape");
+    &SYSTEM_PROMPT[start..end]
+}
+
+/// System prompt for the final merge call: the same JSON contract as a chunk
+/// (shared verbatim via [`response_shape_spec`]), a merging role instead of a
+/// distilling one.
+fn merge_system_prompt() -> String {
+    format!(
+        "You are a meeting-notes distiller. One meeting's transcript was distilled in consecutive \
+parts; you will be given the meeting's date and those partial results, in order, as a JSON array. \
+Merge them into ONE result for the whole meeting: write a single unified summary of the meeting \
+(not a list of per-part recaps), keep every distinct decision and action item exactly once (two \
+entries are the same only when they describe the same commitment), keep only the open questions no \
+later part resolved, and choose one title and the most representative tags. Never invent owners, \
+dates, decisions, or facts not present in the partial results. {} No prose, no markdown fences, no \
+explanation - only the JSON object.",
+        response_shape_spec()
+    )
 }
 
 /// Parses the model's output into a normalized [`DistillOutput`].
@@ -542,6 +741,130 @@ pub struct RoutingDiagnostics {
     pub example_failures: Vec<ExamplesLoadFailure>,
 }
 
+/// Drops exact cross-chunk repeats — the same decision, action item (all three
+/// fields equal), or open question surfacing in more than one part — keeping
+/// the first occurrence, in part order.
+///
+/// Deliberately mechanical: near-duplicates ("send the memo" vs "send the
+/// budget memo") are the merge model's judgment call, but an item repeated
+/// verbatim because two chunks overlapped on the same commitment is dropped
+/// here, deterministically, before it can bias the merge or survive it twice.
+fn dedup_across_chunks(parts: Vec<DistillOutput>) -> Vec<DistillOutput> {
+    let mut seen_decisions = std::collections::HashSet::new();
+    let mut seen_items = std::collections::HashSet::new();
+    let mut seen_questions = std::collections::HashSet::new();
+
+    parts
+        .into_iter()
+        .map(|mut part| {
+            part.decisions
+                .retain(|decision| seen_decisions.insert(decision.clone()));
+            part.action_items
+                .retain(|item| seen_items.insert(item.clone()));
+            part.open_questions
+                .retain(|question| seen_questions.insert(question.clone()));
+            part
+        })
+        .collect()
+}
+
+/// One chunk's result as the merge call sees it. Field order is fixed by the
+/// struct, so the same parts always serialize to the same prompt.
+#[derive(serde::Serialize)]
+struct MergePart<'a> {
+    part: usize,
+    title: Option<&'a str>,
+    summary: &'a str,
+    decisions: &'a [String],
+    action_items: Vec<MergeActionItem<'a>>,
+    open_questions: &'a [String],
+    tags: Vec<&'a str>,
+}
+
+#[derive(serde::Serialize)]
+struct MergeActionItem<'a> {
+    owner: Option<&'a str>,
+    description: &'a str,
+    due_date: Option<&'a str>,
+}
+
+/// Builds the final merge request from the (already deduped) chunk outputs.
+fn build_merge_request(parts: &[DistillOutput], meeting_date: &str) -> LlmRequest {
+    let wire: Vec<MergePart<'_>> = parts
+        .iter()
+        .enumerate()
+        .map(|(index, part)| MergePart {
+            part: index + 1,
+            title: part.title.as_deref(),
+            summary: &part.summary,
+            decisions: &part.decisions,
+            action_items: part
+                .action_items
+                .iter()
+                .map(|item| MergeActionItem {
+                    owner: item.owner.as_deref(),
+                    description: &item.description,
+                    due_date: item.due_date.as_deref(),
+                })
+                .collect(),
+            open_questions: &part.open_questions,
+            tags: part.tags.iter().map(|tag| tag.as_str()).collect(),
+        })
+        .collect();
+
+    // Serialization of owned data with no non-string map keys cannot fail; an
+    // empty array would fail the merge's parse, which is the honest outcome.
+    let payload = serde_json::to_string(&wire).unwrap_or_else(|_| "[]".to_string());
+    let total = parts.len();
+
+    LlmRequest {
+        system_prompt: merge_system_prompt(),
+        prompt: format!(
+            "Meeting date: {meeting_date}\n\nThe meeting's transcript was distilled in {total} \
+consecutive parts. The partial results, in order:\n{payload}"
+        ),
+    }
+}
+
+/// Map-reduce path for a transcript whose single-call prompt exceeds
+/// `budget_chars`: distill each chunk, drop exact repeats, then merge with one
+/// final call into the same [`DistillOutput`] the single-call path produces.
+///
+/// Each call gets the runner's full per-call timeout, so wall-clock scales with
+/// chunk count rather than one call having to fit a whole long meeting. Any
+/// chunk or merge failure aborts the whole distill — no further calls are made
+/// and no note is written, keeping the module's fail-hard contract intact for
+/// long transcripts too.
+fn distill_chunked(
+    runner: &dyn HeadlessClaude,
+    segments: &[TranscriptSegment],
+    meeting_date: &str,
+    budget_chars: usize,
+) -> Result<DistillOutput, DistillError> {
+    let line_budget = budget_chars
+        .saturating_sub(CHUNK_PROMPT_OVERHEAD_CHARS)
+        .max(1);
+    let transcripts = plan_chunk_transcripts(segments, line_budget);
+    let total = transcripts.len();
+
+    let mut parts = Vec::with_capacity(total);
+    for (index, transcript) in transcripts.iter().enumerate() {
+        let request = build_chunk_request(transcript, meeting_date, index + 1, total);
+        parts.push(parse_output(&runner.run(&request)?)?);
+    }
+
+    // Unreachable given the arithmetic above (a prompt over budget means the
+    // transcript alone exceeds `line_budget`, so it splits), but merging one
+    // part with itself would only cost a call and risk paraphrasing it.
+    if parts.len() == 1 {
+        return Ok(parts.remove(0));
+    }
+
+    let parts = dedup_across_chunks(parts);
+    let merge_request = build_merge_request(&parts, meeting_date);
+    parse_output(&runner.run(&merge_request)?)
+}
+
 /// Distills the raw session at `session_path` into a meeting note under
 /// `vault_root`, returning where it landed.
 ///
@@ -555,6 +878,11 @@ pub struct RoutingDiagnostics {
 /// date-only form — the closest honest stand-in, since stamping "now" would
 /// fabricate chronology for a weeks-old import. The note's `source` is the
 /// session's vault-relative path.
+///
+/// One model call for a transcript inside [`DISTILL_INPUT_BUDGET_CHARS`];
+/// a longer one is chunked and merged by [`distill_chunked`], which costs one
+/// call per chunk plus one merge and fails the whole distill if any of them
+/// fails.
 pub fn distill_session(
     runner: &dyn HeadlessClaude,
     vault_root: &Path,
@@ -600,8 +928,15 @@ pub fn distill_session(
         }
     };
 
+    // One call while the prompt fits the budget — the overwhelmingly common
+    // case, byte-for-byte what this pass has always sent. Only a transcript
+    // that would otherwise overflow takes the chunked map-reduce path.
     let request = build_request(&segments, &meeting_date);
-    let output = parse_output(&runner.run(&request)?)?;
+    let output = if request.prompt.chars().count() <= DISTILL_INPUT_BUDGET_CHARS {
+        parse_output(&runner.run(&request)?)?
+    } else {
+        distill_chunked(runner, &segments, &meeting_date, DISTILL_INPUT_BUDGET_CHARS)?
+    };
     // Render the body once: routing scores it and the note stores it, so the
     // text that decides where the note lands is exactly the text on disk.
     let body = render_body(&output);
@@ -1716,5 +2051,479 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(err, DistillError::Session(_)));
+    }
+
+    // ---- input budgeting: chunk planning ----------------------------------
+
+    /// The `"You: "`/`"Them: "` prefix plus the trailing newline a rendered
+    /// line costs on top of its text.
+    const LINE_OVERHEAD: usize = 6;
+
+    /// Runner that replays a scripted sequence of responses and records every
+    /// request it was handed, so a chunked run can be asserted on both what it
+    /// sent and how many calls it made.
+    struct SequenceRunner {
+        responses: std::cell::RefCell<std::collections::VecDeque<Result<String, LlmRunError>>>,
+        requests: std::cell::RefCell<Vec<LlmRequest>>,
+    }
+
+    impl SequenceRunner {
+        fn new(responses: Vec<Result<String, LlmRunError>>) -> Self {
+            Self {
+                responses: std::cell::RefCell::new(responses.into()),
+                requests: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+
+        fn ok(responses: Vec<String>) -> Self {
+            Self::new(responses.into_iter().map(Ok).collect())
+        }
+
+        fn requests(&self) -> Vec<LlmRequest> {
+            self.requests.borrow().clone()
+        }
+    }
+
+    impl HeadlessClaude for SequenceRunner {
+        fn run(&self, request: &LlmRequest) -> Result<String, LlmRunError> {
+            self.requests.borrow_mut().push(request.clone());
+            self.responses
+                .borrow_mut()
+                .pop_front()
+                .expect("runner called more times than the test scripted")
+        }
+    }
+
+    /// A distill payload carrying one action item, so a chunk's contribution
+    /// stays identifiable through the merge.
+    fn chunk_json(summary: &str, description: &str) -> String {
+        format!(
+            r#"{{"summary": "{summary}", "action_items": [{{"owner": "Shane", "description": "{description}", "due_date": null}}]}}"#
+        )
+    }
+
+    #[test]
+    fn plan_keeps_a_fitting_transcript_in_one_chunk() {
+        let segments = vec![
+            segment(0, Channel::You, "lets sync on the budget"),
+            segment(1, Channel::Them, "will do"),
+        ];
+
+        let chunks = plan_chunk_transcripts(&segments, 1_000);
+
+        assert_eq!(chunks, vec![render_transcript(&segments)]);
+    }
+
+    #[test]
+    fn plan_budget_boundary_is_inclusive() {
+        // Two lines of "You: abc\n" — nine characters each.
+        let segments = vec![
+            segment(0, Channel::You, "abc"),
+            segment(1, Channel::You, "def"),
+        ];
+        let exact = 2 * (3 + LINE_OVERHEAD);
+
+        assert_eq!(plan_chunk_transcripts(&segments, exact).len(), 1);
+        assert_eq!(plan_chunk_transcripts(&segments, exact - 1).len(), 2);
+    }
+
+    #[test]
+    fn plan_splits_on_segment_boundaries_and_loses_nothing() {
+        let segments: Vec<_> = (0..20)
+            .map(|index| {
+                let channel = if index % 2 == 0 {
+                    Channel::You
+                } else {
+                    Channel::Them
+                };
+                segment(index, channel, &format!("utterance number {index}"))
+            })
+            .collect();
+
+        let chunks = plan_chunk_transcripts(&segments, 80);
+
+        assert!(chunks.len() > 1, "expected the transcript to split");
+        // Nothing is dropped, duplicated, or reordered by the split.
+        assert_eq!(chunks.concat(), render_transcript(&segments));
+        // Every line in every chunk still carries its channel attribution.
+        for chunk in &chunks {
+            assert!(chunk.chars().count() <= 80);
+            for line in chunk.lines() {
+                assert!(
+                    line.starts_with("You: ") || line.starts_with("Them: "),
+                    "line lost its channel prefix: {line:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn plan_counts_characters_not_bytes() {
+        // "You: héllo\n" is 11 characters but 12 bytes; two of them fit a
+        // 22-character budget and would not fit a byte-counted one.
+        let segments = vec![
+            segment(0, Channel::You, "héllo"),
+            segment(1, Channel::You, "héllo"),
+        ];
+
+        assert_eq!(plan_chunk_transcripts(&segments, 22).len(), 1);
+    }
+
+    #[test]
+    fn an_oversized_segment_is_word_split_with_its_label_recarried() {
+        let text = "alpha bravo charlie delta echo foxtrot golf hotel india juliet";
+        let segments = vec![segment(0, Channel::Them, text)];
+
+        let chunks = plan_chunk_transcripts(&segments, 30);
+
+        assert!(chunks.len() > 1, "expected the utterance to be split");
+        let mut words = Vec::new();
+        for chunk in &chunks {
+            assert!(chunk.chars().count() <= 30);
+            for line in chunk.lines() {
+                let rest = line
+                    .strip_prefix("Them: ")
+                    .expect("every piece re-carries its channel label");
+                words.extend(rest.split_whitespace().map(str::to_owned));
+            }
+        }
+        // The utterance survives the split intact, word for word.
+        assert_eq!(words.join(" "), text);
+    }
+
+    #[test]
+    fn an_unbreakable_run_longer_than_the_budget_is_split_on_char_boundaries() {
+        let text = "a".repeat(100);
+        let segments = vec![segment(0, Channel::You, &text)];
+
+        let chunks = plan_chunk_transcripts(&segments, 30);
+
+        let recovered: String = chunks
+            .iter()
+            .flat_map(|chunk| chunk.lines())
+            .map(|line| line.strip_prefix("You: ").expect("label re-carried"))
+            .collect();
+        assert_eq!(recovered, text);
+        assert!(chunks.iter().all(|chunk| chunk.chars().count() <= 30));
+    }
+
+    // ---- input budgeting: merge -------------------------------------------
+
+    #[test]
+    fn both_system_prompts_share_the_response_shape_spec() {
+        let spec = response_shape_spec();
+
+        assert!(spec.starts_with("Respond with ONLY a single JSON object"));
+        assert!(spec.contains("\"action_items\""));
+        assert!(spec.contains("\"tags\""));
+        assert!(SYSTEM_PROMPT.contains(spec));
+        assert!(merge_system_prompt().contains(spec));
+    }
+
+    #[test]
+    fn exact_duplicates_dedup_across_chunks_first_wins() {
+        let repeated = draft("send the memo", Some("Shane"), None);
+        let similar = draft("send the memo", Some("Ada"), None);
+        let first = DistillOutput {
+            action_items: vec![repeated.clone()],
+            open_questions: vec!["Who owns outreach?".into()],
+            ..distill_output(None, "First half.", &["Approve the budget."])
+        };
+        let second = DistillOutput {
+            action_items: vec![repeated.clone(), similar.clone()],
+            open_questions: vec!["Who owns outreach?".into()],
+            ..distill_output(
+                None,
+                "Second half.",
+                &["Approve the budget.", "Ship on Friday."],
+            )
+        };
+
+        let merged = dedup_across_chunks(vec![first, second]);
+
+        assert_eq!(merged[0].decisions, vec!["Approve the budget."]);
+        assert_eq!(merged[0].action_items, vec![repeated]);
+        assert_eq!(merged[0].open_questions, vec!["Who owns outreach?"]);
+        // The repeat is gone; a different owner is a different commitment.
+        assert_eq!(merged[1].decisions, vec!["Ship on Friday."]);
+        assert_eq!(merged[1].action_items, vec![similar]);
+        assert!(merged[1].open_questions.is_empty());
+    }
+
+    /// Budget whose line allowance (80 characters) splits
+    /// [`two_chunk_segments`] into exactly two chunks.
+    const TWO_CHUNK_BUDGET: usize = CHUNK_PROMPT_OVERHEAD_CHARS + 80;
+
+    /// Four 24-character utterances: two chunks at [`TWO_CHUNK_BUDGET`].
+    fn two_chunk_segments() -> Vec<TranscriptSegment> {
+        (0..4)
+            .map(|index| segment(index, Channel::You, &format!("utterance number {index}")))
+            .collect()
+    }
+
+    #[test]
+    fn chunked_distill_sends_part_framed_requests_then_one_merge() {
+        let segments = two_chunk_segments();
+        assert_eq!(
+            plan_chunk_transcripts(&segments, TWO_CHUNK_BUDGET - CHUNK_PROMPT_OVERHEAD_CHARS).len(),
+            2,
+            "the fixture should split into two chunks"
+        );
+        let runner = SequenceRunner::ok(vec![
+            chunk_json("First half.", "send the memo"),
+            chunk_json("Second half.", "book the room"),
+            chunk_json("The whole meeting.", "send the memo"),
+        ]);
+
+        let output = distill_chunked(
+            &runner,
+            &segments,
+            "2026-07-12",
+            CHUNK_PROMPT_OVERHEAD_CHARS + 80,
+        )
+        .unwrap();
+
+        let requests = runner.requests();
+        assert_eq!(requests.len(), 3, "two chunks plus one merge");
+        for (index, request) in requests[..2].iter().enumerate() {
+            assert_eq!(request.system_prompt, SYSTEM_PROMPT);
+            assert!(request
+                .prompt
+                .contains(&format!("This is part {} of 2", index + 1)));
+        }
+        assert_eq!(requests[2].system_prompt, merge_system_prompt());
+        assert!(requests[2]
+            .prompt
+            .contains("distilled in 2 consecutive parts"));
+        assert_eq!(output.summary, "The whole meeting.");
+    }
+
+    #[test]
+    fn duplicate_action_items_reach_the_merge_request_once() {
+        let segments = two_chunk_segments();
+        // Both chunks report the same commitment verbatim.
+        let runner = SequenceRunner::ok(vec![
+            chunk_json("First half.", "send the memo"),
+            chunk_json("Second half.", "send the memo"),
+            chunk_json("The whole meeting.", "send the memo"),
+        ]);
+
+        distill_chunked(&runner, &segments, "2026-07-12", TWO_CHUNK_BUDGET).unwrap();
+
+        let merge_prompt = runner.requests()[2].prompt.clone();
+        assert_eq!(merge_prompt.matches("send the memo").count(), 1);
+    }
+
+    #[test]
+    fn a_mid_sequence_chunk_failure_aborts_before_further_calls() {
+        let segments = two_chunk_segments();
+        let runner = SequenceRunner::new(vec![
+            Ok(chunk_json("First half.", "send the memo")),
+            Err(LlmRunError::EmptyResult),
+        ]);
+
+        let err = distill_chunked(
+            &runner,
+            &segments,
+            "2026-07-12",
+            CHUNK_PROMPT_OVERHEAD_CHARS + 80,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, DistillError::Run(_)));
+        // The merge was never attempted.
+        assert_eq!(runner.requests().len(), 2);
+    }
+
+    #[test]
+    fn a_chunk_parse_failure_aborts_the_run() {
+        let segments = two_chunk_segments();
+        let runner = SequenceRunner::ok(vec!["not json at all".to_string()]);
+
+        let err = distill_chunked(
+            &runner,
+            &segments,
+            "2026-07-12",
+            CHUNK_PROMPT_OVERHEAD_CHARS + 80,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, DistillError::Parse(_)));
+        assert_eq!(runner.requests().len(), 1);
+    }
+
+    #[test]
+    fn a_merge_parse_failure_aborts_the_run() {
+        let segments = two_chunk_segments();
+        let runner = SequenceRunner::ok(vec![
+            chunk_json("First half.", "send the memo"),
+            chunk_json("Second half.", "book the room"),
+            "sorry, I can't do that".to_string(),
+        ]);
+
+        let err = distill_chunked(
+            &runner,
+            &segments,
+            "2026-07-12",
+            CHUNK_PROMPT_OVERHEAD_CHARS + 80,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, DistillError::Parse(_)));
+    }
+
+    // ---- input budgeting: the session path --------------------------------
+
+    /// Writes `segments` as a session into `<vault>/sessions/`.
+    fn write_session_with(vault: &Path, segments: &[TranscriptSegment]) -> PathBuf {
+        raw_session::write_raw_session(
+            &vault.join("sessions"),
+            instant(),
+            &device(),
+            None,
+            segments,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn an_under_budget_session_sends_exactly_the_single_call_request() {
+        let vault = tempdir().unwrap();
+        let session_path = write_session(vault.path(), None);
+        let segments = raw_session::read_raw_session(&session_path).unwrap();
+        let runner = SequenceRunner::ok(vec![full_output_json()]);
+
+        distill_session(&runner, vault.path(), &session_path, &|_, _| {
+            inbox_routing()
+        })
+        .unwrap();
+
+        // Byte-for-byte the request this pass has always sent, and only one.
+        assert_eq!(
+            runner.requests(),
+            vec![build_request(&segments, "2026-07-12")]
+        );
+    }
+
+    #[test]
+    fn a_session_exactly_at_the_budget_stays_single_call() {
+        let vault = tempdir().unwrap();
+        // "Meeting date: 2026-07-12\n\nTranscript:\n" is 38 characters; the
+        // one rendered line must bring the prompt to exactly the budget.
+        let preamble = "Meeting date: 2026-07-12\n\nTranscript:\n".chars().count();
+        let text = "a".repeat(DISTILL_INPUT_BUDGET_CHARS - preamble - LINE_OVERHEAD);
+        let segments = vec![segment(0, Channel::You, &text)];
+        let session_path = write_session_with(vault.path(), &segments);
+        let runner = SequenceRunner::ok(vec![full_output_json()]);
+
+        let request = build_request(&segments, "2026-07-12");
+        assert_eq!(request.prompt.chars().count(), DISTILL_INPUT_BUDGET_CHARS);
+
+        distill_session(&runner, vault.path(), &session_path, &|_, _| {
+            inbox_routing()
+        })
+        .unwrap();
+
+        assert_eq!(runner.requests(), vec![request]);
+    }
+
+    #[test]
+    fn a_long_session_distills_into_one_well_formed_note() {
+        let vault = tempdir().unwrap();
+        // ~3 hours of two-channel conversation, well past the budget.
+        let segments: Vec<_> = (0..4_000)
+            .map(|index| {
+                let channel = if index % 2 == 0 {
+                    Channel::You
+                } else {
+                    Channel::Them
+                };
+                segment(
+                    index,
+                    channel,
+                    &format!("utterance number {index} about the permits and the budget schedule"),
+                )
+            })
+            .collect();
+        assert!(
+            build_request(&segments, "2026-07-12")
+                .prompt
+                .chars()
+                .count()
+                > DISTILL_INPUT_BUDGET_CHARS
+        );
+        let session_path = write_session_with(vault.path(), &segments);
+
+        let chunk_count = plan_chunk_transcripts(
+            &segments,
+            DISTILL_INPUT_BUDGET_CHARS - CHUNK_PROMPT_OVERHEAD_CHARS,
+        )
+        .len();
+        assert!(chunk_count > 1, "expected the transcript to chunk");
+
+        // Every chunk reports the same early commitment; only the last one
+        // raises the permits, so a merge that drops late chunks fails here.
+        let mut responses: Vec<String> = (0..chunk_count)
+            .map(|index| {
+                if index == chunk_count - 1 {
+                    chunk_json("The closing stretch.", "file the permits")
+                } else {
+                    chunk_json("An earlier stretch.", "send the memo")
+                }
+            })
+            .collect();
+        responses.push(
+            r#"{
+                "title": "Permits and budget",
+                "summary": "A long meeting about permits and the budget schedule.",
+                "decisions": ["Approve the revised schedule"],
+                "action_items": [
+                    {"owner": "Shane", "description": "send the memo", "due_date": null},
+                    {"owner": "Shane", "description": "file the permits", "due_date": "2026-07-20"}
+                ],
+                "open_questions": [],
+                "tags": ["permits"]
+            }"#
+            .to_string(),
+        );
+        let runner = SequenceRunner::ok(responses);
+
+        let distilled = distill_session(&runner, vault.path(), &session_path, &|_, _| {
+            inbox_routing()
+        })
+        .unwrap();
+
+        assert_eq!(runner.requests().len(), chunk_count + 1);
+        let written = std::fs::read_to_string(&distilled.path).unwrap();
+        // One well-formed note, carrying the late chunk's action item.
+        assert!(written.contains("# Summary"));
+        assert!(written.contains("- [ ] Shane to send the memo."));
+        assert!(written.contains("- [ ] Shane to file the permits by 2026-07-20."));
+        assert!(written.contains("- Approve the revised schedule."));
+    }
+
+    #[test]
+    fn a_chunk_failure_writes_no_note_and_keeps_the_session() {
+        let vault = tempdir().unwrap();
+        let long_text = "a".repeat(DISTILL_INPUT_BUDGET_CHARS);
+        let segments = vec![
+            segment(0, Channel::You, &long_text),
+            segment(1, Channel::Them, "and that's the plan"),
+        ];
+        let session_path = write_session_with(vault.path(), &segments);
+        let runner = SequenceRunner::new(vec![
+            Ok(chunk_json("First half.", "send the memo")),
+            Err(LlmRunError::ClaudeError("overloaded".into())),
+        ]);
+
+        let err = distill_session(&runner, vault.path(), &session_path, &|_, _| {
+            inbox_routing()
+        })
+        .unwrap_err();
+
+        assert!(matches!(err, DistillError::Run(_)));
+        assert!(!vault.path().join("Inbox").exists());
+        // The raw session survives, so the distill stays retryable.
+        assert!(session_path.exists());
     }
 }
