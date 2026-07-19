@@ -154,7 +154,28 @@ At meeting end (batch, not continuous — keeps token usage sane):
 
 ### 3.7 Trust, consent, and hygiene
 
-- **Recording consent:** Massachusetts (and many states) require two-party consent. One-time in-app nudge ("announce your recordings"), unambiguous listening indicator, and a clear statement in the README. This is both legal hygiene and a trust signal.
+- **Recording consent:** Massachusetts (and many states) require two-party consent. One-time in-app nudge ("announce your recordings"), the capture-visibility invariant below (capture is never invisible), and a clear statement in the README. This is both legal hygiene and a trust signal.
+- **Capture is never invisible.** There is no state of the app in which audio capture is running
+  without an on-screen indication of it. This holds when the main window is minimized, closed to
+  tray, or never opened, and during full-screen scenarios (presenting, screen-sharing, watching
+  video). Specifically:
+  1. **Tray:** the tray icon unambiguously distinguishes capturing vs idle at a glance
+     (animated/tinted while capturing, still when idle), and exists whenever capture can run — the
+     app lives in the tray; the window is optional.
+  2. **Toast:** every capture start fires a brief self-dismissing notification.
+  3. **Full-screen:** a small always-on-top overlay pill (draggable, dismissible) covers the case
+     where the tray is hidden. Default ON for auto-detected captures, default OFF for
+     manual/hotkey captures (user can change both).
+  4. **No OS reliance:** the Windows mic-in-use indicator only covers microphone capture — WASAPI
+     loopback (system audio) does not trigger it. Kodabi's own indicators must be sufficient on
+     their own.
+  5. **Symmetry:** indicators also make NOT-capturing unambiguous, protecting against both failure
+     modes: accidental capture and silently missed meetings.
+
+  This is the bar, not the shipped state. Task #71 (indicator truthfulness — capture failures are
+  broadcast so the in-window indicator never claims a capture that isn't running) has landed;
+  enforcement of the surfaces above is outstanding, tracked as tasks #68 (tray), #69 (toast), and
+  #70 (overlay). The indicator surfaces themselves are designed in §4.
 - **Retention policy:** governs the stored transcript — optional "distill then discard the raw transcript after N days." Raw client-call transcripts accumulating forever is a liability. **No audio is *retained* in v1** — only the transcript + timestamps become a lasting on-disk artifact, so there is no retained audio for the retention policy to prune yet. (The task #57 incremental-capture spool flushes audio to disk *transiently* during a meeting for crash recovery, but that spool is cleared once the session distills, and an orphaned spool left by a crash is reclaimed on the next startup — not by retention.) When an opt-in audio-retention toggle is eventually pulled by a use case, the retention policy must cover it too. **One gap the in-app policy cannot reach:** the `claude` CLI that `kodabi-llm` spawns for distill keeps its *own* Claude Code session logs, which contain the transcript text passed to it — outside our retention control. Document this, and disable that logging where the CLI allows it, so the policy's promise is complete.
 - **Security at rest (v1 posture):** rely on OS disk encryption (BitLocker) + the retention policy. Say so explicitly in docs. App-level encryption is a later consideration.
 - **Resource budget:** idle ≈ zero; capturing under a target CPU ceiling (tune on real hardware); no fan spin-up during meetings. Treat as a requirement, not a bug report. Measurement procedure, tuning knobs, and the recorded numbers live in [`RESOURCE_BUDGET.md`](RESOURCE_BUDGET.md).
@@ -170,7 +191,7 @@ Design is a feature, not polish. Bar: Linear / Things 3 quality, not admin-panel
 - **Ma (間)** — negative space as an active element. Whitespace-heavy layouts, one thing per view. Emptiness is the design, not the absence of it.
 - **Forest palette** — moss, fern, mist, stone, washi-paper cream, sumi-ink charcoal. Muted and natural, never SaaS blue/purple. One quiet green as the sole accent (the listening state).
 - **Wabi-sabi restraint** — soft edges, paper-and-wood feel; no gloss, gradients, or glassmorphism trend-chasing.
-- **The listening indicator IS the kodama** — an original minimal spirit-mark (evoke the archetype, never trace Ghibli's character): gently animate while listening, still when idle. Logo, trust signal, and screenshot in one element.
+- **The listening indicator IS the kodama** — an original minimal spirit-mark (evoke the archetype, never trace Ghibli's character): gently animate while listening, still when idle. Logo, trust signal, and screenshot in one element. It is the in-window face of the §3.7 capture-visibility invariant; the tray icon, capture-start toast, and full-screen overlay carry the same promise when the window isn't visible.
 - **The kodama rattle** — an optional, off-by-default soft wooden "tick" on capture start/stop and distill-complete. A signature detail for those who enable it.
 - **Moodboard references (Phase 0):** Japanese stationery, Ghibli *backgrounds*, Muji, washi paper, misty forest photography.
 
@@ -180,7 +201,7 @@ Principles:
 
 - **Typography-first, chrome-last.** One humanist sans (clean, slightly soft, wide spacing) + a serif reserved for reading views. Hierarchy through type and spacing, almost never color. Generous line height, real margins. No borders and boxes.
 - **Motion as feedback, not decoration.** The meeting-end distill-and-route moment gets one satisfying transition — the note drifting into its project like a spirit settling into a tree. Everything else is near-instant.
-- **The listening state deserves love.** Subtle waveform / breathing indicator. It's the screenshot, and it's the trust signal.
+- **The listening state deserves love.** Subtle waveform / breathing indicator. It's the screenshot, and it's the trust signal — one surface of the §3.7 invariant that capture is never invisible.
 - **⌘K / Ctrl-K command palette as primary navigation.** Fits the audience, keeps chrome minimal.
 - **Two AI surfaces, one architecture:** the designed chat UI (Claude Code headless underneath) is the front door; the embedded xterm.js terminal is the power-user escape hatch. Terminal ships first (nearly free), pretty chat follows.
 - **Process discipline:** lock the aesthetic before building screens — moodboard, type scale, spacing tokens, color system. "Clean" retrofitted onto grown UI never lands.
@@ -202,7 +223,7 @@ Principles:
 - SQLite FTS5 + sqlite-vec hybrid index, local embeddings, rebuildable
 - MCP server exposing the knowledge base
 - Claude Code integration: embedded terminal first, designed chat UI second
-- Retention setting, consent nudge, listening indicator
+- Retention setting, consent nudge, and the capture-visibility indicators the §3.7 invariant requires (in-window listening indicator, capturing-vs-idle tray icon, capture-start toast; the full-screen overlay pill may follow)
 
 ### V1 anti-scope (explicitly not building)
 
@@ -281,7 +302,7 @@ order of expected value — each earns its place only after the core loop proves
   - Primary signal: mic-in-use by process (Windows audio session APIs / ConsentStore) — `ms-teams.exe` grabs mic = meeting started; mic released = ended
   - Disambiguator: window/tab title patterns (browser mic use → confirm "Meet – …" title). Each enabled app = one (process + title) rule; new apps are config, not features
   - Calendar cross-reference labels the capture ("MERIDIAN standup") and primes the categorizer — labeling, not detection
-  - UX rule: **auto-detect, never auto-silently-record** — detection fires a "Meeting detected — capturing" notification with one-tap cancel (or ask-first mode)
+  - UX rule: **auto-detect, never auto-silently-record** — detection fires a "Meeting detected — capturing" notification with one-tap cancel (or ask-first mode). This is the §3.7 capture-start toast in its richer actionable form: auto-detected captures earn a cancellable notification, where a manual/hotkey capture only owes the brief self-dismissing one
 - **Speaker identity** (staged; each stage stands alone):
   1. *Active-speaker scraping:* UI Automation reads who's highlighted in the Teams/Meet window, timestamped and aligned with the transcript → real names, zero audio ML. Brittle per app-redesign (scraper rules), but beats diarization when it works
   2. *Claude attribution in the post-pass:* given the roster (calendar invite / window), infer speakers from context ("Thanks, Tyler", self-introductions) and reconcile anonymous clusters with names
@@ -309,4 +330,4 @@ order of expected value — each earns its place only after the core loop proves
 - **Transcription quality on real calls** → glossary biasing + cleanup pass + real-meeting benchmarking of both engines, early.
 - **Whisper silence hallucination** (phantom text during pauses — endemic to meeting audio) → Parakeet default; VAD mandatory on any Whisper path.
 - **Design debt** → aesthetic locked in Phase 0 before screens exist.
-- **Legal exposure (recording)** → consent nudge, unambiguous indicator, README disclosure, retention policy.
+- **Legal exposure (recording)** → consent nudge, the §3.7 capture-visibility invariant (capture is never invisible), README disclosure, retention policy.
