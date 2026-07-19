@@ -50,9 +50,11 @@ Run `cargo test -p kodabi-core index` (no `dist/` needed for a `-p` run).
 
 ## 6. Gates
 
-Run the full Rust gates (fmt + clippy + test, `dist/` present). Because CI's embed
-job is path-filtered to `crates/kodabi-core` too, also run
-`cargo clippy -p kodabi-embed --features bge --all-targets --locked -- -D warnings`.
+Run the full Rust gates (fmt + clippy + test, `dist/` present). Two CI jobs are
+path-filtered to `crates/` and so cover `kodabi-core` too — run their legs as well:
+
+- `cargo clippy -p kodabi-embed --features bge --all-targets --locked -- -D warnings`
+- `cargo clippy -p kodabi --features parakeet --all-targets --locked -- -D warnings`
 
 ## 7. Verify
 

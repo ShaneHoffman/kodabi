@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri:build": "tauri build --features parakeet"
   },
   "dependencies": {
     "@fontsource/source-code-pro": "^5.2.5",

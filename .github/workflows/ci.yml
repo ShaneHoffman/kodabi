@@ -54,10 +54,12 @@ jobs:
   # exist (src-tauri embeds it via tauri::generate_context!), downloaded from
   # the frontend job rather than rebuilt.
   #
-  # CI does not build the Tauri app — the release compile is the slowest step,
-  # and the workspace's two smoke tests don't justify paying it per push.
-  # Whether the desktop app itself builds is verified by the /pull-request
-  # skill before a PR is opened or updated (see .claude/skills/pull-request).
+  # These two jobs build the app with default features, i.e. the stub
+  # MockEngine — the shipping configuration (`--features parakeet`) is built
+  # and exercised by the `app` job at the bottom of this file, path-filtered so
+  # the slow release compile only runs when a Rust surface changes. The
+  # /pull-request skill still release-builds the app unconditionally before a
+  # PR is opened or updated (see .claude/skills/pull-request).
   lint:
     name: Rust (fmt + clippy)
     runs-on: windows-latest
@@ -233,3 +235,120 @@ jobs:
       - name: Clippy (feature bge — strict, warnings fail)
         if: steps.changed.outputs.run == 'true'
         run: cargo clippy -p kodabi-embed --features bge --all-targets --locked -- -D warnings
+
+  # Builds and exercises the *shipping* configuration of the desktop app, which
+  # no other job covers: `lint`/`test` run default features (the stub
+  # MockEngine), and `transcribe` clippy-checks the engine crate alone, never
+  # the app that forwards its features. Four things happen here:
+  #
+  #   1. the real-model integration tests run against the committed speech
+  #      fixture, so CI proves audio actually transcribes with Parakeet rather
+  #      than merely compiling;
+  #   2. clippy lints src-tauri's `parakeet`-gated code (build_engine and
+  #      friends), which the default `--workspace` legs cfg out;
+  #   3. the app is release-built exactly as it ships;
+  #   4. the release guard is asserted to still fire, so a featureless release
+  #      build can never quietly start succeeding again.
+  #
+  # Path-filtered to the Rust surfaces plus this workflow file (so edits to the
+  # job itself are exercised). Frontend-only changes skip it: the `frontend`
+  # job already validates dist/, which is all `tauri::generate_context!` needs.
+  # The model files are public sherpa-onnx release assets, cached across runs
+  # under a static key since those assets are immutable.
+  app:
+    name: App (release + Parakeet)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    needs: frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for changes to src-tauri, crates, or the workspace manifests
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Same base-selection logic as the transcribe job: PR base, else the
+          # commit the push replaced, else HEAD~1 for a brand-new branch.
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            base="HEAD~1"
+          fi
+          changed="$(git diff --name-only "$base" HEAD -- src-tauri crates Cargo.toml Cargo.lock .github/workflows/ci.yml)"
+          if [ -n "$changed" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install Rust (stable) + clippy
+        if: steps.changed.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        if: steps.changed.outputs.run == 'true'
+      - name: Download dist/ (built by the frontend job)
+        if: steps.changed.outputs.run == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Cache Parakeet + Silero VAD models
+        if: steps.changed.outputs.run == 'true'
+        id: models
+        uses: actions/cache@v4
+        with:
+          path: .ci-models
+          key: stt-parakeet-tdt-0.6b-v2-int8-silero-vad-v1
+      - name: Download models (cache miss only)
+        if: steps.changed.outputs.run == 'true' && steps.models.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Immutable release assets from the sherpa-onnx `asr-models` tag; the
+          # cache key above is bumped by hand if either one is ever replaced.
+          # bsdtar (the runner's `tar`) handles .tar.bz2 natively.
+          base_url=https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models
+          mkdir -p .ci-models
+          curl -fsSL --retry 3 -o parakeet.tar.bz2 \
+            "$base_url/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8.tar.bz2"
+          tar xjf parakeet.tar.bz2 -C .ci-models
+          rm parakeet.tar.bz2
+          curl -fsSL --retry 3 -o .ci-models/silero_vad.onnx "$base_url/silero_vad.onnx"
+      - name: Real transcription (Parakeet, real models, committed fixture)
+        if: steps.changed.outputs.run == 'true'
+        env:
+          # Scoped to the parakeet_real target on purpose: the crate's other
+          # #[ignore]d tests (benchmark_parakeet, benchmark_compare) need the
+          # local-only meeting fixture (KODABI_BENCHMARK_MEETING_DIR) that is
+          # deliberately never committed, and would fail here.
+          PARAKEET_ENCODER: ${{ github.workspace }}/.ci-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/encoder.int8.onnx
+          PARAKEET_DECODER: ${{ github.workspace }}/.ci-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/decoder.int8.onnx
+          PARAKEET_JOINER: ${{ github.workspace }}/.ci-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/joiner.int8.onnx
+          PARAKEET_TOKENS: ${{ github.workspace }}/.ci-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/tokens.txt
+          PARAKEET_VAD_MODEL: ${{ github.workspace }}/.ci-models/silero_vad.onnx
+        run: cargo test -p kodabi-transcribe --features parakeet --locked --test parakeet_real -- --ignored --nocapture
+      - name: Clippy (app with parakeet — strict, warnings fail)
+        if: steps.changed.outputs.run == 'true'
+        run: cargo clippy -p kodabi --features parakeet --all-targets --locked -- -D warnings
+      - name: Release build (the shipping configuration)
+        if: steps.changed.outputs.run == 'true'
+        run: cargo build -p kodabi --release --locked --features parakeet
+      - name: Guard check (a featureless release build must not compile)
+        if: steps.changed.outputs.run == 'true'
+        shell: bash
+        run: |
+          set -uo pipefail
+          # The grep string mirrors the compile_error! in
+          # src-tauri/src/transcribe.rs. Reword one and this must change too.
+          if cargo build -p kodabi --release --locked 2> guard.log; then
+            echo "FAIL: expected the no-engine release build to be rejected by the compile_error guard"
+            cat guard.log
+            exit 1
+          fi
+          grep -q "release builds must ship a real STT engine" guard.log || {
+            echo "FAIL: the release build failed, but not with the engine guard:"
+            cat guard.log
+            exit 1
+          }
