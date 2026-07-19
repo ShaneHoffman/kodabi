@@ -19,6 +19,16 @@ export const VAULT_CHANGED_EVENT = "vault:changed";
  * `{ status: "error", message }`. Mirrors `events::INDEX_STATE_EVENT`. */
 export const INDEX_STATE_EVENT = "index:state";
 
+/** Emitted when a capture is attempted before recording consent is
+ * acknowledged, so the frontend opens the consent nudge. Mirrors
+ * `capture_control::CONSENT_REQUIRED_EVENT`. */
+export const CONSENT_REQUIRED_EVENT = "consent:required";
+
+/** App settings changed over IPC, carrying the new `Settings`, so a view already
+ * mounted when the change lands refreshes without a reload. Mirrors
+ * `settings_cmds::SETTINGS_CHANGED_EVENT`. */
+export const SETTINGS_CHANGED_EVENT = "settings:changed";
+
 /** Sent to the quick-capture window when it comes forward, so its UI can refocus
  * and reset. Mirrors `quick_capture`'s `SHOWN_EVENT`. */
 export const QUICK_CAPTURE_SHOWN_EVENT = "quick-capture:shown";
