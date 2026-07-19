@@ -62,7 +62,13 @@ Canonical key order the writer emits: **`id, type, project, date, tags, source, 
   Store the value exactly as written. The two accepted shapes are strictly a `YYYY-MM-DD` calendar
   date **or** an RFC 3339 timestamp that **carries an offset** (`Z` or numeric); a naive
   `2026-07-09T14:00:00` with no offset is rejected, because without an offset the instant is
-  ambiguous. A lexical string sort orders same-offset timestamps and date-only values
+  ambiguous. **The writer emits the device's local offset at capture time** (e.g.
+  `2026-07-09T20:00:00-04:00`, not the `…Z` UTC form): the offset preserves the exact instant, but
+  the wall-clock digits reflect the user's *local* day, so an evening meeting near the UTC day
+  boundary files under the correct local date rather than "tomorrow." A date-only value is likewise
+  the local calendar date. (The distill writer currently emits the UTC instant; correcting it to
+  the local offset is tracked as task #66, `fix/local-date-frontmatter`.) A lexical string sort orders
+  same-offset timestamps and date-only values
   chronologically, but it compares wall-clock digits rather than the underlying instant — so
   `2026-07-09T14:00:00-07:00` (21:00Z) sorts *before* `2026-07-09T15:00:00+00:00` (15:00Z) even
   though it happened later. When notes span multiple offsets, the index must normalize `date` to UTC

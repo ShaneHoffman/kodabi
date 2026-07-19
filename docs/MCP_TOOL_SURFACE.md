@@ -610,7 +610,7 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
         "title": { "type": "string", "description": "Note title." },
         "type": { "$ref": "#/$defs/NoteType" },
         "project": { "oneOf": [ { "$ref": "#/$defs/ProjectSlug" }, { "type": "null" } ], "description": "Owning project slug, or null if unfiled (Inbox). Frontmatter stores the sentinel string \"Inbox\" for the null case." },
-        "date": { "oneOf": [ { "$ref": "#/$defs/IsoDateTime" }, { "$ref": "#/$defs/IsoDate" } ], "description": "Frontmatter date, verbatim as stored: full timestamp with offset when a time is known, date-only otherwise. The writer accepts only these two shapes and rejects a naive timestamp with no offset." },
+        "date": { "oneOf": [ { "$ref": "#/$defs/IsoDateTime" }, { "$ref": "#/$defs/IsoDate" } ], "description": "Frontmatter date, verbatim as stored: full timestamp with the device's local offset (not UTC) when a time is known, local calendar date otherwise. The writer accepts only these two shapes and rejects a naive timestamp with no offset." },
         "tags": { "type": "array", "items": { "type": "string" }, "description": "Frontmatter tags; empty array when the frontmatter key is absent (the writer omits the key for untagged notes, and normalizes a hand-edited empty list to an omitted key). Each tag is lowercase kebab-case." },
         "source": { "type": "string", "description": "Frontmatter source: a capture keyword (transcript | quick-capture | chat | import | manual) or a repo-relative path to the raw artifact. Disambiguation: a value exactly equal to a keyword is that keyword; anything else is the path." },
         "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Routing confidence 0..1, or null when no routing score exists (hand-filed or imported notes)." }
@@ -729,8 +729,11 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
    [Deferred / not in v1](#deferred--not-in-v1)).
 5. **Dates & time.** ISO 8601 throughout: a note's `date` is passed through **verbatim as
    frontmatter stores it** — a full RFC 3339 timestamp with offset when a time is known,
-   `YYYY-MM-DD` otherwise (per the frontmatter schema); due dates are `YYYY-MM-DD`;
-   `last_activity` is an RFC 3339 `date-time` in UTC. Transcript positions are **integer
+   `YYYY-MM-DD` otherwise (per the frontmatter schema). That offset is the device's **local**
+   offset at capture time (not UTC), so a note's wall-clock date reflects the user's local day; a
+   consumer that orders across mixed offsets must normalize to UTC first (per the frontmatter
+   schema's sort caveat). Due dates are `YYYY-MM-DD`; `last_activity` is an index-derived RFC 3339
+   `date-time` in UTC. Transcript positions are **integer
    millisecond offsets** (`start_ms`/`end_ms`) from meeting start, not wall-clock, because
    per-channel segments are recorded relative to session start.
 6. **Identity handles.** The **note write handle is the stable `id`**; `path` is always returned but
