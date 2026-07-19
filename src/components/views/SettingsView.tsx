@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   buildRetentionPolicy,
@@ -83,16 +83,14 @@ export function SettingsView() {
 
   // Seed the day field from the stored policy the first time a keep_days value
   // is seen, so editing starts from the stored value rather than the
-  // placeholder default. Guarded by a ref so a later `settings` change (an
+  // placeholder default. The once-only flag means a later `settings` change (an
   // apply() echoing its result back) never overwrites an edit the user is
   // still typing.
-  const seededDays = useRef(false);
-  useEffect(() => {
-    if (!seededDays.current && settings?.retention.policy === "keep_days") {
-      setDays(String(settings.retention.days));
-      seededDays.current = true;
-    }
-  }, [settings]);
+  const [seededDays, setSeededDays] = useState(false);
+  if (!seededDays && settings?.retention.policy === "keep_days") {
+    setSeededDays(true);
+    setDays(String(settings.retention.days));
+  }
 
   const kind: RetentionKind = settings?.retention.policy ?? "keep_all";
 

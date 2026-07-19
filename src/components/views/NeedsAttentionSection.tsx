@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { DISTILL_STATE_EVENT } from "../../events";
 import { useTauriEvent } from "../../useTauriEvent";
 import { retryDistill, type FailedSession } from "../../useSessions";
@@ -76,19 +76,20 @@ export function NeedsAttentionSection({
   // Drop messages for sessions that are no longer listed (retried successfully,
   // or pruned by the retention sweep). Without this the map only ever grows,
   // and a message from an old failure could resurface under a row that came
-  // back. Returning `current` unchanged when nothing was pruned keeps React
-  // from re-rendering on every refetch.
-  useEffect(() => {
-    setRowErrors((current) => {
-      const listed = new Set(sessions.map((session) => session.path));
-      const remaining = Object.entries(current).filter(([path]) =>
-        listed.has(path),
-      );
-      return remaining.length === Object.keys(current).length
-        ? current
-        : Object.fromEntries(remaining);
-    });
-  }, [sessions]);
+  // back. Pruned during render when the list identity changes (React's
+  // adjust-state-on-prop-change pattern) so the drop lands before paint; the
+  // length check skips the setState when nothing was pruned.
+  const [previousSessions, setPreviousSessions] = useState(sessions);
+  if (previousSessions !== sessions) {
+    setPreviousSessions(sessions);
+    const listed = new Set(sessions.map((session) => session.path));
+    const remaining = Object.entries(rowErrors).filter(([path]) =>
+      listed.has(path),
+    );
+    if (remaining.length !== Object.keys(rowErrors).length) {
+      setRowErrors(Object.fromEntries(remaining));
+    }
+  }
 
   const retry = (path: string) => {
     setPendingPath(path);
