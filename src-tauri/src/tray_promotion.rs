@@ -47,22 +47,71 @@ struct IconEntry {
     is_promoted: Option<u32>,
 }
 
-/// The entry to promote, if any.
+/// The known folders Explorer abbreviates a path under, as
+/// (environment variable naming the folder, its `FOLDERID` GUID). Only the two
+/// that can hold an installed Kodabi: the per-machine MSI target lands in
+/// `Program Files`, and a 32-bit install would land in its x86 sibling.
+const ABBREVIATED_FOLDERS: [(&str, &str); 2] = [
+    ("ProgramFiles", "{6D809377-6AF0-444B-8957-A3773F02200E}"),
+    (
+        "ProgramFiles(x86)",
+        "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}",
+    ),
+];
+
+/// The known-folder roots that exist on this machine, lowercased.
+fn abbreviated_folders() -> Vec<(String, &'static str)> {
+    ABBREVIATED_FOLDERS
+        .iter()
+        .filter_map(|(variable, id)| {
+            std::env::var(variable)
+                .ok()
+                .map(|root| (root.to_lowercase(), *id))
+        })
+        .collect()
+}
+
+/// Every `ExecutablePath` spelling Explorer might have recorded for this
+/// binary, lowercased.
 ///
-/// Ours is the one whose `ExecutablePath` is this binary — compared
-/// case-insensitively, since Windows paths are and Explorer records whatever
-/// casing the process was launched with. An entry that already carries an
-/// `IsPromoted` value is skipped whatever it says: 1 means the work is done,
-/// 0 means the user deliberately hid the mark.
-fn entry_to_promote<'a>(entries: &'a [IconEntry], executable: &Path) -> Option<&'a IconEntry> {
-    let executable = executable.to_string_lossy().to_lowercase();
-    entries.iter().find(|entry| {
-        entry.is_promoted.is_none()
-            && entry
-                .executable_path
-                .as_ref()
-                .is_some_and(|path| path.to_lowercase() == executable)
-    })
+/// Windows paths are case-insensitive and Explorer records whatever casing the
+/// process was launched with, hence the lowercasing. Less obviously, Explorer
+/// does not always store an absolute path: under a handful of known folders it
+/// writes `{FOLDERID}\rest` instead. Which spelling Kodabi's own entry wears
+/// therefore depends on where it was installed — a per-user install (Tauri's
+/// NSIS default) stays absolute, while the MSI target installs under
+/// `Program Files` and does not. Matching only the absolute form would leave
+/// every MSI install sitting in the overflow forever.
+fn executable_forms(executable: &Path, folders: &[(String, &str)]) -> Vec<String> {
+    let absolute = executable.to_string_lossy().to_lowercase();
+    let mut forms = vec![absolute.clone()];
+    for (root, id) in folders {
+        // The trailing separator matters: without it `C:\Program Files` also
+        // prefixes `C:\Program Files (x86)\…` and would abbreviate it wrongly.
+        let prefix = format!(r"{}\", root.trim_end_matches('\\'));
+        if let Some(rest) = absolute.strip_prefix(&prefix) {
+            forms.push(format!(r"{}\{rest}", id.to_lowercase()));
+        }
+    }
+    forms
+}
+
+/// Whether an entry is this binary's.
+fn is_ours(entry: &IconEntry, forms: &[String]) -> bool {
+    entry
+        .executable_path
+        .as_ref()
+        .is_some_and(|path| forms.contains(&path.to_lowercase()))
+}
+
+/// The entry to promote, if any: ours, in any of the spellings
+/// [`executable_forms`] accepts. An entry that already carries an `IsPromoted`
+/// value is skipped whatever it says: 1 means the work is done, 0 means the
+/// user deliberately hid the mark.
+fn entry_to_promote<'a>(entries: &'a [IconEntry], forms: &[String]) -> Option<&'a IconEntry> {
+    entries
+        .iter()
+        .find(|entry| entry.is_promoted.is_none() && is_ours(entry, forms))
 }
 
 /// Reads every `NotifyIconSettings` entry.
@@ -93,16 +142,13 @@ fn set_promoted(key: &str) -> std::io::Result<()> {
 /// One attempt. `Ok(true)` means there is nothing left to do — either the mark
 /// was promoted, or the entry already carries the user's choice.
 fn try_promote(executable: &Path) -> std::io::Result<bool> {
+    let forms = executable_forms(executable, &abbreviated_folders());
     let entries = read_entries()?;
-    let Some(entry) = entry_to_promote(&entries, executable) else {
+    let Some(entry) = entry_to_promote(&entries, &forms) else {
         // Either Explorer hasn't written our entry yet (poll again), or it has
         // and someone already set the value (nothing to do). Only the second
         // reading ends the polling.
-        let ours_exists = entries.iter().any(|entry| {
-            entry.executable_path.as_ref().is_some_and(|path| {
-                path.to_lowercase() == executable.to_string_lossy().to_lowercase()
-            })
-        });
+        let ours_exists = entries.iter().any(|entry| is_ours(entry, &forms));
         return Ok(ours_exists);
     };
     set_promoted(&entry.key)?;
@@ -144,6 +190,25 @@ mod tests {
         }
     }
 
+    /// The known folders, fixed rather than read from this machine's
+    /// environment, so the tests describe the same Windows everywhere.
+    fn folders() -> Vec<(String, &'static str)> {
+        vec![
+            (
+                r"c:\program files".to_string(),
+                "{6D809377-6AF0-444B-8957-A3773F02200E}",
+            ),
+            (
+                r"c:\program files (x86)".to_string(),
+                "{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}",
+            ),
+        ]
+    }
+
+    fn forms(executable: &str) -> Vec<String> {
+        executable_forms(Path::new(executable), &folders())
+    }
+
     #[test]
     fn promotes_our_own_entry_only() {
         let entries = [
@@ -151,7 +216,7 @@ mod tests {
             entry("bbb", Some(r"C:\Program Files\Kodabi\kodabi.exe"), None),
             entry("ccc", None, None),
         ];
-        let chosen = entry_to_promote(&entries, Path::new(r"C:\Program Files\Kodabi\kodabi.exe"));
+        let chosen = entry_to_promote(&entries, &forms(r"C:\Program Files\Kodabi\kodabi.exe"));
         assert_eq!(chosen.map(|entry| entry.key.as_str()), Some("bbb"));
     }
 
@@ -165,8 +230,44 @@ mod tests {
             None,
         )];
         assert!(
-            entry_to_promote(&entries, Path::new(r"c:\program files\kodabi\kodabi.exe")).is_some()
+            entry_to_promote(&entries, &forms(r"c:\program files\kodabi\kodabi.exe")).is_some()
         );
+    }
+
+    #[test]
+    fn matches_the_known_folder_form_explorer_writes_for_program_files() {
+        // Explorer stores a path under Program Files abbreviated to its
+        // FOLDERID, not absolute — so the MSI install (the per-machine one)
+        // would never recognise its own entry if we only compared the path
+        // `current_exe` reports.
+        let entries = [entry(
+            "aaa",
+            Some(r"{6D809377-6AF0-444B-8957-A3773F02200E}\Kodabi\Kodabi.exe"),
+            None,
+        )];
+        assert!(
+            entry_to_promote(&entries, &forms(r"C:\Program Files\Kodabi\Kodabi.exe")).is_some()
+        );
+
+        let x86 = [entry(
+            "bbb",
+            Some(r"{7C5A40EF-A0FB-4BFC-874A-C0F2E0B9FA8E}\Kodabi\Kodabi.exe"),
+            None,
+        )];
+        assert!(
+            entry_to_promote(&x86, &forms(r"C:\Program Files (x86)\Kodabi\Kodabi.exe")).is_some()
+        );
+    }
+
+    #[test]
+    fn does_not_abbreviate_program_files_x86_as_program_files() {
+        // `C:\Program Files` prefixes `C:\Program Files (x86)` as a string, so
+        // a separator-blind match would claim the x86 install wears the x64
+        // FOLDERID and promote nothing (or worse, someone else's entry).
+        let x86 = forms(r"C:\Program Files (x86)\Kodabi\Kodabi.exe");
+        assert!(!x86
+            .iter()
+            .any(|form| form.starts_with("{6d809377-6af0-444b-8957-a3773f02200e}")));
     }
 
     #[test]
@@ -174,9 +275,9 @@ mod tests {
         let ours = r"C:\Program Files\Kodabi\kodabi.exe";
         // 0 is the user deliberately hiding the mark: leave it hidden, on this
         // launch and every later one.
-        assert!(entry_to_promote(&[entry("aaa", Some(ours), Some(0))], Path::new(ours)).is_none());
+        assert!(entry_to_promote(&[entry("aaa", Some(ours), Some(0))], &forms(ours)).is_none());
         // 1 is already promoted, so there is nothing to write.
-        assert!(entry_to_promote(&[entry("aaa", Some(ours), Some(1))], Path::new(ours)).is_none());
+        assert!(entry_to_promote(&[entry("aaa", Some(ours), Some(1))], &forms(ours)).is_none());
     }
 
     #[test]
@@ -186,7 +287,7 @@ mod tests {
         // icon would be strictly worse than doing nothing.
         let entries = [entry("aaa", Some(r"C:\Other\other.exe"), None)];
         assert!(
-            entry_to_promote(&entries, Path::new(r"C:\Program Files\Kodabi\kodabi.exe")).is_none()
+            entry_to_promote(&entries, &forms(r"C:\Program Files\Kodabi\kodabi.exe")).is_none()
         );
     }
 }
