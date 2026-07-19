@@ -90,7 +90,9 @@ pub fn set_retention_policy(
 
 /// Sets the capture-overlay visibility flags and brings the pill in line with
 /// them immediately, so flipping the toggle during a running capture shows or
-/// hides it right then rather than at the next capture.
+/// hides it right then rather than at the next capture. That includes a capture
+/// whose pill the user already dismissed — see
+/// [`crate::overlay::apply_settings_change`].
 #[tauri::command]
 pub fn set_capture_overlay(
     app: AppHandle,
@@ -99,7 +101,7 @@ pub fn set_capture_overlay(
 ) -> Result<Settings, String> {
     let settings = state.update(|s| s.overlay = overlay)?;
     let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
-    crate::overlay::resync(&app);
+    crate::overlay::apply_settings_change(&app);
     Ok(settings)
 }
 
