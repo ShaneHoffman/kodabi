@@ -9,6 +9,17 @@ export type DistillState =
   | { status: "skipped"; reason: string }
   | { status: "error"; message: string };
 
+/**
+ * The wire payload, which is `DistillState` plus one non-terminal warning the
+ * label state machine deliberately never adopts: `routing_fallback` means the
+ * routing signals failed to load and the note filed to Inbox anyway. It arrives
+ * mid-distill, so treating it as label state would clobber "Distilling…"; it is
+ * logged and dropped instead (like `skipped`, but not even terminal).
+ */
+type DistillEvent =
+  | DistillState
+  | { status: "routing_fallback"; message: string };
+
 const DISTILL_STATE_EVENT = "distill:state";
 
 /**
@@ -23,6 +34,10 @@ const DISTILL_STATE_EVENT = "distill:state";
  * while a capture is live — a distill can run for minutes, so its terminal
  * event may land mid-way through the next recording and would otherwise show
  * a stale label for the wrong meeting.
+ *
+ * A `routing_fallback` warning is non-fatal and never becomes label state: it
+ * is logged and bypasses the capture-phase guard entirely (a log line, unlike
+ * a label, cannot go stale).
  */
 export function useDistillState(capturePhase: CapturePhase): DistillState {
   const [state, setState] = useState<DistillState>({ status: "idle" });
@@ -37,7 +52,13 @@ export function useDistillState(capturePhase: CapturePhase): DistillState {
     let active = true;
     let unlisten: (() => void) | undefined;
 
-    listen<DistillState>(DISTILL_STATE_EVENT, (event) => {
+    listen<DistillEvent>(DISTILL_STATE_EVENT, (event) => {
+      if (event.payload.status === "routing_fallback") {
+        console.warn(
+          `distill routing fell back to Inbox: ${event.payload.message}`,
+        );
+        return;
+      }
       if (active && capturePhaseRef.current !== "listening") setState(event.payload);
     }).then((fn) => {
       if (active) {

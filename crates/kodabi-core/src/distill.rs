@@ -39,6 +39,7 @@ use crate::llm::{extract_balanced_spans, HeadlessClaude, LlmRequest, LlmRunError
 use crate::naming;
 use crate::note::{self, Note, NoteError, NoteId, NoteType, Routing, Source, Tag, INBOX};
 use crate::raw_session::{self, RawSessionError, TranscriptSegment};
+use crate::routing::{self, NoteText, RoutingConfig, RoutingError};
 use crate::transcription::Channel;
 
 /// The owner token rendered for an action item nobody could be attributed to.
@@ -94,7 +95,7 @@ No prose, no markdown fences, no explanation - only the JSON object.";
 
 /// The distilled content of one meeting, parsed and normalized from the
 /// model's JSON. [`render_body`] turns this into the note's Markdown body;
-/// the routing engine (#43) scores it into a [`Routing`].
+/// [`route_distilled`] scores it into a [`Routing`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct DistillOutput {
     /// Short meeting title; seeds the note's filename slug. `None` when the
@@ -445,9 +446,9 @@ pub fn render_body(output: &DistillOutput) -> String {
     sections.join("\n\n")
 }
 
-/// The pre-routing (#43) placeholder every distilled note files under until
-/// a real scorer exists: Inbox, with the schema-mandated recorded score
-/// (`0.0` — "no routing signal at all", honestly the lowest confidence).
+/// Inbox with the schema-mandated recorded score (`0.0` — "no routing signal
+/// at all", honestly the lowest confidence). Two callers: [`route_distilled`]'s
+/// fail-soft fallback when signals can't load, and the routing stub in tests.
 pub fn inbox_routing() -> Routing {
     Routing::Routed {
         project: INBOX.to_string(),
@@ -455,12 +456,50 @@ pub fn inbox_routing() -> Routing {
     }
 }
 
+/// Scores a distilled meeting into its [`Routing`] via the confidence-split
+/// router, adapting [`DistillOutput`] to the router's [`NoteText`] (the model's
+/// title, which weighs double, plus the [`render_body`] Markdown).
+///
+/// Scores the *rendered* body, so the text that decides where the note lands is
+/// exactly the text written to disk — a note explains its own routing. (One
+/// consequence: the body's section headings — "Decisions", "Open questions" —
+/// are in the scored haystack, so a glossary term literally named after a
+/// heading would match every meeting note. Pathological, `TERM_WEIGHT` is only
+/// 1.0, and the margin rule still applies, so it is documented, not sanitized.)
+///
+/// Fail-soft: the model tokens are already spent by the time this runs, so a
+/// signal-load failure (a malformed `_glossary.yml`, say) must not lose the
+/// note — it falls back to [`inbox_routing`] and returns the error for the
+/// caller to surface. `Some(err)` therefore implies the routing is
+/// [`inbox_routing`]; the converse does not hold (Inbox at `0.0` is also just
+/// "no glossary matched").
+///
+/// `vault_root` must be the same root passed to [`distill_session`]: signals
+/// are discovered where the note will be written.
+pub fn route_distilled(
+    vault_root: &Path,
+    output: &DistillOutput,
+    config: &RoutingConfig,
+) -> (Routing, Option<RoutingError>) {
+    match routing::load_project_signals(vault_root) {
+        Ok(signals) => {
+            let body = render_body(output);
+            let text = NoteText {
+                title: output.title.as_deref(),
+                body: &body,
+            };
+            (routing::route(text, &signals, config), None)
+        }
+        Err(err) => (inbox_routing(), Some(err)),
+    }
+}
+
 /// Distills the raw session at `session_path` into a meeting note under
 /// `vault_root`, returning where it landed.
 ///
-/// `route` maps the distilled content to its `project` + `confidence` — the
-/// seam the routing engine (#43) plugs into; until then callers pass
-/// `&|_| inbox_routing()`. The note's `date` is recovered from the session
+/// `route` maps the distilled content to its `project` + `confidence`:
+/// production wraps [`route_distilled`] (resolving config at the src-tauri
+/// boundary); tests stub it. The note's `date` is recovered from the session
 /// filename's capture timestamp; a hand-imported file that doesn't match the
 /// scheme falls back to the file's modification time (then today) in
 /// date-only form — the closest honest stand-in, since stamping "now" would
@@ -544,6 +583,9 @@ pub fn distill_session(
 mod tests {
     use super::*;
     use crate::device::DeviceId;
+    use crate::glossary::{Glossary, GlossaryTerm, OnConflict};
+    use crate::note::project_dir;
+    use crate::routing::DEFAULT_THRESHOLD;
     use chrono::{DateTime, TimeZone, Timelike, Utc};
     use tempfile::tempdir;
 
@@ -621,6 +663,56 @@ mod tests {
             description: description.to_string(),
             owner: owner.map(str::to_string),
             due_date: due_date.map(str::to_string),
+        }
+    }
+
+    /// Writes a project glossary to disk so `route_distilled` has real signals
+    /// to discover and load. Mirrors routing.rs's own test-glossary builder.
+    fn save_glossary(vault: &Path, slug: &str, entries: &[(&str, &[&str])]) {
+        let mut glossary = Glossary::default();
+        for (term, aliases) in entries {
+            glossary
+                .upsert(
+                    GlossaryTerm {
+                        term: term.to_string(),
+                        definition: String::new(),
+                        aliases: aliases.iter().map(|a| a.to_string()).collect(),
+                    },
+                    OnConflict::Error,
+                )
+                .unwrap();
+        }
+        let dir = project_dir(vault, slug);
+        std::fs::create_dir_all(&dir).unwrap();
+        glossary.save(&dir).unwrap();
+    }
+
+    /// The two-project routing fixture (mirroring routing.rs's): a term-rich
+    /// `Paradise Golf` and a smaller `Growth/Q3`. `write_session` separately
+    /// creates the `sessions/` folder, which discovery ignores as reserved.
+    fn routing_fixture(vault: &Path) {
+        save_glossary(
+            vault,
+            "Paradise Golf",
+            &[
+                ("OKIES", &[]),
+                ("ForeUp", &["4up"]),
+                ("GreenFlow", &[]),
+                ("irrigation", &[]),
+                ("tee sheet", &[]),
+            ],
+        );
+        save_glossary(vault, "Growth/Q3", &[("OKR", &[]), ("activation", &[])]);
+    }
+
+    fn distill_output(title: Option<&str>, summary: &str, decisions: &[&str]) -> DistillOutput {
+        DistillOutput {
+            title: title.map(str::to_string),
+            summary: summary.to_string(),
+            decisions: decisions.iter().map(|d| d.to_string()).collect(),
+            action_items: vec![],
+            open_questions: vec![],
+            tags: vec![],
         }
     }
 
@@ -1063,6 +1155,253 @@ mod tests {
         assert!(distilled
             .path
             .starts_with(vault.path().join("Paradise Golf")));
+    }
+
+    // ------------------------------------------------------------------
+    // route_distilled
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn route_distilled_files_a_term_rich_output_into_its_project() {
+        let vault = tempdir().unwrap();
+        routing_fixture(vault.path());
+        // Five distinct Paradise Golf terms, unopposed: saturate(5) = 5/7. The
+        // rendered `# Summary` heading token adds nothing.
+        let output = distill_output(
+            None,
+            "OKIES rollout: ForeUp sync for the tee sheet, GreenFlow irrigation checks.",
+            &[],
+        );
+
+        let (routing, err) = route_distilled(vault.path(), &output, &RoutingConfig::default());
+
+        assert!(err.is_none());
+        assert_eq!(
+            routing,
+            Routing::Routed {
+                project: "Paradise Golf".to_string(),
+                confidence: 5.0 / 7.0,
+            }
+        );
+    }
+
+    #[test]
+    fn route_distilled_scores_the_llm_title() {
+        let vault = tempdir().unwrap();
+        routing_fixture(vault.path());
+        // The only signal is the project name, present only in the title — a
+        // routed result proves the title reached the router (weighing double:
+        // saturate(2 * 2) = 4/6).
+        let output = distill_output(Some("Paradise Golf weekly sync"), "Agenda to follow.", &[]);
+
+        let (routing, err) = route_distilled(vault.path(), &output, &RoutingConfig::default());
+
+        assert!(err.is_none());
+        assert_eq!(
+            routing,
+            Routing::Routed {
+                project: "Paradise Golf".to_string(),
+                confidence: 4.0 / 6.0,
+            }
+        );
+    }
+
+    #[test]
+    fn route_distilled_scores_the_rendered_body_not_just_the_summary() {
+        let vault = tempdir().unwrap();
+        routing_fixture(vault.path());
+        // Three Paradise Golf terms, each in a *decisions* bullet the summary
+        // never mentions — so a match proves the rendered body is scored.
+        // saturate(3) == DEFAULT_THRESHOLD, pinning the `>=` boundary too:
+        // exactly-threshold evidence still auto-files.
+        let output = distill_output(
+            None,
+            "The team met and reviewed progress.",
+            &[
+                "Adopt the tee sheet import",
+                "Approve the ForeUp contract",
+                "Retire OKIES",
+            ],
+        );
+
+        let (routing, err) = route_distilled(vault.path(), &output, &RoutingConfig::default());
+
+        assert!(err.is_none());
+        assert_eq!(
+            routing,
+            Routing::Routed {
+                project: "Paradise Golf".to_string(),
+                confidence: DEFAULT_THRESHOLD,
+            }
+        );
+    }
+
+    #[test]
+    fn route_distilled_low_margin_output_lands_in_inbox_with_the_score() {
+        let vault = tempdir().unwrap();
+        routing_fixture(vault.path());
+        // Three Paradise Golf terms against one Growth/Q3 term: margin 2,
+        // saturate(2) = 0.5, below the 0.6 threshold. Contested evidence stays
+        // uncategorized, with the score on record.
+        let output = distill_output(
+            None,
+            "OKIES kickoff with ForeUp on the tee sheet; timeline follows OKR.",
+            &[],
+        );
+
+        let (routing, err) = route_distilled(vault.path(), &output, &RoutingConfig::default());
+
+        assert!(err.is_none());
+        assert_eq!(
+            routing,
+            Routing::Routed {
+                project: INBOX.to_string(),
+                confidence: 0.5,
+            }
+        );
+    }
+
+    #[test]
+    fn route_distilled_falls_back_to_inbox_when_signals_cannot_load() {
+        let vault = tempdir().unwrap();
+        routing_fixture(vault.path());
+        // A malformed glossary must not lose the note — the model tokens are
+        // already spent. It falls back to Inbox and hands the error back.
+        std::fs::write(
+            crate::glossary::glossary_path(&project_dir(vault.path(), "Paradise Golf")),
+            "terms: [\n",
+        )
+        .unwrap();
+        let output = distill_output(None, "OKIES rollout with ForeUp.", &[]);
+
+        let (routing, err) = route_distilled(vault.path(), &output, &RoutingConfig::default());
+
+        assert_eq!(routing, inbox_routing());
+        assert!(matches!(err, Some(RoutingError::Glossary(_))));
+    }
+
+    // ------------------------------------------------------------------
+    // distill_session → route_distilled → write_note → re-parse
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn distill_routes_a_glossary_matching_transcript_into_its_project() {
+        let vault = tempdir().unwrap();
+        routing_fixture(vault.path());
+        let session_path = write_session(vault.path(), None);
+        let runner = MockRunner(Ok(r#"{
+            "title": "Paradise Golf irrigation sync",
+            "summary": "GreenFlow demo went well. The tee sheet import from ForeUp is unblocked.",
+            "decisions": [],
+            "action_items": [],
+            "open_questions": [],
+            "tags": []
+        }"#
+        .to_string()));
+
+        let distilled = distill_session(&runner, vault.path(), &session_path, &|output| {
+            route_distilled(vault.path(), output, &RoutingConfig::default()).0
+        })
+        .expect("distill should succeed");
+
+        // Name in title (2*2) + three body terms + irrigation in title (1*2) =
+        // 9; saturate(9) = 9/11, comfortably over the threshold.
+        assert_eq!(
+            distilled.path,
+            vault
+                .path()
+                .join("Paradise Golf")
+                .join("paradise-golf-irrigation-sync.md")
+        );
+        let note = Note::from_markdown(&std::fs::read_to_string(&distilled.path).unwrap()).unwrap();
+        assert_eq!(note.note_type, NoteType::Meeting);
+        assert_eq!(note.routing.project(), "Paradise Golf");
+        assert_eq!(note.routing.confidence(), Some(9.0 / 11.0));
+        assert!(note.routing.confidence().unwrap() >= DEFAULT_THRESHOLD);
+    }
+
+    #[test]
+    fn distill_ambiguous_transcript_lands_in_inbox_with_the_recorded_score() {
+        let vault = tempdir().unwrap();
+        routing_fixture(vault.path());
+        let session_path = write_session(vault.path(), None);
+        let runner = MockRunner(Ok(r#"{
+            "title": "Kickoff notes",
+            "summary": "OKIES kickoff with ForeUp on the tee sheet; timeline follows OKR.",
+            "decisions": [],
+            "action_items": [],
+            "open_questions": [],
+            "tags": []
+        }"#
+        .to_string()));
+
+        let distilled = distill_session(&runner, vault.path(), &session_path, &|output| {
+            route_distilled(vault.path(), output, &RoutingConfig::default()).0
+        })
+        .unwrap();
+
+        assert_eq!(
+            distilled.path,
+            vault.path().join("Inbox").join("kickoff-notes.md")
+        );
+        let note = Note::from_markdown(&std::fs::read_to_string(&distilled.path).unwrap()).unwrap();
+        assert_eq!(note.routing.project(), INBOX);
+        assert_eq!(note.routing.confidence(), Some(0.5));
+    }
+
+    #[test]
+    fn distill_garbage_output_does_not_confidently_auto_file() {
+        let vault = tempdir().unwrap();
+        routing_fixture(vault.path());
+        let session_path = write_session(vault.path(), None);
+        // Nonempty but signal-free: no glossary term matches, so nothing scores.
+        let runner = MockRunner(Ok(r#"{
+            "title": "Team huddle",
+            "summary": "Lorem ipsum placeholder chatter about nothing in particular.",
+            "decisions": [],
+            "action_items": [],
+            "open_questions": [],
+            "tags": []
+        }"#
+        .to_string()));
+
+        let distilled = distill_session(&runner, vault.path(), &session_path, &|output| {
+            route_distilled(vault.path(), output, &RoutingConfig::default()).0
+        })
+        .unwrap();
+
+        let note = Note::from_markdown(&std::fs::read_to_string(&distilled.path).unwrap()).unwrap();
+        assert_eq!(note.routing.project(), INBOX);
+        assert_eq!(note.routing.confidence(), Some(0.0));
+        assert!(distilled.path.starts_with(vault.path().join("Inbox")));
+        assert!(!distilled
+            .path
+            .starts_with(vault.path().join("Paradise Golf")));
+        assert!(!distilled.path.starts_with(vault.path().join("Growth")));
+    }
+
+    #[test]
+    fn distill_survives_a_malformed_glossary_and_files_to_inbox() {
+        let vault = tempdir().unwrap();
+        routing_fixture(vault.path());
+        std::fs::write(
+            crate::glossary::glossary_path(&project_dir(vault.path(), "Paradise Golf")),
+            "terms: [\n",
+        )
+        .unwrap();
+        let session_path = write_session(vault.path(), None);
+        let runner = MockRunner(Ok(full_output_json()));
+
+        // The production callback swallows the routing error (`.0`); fail-soft
+        // means the note still lands, in Inbox, rather than the distill failing.
+        let distilled = distill_session(&runner, vault.path(), &session_path, &|output| {
+            route_distilled(vault.path(), output, &RoutingConfig::default()).0
+        })
+        .expect("a malformed glossary must not fail the distill");
+
+        let note = Note::from_markdown(&std::fs::read_to_string(&distilled.path).unwrap()).unwrap();
+        assert_eq!(note.routing.project(), INBOX);
+        assert_eq!(note.routing.confidence(), Some(0.0));
     }
 
     #[test]

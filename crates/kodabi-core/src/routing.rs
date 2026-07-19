@@ -43,7 +43,7 @@ const SATURATION_WEIGHT: f64 = 2.0;
 /// auto-filing requires net evidence worth three unopposed body-level signals
 /// (`3/(3+K)`, `0.6` at the current `K = 2`). Written in terms of
 /// [`SATURATION_WEIGHT`] so retuning the curve keeps that meaning instead of
-/// silently changing what the threshold demands. The future
+/// silently changing what the threshold demands. The
 /// `KODABI_ROUTING_THRESHOLD` env override is applied at the src-tauri
 /// boundary, never read here — core takes config as a parameter.
 pub const DEFAULT_THRESHOLD: f64 = 3.0 / (3.0 + SATURATION_WEIGHT);
