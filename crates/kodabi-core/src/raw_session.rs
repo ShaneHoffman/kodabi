@@ -17,7 +17,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::device::DeviceId;
-use crate::naming::{numbered_slug, session_filename};
+use crate::naming::{numbered_slug, session_dir_name, session_filename};
 use crate::transcription::{Channel, Segment};
 
 /// Per-process counter that, combined with the process id, gives each
@@ -221,6 +221,40 @@ fn link_into_free_path(
     }
 }
 
+/// Whether a persisted session transcript for this capture instant and device
+/// already exists in `dir` — any `<timestamp>-<device>.jsonl`, including the
+/// slugged and numbered variants [`write_raw_session`] produces on collision.
+///
+/// Recovery uses this to stay idempotent: the in-flight spill directory is
+/// deleted only *after* its transcript lands, so a crash (or a failed removal)
+/// in that window leaves a directory a later launch would otherwise transcribe
+/// a second time, producing a duplicate session file and note. A `dir` that
+/// can't be read (e.g. no sessions yet) reads as "not present".
+pub fn session_exists(dir: &Path, captured_at: DateTime<Utc>, device: &DeviceId) -> bool {
+    // `<timestamp>-<device>`: the exact stem of a bare session file, and the
+    // prefix of every slugged/numbered one. The device id is fixed-length, so
+    // the boundary char after the prefix is always `.` (bare) or `-` (slug).
+    let prefix = session_dir_name(captured_at, device);
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if !name.ends_with(".jsonl") {
+            continue;
+        }
+        if let Some(rest) = name.strip_prefix(&prefix) {
+            if rest.starts_with('.') || rest.starts_with('-') {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Builds a scratch path in `dir` unique to this process and call.
 fn unique_temp_path(dir: &Path) -> PathBuf {
     dir.join(format!(
@@ -250,6 +284,32 @@ mod tests {
             end_ms,
             text: text.to_string(),
         }
+    }
+
+    #[test]
+    fn session_exists_matches_bare_slugged_and_numbered_but_not_other_sessions() {
+        let dir = tempdir().unwrap();
+        let other_device = DeviceId::parse("z9y8x7w6").unwrap();
+
+        // Nothing written yet, and a missing dir, both read as "not present".
+        assert!(!session_exists(dir.path(), instant(), &device()));
+        assert!(!session_exists(
+            &dir.path().join("nope"),
+            instant(),
+            &device()
+        ));
+
+        // A slugged transcript for this instant+device counts as present.
+        let name = session_filename(instant(), &device(), Some("weekly sync"), "jsonl");
+        fs::write(dir.path().join(&name), "{}").unwrap();
+        assert!(session_exists(dir.path(), instant(), &device()));
+
+        // A different device (same instant) is a different session.
+        assert!(!session_exists(dir.path(), instant(), &other_device));
+
+        // A different instant (same device) is a different session.
+        let later = instant() + chrono::Duration::seconds(1);
+        assert!(!session_exists(dir.path(), later, &device()));
     }
 
     #[test]

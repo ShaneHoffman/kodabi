@@ -225,11 +225,28 @@ fn recover_orphan(app: &AppHandle, orphan: RecoverableOrphan) {
     let _guard = TRANSCRIBE_LOCK
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let captured_at = orphan.meta.started_at;
+
+    // Idempotency: the spill directory is deleted only *after* its transcript
+    // lands, so a crash (or a failed removal) in that window leaves a directory
+    // whose meeting is already saved. If a transcript for this instant+device
+    // is already on disk, don't re-transcribe it into a duplicate `.jsonl` +
+    // note — just clear the leftover spill.
+    if let Ok(kb_dir) = knowledge_base_dir(app) {
+        let device = app.state::<DeviceId>().inner().clone();
+        if kodabi_core::raw_session::session_exists(&kb_dir.join("sessions"), captured_at, &device)
+        {
+            if let Err(err) = orphan.remove() {
+                eprintln!("capture recovery: failed to remove already-transcribed session: {err}");
+            }
+            return;
+        }
+    }
+
     let _ = app.emit(
         TRANSCRIPTION_STATE_EVENT,
         TranscriptionStateEvent::Transcribing,
     );
-    let captured_at = orphan.meta.started_at;
     match run_spilled(
         app,
         &orphan.mic_pcm,
@@ -374,6 +391,10 @@ struct Resampling16kSource {
     reader: SpillReader,
     resampler: MonoResampler,
     read_chunk: usize,
+    /// Reused copy-out buffer for each read, so the reader borrow can end
+    /// before the resampler borrow begins without allocating a fresh `Vec` per
+    /// chunk over a long recording.
+    input: Vec<f32>,
     buf: Vec<f32>,
     finished: bool,
 }
@@ -389,6 +410,7 @@ impl Resampling16kSource {
             // Read ~10s of source audio per pull; resampling shrinks it to the
             // ~10s of 16 kHz the engine then consumes.
             read_chunk: source_rate as usize * 10,
+            input: Vec::new(),
             buf: Vec::new(),
             finished: false,
         })
@@ -403,11 +425,11 @@ impl AudioSource for Resampling16kSource {
             }
             match self.reader.next_chunk(self.read_chunk)? {
                 Some(samples) => {
-                    // Copy out so the reader borrow ends before the resampler
-                    // borrow begins (disjoint fields, but the copy is cheap
-                    // against the transcription cost).
-                    let input = samples.to_vec();
-                    let resampled = self.resampler.push(&input);
+                    // Copy out into the reused buffer so the reader borrow ends
+                    // before the resampler borrow begins (disjoint fields).
+                    self.input.clear();
+                    self.input.extend_from_slice(samples);
+                    let resampled = self.resampler.push(&self.input);
                     if resampled.is_empty() {
                         continue; // not yet a full resample chunk — read more
                     }
