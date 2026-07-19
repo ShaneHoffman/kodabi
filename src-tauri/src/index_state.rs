@@ -15,24 +15,59 @@
 //! builds; the default build carries `None`, so the worker populates the note
 //! row and full-text index but writes no vectors.
 //!
-//! At startup the worker also reconciles: any note already in the index but
-//! missing its vectors — one indexed in a no-embed build, or stranded by a
-//! transient embed failure — gets embedded from its stored body. Notes not yet
-//! in the index at all await the vault rebuild (#49).
+//! The worker also serves whole-vault [`reconcile`](kodabi_core::reconcile)
+//! jobs: a file watcher and a startup scan enqueue a reconcile whenever the
+//! vault changes on disk, syncing note rows by their stable `id`, and the
+//! rebuild command clears and repopulates the index from files alone. After a
+//! reconcile the worker embeds any note still missing its vectors, so external
+//! edits and changes made while the app was closed both converge without a
+//! restart.
 
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use kodabi_core::embed::{self, Embedder};
 use kodabi_core::index::{IndexedNote, NoteIndex};
-use tauri::{AppHandle, Manager};
+use kodabi_core::reconcile;
+use kodabi_core::watch::{self, VaultWatcher};
+use tauri::{AppHandle, Emitter, Manager};
+
+use crate::events::{INDEX_STATE_EVENT, VAULT_CHANGED_EVENT};
+use crate::transcribe::knowledge_base_dir;
+
+/// A unit of work for the index worker.
+enum Job {
+    /// Upsert and re-embed a single note after an in-app write. Boxed because it
+    /// dwarfs the other variants, which carry no data.
+    Note(Box<IndexedNote>),
+    /// Sync the whole index to the vault on disk — a watcher burst or the
+    /// startup scan.
+    Reconcile,
+    /// Drop and repopulate the index from every file ("files are truth").
+    Rebuild,
+}
+
+/// Progress of a full rebuild, emitted on the `index:state` event. Mirrors the
+/// `transcription:state` tagged-status shape the frontend already consumes.
+#[derive(Clone, serde::Serialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+enum IndexStateEvent {
+    Rebuilding,
+    Ready { notes: usize },
+    Error { message: String },
+}
 
 /// A handle to the background index worker, held as Tauri managed state.
 pub struct IndexState {
-    /// Sends notes to the worker thread. `None` when the database failed to
-    /// open (logged at startup). Wrapped in a `Mutex` so the shared state stays
+    /// Sends jobs to the worker thread. `None` when the database failed to open
+    /// (logged at startup). Wrapped in a `Mutex` so the shared state stays
     /// `Sync` — the lock is held only for a non-blocking channel send.
-    sender: Option<Mutex<Sender<IndexedNote>>>,
+    sender: Option<Mutex<Sender<Job>>>,
+    /// Keeps the OS file watcher alive for the app's lifetime; dropping it stops
+    /// watching. `None` when the index or the vault path is unavailable. The
+    /// `Mutex` only makes the state `Sync`; it is never locked after construction.
+    _watcher: Option<Mutex<VaultWatcher>>,
 }
 
 impl IndexState {
@@ -42,14 +77,46 @@ impl IndexState {
     pub fn initialize(app: &AppHandle) -> Self {
         let Some(index) = open_index(app) else {
             eprintln!("note index unavailable — notes will not be searchable this session");
-            return Self { sender: None };
+            return Self {
+                sender: None,
+                _watcher: None,
+            };
         };
         let index = Arc::new(index);
         let embedder = build_embedder();
-        let (sender, jobs) = mpsc::channel::<IndexedNote>();
-        std::thread::spawn(move || run_worker(index, embedder, jobs));
+
+        // The vault root the watcher observes and reconcile scans. Best-effort:
+        // if it can't be resolved, the worker still serves in-app writes; only
+        // the live-sync and rebuild have nothing to converge against.
+        let vault_root = knowledge_base_dir(app).ok();
+
+        let (sender, jobs) = mpsc::channel::<Job>();
+        let app_handle = app.clone();
+        let worker_root = vault_root.clone();
+        std::thread::spawn(move || run_worker(app_handle, index, embedder, worker_root, jobs));
+
+        // A full reconciliation scan at startup converges files added or edited
+        // while the app was closed, before any live watcher event arrives.
+        let _ = sender.send(Job::Reconcile);
+
+        // Watch the vault so on-disk edits (from the app, an editor, or git)
+        // reconcile without a restart; a relevant change enqueues one reconcile.
+        let watcher = vault_root.and_then(|root| {
+            let watch_sender = sender.clone();
+            match watch::watch_vault(&root, move || {
+                let _ = watch_sender.send(Job::Reconcile);
+            }) {
+                Ok(watcher) => Some(Mutex::new(watcher)),
+                Err(err) => {
+                    eprintln!("failed to start the vault watcher: {err}");
+                    None
+                }
+            }
+        });
+
         Self {
             sender: Some(Mutex::new(sender)),
+            _watcher: watcher,
         }
     }
 
@@ -58,31 +125,135 @@ impl IndexState {
     /// the disk write is what mattered, so indexing runs off the command path
     /// and can never fail or delay it.
     pub fn index_note_best_effort(&self, note: IndexedNote) {
+        self.send(Job::Note(Box::new(note)));
+    }
+
+    /// Requests a full rebuild of the index from files alone, returning whether
+    /// the worker accepted it (false when the index is unavailable this session).
+    /// Progress arrives on the `index:state` event.
+    pub fn request_rebuild(&self) -> bool {
+        self.send(Job::Rebuild)
+    }
+
+    /// Hands a job to the worker, returning whether it was queued. A closed
+    /// channel (worker gone at shutdown) or an unopened index simply drops it —
+    /// fine for a best-effort cache.
+    fn send(&self, job: Job) -> bool {
         let Some(sender) = &self.sender else {
-            return;
+            return false;
         };
         let sender = sender.lock().unwrap_or_else(|poison| poison.into_inner());
-        // `send` only fails if the worker thread is gone (shutdown) — the note
-        // is dropped, which is fine for a best-effort cache.
-        let _ = sender.send(note);
+        sender.send(job).is_ok()
     }
 }
 
-/// The worker loop: reconcile once, then serve write/edit jobs in arrival order.
+/// The worker loop: serve note upserts, whole-vault reconciles, and rebuilds in
+/// arrival order.
 ///
-/// A single worker means phases of [`process_note`] never interleave with
-/// another writer, so the lock can be released across the slow embed without
-/// racing a concurrent write.
+/// A single worker means phases of [`process_note`] (and the reconcile embed
+/// sweep) never interleave with another writer, so the lock can be released
+/// across the slow embed without racing a concurrent write.
 fn run_worker(
+    app: AppHandle,
     index: Arc<Mutex<NoteIndex>>,
     embedder: Option<Arc<dyn Embedder>>,
-    jobs: Receiver<IndexedNote>,
+    vault_root: Option<PathBuf>,
+    jobs: Receiver<Job>,
 ) {
-    if let Some(embedder) = &embedder {
-        reconcile_missing(&index, embedder.as_ref());
+    for job in jobs {
+        match job {
+            Job::Note(note) => process_note(&index, embedder.as_deref(), &note),
+            Job::Reconcile => {
+                run_reconcile(&app, &index, embedder.as_deref(), vault_root.as_deref())
+            }
+            Job::Rebuild => run_rebuild(&app, &index, embedder.as_deref(), vault_root.as_deref()),
+        }
     }
-    for note in jobs {
-        process_note(&index, embedder.as_deref(), &note);
+}
+
+/// Syncs the whole index to the vault, then embeds any note left without
+/// vectors. Rows first (the index lock is held only for the scan), embeddings
+/// second (off the lock, per the three-phase discipline in [`process_note`]).
+/// Best-effort: a failure is logged and the next burst converges. Redundant
+/// reconciles are cheap — the pass skips unchanged notes without touching a row.
+fn run_reconcile(
+    app: &AppHandle,
+    index: &Mutex<NoteIndex>,
+    embedder: Option<&dyn Embedder>,
+    vault_root: Option<&Path>,
+) {
+    let Some(root) = vault_root else {
+        return; // no vault path resolved — nothing to reconcile against.
+    };
+    let report = {
+        let mut idx = lock(index);
+        reconcile::reconcile(root, &mut idx)
+    };
+    match report {
+        Ok(report) => {
+            if report.upserted + report.deleted > 0 {
+                eprintln!(
+                    "index reconcile: {} upserted, {} unchanged, {} deleted",
+                    report.upserted, report.unchanged, report.deleted
+                );
+            }
+            if let Some(embedder) = embedder {
+                reconcile_missing(index, embedder);
+            }
+            // Refresh every window's disk-backed lists now that the index (and
+            // the files it mirrors) settled.
+            let _ = app.emit(VAULT_CHANGED_EVENT, ());
+        }
+        Err(err) => eprintln!("index reconcile failed: {err}"),
+    }
+}
+
+/// Drops and repopulates the index from files alone, announcing progress on the
+/// `index:state` event. Unlike a reconcile, a rebuild always signals start and
+/// completion (the UI shows status) and always emits `vault:changed` on success.
+fn run_rebuild(
+    app: &AppHandle,
+    index: &Mutex<NoteIndex>,
+    embedder: Option<&dyn Embedder>,
+    vault_root: Option<&Path>,
+) {
+    let _ = app.emit(INDEX_STATE_EVENT, IndexStateEvent::Rebuilding);
+
+    let Some(root) = vault_root else {
+        let _ = app.emit(
+            INDEX_STATE_EVENT,
+            IndexStateEvent::Error {
+                message: "the knowledge base folder could not be resolved".to_string(),
+            },
+        );
+        return;
+    };
+
+    let report = {
+        let mut idx = lock(index);
+        reconcile::rebuild(root, &mut idx)
+    };
+    match report {
+        Ok(report) => {
+            if let Some(embedder) = embedder {
+                reconcile_missing(index, embedder);
+            }
+            let _ = app.emit(
+                INDEX_STATE_EVENT,
+                IndexStateEvent::Ready {
+                    notes: report.upserted + report.unchanged,
+                },
+            );
+            let _ = app.emit(VAULT_CHANGED_EVENT, ());
+        }
+        Err(err) => {
+            let _ = app.emit(
+                INDEX_STATE_EVENT,
+                IndexStateEvent::Error {
+                    message: err.to_string(),
+                },
+            );
+        }
     }
 }
 
@@ -190,9 +361,11 @@ fn lock(index: &Mutex<NoteIndex>) -> MutexGuard<'_, NoteIndex> {
 /// Opens (creating if absent) the index database under the app-data dir.
 ///
 /// The index lives at `app_data_dir()/index.db` — derived straight from
-/// `app_data_dir()` rather than the KB root, because it is a machine-local
-/// cache that should stay put even if a future vault-path setting relocates the
-/// notes. Today the two directories coincide.
+/// `app_data_dir()` rather than the KB root, because it is a machine-local cache
+/// that must stay put even when a future vault-path setting relocates the notes.
+/// This is a pinned invariant: the index is "derived, never synced", so it must
+/// never sit inside the (syncable) KB folder. Today the two directories coincide,
+/// which is exactly why the watcher filters `index.db*` out of its events.
 fn open_index(app: &AppHandle) -> Option<Mutex<NoteIndex>> {
     let dir = match app.path().app_data_dir() {
         Ok(dir) => dir,

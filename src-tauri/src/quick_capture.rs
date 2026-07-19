@@ -17,6 +17,7 @@ use kodabi_core::note::{self, Note};
 use tauri::{AppHandle, Emitter, Manager, Runtime, Window};
 use tauri_plugin_global_shortcut::Shortcut;
 
+use crate::events::VAULT_CHANGED_EVENT;
 use crate::routing_env::routing_config_from_env;
 use crate::transcribe::knowledge_base_dir;
 
@@ -30,11 +31,6 @@ pub const WINDOW_LABEL: &str = "quick-capture";
 /// audio-capture toggle) and `Ctrl+K` (the in-app command palette). Not yet
 /// user-configurable (there is no settings store yet).
 pub const DEFAULT_QUICK_CAPTURE_SHORTCUT: &str = "Ctrl+Alt+Space";
-
-/// Emitted app-wide after a successful quick-capture write so any open window
-/// (the main window's note lists) can refetch — the frontend's own
-/// `notifyVaultChanged` DOM bus is per-webview and can't cross windows.
-pub const VAULT_CHANGED_EVENT: &str = "vault:changed";
 
 /// Emitted to the capture window when it is shown, so its UI can refocus the
 /// textarea and clear any stale flash/error left from a prior capture.
