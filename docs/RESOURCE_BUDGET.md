@@ -11,11 +11,11 @@ Two costs are measured separately, because they happen at different times:
 
 - **Capture** — the all-day steady-state cost. While a meeting is live, only the capture
   path runs: two `cpal` capture threads (mic + loopback) plus one combiner thread running
-  two concurrent live resamplers, alongside the always-on capture watchdog
-  (`src-tauri/src/capture_watchdog.rs`), which wakes once a second to take one mutex and read
-  a few atomics so a device that drops out can't leave the indicators claiming to record.
-  This is the number `§3.7`'s "capturing under a target CPU ceiling" and "no fan spin-up" are
-  really about — it's what's running continuously next to real work.
+  two concurrent live resamplers, alongside the capture watchdog
+  (`src-tauri/src/capture_watchdog.rs`), which wakes once a second while a capture is engaged to
+  take one mutex and read a few atomics so a device that drops out can't leave the indicators
+  claiming to record. This is the number `§3.7`'s "capturing under a target CPU ceiling" and
+  "no fan spin-up" are really about — it's what's running continuously next to real work.
 - **Transcription** — a post-meeting burst, not a during-meeting cost. `crates/kodabi-core`'s
   pipeline only runs *after* capture stops (serialized so at most one heavyweight engine is
   ever resident), so its CPU/GPU spike is bounded in time even if it's high.
@@ -131,9 +131,11 @@ these ceilings, re-tune via the knobs above rather than raising the ceiling by d
 Measured 2026-07-15: launched the default (no engine feature) build, no capture started,
 sampled ~65s via `scripts/measure-resources.ps1`. **Confirms "idle ≈ zero."**
 
-> Measured before the capture watchdog landed, so this baseline predates its 1 Hz idle wake
-> (one mutex plus a few atomic reads per tick). Expected to stay ≈ zero, but the number has
-> not been re-measured since.
+> Measured before the capture watchdog landed, so this baseline predates its idle wake. With no
+> capture running the watchdog backs off to one tick every 10s (one mutex plus a few atomic reads
+> per tick) — nothing can change capture state while nothing is installed, so the idle tick only
+> re-converges an indicator a panicked toggle left stale. Expected to stay ≈ zero, but the number
+> has not been re-measured since.
 
 | Process | CPU% avg | CPU% peak | Working set |
 |---|---|---|---|

@@ -36,6 +36,15 @@ export function isCaptureActive(phase: CapturePhase): boolean {
   return phase !== "idle";
 }
 
+/** Whether two capture states describe the same thing. */
+function sameCaptureState(a: CaptureStateEvent, b: CaptureStateEvent): boolean {
+  return (
+    a.phase === b.phase &&
+    a.sources.loopback === b.sources.loopback &&
+    a.sources.microphone === b.sources.microphone
+  );
+}
+
 /**
  * Subscribes to the backend's capture state: an invoke on mount seeds the
  * current state (so a transition that happened before the listener attached
@@ -44,6 +53,13 @@ export function isCaptureActive(phase: CapturePhase): boolean {
  * The backend pushes on every change, including ones no toggle drove — a
  * device lost mid-session degrades the state within a few seconds — so what
  * this returns can always be shown as-is without polling to double-check.
+ *
+ * The returned object's *identity* changes only when its value does. The
+ * backend can legitimately re-broadcast an unchanged state (a command's
+ * post-lock broadcast racing a watchdog tick), and consumers key effects off
+ * this value — notably `useDebouncedValue`, whose timer a fresh identity would
+ * restart, starving the aria-live label of a state that never actually
+ * changed.
  */
 export function useCaptureState(): CaptureStateEvent {
   const [captureState, setCaptureState] = useState<CaptureStateEvent>(IDLE_STATE);
@@ -51,15 +67,17 @@ export function useCaptureState(): CaptureStateEvent {
   useEffect(() => {
     let active = true;
     let unlisten: (() => void) | undefined;
+    const apply = (next: CaptureStateEvent) =>
+      setCaptureState((current) => (sameCaptureState(current, next) ? current : next));
 
     invoke<CaptureStateEvent>("capture_phase")
       .then((event) => {
-        if (active) setCaptureState(event);
+        if (active) apply(event);
       })
       .catch(() => {});
 
     listen<CaptureStateEvent>(CAPTURE_STATE_EVENT, (event) => {
-      if (active) setCaptureState(event.payload);
+      if (active) apply(event.payload);
     }).then((fn) => {
       if (active) {
         unlisten = fn;

@@ -61,10 +61,13 @@ sits in between.
   recording and the other has failed or dropped out. The green **stays**, because audio genuinely
   is being captured and withdrawing it would falsely suggest privacy; but the aura collapses, so
   the mark visibly is not full listening. The paired label names the source that is down.
-- **Reconnecting (engaged, nothing recorded) — the idle mark.** Every source has dropped and the
-  capture threads are rebuilding. Nothing reaches disk, so the mark wears **no green**: it is the
-  idle mark, with the label carrying the reconnecting state. A capture that claims to be on air
-  while recording nothing is the one failure the mark must never show.
+- **Reconnecting (engaged, nothing recorded) — ink, waking.** Every source has dropped and the
+  capture threads are rebuilding. Nothing reaches disk, so the mark wears **no green**. But it is
+  *not* the idle mark either: idle means "no capture is running", while this session is still
+  engaged and will resume recording with no further press, so it borrows **starting**'s ink pulse.
+  Same ink, same motion — both mean "engaged, nothing recorded yet" — with the label distinguishing
+  them. A capture that claims to be on air while recording nothing is the one failure the mark must
+  never show; a dormant-looking mark over a session that is about to resume is the second.
 - **Wake / settle transitions.** Idle→listening *warms* the ink to green and draws the first breath
   over ~450 ms — the quiet "it woke up" beat. Listening→idle reverses it: green recedes, the breath
   settles to still, the aura fades. One deliberate motion, never a flourish.
@@ -91,8 +94,8 @@ P1-5 to refine against real audio; the moodboard's `breathe` / `halo` keyframes 
 - **Accessibility floor — reduced motion.** Under `prefers-reduced-motion: reduce`, all animation
   stops and listening becomes a **still green mark** — still unmistakably on-air by the reserved
   color and presence alone. This mirrors the locked behavior already in `design/moodboard.html`.
-  Degraded likewise settles to a still green mark; starting settles to a still ink mark, its state
-  carried by the text label the mark is always paired with.
+  Degraded likewise settles to a still green mark; starting and reconnecting settle to a still ink
+  mark, their state carried by the text label the mark is always paired with.
 
 ---
 
@@ -121,8 +124,8 @@ washi (light) and sumi (dark) grounds without redrawing.
   in addition to the reserved green, and in the running app it is expected to pair with a text label
   and reflect real capture state (P1-5). It never depends solely on distinguishing one hue.
 - **Reduced motion** degrades to a still green mark for the recording states (above) — never a
-  blank or an ambiguous state. Starting settles to a still ink mark, since it isn't recording; its
-  state is carried by the text label the mark is always paired with.
+  blank or an ambiguous state. Starting and reconnecting settle to a still ink mark, since neither
+  is recording; their state is carried by the text label the mark is always paired with.
 - **Contrast & theme.** The green shifts by theme (`#5F7E5A` light / `#86A67E` dark — indicative,
   P0-4 locks the final value) so it stays legible on washi and on night grounds.
 - **Unambiguous by construction.** One reserved color, spent on exactly one meaning — audio is

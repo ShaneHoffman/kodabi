@@ -6,11 +6,11 @@
 //! ever runs again, so without this the tray and window would keep claiming
 //! "listening" while zero audio is recorded — a silently missed meeting.
 //!
-//! So a background thread re-derives the truth from `DualCapture` once a
-//! second and broadcasts whenever it differs from what was last shown. It
-//! ticks only while holding the toggle lock, which both keeps it from
-//! interleaving with a toggle's own broadcasts and makes it the backstop that
-//! drains a coalesced hotkey press no in-flight toggle picked up.
+//! So a background thread re-derives the truth from `DualCapture` while a
+//! capture is engaged and broadcasts whenever it differs from what was last
+//! shown. It ticks only while holding the toggle lock, which both keeps it
+//! from interleaving with a toggle's own broadcasts and makes it the backstop
+//! that drains a coalesced hotkey press no in-flight toggle picked up.
 
 use std::sync::atomic::Ordering;
 use std::time::Duration;
@@ -20,12 +20,27 @@ use tauri::{AppHandle, Manager};
 use crate::audio_cmds::{event_from_state, CapturePhase, CaptureState, CaptureStateEvent};
 use crate::capture_control::{
     broadcast_event, drain_pending_toggles, perform_one_toggle, try_lock_toggle, CaptureController,
+    TogglePress,
 };
 
-/// How often the truth is re-derived. The acceptance bar is "within a few
-/// seconds", and a poll is cheap (one mutex + two atomic loads), so a second
-/// leaves room for the confirm delay below while staying well inside it.
+/// How often the truth is re-derived while a capture is engaged. The
+/// acceptance bar is "within a few seconds", and a poll is cheap (one mutex +
+/// two atomic loads), so a second leaves room for the confirm delay below
+/// while staying well inside it.
 const WATCHDOG_INTERVAL: Duration = Duration::from_secs(1);
+
+/// How often the truth is re-derived while nothing is installed.
+///
+/// With no capture running there is nothing that can change state on its own —
+/// the silent rebuild-retry loop this watchdog exists to catch only happens to
+/// a *live* capture — and every toggle broadcasts its own outcome. So the idle
+/// tick is pure belt-and-braces (it re-converges an indicator left stale by a
+/// panicked toggle, and clears a stranded `pending_toggle` flag), and polling
+/// it once a second would spend ~86k wakes a day next to a dormant tray icon
+/// against `docs/RESOURCE_BUDGET.md`'s "idle ≈ zero". Backing off to 10s costs
+/// nothing user-visible: a stranded press while idle is a no-op anyway, since
+/// a coalesced press can never start a capture.
+const IDLE_WATCHDOG_INTERVAL: Duration = Duration::from_secs(10);
 
 /// Consecutive ticks a newly-degraded state must persist before it is shown.
 ///
@@ -75,20 +90,50 @@ impl DegradedDebounce {
         self.consecutive_degraded = 0;
         Some(observed)
     }
+
+    /// Forget any part-built degraded confirmation.
+    ///
+    /// Called whenever a tick can't observe the truth at all (the toggle lock
+    /// was busy, state wasn't managed yet, the health read failed), so
+    /// "consecutive" always means consecutive *observations*. Without this a
+    /// single transient stall seen before a long unobservable gap would pair
+    /// with an unrelated stall minutes later and be broadcast as confirmed —
+    /// exactly the flash [`DEGRADED_CONFIRM_TICKS`] exists to suppress.
+    pub(crate) fn reset(&mut self) {
+        self.consecutive_degraded = 0;
+    }
 }
 
-/// Start the watchdog: one tick every [`WATCHDOG_INTERVAL`], forever. Detached,
-/// and dies with the process. Call once from `setup`, after the tray has
-/// managed the [`CaptureController`] this reads.
+/// Start the watchdog: tick, sleep, forever. Detached, and dies with the
+/// process. Call once from `setup`, after the tray has managed the
+/// [`CaptureController`] this reads.
+///
+/// The interval adapts to whether there is anything to watch — see
+/// [`IDLE_WATCHDOG_INTERVAL`].
 pub(crate) fn start(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
         let mut debounce = DegradedDebounce::default();
         loop {
             tick(&app, &mut debounce);
-            std::thread::sleep(WATCHDOG_INTERVAL);
+            std::thread::sleep(next_interval(&app));
         }
     });
+}
+
+/// How long to sleep before the next tick: the engaged rate while a capture is
+/// installed, the backed-off idle rate otherwise. An unreadable state counts as
+/// engaged, so uncertainty always polls at the faster rate.
+fn next_interval(app: &AppHandle) -> Duration {
+    let engaged = match app.try_state::<CaptureState>() {
+        Some(state) => state.is_active().unwrap_or(true),
+        None => true,
+    };
+    if engaged {
+        WATCHDOG_INTERVAL
+    } else {
+        IDLE_WATCHDOG_INTERVAL
+    }
 }
 
 /// One pass: re-derive the truth and broadcast it if it differs from what is
@@ -97,18 +142,21 @@ pub(crate) fn start(app: &AppHandle) {
 /// Skips entirely while a toggle holds the lock — that toggle is mid-
 /// read-decide-act and will broadcast its own outcome, and its `Starting`
 /// announcement must not be overwritten by a truth read that predates the
-/// start finishing.
+/// start finishing. Every skip path resets the debounce, so a suppressed
+/// degraded observation never pairs with one from after the gap.
 fn tick(app: &AppHandle, debounce: &mut DegradedDebounce) {
     let (Some(controller), Some(state)) = (
         app.try_state::<CaptureController>(),
         app.try_state::<CaptureState>(),
     ) else {
+        debounce.reset();
         return;
     };
     // A poisoned lock is treated as acquirable, so a toggle thread that
     // panicked mid-start (leaving `Starting` on screen forever) is corrected
     // by the next tick rather than wedging the watchdog too.
     let Some(_guard) = try_lock_toggle(&controller) else {
+        debounce.reset();
         return;
     };
 
@@ -120,14 +168,22 @@ fn tick(app: &AppHandle, debounce: &mut DegradedDebounce) {
         }
         // A failed health read proves nothing either way; leave the current
         // state alone and try again next tick.
-        Err(err) => eprintln!("capture watchdog health read failed: {err}"),
+        Err(err) => {
+            debounce.reset();
+            eprintln!("capture watchdog health read failed: {err}");
+        }
     }
 
     // Backstop for the press that set `pending_toggle` in the sliver between
     // the holder's last drain check and its release: without this it would
-    // wait for the next press instead of being honored.
+    // wait for the next press instead of being honored. Every pass here is
+    // replaying a press, so it can only stop — never start.
     if controller.pending_toggle.load(Ordering::SeqCst) {
-        drain_pending_toggles(&controller.pending_toggle, || perform_one_toggle(app));
+        drain_pending_toggles(
+            &controller.pending_toggle,
+            TogglePress::Coalesced,
+            |press| perform_one_toggle(app, press),
+        );
     }
 }
 
@@ -197,6 +253,24 @@ mod tests {
         // indicator never flickered — and the counter must not carry over.
         assert_eq!(debounce.decide(&listening(), listening()), None);
         assert_eq!(debounce.decide(&listening(), mic_stalled()), None);
+    }
+
+    #[test]
+    fn an_unobservable_gap_restarts_the_degraded_confirmation() {
+        let mut debounce = DegradedDebounce::default();
+        // One transient stall is seen and correctly suppressed.
+        assert_eq!(debounce.decide(&listening(), mic_stalled()), None);
+        // Then the watchdog goes blind for a while — a toggle holds the lock,
+        // or the health read fails — so it never observes the recovery that
+        // would have cleared the counter.
+        debounce.reset();
+        // An unrelated stall much later must start its own confirmation, not
+        // inherit credit from the one before the gap.
+        assert_eq!(debounce.decide(&listening(), mic_stalled()), None);
+        assert_eq!(
+            debounce.decide(&listening(), mic_stalled()),
+            Some(mic_stalled())
+        );
     }
 
     #[test]
