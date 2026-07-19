@@ -83,7 +83,7 @@ gates, an auditor agent, or review) rather than a ported test.
 | --- | --- | --- |
 | add-ipc-endpoint | Amend | `.claude/skills/add-tauri-command/` — scaffold-then-verify; ends by spawning `tauri-command-auditor`. |
 | add-migration | Adopt | `.claude/skills/add-migration/` — Kodabi's append-only model, upgrade-test requirement; spawns `migration-safety`. |
-| code-review | Skip | Would shadow the built-in `/code-review high` the board's Code Review column runs; the adopted auditor agents supply the gate function instead. |
+| code-review | Skip → superseded | Originally skipped as a shadow of the built-in `/code-review high` the column ran. The column now runs Kodabi's own `.claude/skills/code-review-fix/` (review → fix → gates → commit). The built-in is invocable, but it stops at reporting: it never fixes, never runs the gate matrix, and never commits, so the stage could not be self-contained. |
 | commit | Amend | `.claude/skills/commit/` — inverted: theirs skips gates, Kodabi's `CLAUDE.md` mandates them, so the skill runs a surface→gate matrix. Never pushes. |
 | cross-platform | Skip | Windows-only v1 anti-scope. |
 | debug-activity | Skip | Their activity-engine playbook. |
