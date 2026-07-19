@@ -30,5 +30,7 @@ Guidance for adding or changing anything under `.claude/skills/` and
   `add-migration` → `migration-safety`,
   `test` (audit/write) → `test-builder`,
   `sync-docs` → `doc-auditor`.
+  The one exception is `code-review-fix`: it *is* the independent review pass, so it spawns no
+  auditor of its own — its own findings are the check.
 - **Keep skills lean.** Link `CLAUDE.md`, the docs, and the rules rather than
   restating them; a skill that duplicates a rule becomes the second thing to update.

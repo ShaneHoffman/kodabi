@@ -19,5 +19,5 @@ belongs in committed files.
   vars, a passed-in root) rather than hard-coding them.
 
 Enforcement is review-based: the `/commit` skill scans the diff for stray real
-paths and emails before committing, and `/code-review` flags them. There is no CI
-scan.
+paths and emails before committing, and the Code Review stage (`/code-review-fix`)
+flags them. There is no CI scan.
