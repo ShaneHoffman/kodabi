@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DISTILL_STATE_EVENT } from "./events";
 import type { CapturePhase } from "./useCaptureState";
 import { useDistillState } from "./useDistillState";
-import { emit, listenerCount, resetTauriMocks } from "./test/tauri";
+import { emitFromBackend, listenerCount, resetTauriMocks } from "./test/tauri";
 
 vi.mock("@tauri-apps/api/core", () => import("./test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("./test/tauri"));
@@ -13,7 +13,7 @@ const SESSION = "sessions/2026-07-01T10-00-00Z-team-sync.jsonl";
 /** Deliver a `distill:state` payload the way the backend would. */
 function emitDistill(payload: unknown): void {
   act(() => {
-    emit(DISTILL_STATE_EVENT, payload);
+    emitFromBackend(DISTILL_STATE_EVENT, payload);
   });
 }
 
@@ -140,16 +140,27 @@ describe("useDistillState", () => {
     expect(listenerCount(DISTILL_STATE_EVENT)).toBe(0);
   });
 
-  it("ignores an event delivered after unmount", async () => {
+  it("ignores an event delivered in the gap between unmount and unlisten", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { unmount } = renderHook(() => useDistillState("idle"));
-    await flush();
 
+    // Unmount *before* `flush()`, so `listen`'s promise hasn't resolved and the
+    // cleanup had no unlisten function to call yet. The subscriber is therefore
+    // still registered while the hook is gone — the one window in which a
+    // delivered event can reach a torn-down hook, and the whole reason for the
+    // `active` flag. Unmounting after the subscription resolves proves nothing:
+    // the callback is simply no longer registered.
     unmount();
-    emitDistill({ status: "saved", path: "Inbox/late.md", session_path: SESSION });
+    expect(listenerCount(DISTILL_STATE_EVENT)).toBe(1);
 
-    // Nothing to assert on state (the hook is gone); what must hold is that no
-    // late branch ran — no warning, no act-outside-render error.
+    emitDistill({
+      status: "routing_fallback",
+      message: "routing signals unavailable",
+      session_path: SESSION,
+    });
+
+    // `routing_fallback` is the branch that acts on arrival unconditionally, so
+    // silence here is proof the teardown guard ran ahead of every branch.
     expect(warn).not.toHaveBeenCalled();
   });
 });

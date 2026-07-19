@@ -29,6 +29,9 @@
       "WebFetch(domain:react.dev)",
       "WebFetch(domain:tailwindcss.com)"
     ],
-    "deny": []
+    "deny": [
+      "Bash(pnpm test:watch)",
+      "Bash(pnpm test:watch:*)"
+    ]
   }
 }
