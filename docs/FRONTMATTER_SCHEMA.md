@@ -62,7 +62,7 @@ Canonical key order the writer emits: **`id, type, project, date, tags, source, 
   Store the value exactly as written. The two accepted shapes are strictly a `YYYY-MM-DD` calendar
   date **or** an RFC 3339 timestamp that **carries an offset** (`Z` or numeric); a naive
   `2026-07-09T14:00:00` with no offset is rejected, because without an offset the instant is
-  ambiguous. **The writer emits the device's local offset at capture time** (e.g.
+  ambiguous. **The canonical `date` shape is the device's local offset at capture time** (e.g.
   `2026-07-09T20:00:00-04:00`, not the `…Z` UTC form): the offset preserves the exact instant, but
   the wall-clock digits reflect the user's *local* day, so an evening meeting near the UTC day
   boundary files under the correct local date rather than "tomorrow." A date-only value is likewise
