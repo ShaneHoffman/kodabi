@@ -47,7 +47,8 @@ design/                 # Locked design tokens — design/tokens.css is the sing
 src/                    # React + TypeScript frontend. src/index.css bridges the tokens
                         # into Tailwind v4 utilities; src/fonts.ts self-hosts the Source
                         # typeface trio.
-src-tauri/              # Tauri v2 binary crate — the desktop shell and window.
+src-tauri/              # Tauri v2 binary crate — the desktop shell and its three
+                        # windows (main, quick capture, capture overlay pill).
 crates/kodabi-core/     # Pure, UI-agnostic, unit-testable data layer that the shell
                         # depends on. Future SQLite index and MCP query surface live here.
 Cargo.toml              # Cargo workspace manifest (src-tauri + crates/kodabi-core).

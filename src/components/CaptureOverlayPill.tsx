@@ -1,0 +1,63 @@
+import { captureLabel, markMode } from "../captureLabel";
+import { dismissCaptureOverlay } from "../captureOverlay";
+import { isCaptureActive, useCaptureState } from "../useCaptureState";
+import { useDebouncedValue } from "../useDebouncedValue";
+import { SpiritMark } from "./SpiritMark";
+import "./CaptureOverlayPill.css";
+
+/**
+ * The always-on-top capture pill: the same mark-plus-status pairing as
+ * {@link ListeningIndicator}, but in its own frameless window that floats over
+ * full-screen apps.
+ *
+ * It exists for the one case the in-window indicator and the tray both miss:
+ * presenting or screen-sharing hides the taskbar, the main window is usually
+ * closed to tray, and WASAPI loopback never lights the Windows microphone
+ * indicator — so without this a running capture can be completely invisible.
+ *
+ * Visibility is the backend's call (`src-tauri/src/overlay.rs` shows and hides
+ * the window off the capture-state funnel). Rendering nothing while idle is a
+ * second, independent guard on the same invariant, not the primary mechanism.
+ */
+export function CaptureOverlayPill() {
+  const captureState = useCaptureState();
+  // Same split as the sidebar indicator: the mark reacts instantly, the text
+  // follows a debounced state so a flapping source doesn't strobe the label.
+  const label = captureLabel(useDebouncedValue(captureState, 400));
+
+  // Belt and braces. The window should already be hidden by the time capture
+  // reads idle; if it somehow isn't, an empty pill is far better than one
+  // claiming to be recording.
+  if (!isCaptureActive(captureState.phase)) return null;
+
+  return (
+    // `deep` (not the bare attribute) so a press anywhere on the pill drags it,
+    // not just the exact root element. Tauri's drag script excludes <button>
+    // subtrees on its own, which is what keeps the dismiss control clickable.
+    <div
+      data-tauri-drag-region="deep"
+      data-testid="capture-overlay-pill"
+      className="capture-overlay-pill flex h-screen items-center gap-2xs rounded-full bg-surface px-xs py-2xs"
+    >
+      <SpiritMark mode={markMode(captureState)} size="0.85rem" halo="0.8rem" />
+      <p
+        role="status"
+        className={`capture-overlay-pill__label grow text-cap uppercase tracking-wide ${
+          label.live ? "text-accent-dot" : "text-text-faint"
+        }`}
+      >
+        {label.text}
+      </p>
+      <button
+        type="button"
+        aria-label="Hide capture pill"
+        data-testid="capture-overlay-dismiss"
+        className="capture-overlay-pill__dismiss text-text-faint"
+        onClick={() => void dismissCaptureOverlay()}
+      >
+        {/* Decorative: the accessible name is on the button. */}
+        <span aria-hidden="true">✕</span>
+      </button>
+    </div>
+  );
+}

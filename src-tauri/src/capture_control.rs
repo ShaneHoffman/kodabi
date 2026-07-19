@@ -216,6 +216,10 @@ pub(crate) fn perform_one_toggle(app: &AppHandle, press: TogglePress) {
     let consent = consent_acknowledged(app);
     let result = match next_action(active, consent, press) {
         ToggleAction::Start => {
+            // The hotkey and the tray are both user presses, so the pill reads
+            // the manual setting. Recorded before the first broadcast, which is
+            // what decides whether the pill appears.
+            crate::overlay::note_capture_start(app, kodabi_core::overlay::CaptureOrigin::Manual);
             // Announce the start before negotiating: device negotiation can
             // block for ~1s, and an indicator that says nothing for that
             // window is indistinguishable from a press that didn't register.
@@ -355,6 +359,11 @@ pub(crate) fn broadcast_event(app: &AppHandle, event: CaptureStateEvent) {
         }
     }
     let _ = app.emit(CAPTURE_STATE_EVENT, event);
+    // The overlay pill hangs off the same funnel as the tray, so the two can
+    // never disagree about whether a capture is running. Kept last, and
+    // deliberately leaf-only: this usually runs with `toggle_lock` held (see
+    // `crate::overlay`'s module doc).
+    crate::overlay::sync(app, &event);
 }
 
 /// The state broadcast when nothing is captured.

@@ -20,9 +20,18 @@ export type RetentionPolicy =
 /** The bare discriminant, e.g. for a Select's value. */
 export type RetentionKind = RetentionPolicy["policy"];
 
+/** Whether the always-on-top capture pill shows, split by how the capture
+ * began. `auto_captures` is dormant: meeting auto-detection does not exist yet,
+ * so nothing produces an auto-detected capture today. */
+export type OverlaySettings = {
+  manual_captures: boolean;
+  auto_captures: boolean;
+};
+
 export type Settings = {
   consent_acknowledged: boolean;
   retention: RetentionPolicy;
+  overlay: OverlaySettings;
 };
 
 /** Default day count seeded into the "keep for N days" control before the user
@@ -62,6 +71,12 @@ export function getSettings(): Promise<Settings> {
 
 export function setRetentionPolicy(policy: RetentionPolicy): Promise<Settings> {
   return invoke<Settings>("set_retention_policy", { policy });
+}
+
+/** Sets both overlay flags at once. The backend re-syncs the pill immediately,
+ * so a change during a running capture takes effect right away. */
+export function setCaptureOverlay(overlay: OverlaySettings): Promise<Settings> {
+  return invoke<Settings>("set_capture_overlay", { overlay });
 }
 
 export function acknowledgeConsent(retention: RetentionPolicy): Promise<Settings> {
