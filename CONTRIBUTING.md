@@ -25,14 +25,15 @@ Use Conventional-Commit subjects: `<type>: <imperative summary>`, matching the b
 
 ## Pull requests & the stage gate
 
-Work moves through `Backlog → Planning → Executing → Code Review → Open PR → Done`, with a
+Work moves through `Ready → Planning → Executing → Code Review → Open PR → Done`, with a
 **manual gate between stages** (Planning → Executing advances automatically when a plan is approved).
 
 - **Executing** commits to the branch but **does not push.**
-- **Code Review** is an independent review of `git diff main...HEAD`.
+- **Code Review** independently reviews `git diff origin/main...HEAD`, fixes the in-scope findings, and
+  commits them on the branch — it **does not push.**
 - **Open PR** pushes the branch and opens a PR against `main` (`gh pr create --base main`) — it is
   **not** merged automatically. A maintainer reviews and merges on GitHub, then the card moves to Done.
-- One PR per branch. **Never force a card back to Backlog** — request changes by sending it back to
+- One PR per branch. **Never force a card back to Ready** — request changes by sending it back to
   Executing.
 
 See the root **`CLAUDE.md`** for the agent- and MCP-specific details.
