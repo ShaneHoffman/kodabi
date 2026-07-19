@@ -11,6 +11,7 @@ mod retention;
 mod routing_env;
 mod settings_cmds;
 mod transcribe;
+mod tray_promotion;
 
 use kodabi_core::device::DeviceId;
 use tauri::Manager;
@@ -86,6 +87,16 @@ pub fn run() {
             // moments of launch can't reach the toggle before the controller
             // it depends on exists.
             capture_control::build_tray(app.handle())?;
+
+            // Windows drops every new tray icon into the hidden overflow, and
+            // a mark behind a chevron can't be read at a glance. Lift it onto
+            // the taskbar unless the user has already said otherwise. Runs in
+            // the background: Explorer writes the entry it needs in response
+            // to the icon being added, so it can't be there yet.
+            match std::env::current_exe() {
+                Ok(executable) => tray_promotion::promote_in_background(executable),
+                Err(err) => eprintln!("could not resolve this executable's path: {err}"),
+            }
 
             // Keep the indicators honest about state changes no toggle drives:
             // a device lost mid-meeting leaves the capture thread retrying
