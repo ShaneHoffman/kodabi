@@ -12,7 +12,7 @@ use kodabi_core::distill::{route_distilled, DistillError};
 use kodabi_llm::{ClaudeConfig, ClaudeRunner};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::routing_env::routing_config_from_env;
+use crate::routing_env::{report_signal_failures, routing_config_from_env};
 use crate::settings_cmds::SettingsState;
 use crate::transcribe::knowledge_base_dir;
 
@@ -177,23 +177,11 @@ fn run(app: &AppHandle, session_path: &Path) -> Result<PathBuf, DistillFailure> 
                 DistillStateEvent::RoutingFallback { message },
             );
         }
-        // A single project's glossary is broken but routing still ran (contained
-        // to that project). Log it so the user can fix the file; the note landed
-        // wherever the surviving signals sent it, so this is not a fallback.
-        for failure in &diagnostics.glossary_failures {
-            eprintln!(
-                "distill: project \"{}\" has an unreadable glossary; it routes on its name only until fixed: {}",
-                failure.project, failure.error
-            );
-        }
-        // Same containment for a broken corrections log: the project simply
-        // contributes no example evidence until the file is fixed.
-        for failure in &diagnostics.example_failures {
-            eprintln!(
-                "distill: project \"{}\" has an unreadable routing-examples log; recorded corrections there are ignored until fixed: {}",
-                failure.project, failure.error
-            );
-        }
+        // A single project's signal file is broken but routing still ran
+        // (contained to that project). Log it so the user can fix the file; the
+        // note landed wherever the surviving signals sent it, not in a fallback.
+        report_signal_failures("distill", &diagnostics.glossary_failures);
+        report_signal_failures("distill", &diagnostics.example_failures);
         routing
     })
     .map(|distilled| distilled.path)

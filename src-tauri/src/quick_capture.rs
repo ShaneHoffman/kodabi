@@ -18,7 +18,7 @@ use tauri::{AppHandle, Emitter, Manager, Runtime, Window};
 use tauri_plugin_global_shortcut::Shortcut;
 
 use crate::events::VAULT_CHANGED_EVENT;
-use crate::routing_env::routing_config_from_env;
+use crate::routing_env::{report_signal_failures, routing_config_from_env};
 use crate::transcribe::knowledge_base_dir;
 
 /// Label of the statically-configured quick-capture window
@@ -162,22 +162,10 @@ fn submit_impl(app: &AppHandle, text: &str) -> Result<QuickCaptureOutcome, Strin
     let captured = quick_capture(&kb, text, &date, &routing_config_from_env())
         .map_err(|err| err.to_string())?;
 
-    // A broken glossary is contained to its own project (routing still ran); log
-    // it so the user can fix the file. The capture itself succeeded.
-    for failure in &captured.glossary_failures {
-        eprintln!(
-            "quick-capture: project \"{}\" has an unreadable glossary; it routes on its name only until fixed: {}",
-            failure.project, failure.error
-        );
-    }
-    // Same containment for a broken corrections log: the project simply
-    // contributes no example evidence until the file is fixed.
-    for failure in &captured.example_failures {
-        eprintln!(
-            "quick-capture: project \"{}\" has an unreadable routing-examples log; recorded corrections there are ignored until fixed: {}",
-            failure.project, failure.error
-        );
-    }
+    // A broken signal file is contained to its own project (routing still ran);
+    // log it so the user can fix the file. The capture itself succeeded.
+    report_signal_failures("quick-capture", &captured.glossary_failures);
+    report_signal_failures("quick-capture", &captured.example_failures);
 
     // Broadcast to every window so the main window's lists refresh even while it
     // is hidden to the tray.
