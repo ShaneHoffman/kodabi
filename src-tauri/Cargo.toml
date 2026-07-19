@@ -35,8 +35,11 @@ default = []
 # Forward to `kodabi-transcribe`'s own mutually-exclusive engine features (see
 # that crate's Cargo.toml for the static/shared link-mode conflict that keeps
 # `parakeet` and `whisper` from ever being enabled together in one binary).
-# Neither is on by default, so the default build transcribes with
+# Neither is on by default, so a debug build transcribes with
 # `kodabi_core::transcription::MockEngine` and stays native-dependency-free.
+# A *release* build with neither feature fails to compile on purpose (the
+# `compile_error!` guard in `src/transcribe.rs`), so a mock engine can never
+# ship; release builds pass `--features parakeet` (`pnpm tauri:build`).
 parakeet = ["dep:kodabi-transcribe", "kodabi-transcribe/parakeet"]
 whisper = ["dep:kodabi-transcribe", "kodabi-transcribe/whisper"]
 # Forward to `kodabi-embed`'s `bge` backend. Off by default, so the default

@@ -64,11 +64,37 @@ target/, dist/          # Build output (git-ignored).
 ```sh
 pnpm install       # install frontend dependencies
 pnpm tauri dev     # run the desktop app in dev mode
-pnpm tauri build   # build the installer bundle
+pnpm tauri:build   # build the installer bundle (real Parakeet engine)
 pnpm dev           # frontend only, in a browser
 pnpm build         # typecheck + Vite build
 pnpm lint          # frontend lint
 ```
+
+### Speech-to-text engines
+
+The STT engine is selected at build time by mutually exclusive cargo features
+(`parakeet` or `whisper`), because their sherpa-onnx link modes cannot coexist in one
+binary. Neither is on by default, so `pnpm tauri dev` runs a stub engine that emits
+placeholder text — that keeps the dev loop and the test gates free of native model
+dependencies. `pnpm tauri:build` passes `--features parakeet`, and a release build with
+no engine feature **fails to compile on purpose**, so a stub build can never ship.
+
+To run the real engine in dev mode, build with the feature and point the five model
+variables at a locally downloaded [`sherpa-onnx-nemo-parakeet-tdt-0.6b-v2`
+(int8)](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) plus
+`silero_vad.onnx`:
+
+```sh
+PARAKEET_ENCODER=.../encoder.int8.onnx PARAKEET_DECODER=.../decoder.int8.onnx \
+PARAKEET_JOINER=.../joiner.int8.onnx PARAKEET_TOKENS=.../tokens.txt \
+PARAKEET_VAD_MODEL=.../silero_vad.onnx \
+pnpm tauri dev --features parakeet
+```
+
+Model download and settings wiring for end users is a later ticket. See
+[`docs/benchmarks/stt-engine-benchmark.md`](docs/benchmarks/stt-engine-benchmark.md) for
+why Parakeet is the shipping engine and
+[`docs/RESOURCE_BUDGET.md`](docs/RESOURCE_BUDGET.md) for the deferred Whisper fallback.
 
 Rust tests, lint, and format run from the repo root (the workspace covers both crates):
 
