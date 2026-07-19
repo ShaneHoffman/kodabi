@@ -75,10 +75,10 @@ export function InboxView() {
 /**
  * One unfiled note. Opening it (the left region) navigates to the editor;
  * choosing a project (the right picker) re-routes it. On success the row plays
- * its collapse/fade exit; the backend file watcher observes the move and
- * broadcasts `vault:changed`, which refetches the list and the sidebar badge
- * together. The watcher's debounce outlasts the 0.2s exit transition, so the
- * row finishes animating out before the list drops it. A failed re-route keeps
+ * its collapse/fade exit; the re-route command broadcasts `vault:changed`
+ * itself, which refetches the list and the sidebar badge together and drops the
+ * row (the file watcher is a fallback for external edits, not the only trigger,
+ * so the row leaves even if the watcher never started). A failed re-route keeps
  * the row and surfaces the backend message.
  */
 function InboxRow({
@@ -98,9 +98,10 @@ function InboxRow({
     setError(null);
     fileNoteToProject({ id: note.id, project: slug })
       .then(() => {
-        // Play the exit transition (InboxView.css, 0.2s). The backend watcher
-        // sees the file move and broadcasts `vault:changed` after its debounce,
-        // which refetches and drops the row — by then the fade has finished.
+        // Play the exit transition (InboxView.css, 0.2s). The re-route command
+        // broadcasts `vault:changed` itself, so the list refetches and drops the
+        // row promptly (and still converges if the file watcher never started);
+        // the fade is best-effort polish for the brief window before it does.
         setLeaving(true);
       })
       .catch((err: unknown) => {

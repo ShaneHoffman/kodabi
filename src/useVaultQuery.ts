@@ -3,10 +3,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 /*
  * Vault change signal — a per-webview fan-out: something changed on disk, so
  * every disk-reading hook refetches. Its sole writer is `useVaultChangedBridge`,
- * which relays the backend `vault:changed` event; that event is now driven by
- * the Phase 2 file watcher, which observes every note write (in-app, external
- * editor, or git) and broadcasts once its debounce settles. Call sites don't
- * announce writes themselves anymore — the watcher does.
+ * which relays the backend `vault:changed` event. That event has two sources:
+ * the note commands emit it right after an in-app write (create, edit, re-route,
+ * quick capture), so the refresh is immediate and survives a watcher that never
+ * started; and the Phase 2 file watcher emits it after reconciling an external
+ * change (an editor or git touching the files). Call sites don't announce their
+ * own writes anymore — the backend does.
  */
 
 const VAULT_CHANGED_EVENT = "kodabi:vault-changed";

@@ -156,8 +156,9 @@ function CreateNote({ initialProject }: { initialProject: string | null }) {
         // Land in the read view via read_note — the round trip through the
         // on-disk file is the proof the note was written schema-valid. The
         // echoed project is the backend-canonicalized casing, which may
-        // differ from what was typed. The new file's own lists refresh when the
-        // backend watcher broadcasts `vault:changed`.
+        // differ from what was typed. Every window's lists refresh because the
+        // write_note command broadcasts `vault:changed` (the watcher is a
+        // fallback for external edits).
         navigate({
           kind: "noteEditor",
           noteId: created.id,
@@ -258,7 +259,7 @@ function OpenedNote({ noteId, project }: { noteId: string; project: string }) {
       onCancel={() => setEditing(false)}
       onSaved={(saved) => {
         // The editor shows the save's echo immediately; other windows' lists
-        // refresh when the backend watcher broadcasts `vault:changed`.
+        // refresh because the save_note command broadcasts `vault:changed`.
         setNote(saved);
         setEditing(false);
       }}

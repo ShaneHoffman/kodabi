@@ -11,10 +11,20 @@ use std::path::Path;
 use kodabi_core::index::IndexedNote;
 use kodabi_core::note::{self, Note, NoteEdit, NoteId, NoteType, Routing, Source, Tag};
 use kodabi_core::vault::{self, FileNoteOptions, ListedNote, ProjectInfo, RoutedNote};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
+use crate::events::VAULT_CHANGED_EVENT;
 use crate::index_state::IndexState;
 use crate::transcribe::knowledge_base_dir;
+
+/// Broadcasts `vault:changed` so every open window refetches its disk-backed
+/// lists immediately after an in-app write, without waiting on the file
+/// watcher's debounce — and without depending on the watcher having started at
+/// all (it is best-effort; see `index_state`). The watcher's own post-reconcile
+/// broadcast, when it lands, is then a harmless, later no-op refetch.
+fn broadcast_vault_changed(app: &AppHandle) {
+    let _ = app.emit(VAULT_CHANGED_EVENT, ());
+}
 
 /// Maximum length (in `char`s) of a note-list snippet.
 const SNIPPET_MAX_CHARS: usize = 160;
@@ -148,6 +158,7 @@ fn write_note_impl(app: &AppHandle, mut input: NewNoteInput) -> Result<WrittenNo
         &rel.to_string_lossy().replace('\\', "/"),
     );
     app.state::<IndexState>().index_note_best_effort(indexed);
+    broadcast_vault_changed(app);
 
     Ok(written_note(&note, title, rel))
 }
@@ -322,6 +333,7 @@ pub async fn save_note(app: AppHandle, input: SaveNoteInput) -> Result<NoteDetai
         &rel.to_string_lossy().replace('\\', "/"),
     );
     app.state::<IndexState>().index_note_best_effort(indexed);
+    broadcast_vault_changed(&app);
 
     Ok(note_detail(&listed, &kb))
 }
@@ -379,6 +391,25 @@ pub async fn file_note_to_project(
     let routed = vault::file_note_to_project(&kb, &id, &input.project, &options)
         .map_err(|err| err.to_string())?
         .ok_or_else(|| format!("note {} not found in the vault", input.id))?;
+
+    // Keep the index in step with the move (best-effort; see `write_note_impl`).
+    // A re-route changes the note's project and path; upsert-by-`id` on the
+    // background worker updates the same row. Done here, not left to the file
+    // watcher alone, so a re-correction reflects in search at once and still
+    // converges if the watcher never started.
+    let rel = routed
+        .note
+        .path
+        .strip_prefix(&kb)
+        .unwrap_or(&routed.note.path);
+    let indexed = IndexedNote::from_note(
+        &routed.note.note,
+        &routed.note.title,
+        &rel.to_string_lossy().replace('\\', "/"),
+    );
+    app.state::<IndexState>().index_note_best_effort(indexed);
+    broadcast_vault_changed(&app);
+
     Ok(file_note_outcome(routed, &kb))
 }
 
