@@ -5,6 +5,7 @@
 //! reads the vault itself — a scan stays O(notes-in-folder) parses, cheap for a
 //! per-project folder, and needs no index to be present or current.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -12,7 +13,9 @@ use std::time::SystemTime;
 
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 
-use crate::note::{self, Note, NoteEdit, NoteError, NoteId, NoteType, Result, Routing, INBOX};
+use crate::note::{
+    self, Note, NoteEdit, NoteError, NoteId, NoteType, Result, Routing, Source, INBOX,
+};
 use crate::routing_examples::{self, RoutingExample, RoutingExamples, RoutingExamplesError};
 
 /// A note found on disk: its absolute path, display title, and parsed content.
@@ -486,6 +489,84 @@ fn collect_project(dir: &Path, slug: String, out: &mut Vec<ProjectInfo>) -> bool
         });
     }
     qualifies
+}
+
+/// Every raw-artifact `source:` value claimed by a note anywhere in the vault,
+/// in one walk.
+///
+/// The Inbox plus every project subtree is visited; the other reserved root
+/// dirs (`note::RESERVED_ROOT_DIRS`) and hidden/infrastructure folders never
+/// hold notes and are skipped. Notes carrying a keyword source contribute
+/// nothing.
+///
+/// Tolerant by the same contract as [`list_projects`]: an unreadable subtree or
+/// an unparseable note is skipped rather than fatal, so one ACL-denied folder
+/// can't blank a caller's whole view. Only a vault root that itself fails to
+/// read errors. Callers that use this to find *unclaimed* artifacts should know
+/// the direction of that tolerance: a note skipped here claims nothing, so its
+/// session can resurface as unclaimed.
+pub fn collect_raw_artifact_sources(vault_root: &Path) -> Result<HashSet<String>> {
+    let mut sources = HashSet::new();
+    let entries = match fs::read_dir(vault_root) {
+        Ok(entries) => entries,
+        Err(source) if source.kind() == io::ErrorKind::NotFound => return Ok(sources),
+        Err(source) => {
+            return Err(NoteError::Io {
+                path: vault_root.to_path_buf(),
+                source,
+            })
+        }
+    };
+
+    for entry in entries {
+        let Ok(entry) = entry else { continue };
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        // The Inbox is a real note folder even though it is never a *project*,
+        // so it is the one reserved root name that is walked.
+        let is_inbox = name.eq_ignore_ascii_case(INBOX);
+        if !is_inbox && (is_reserved_root_dir(name) || !is_project_segment(name)) {
+            continue;
+        }
+        collect_sources_in(&entry.path(), &mut sources);
+    }
+    Ok(sources)
+}
+
+/// Depth-first half of [`collect_raw_artifact_sources`]. Silent on error at
+/// every level, per that function's tolerance contract.
+fn collect_sources_in(dir: &Path, out: &mut HashSet<String>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries {
+        let Ok(entry) = entry else { continue };
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let path = entry.path();
+        if file_type.is_dir() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else { continue };
+            if is_project_segment(name) {
+                collect_sources_in(&path, out);
+            }
+        } else if file_type.is_file() && is_md_file(&path) {
+            let Ok(contents) = fs::read_to_string(&path) else {
+                continue;
+            };
+            if let Ok(Note {
+                source: Source::RawArtifact(artifact),
+                ..
+            }) = Note::from_markdown(&contents)
+            {
+                out.insert(artifact);
+            }
+        }
+    }
 }
 
 pub(crate) fn is_md_file(path: &Path) -> bool {

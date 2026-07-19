@@ -19,6 +19,17 @@ export const VAULT_CHANGED_EVENT = "vault:changed";
  * `{ status: "error", message }`. Mirrors `events::INDEX_STATE_EVENT`. */
 export const INDEX_STATE_EVENT = "index:state";
 
+/** The retention sweep deleted expired raw sessions, so any surface listing
+ * sessions refetches rather than offering a retry for a file that is gone.
+ * Distinct from `vault:changed`: a prune touches no note. Mirrors
+ * `events::SESSIONS_CHANGED_EVENT`. */
+export const SESSIONS_CHANGED_EVENT = "sessions:changed";
+
+/** End-of-meeting distill progress, as a tagged-status payload: `distilling`,
+ * `routing_fallback`, `saved`, `skipped`, or `error`. Mirrors
+ * `distill_cmds::DISTILL_STATE_EVENT`. */
+export const DISTILL_STATE_EVENT = "distill:state";
+
 /** Emitted when a capture is attempted before recording consent is
  * acknowledged, so the frontend opens the consent nudge. Mirrors
  * `capture_control::CONSENT_REQUIRED_EVENT`. */

@@ -562,7 +562,7 @@ pub fn distill_session(
     route: &dyn Fn(&DistillOutput, &str) -> Routing,
 ) -> Result<DistilledNote, DistillError> {
     let segments = raw_session::read_raw_session(session_path)?;
-    if segments.iter().all(|s| s.text.trim().is_empty()) {
+    if raw_session::is_silent(&segments) {
         return Err(DistillError::EmptyTranscript);
     }
 

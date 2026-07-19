@@ -147,7 +147,14 @@ pub fn spawn_transcription(
                 // distill from a mock build, invoke the `distill_session`
                 // command on the saved path instead.
                 #[cfg(any(feature = "parakeet", feature = "whisper"))]
-                crate::distill_cmds::spawn_distill(&app, path);
+                if !crate::distill_cmds::spawn_distill(&app, path.clone()) {
+                    // A freshly written session can't already be claimed, so
+                    // this would mean a duplicate path escaped the writer.
+                    eprintln!(
+                        "distill: {} is already queued; not queuing it twice",
+                        path.display()
+                    );
+                }
             }
             Err(message) => {
                 eprintln!("transcription pipeline failed: {message}");

@@ -7,7 +7,9 @@ import {
   type NoteSummary,
 } from "../../useNotes";
 import { formatSlug, useProjects } from "../../useProjects";
+import { useFailedSessions } from "../../useSessions";
 import { Select, type SelectOption } from "../ui/Select";
+import { NeedsAttentionSection } from "./NeedsAttentionSection";
 import "./InboxView.css";
 
 /** The quiet meta line for an unfiled note: day, routing score, then tags. */
@@ -26,6 +28,9 @@ function inboxMeta(note: NoteSummary): string {
  */
 export function InboxView() {
   const { notes, loading, error } = useProjectNotes(INBOX_PROJECT);
+  // Owned here, not inside the section: the empty state below has to know
+  // whether anything needs attention before it can claim nothing is waiting.
+  const { sessions, error: sessionsError } = useFailedSessions();
   const { entries } = useProjects();
   // Real projects only — the Inbox itself is never a re-route target. Memoized
   // (entries is stable from useProjects) so the same array reference reaches
@@ -50,10 +55,20 @@ export function InboxView() {
           <h2 className="font-serif text-h2 text-text">Inbox</h2>
         </header>
 
+        {/* Captured meetings that never became a note: they need an action
+            (a retry), so they sit above the notes waiting to be filed. Renders
+            nothing when there are none, which is the normal case. */}
+        <NeedsAttentionSection sessions={sessions} error={sessionsError} />
+
         {error ? (
           <p className="text-body text-text-soft">{error}</p>
         ) : notes.length === 0 ? (
-          !loading && (
+          // "Nothing waiting" has to mean the whole view, not just this list:
+          // claiming it above a populated needs-attention section would tell
+          // the user there is nothing to do while showing them something to do.
+          !loading &&
+          sessions.length === 0 &&
+          !sessionsError && (
             <p className="text-body text-text-soft">
               Nothing waiting. Notes the router can&apos;t place land here.
             </p>
