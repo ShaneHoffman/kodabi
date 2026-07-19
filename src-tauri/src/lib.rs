@@ -98,6 +98,12 @@ pub fn run() {
             // Start the retention schedule (an immediate sweep, then periodic)
             // now that the settings state it reads is managed.
             retention::start_schedule(app.handle());
+
+            // Recover any capture session orphaned by a crash or kill
+            // mid-meeting (transcribe + distill what was spilled to disk), and
+            // sweep away un-recoverable leftovers. Detached, so it never blocks
+            // launch; a clean shutdown leaves nothing to recover.
+            transcribe::spawn_recovery(app.handle());
             Ok(())
         })
         .manage(audio_cmds::CaptureState::default())

@@ -9,22 +9,36 @@
 //! transcribes with `kodabi_core::transcription::MockEngine` and stays
 //! native-dependency-free (CI-green ahead of #37's benchmark-and-lock).
 
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
-use kodabi_audio::{AlignedSession, SessionChannel};
+use kodabi_audio::{AlignedSession, CombinedSession, MonoResampler, SessionChannel, SpillReader};
 use kodabi_core::device::DeviceId;
 use kodabi_core::glossary::Glossary;
+use kodabi_core::inflight::{self, InflightSession, OrphanKind, RecoverableOrphan};
 use kodabi_core::metrics::PipelineTimings;
 use kodabi_core::pipeline::transcribe_and_persist;
-use kodabi_core::transcription::{self, Channel, TranscriptionEngine};
+use kodabi_core::transcription::{self, AudioSource, Channel, SliceSource, TranscriptionEngine};
 use kodabi_llm::{ClaudeConfig, ClaudeRunner};
 use tauri::{AppHandle, Emitter, Manager};
 
 /// All engines expect mono `f32` PCM at this rate.
 const ENGINE_SAMPLE_RATE_HZ: u32 = 16_000;
+
+/// Samples per chunk fed to the engine on the in-memory fallback path. Ten
+/// seconds at 16 kHz — matches the streamed-from-disk cadence so both paths
+/// exercise the engine the same way.
+const IN_MEMORY_CHUNK_SAMPLES: usize = ENGINE_SAMPLE_RATE_HZ as usize * 10;
+
+/// How long an un-recoverable in-flight directory (corrupt, lone-channel, a
+/// mis-tap) is kept before [`kodabi_core::inflight::sweep_stale`] deletes it.
+/// Generous, so a directory that is merely failing to transcribe (a missing
+/// model) is retried across many launches rather than swept. `pub(crate)` so
+/// the retention schedule can piggyback the sweep on its cadence.
+pub(crate) const INFLIGHT_STALE_GRACE: Duration = Duration::from_secs(48 * 60 * 60);
 
 /// Event the frontend subscribes to for post-capture transcription progress.
 pub const TRANSCRIPTION_STATE_EVENT: &str = "transcription:state";
@@ -44,7 +58,8 @@ enum TranscriptionStateEvent {
 /// is treated as an accidental toggle (a mis-tap start→stop) rather than a
 /// real meeting: running the pipeline on one only writes a near-empty session
 /// file and flashes "Saved" for nothing, so we skip it and leave the UI idle.
-const MIN_TRANSCRIBE_DURATION: Duration = Duration::from_secs(1);
+/// `pub(crate)` so recovery's stale-sweep applies the same mis-tap bar.
+pub(crate) const MIN_TRANSCRIBE_DURATION: Duration = Duration::from_secs(1);
 
 /// Serializes pipeline runs so back-to-back meetings never hold two
 /// heavyweight transcription engines (each a multi-hundred-MB model) resident
@@ -57,17 +72,38 @@ static TRANSCRIBE_LOCK: Mutex<()> = Mutex::new(());
 /// runs under) never blocks on model load or the headless Claude cleanup
 /// call. A session shorter than [`MIN_TRANSCRIBE_DURATION`] is dropped without
 /// spawning anything; concurrent runs are serialized on [`TRANSCRIBE_LOCK`].
-pub fn spawn_transcription(app: &AppHandle, session: AlignedSession) {
-    if session.duration() < MIN_TRANSCRIBE_DURATION {
+///
+/// `inflight` is the on-disk session backing the audio (present whenever the
+/// spill directory was created at start): its `started_at` gives the recovered
+/// session an accurate `captured_at`, and it is removed once the transcript
+/// lands or kept (for next-launch recovery) if the run fails. When absent
+/// (spill setup failed, so capture stayed in memory), `captured_at` falls back
+/// to back-dating from the duration.
+pub fn spawn_transcription(
+    app: &AppHandle,
+    combined: CombinedSession,
+    inflight: Option<InflightSession>,
+) {
+    let duration = combined_duration(&combined);
+    if duration < MIN_TRANSCRIBE_DURATION {
+        // A mis-tap: nothing worth transcribing. Drop the in-flight directory.
+        if let Some(inflight) = inflight {
+            if let Err(err) = inflight.remove() {
+                eprintln!("capture: failed to remove short in-flight session: {err}");
+            }
+        }
         return;
     }
 
     let app = app.clone();
-    // Stamp the meeting's start now — right after stop — rather than when this
-    // thread finally acquires the lock and finishes model load + cleanup, any
-    // of which can lag `stop` by minutes.
-    let elapsed_ms = session.duration().as_millis() as i64;
-    let captured_at = Utc::now() - chrono::Duration::milliseconds(elapsed_ms);
+    // Prefer the in-flight start instant (stamped at capture start) over
+    // back-dating from the duration, which only estimates it.
+    let captured_at = inflight
+        .as_ref()
+        .map(InflightSession::started_at)
+        .unwrap_or_else(|| {
+            Utc::now() - chrono::Duration::milliseconds(duration.as_millis() as i64)
+        });
 
     std::thread::spawn(move || {
         // Hold the lock across the whole pipeline so only one engine is ever
@@ -84,7 +120,7 @@ pub fn spawn_transcription(app: &AppHandle, session: AlignedSession) {
             TRANSCRIPTION_STATE_EVENT,
             TranscriptionStateEvent::Transcribing,
         );
-        match run(&app, &session, captured_at) {
+        match run(&app, combined, captured_at) {
             Ok(path) => {
                 let _ = app.emit(
                     TRANSCRIPTION_STATE_EVENT,
@@ -92,6 +128,15 @@ pub fn spawn_transcription(app: &AppHandle, session: AlignedSession) {
                         path: path.display().to_string(),
                     },
                 );
+                // The transcript is safely on disk (atomic hard-link claim), so
+                // the spill is no longer needed: remove the in-flight directory.
+                // Order matters — remove only after the `.jsonl` lands, so a
+                // crash before this leaves a re-recoverable directory.
+                if let Some(inflight) = inflight {
+                    if let Err(err) = inflight.remove() {
+                        eprintln!("capture: failed to remove in-flight session: {err}");
+                    }
+                }
                 // End-of-meeting brain-pass (FOUNDING_DOC §3.5): distill the
                 // freshly saved session into a note. It has its own lock,
                 // thread, and event channel, so a slow or failing distill
@@ -110,9 +155,109 @@ pub fn spawn_transcription(app: &AppHandle, session: AlignedSession) {
                     TRANSCRIPTION_STATE_EVENT,
                     TranscriptionStateEvent::Error { message },
                 );
+                // Keep the in-flight directory (dropping `inflight` releases the
+                // lock but leaves the spill on disk) so the next launch can
+                // retry it — a transient failure like a missing model must not
+                // discard a real recording.
             }
         }
     });
+}
+
+/// Duration of a finalized session, whichever form it took.
+fn combined_duration(combined: &CombinedSession) -> Duration {
+    match combined {
+        CombinedSession::InMemory(session) => session.duration(),
+        CombinedSession::Spilled(spilled) => spilled.duration(),
+    }
+}
+
+/// On startup, recover any orphaned in-flight capture sessions (a crash or kill
+/// mid-meeting) and sweep away un-recoverable leftovers. Runs on a detached
+/// thread so it never blocks launch; a missing in-flight root is a no-op.
+///
+/// Each recoverable orphan flows through the *same* transcribe → persist →
+/// distill chain a normal stop uses, emitting the same `transcription:state`
+/// events, so the UI surfaces "Transcribing…" → "Saved" for it with no new
+/// wiring. Runs are serialized against live transcription on [`TRANSCRIBE_LOCK`].
+pub fn spawn_recovery(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let sessions_dir = match knowledge_base_dir(&app) {
+            Ok(kb) => kb.join("sessions"),
+            Err(err) => {
+                eprintln!("capture recovery skipped: {err}");
+                return;
+            }
+        };
+        let root = inflight::inflight_root(&sessions_dir);
+
+        let orphans = match inflight::scan(&root, MIN_TRANSCRIBE_DURATION) {
+            Ok(orphans) => orphans,
+            Err(err) => {
+                eprintln!("capture recovery scan failed: {err}");
+                return;
+            }
+        };
+        for orphan in orphans {
+            if let OrphanKind::Recoverable(orphan) = orphan {
+                recover_orphan(&app, orphan);
+            }
+            // `Discard` entries are left for `sweep_stale` below, which only
+            // deletes them once they are safely past the grace window.
+        }
+
+        if let Err(err) = inflight::sweep_stale(
+            &root,
+            Utc::now(),
+            INFLIGHT_STALE_GRACE,
+            MIN_TRANSCRIBE_DURATION,
+        ) {
+            eprintln!("capture recovery sweep failed: {err}");
+        }
+    });
+}
+
+/// Transcribe one recovered orphan through the shared pipeline and, on success,
+/// delete its directory. A failure keeps the directory (dropping `orphan`
+/// releases its lock but leaves the spill on disk) for the next launch to retry.
+fn recover_orphan(app: &AppHandle, orphan: RecoverableOrphan) {
+    let _guard = TRANSCRIBE_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _ = app.emit(
+        TRANSCRIPTION_STATE_EVENT,
+        TranscriptionStateEvent::Transcribing,
+    );
+    let captured_at = orphan.meta.started_at;
+    match run_spilled(
+        app,
+        &orphan.mic_pcm,
+        &orphan.system_pcm,
+        orphan.meta.sample_rate,
+        captured_at,
+    ) {
+        Ok(path) => {
+            let _ = app.emit(
+                TRANSCRIPTION_STATE_EVENT,
+                TranscriptionStateEvent::Saved {
+                    path: path.display().to_string(),
+                },
+            );
+            if let Err(err) = orphan.remove() {
+                eprintln!("capture recovery: failed to remove recovered session: {err}");
+            }
+            #[cfg(any(feature = "parakeet", feature = "whisper"))]
+            crate::distill_cmds::spawn_distill(app, path);
+        }
+        Err(message) => {
+            eprintln!("capture recovery pipeline failed: {message}");
+            let _ = app.emit(
+                TRANSCRIPTION_STATE_EVENT,
+                TranscriptionStateEvent::Error { message },
+            );
+        }
+    }
 }
 
 /// Resolves the knowledge-base root — the plain, user-syncable folder that
@@ -130,27 +275,77 @@ pub(crate) fn knowledge_base_dir(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|err| format!("failed to resolve knowledge base directory: {err}"))
 }
 
-/// Resamples both channels to 16 kHz, loads the project glossary and device
-/// identity, and runs the pure `kodabi-core` pipeline against `captured_at`
-/// (stamped by the caller at stop, not here). Errors collapse to a message
-/// string — the same convention `audio_cmds` uses for IPC results — since the
-/// only consumer here is the `transcription:state` event.
+/// Runs the pure `kodabi-core` pipeline against a finalized session, streaming
+/// from its spill files (a long meeting never materialises in memory) or from
+/// the in-memory buffer when spilling was unavailable. Errors collapse to a
+/// message string — the same convention `audio_cmds` uses for IPC results —
+/// since the only consumer here is the `transcription:state` event.
 fn run(
     app: &AppHandle,
+    combined: CombinedSession,
+    captured_at: DateTime<Utc>,
+) -> Result<PathBuf, String> {
+    match combined {
+        CombinedSession::Spilled(spilled) => run_spilled(
+            app,
+            &spilled.mic_path,
+            &spilled.system_path,
+            spilled.sample_rate,
+            captured_at,
+        ),
+        CombinedSession::InMemory(session) => run_in_memory(app, &session, captured_at),
+    }
+}
+
+/// Stream both channels off their spill files, resampling to 16 kHz on the fly,
+/// so nothing but the current chunk is ever resident. Shared by a normal stop
+/// (the live spill) and startup recovery (an orphaned spill).
+fn run_spilled(
+    app: &AppHandle,
+    mic_path: &Path,
+    system_path: &Path,
+    source_rate: u32,
+    captured_at: DateTime<Utc>,
+) -> Result<PathBuf, String> {
+    let mut mic =
+        Resampling16kSource::open(mic_path, source_rate).map_err(|err| err.to_string())?;
+    let mut system =
+        Resampling16kSource::open(system_path, source_rate).map_err(|err| err.to_string())?;
+    let mut channels: [(Channel, &mut dyn AudioSource); 2] =
+        [(Channel::You, &mut mic), (Channel::Them, &mut system)];
+    persist(app, &mut channels, captured_at)
+}
+
+/// The in-memory fallback (spill files couldn't be created): resample both
+/// channels up front and feed them in fixed-size chunks.
+fn run_in_memory(
+    app: &AppHandle,
     session: &AlignedSession,
+    captured_at: DateTime<Utc>,
+) -> Result<PathBuf, String> {
+    let mic_pcm = session
+        .channel_resampled(SessionChannel::Mic, ENGINE_SAMPLE_RATE_HZ)
+        .map_err(|err| err.to_string())?;
+    let system_pcm = session
+        .channel_resampled(SessionChannel::System, ENGINE_SAMPLE_RATE_HZ)
+        .map_err(|err| err.to_string())?;
+    let mut mic = SliceSource::new(&mic_pcm, IN_MEMORY_CHUNK_SAMPLES);
+    let mut system = SliceSource::new(&system_pcm, IN_MEMORY_CHUNK_SAMPLES);
+    let mut channels: [(Channel, &mut dyn AudioSource); 2] =
+        [(Channel::You, &mut mic), (Channel::Them, &mut system)];
+    persist(app, &mut channels, captured_at)
+}
+
+/// Load the glossary and device identity and run the core transcribe → clean →
+/// persist pipeline over `channels` (each already yielding 16 kHz mono `f32`).
+fn persist(
+    app: &AppHandle,
+    channels: &mut [(Channel, &mut dyn AudioSource)],
     captured_at: DateTime<Utc>,
 ) -> Result<PathBuf, String> {
     let kb_dir = knowledge_base_dir(app)?;
     let glossary = Glossary::load(&kb_dir).map_err(|err| err.to_string())?;
     let device = app.state::<DeviceId>().inner().clone();
-
-    let mic = session
-        .channel_resampled(SessionChannel::Mic, ENGINE_SAMPLE_RATE_HZ)
-        .map_err(|err| err.to_string())?;
-    let system = session
-        .channel_resampled(SessionChannel::System, ENGINE_SAMPLE_RATE_HZ)
-        .map_err(|err| err.to_string())?;
-    let channels = [(Channel::You, mic), (Channel::Them, system)];
 
     let cleaner = ClaudeRunner::new(ClaudeConfig::cleanup_from_env());
     let mut make_engine = build_engine;
@@ -159,7 +354,7 @@ fn run(
         &mut make_engine,
         &cleaner,
         &glossary,
-        &channels,
+        channels,
         ENGINE_SAMPLE_RATE_HZ,
         &kb_dir.join("sessions"),
         captured_at,
@@ -170,6 +365,67 @@ fn run(
 
     emit_metrics(&outcome.timings);
     Ok(outcome.path)
+}
+
+/// Reads a spilled channel file and resamples it from the capture rate (48 kHz)
+/// down to the 16 kHz the engines expect, a chunk at a time — the disk-backed
+/// [`AudioSource`] the streamed transcription path pulls from.
+struct Resampling16kSource {
+    reader: SpillReader,
+    resampler: MonoResampler,
+    read_chunk: usize,
+    buf: Vec<f32>,
+    finished: bool,
+}
+
+impl Resampling16kSource {
+    fn open(path: &Path, source_rate: u32) -> io::Result<Self> {
+        let reader = SpillReader::open(path)?;
+        let resampler = MonoResampler::new(source_rate, ENGINE_SAMPLE_RATE_HZ)
+            .map_err(|err| io::Error::other(err.to_string()))?;
+        Ok(Resampling16kSource {
+            reader,
+            resampler,
+            // Read ~10s of source audio per pull; resampling shrinks it to the
+            // ~10s of 16 kHz the engine then consumes.
+            read_chunk: source_rate as usize * 10,
+            buf: Vec::new(),
+            finished: false,
+        })
+    }
+}
+
+impl AudioSource for Resampling16kSource {
+    fn next_chunk(&mut self) -> io::Result<Option<&[f32]>> {
+        loop {
+            if self.finished {
+                return Ok(None);
+            }
+            match self.reader.next_chunk(self.read_chunk)? {
+                Some(samples) => {
+                    // Copy out so the reader borrow ends before the resampler
+                    // borrow begins (disjoint fields, but the copy is cheap
+                    // against the transcription cost).
+                    let input = samples.to_vec();
+                    let resampled = self.resampler.push(&input);
+                    if resampled.is_empty() {
+                        continue; // not yet a full resample chunk — read more
+                    }
+                    self.buf = resampled;
+                    return Ok(Some(&self.buf));
+                }
+                None => {
+                    self.finished = true;
+                    let tail = self.resampler.flush();
+                    if tail.is_empty() {
+                        return Ok(None);
+                    }
+                    self.buf = tail;
+                    return Ok(Some(&self.buf));
+                }
+            }
+        }
+    }
 }
 
 /// Env var naming where to append one JSON line of this run's
