@@ -7,7 +7,8 @@ of truth is `docs/FOUNDING_DOC.md`; this is the working roadmap derived from it.
 
 **Decisions already locked that affect later phases:** License = AGPL-3.0-only · Frontend = React +
 Tailwind · Transcription = per-channel (you/them attribution) · Default STT engine = Parakeet TDT
-(whisper.cpp fallback) · Glossary-cleanup post-pass pulled forward into Phase 1.
+(whisper.cpp fallback), selected at build time via mutually exclusive cargo features (release builds
+ship Parakeet) · Glossary-cleanup post-pass pulled forward into Phase 1.
 
 ---
 
@@ -15,20 +16,24 @@ Tailwind · Transcription = per-channel (you/them attribution) · Default STT en
 **Goal:** Turn a raw transcript into a routed, stored, searchable note — plus quick-capture notes through the same pipeline.
 **Milestone:** the v1 definition-of-done sentence is true, **minus chat**.
 
-- [ ] End-of-meeting pipeline: summary → action items / decisions extraction (the glossary-cleanup step is already pulled into Phase 1 as the post-pass)
-- [ ] Confidence-split routing; Inbox UI; one-click re-route feeding the correction loop
+- [ ] End-of-meeting pipeline: glossary cleanup at transcription time (Phase 1 post-pass), then a single headless-Claude distill call returning summary, action items, and decisions as one structured result
+- [ ] Distill token budgeting: chunk or map-reduce transcripts that exceed a configured token budget; a 2-hour meeting must distill, not error (#59 `feat/distill-token-budget`)
+- [ ] Confidence-split routing; Inbox UI; one-click re-route that **records** each correction as a routing example (`_routing_examples.yml`, in the KB folder) — wiring routing into the distill pipeline tracked as #55 `feat/wire-distill-routing`
+- [ ] Incremental capture durability: flush audio/segments to disk during capture so a crash mid-meeting loses at most the last flush interval, and memory stays bounded for multi-hour meetings (#57 `feat/incremental-capture-flush`)
 - [ ] Quick-capture window (global hotkey → text box → same routing pipeline) + basic note create/edit within a project
 - [ ] Markdown writer (frontmatter schema from Phase 0)
 - [ ] Frontmatter-validator Claude Code skill (check emitted notes against `docs/FRONTMATTER_SCHEMA.md`) — build alongside the markdown writer, its first real consumer
 - [ ] SQLite schema: FTS5 + sqlite-vec; local embedding pipeline; file watcher; full rebuild command
 - [ ] Hybrid retrieval (RRF merge) exposed as `search_notes` MCP tool
 - [ ] Retention policy setting + consent nudge
+- [ ] Document (and where possible disable) transcript retention inside Claude Code's own session logs, so the in-app retention policy's promise is complete
 
 ## Phase 3 — The brain (MCP + Claude Code)
 **Goal:** Wire Claude Code into the knowledge base via the MCP server; deliver chat over real history.
 **Milestone:** "What's outstanding on Briarwood Golf?" answered correctly in-app from real meeting history. **← Dogfood daily from here.**
 
 - [ ] MCP server (stdio) exposing the v1 tool surface
+- [ ] Routing reads recorded corrections as an additive scoring signal — a correction must measurably change future routing (#56 `feat/routing-examples-signal`)
 - [ ] Embedded xterm.js terminal running Claude Code with the MCP server preconfigured
 - [ ] Chat sessions distilled + filed + indexed as first-class documents
 - [ ] Designed chat UI driving Claude Code headless (same stack, second skin)
