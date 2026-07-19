@@ -19,11 +19,12 @@ impl NoteIndex {
     /// The `id` is the stable key, so a re-index of a moved or edited note
     /// updates the same row and preserves its `pk`. The FTS index is kept in
     /// sync by the schema's triggers, and the tag set is refreshed explicitly.
-    /// The `notes_vec` embedding is *derived* content that the embedding
-    /// pipeline owns (nothing is written to it here); because it goes stale when
-    /// the title or body changes, an upsert that changes either drops the note's
-    /// vector row so the pipeline recomputes it — a pure move keeps it. All of
-    /// it is one transaction, so a partially-applied upsert is impossible.
+    /// The `notes_vec` chunk vectors and their `note_chunks` text are *derived*
+    /// content that the embedding pipeline owns (nothing is written to them
+    /// here); because they go stale when the title or body changes, an upsert
+    /// that changes either drops the note's chunk rows from both tables so the
+    /// pipeline recomputes them — a pure move keeps them. All of it is one
+    /// transaction, so a partially-applied upsert is impossible.
     pub fn upsert_note(&mut self, note: &IndexedNote) -> Result<()> {
         let date_utc = normalize_date_to_utc(&note.date)?;
 
@@ -71,12 +72,15 @@ impl NoteIndex {
             row.get(0)
         })?;
 
-        // If the embeddable content changed, the cached embedding (if the
-        // pipeline has written one) no longer matches — drop it so it is
-        // recomputed rather than served stale. Keyed by the stable `id`.
+        // If the embeddable content changed, the cached chunk vectors (if the
+        // pipeline has written any) no longer match — drop them from both the
+        // vector table and its text companion so they are recomputed rather
+        // than served stale. Keyed by the stable `id`; `note_id` is a `vec0`
+        // metadata column, so the `notes_vec` delete needs no key parsing.
         if let Some((old_title, old_body)) = previous_content {
             if old_title != note.title || old_body != note.body {
                 tx.execute("DELETE FROM notes_vec WHERE note_id = ?1", [&note.id])?;
+                tx.execute("DELETE FROM note_chunks WHERE note_id = ?1", [&note.id])?;
             }
         }
         // Replace the tag set wholesale so a re-index reflects removed tags too.
@@ -406,44 +410,71 @@ mod tests {
     }
 
     #[test]
-    fn changing_the_body_drops_a_stale_embedding_but_a_move_keeps_it() {
+    fn changing_the_body_drops_stale_chunks_but_a_move_keeps_them() {
+        use crate::index::{EmbeddedChunk, EMBEDDING_DIM};
+
         let mut index = NoteIndex::open_in_memory().unwrap();
         let mut original = note("n_embed1", Some("Acme"), "2026-07-11");
         original.body = "first body".to_string();
         index.upsert_note(&original).unwrap();
 
-        // Stand in for the (future) embedding pipeline: write a vector keyed by
-        // the note id.
-        let embedding = format!("[{}]", vec!["0"; crate::index::EMBEDDING_DIM].join(","));
-        index
-            .conn
-            .execute(
-                "INSERT INTO notes_vec (note_id, embedding) VALUES ('n_embed1', ?1)",
-                [&embedding],
-            )
-            .unwrap();
-        let vec_rows = |idx: &NoteIndex| -> i64 {
-            idx.conn
+        // Stand in for the embedding pipeline: write two chunk vectors (and
+        // their text) keyed by the note id, through the real store API.
+        let chunks = vec![
+            EmbeddedChunk {
+                text: "first body".to_string(),
+                embedding: vec![0.0; EMBEDDING_DIM],
+            },
+            EmbeddedChunk {
+                text: "more".to_string(),
+                embedding: vec![0.0; EMBEDDING_DIM],
+            },
+        ];
+        index.set_note_chunks("n_embed1", &chunks).unwrap();
+
+        // Count rows in both the vector table and its text companion — the
+        // invariant is that they move in lockstep.
+        let rows = |idx: &NoteIndex| -> (i64, i64) {
+            let vec_rows = idx
+                .conn
                 .query_row(
                     "SELECT count(*) FROM notes_vec WHERE note_id = 'n_embed1'",
                     [],
                     |r| r.get(0),
                 )
-                .unwrap()
+                .unwrap();
+            let text_rows = idx
+                .conn
+                .query_row(
+                    "SELECT count(*) FROM note_chunks WHERE note_id = 'n_embed1'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            (vec_rows, text_rows)
         };
-        assert_eq!(vec_rows(&index), 1);
+        assert_eq!(rows(&index), (2, 2));
 
-        // A pure move (path/project change, same title+body) keeps the vector.
+        // A pure move (path/project change, same title+body) keeps the chunks.
         let mut moved = original.clone();
         moved.project = Some("Growth".to_string());
         moved.path = "Growth/n_embed1.md".to_string();
         index.upsert_note(&moved).unwrap();
-        assert_eq!(vec_rows(&index), 1, "a move must not drop the embedding");
+        assert_eq!(rows(&index), (2, 2), "a move must not drop the chunks");
 
-        // Editing the body drops the now-stale vector.
+        // Editing the body drops the now-stale chunks from both tables.
         let mut edited = moved.clone();
         edited.body = "rewritten body".to_string();
         index.upsert_note(&edited).unwrap();
-        assert_eq!(vec_rows(&index), 0, "an edit must drop the stale embedding");
+        assert_eq!(rows(&index), (0, 0), "an edit must drop the stale chunks");
+
+        // A title change alone also invalidates (the title is prepended to
+        // every embedded chunk).
+        index.set_note_chunks("n_embed1", &chunks).unwrap();
+        assert_eq!(rows(&index), (2, 2));
+        let mut retitled = edited.clone();
+        retitled.title = "A New Title".to_string();
+        index.upsert_note(&retitled).unwrap();
+        assert_eq!(rows(&index), (0, 0), "a title change must drop the chunks");
     }
 }
