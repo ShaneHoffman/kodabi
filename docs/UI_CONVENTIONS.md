@@ -207,5 +207,8 @@ Beyond spacing and primitives, a few consistency rules for any screen:
   inline so it overrides the primitive's symmetric padding.
 - **`TextField` / `Select`** — built here as foundation; their first screen consumers arrive with the note
   create/edit work (board #46). Until then the usage examples above are the reference.
+- **`NeedsAttentionSection`** (in the Inbox) — the per-row Retry for a session whose distill failed is a
+  `Button variant="quiet"`, matching the weight of the Inbox's own right-column controls; a row-level
+  action shouldn't shout. Its emphasis is value and type only, never the reserved green.
 - **`CommandPalette`** is intentionally left as-is: a bespoke search-combobox (no focus ring by design,
   its own inset hairline, `role="combobox"` on the input) — not a generic form field.

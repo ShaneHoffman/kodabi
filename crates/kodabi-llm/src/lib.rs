@@ -50,6 +50,10 @@ pub const DISTILL_DEFAULT_MODEL: &str = "sonnet";
 /// Default cap on a single distill run: a whole-meeting pass on a stronger
 /// model, so far roomier than the cleanup default. Override via
 /// `KODABI_DISTILL_TIMEOUT_SECS` ([`ClaudeConfig::distill_from_env`]).
+///
+/// This is a **per-call** cap, not a per-session one: a transcript over
+/// `kodabi_core::distill`'s input budget is chunked into one call per chunk
+/// plus a merge call, and each of them gets this timeout in full.
 pub const DISTILL_DEFAULT_TIMEOUT_SECS: u64 = 180;
 
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(DEFAULT_TIMEOUT_SECS);

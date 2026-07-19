@@ -22,6 +22,7 @@ pub mod reconcile;
 pub mod retention;
 pub mod routing;
 pub mod routing_examples;
+pub mod sessions;
 pub mod settings;
 pub mod transcription;
 pub mod vault;

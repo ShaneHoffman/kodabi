@@ -24,13 +24,16 @@ Run and actually read these before writing anything:
 
 If the current branch **is** `main`, or there are **no** commits vs `main`, STOP and report that there's nothing to open a PR for.
 
-## 2. Check for uncommitted changes from an independent code review
+## 2. Check for unexpected uncommitted changes
 
-Run `git status --short`. **Expect to sometimes find uncommitted changes here that you did not
-make.** This worktree can be shared with a separate, independent Code Review session that applies
-fixes directly to files without committing (per this repo's board flow — see the
-"chore: fix code-review findings from ..." pattern in git history). Finding modified files you
-don't recognize authoring is normal, not a sign you forgot to commit your own work.
+Run `git status --short`. The tree should normally be **clean**: the Code Review session runs
+`/code-review-fix`, which commits its own fixes on the branch (the `fix: fix code-review findings`
+pattern in git history), so the commits you see in step 1 account for the whole branch.
+
+Uncommitted changes here are therefore **unexpected** — a review session that crashed before
+committing, an older review that only edited files, or stray edits from another session sharing
+this worktree. Don't assume you forgot to commit your own work, and don't assume they're safe:
+investigate before doing anything with them.
 
 - If the tree is clean, continue to step 3.
 - If there are uncommitted changes: `git diff` them and read them, then summarize what they do for
@@ -38,10 +41,9 @@ don't recognize authoring is normal, not a sign you forgot to commit your own wo
   them unilaterally — only you originating a commit without asking is authorized by the board
   flow, not a second party's silent edits.
 - If the user confirms, commit them as **their own commit**, separate from the original work, so
-  the review trail stays legible — don't fold them into an earlier commit via amend. Message:
-  `<type>: fix code-review findings` (or a more specific summary if one clear theme stands out),
-  typically `fix:` regardless of the branch's own prefix, since these are review-driven
-  corrections rather than the original feature work.
+  the review trail stays legible — don't fold them into an earlier commit via amend. Use the
+  sanctioned review-commit subject from [`commit`](../commit/SKILL.md): `fix: fix code-review
+  findings` (`docs:` when the fixes are docs-only), regardless of the branch's own prefix.
 - If the user declines, stop and ask how they'd like to proceed before continuing — don't silently
   push or open a PR that omits changes currently sitting in the working tree.
 
