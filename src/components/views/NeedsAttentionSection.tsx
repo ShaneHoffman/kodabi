@@ -1,20 +1,16 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DISTILL_STATE_EVENT } from "../../events";
 import { useTauriEvent } from "../../useTauriEvent";
-import { retryDistill, useFailedSessions, type FailedSession } from "../../useSessions";
+import { retryDistill, type FailedSession } from "../../useSessions";
 import { notifyVaultChanged } from "../../useVaultQuery";
-import type { DistillState } from "../../useDistillState";
+import type { DistillEvent } from "../../useDistillState";
 import { Button } from "../ui/Button";
 
-/** The wire payload of `distill:state`, including the non-terminal warning this
- * section ignores. Mirrors `useDistillState`'s `DistillEvent`. */
-type DistillEvent = DistillState | { status: "routing_fallback"; message: string };
-
-/** A readable name for a session: its slug de-hyphenated, else the capture day. */
+/** A readable name for a session: its slug de-hyphenated, else the raw filename.
+ * Never the capture time, which the line below the title already shows. */
 function sessionTitle(session: FailedSession): string {
   const slug = session.slug?.split("-").filter(Boolean).join(" ").trim();
-  if (slug) return slug;
-  return `Captured ${formatCaptureTime(session.captured_at)}`;
+  return slug || session.file_name;
 }
 
 /** The stored instant (UTC) rendered in the user's own zone, since this is a
@@ -41,23 +37,32 @@ function formatCaptureTime(capturedAt: string): string {
  * when there is nothing to act on, which is the normal case: a silent capture is
  * a benign skip and never appears here, and a session still being distilled is
  * excluded by the backend until its run finishes.
+ *
+ * The list itself is owned by `InboxView`, which needs to know whether there is
+ * anything here before deciding its own "nothing waiting" empty state.
  */
-export function NeedsAttentionSection() {
-  const { sessions, error } = useFailedSessions();
+export function NeedsAttentionSection({
+  sessions,
+  error,
+}: {
+  sessions: FailedSession[];
+  error: string | null;
+}) {
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
 
   useTauriEvent<DistillEvent>(DISTILL_STATE_EVENT, (payload) => {
-    if (payload.status === "saved" || payload.status === "skipped") {
-      // The run finished; a successful distill also broadcasts `vault:changed`,
-      // which refetches this list and drops the row.
-      setPendingPath(null);
+    if (payload.status === "distilling" || payload.status === "routing_fallback") {
       return;
     }
+    // Only the run this row is waiting on may clear its pending state. Every
+    // terminal event names its session, so another session finishing (an
+    // automatic distill landing mid-retry) can no longer re-arm Retry for a run
+    // that is still going, which would queue a second run and a second note.
+    setPendingPath((current) =>
+      current === payload.session_path ? null : current,
+    );
     if (payload.status === "error") {
-      setPendingPath((current) =>
-        current === payload.session_path ? null : current,
-      );
       setRowErrors((current) => ({
         ...current,
         [payload.session_path]: payload.message,
@@ -67,6 +72,23 @@ export function NeedsAttentionSection() {
       notifyVaultChanged();
     }
   });
+
+  // Drop messages for sessions that are no longer listed (retried successfully,
+  // or pruned by the retention sweep). Without this the map only ever grows,
+  // and a message from an old failure could resurface under a row that came
+  // back. Returning `current` unchanged when nothing was pruned keeps React
+  // from re-rendering on every refetch.
+  useEffect(() => {
+    setRowErrors((current) => {
+      const listed = new Set(sessions.map((session) => session.path));
+      const remaining = Object.entries(current).filter(([path]) =>
+        listed.has(path),
+      );
+      return remaining.length === Object.keys(current).length
+        ? current
+        : Object.fromEntries(remaining);
+    });
+  }, [sessions]);
 
   const retry = (path: string) => {
     setPendingPath(path);

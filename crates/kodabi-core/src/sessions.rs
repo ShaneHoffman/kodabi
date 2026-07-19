@@ -23,11 +23,13 @@
 //! - Deleting a note whose session still exists makes that session reappear as
 //!   needing attention. That is the honest reading of "a session with no note",
 //!   not a bug.
-//! - A session claimed only by a note whose frontmatter no longer parses reads
-//!   as unreferenced (a corrupt file is skipped by the scan), so it can
-//!   resurface. Rare, and retrying merely writes a second note.
+//! - A session claimed only by a note whose frontmatter no longer parses, or
+//!   whose folder can't be read at all, reads as unreferenced (both are skipped
+//!   by the walk), so it can resurface. That direction is deliberate: the walk
+//!   stays tolerant so one bad file or ACL-denied folder can't blank the whole
+//!   list, and the cost of erring this way is a duplicate note if the user
+//!   retries, against a silently dropped meeting if it erred the other way.
 
-use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -35,7 +37,7 @@ use std::path::{Path, PathBuf};
 use chrono::{SecondsFormat, Utc};
 
 use crate::naming;
-use crate::note::{NoteError, Source, INBOX};
+use crate::note::NoteError;
 use crate::raw_session::{self, RawSessionError};
 use crate::retention;
 use crate::vault;
@@ -60,10 +62,13 @@ pub struct FailedSession {
     pub captured_at: String,
 }
 
-/// Why deriving the needs-attention list failed outright. Per-file trouble
-/// never lands here — an unreadable session is *listed* (it needs attention)
-/// and an unparseable note is skipped by the scan — so this is only a sessions
-/// directory or vault root that can't be enumerated at all.
+/// Why deriving the needs-attention list failed outright. Per-file and
+/// per-folder trouble never lands here — an unreadable session is *listed* (it
+/// needs attention), and an unparseable note or unreadable project subtree is
+/// skipped by [`vault::collect_raw_artifact_sources`] rather than failing the
+/// walk — so this is only a sessions directory or vault root that can't be
+/// enumerated at all. One ACL-denied folder must never blank the whole list:
+/// the surface exists precisely so a failed capture is not silently dropped.
 #[derive(Debug, thiserror::Error)]
 pub enum SessionsError {
     #[error("failed to read sessions directory {path}: {source}")]
@@ -78,13 +83,13 @@ pub enum SessionsError {
 
 /// Lists the sessions needing attention, newest capture first.
 ///
-/// Cost is linear in the size of the vault: every note is read and parsed to
-/// collect the claimed-session set (the same class of walk as
-/// [`crate::vault::find_note_anywhere`]), plus one read per unclaimed session
-/// to tell a silent capture from a real one. Fine for a personal vault, and it
-/// only runs when a list that shows these is on screen.
+/// Cost is linear in the size of the vault: one walk that reads and parses
+/// every note to collect the claimed-session set (the same class of walk as
+/// [`crate::vault::find_note_anywhere`]), plus a streamed prefix of each
+/// unclaimed session to tell a silent capture from a real one. Fine for a
+/// personal vault, and it only runs when a list that shows these is on screen.
 pub fn list_failed_sessions(vault_root: &Path) -> Result<Vec<FailedSession>, SessionsError> {
-    let claimed = claimed_sessions(vault_root)?;
+    let claimed = vault::collect_raw_artifact_sources(vault_root)?;
     let sessions_dir = vault_root.join(SESSIONS_DIR);
 
     let entries = match fs::read_dir(&sessions_dir) {
@@ -150,8 +155,8 @@ pub fn list_failed_sessions(vault_root: &Path) -> Result<Vec<FailedSession>, Ses
 /// silently withheld. The one exception is a file that vanished mid-scan (a
 /// retention sweep racing this walk), which is simply gone, not broken.
 fn needs_attention(path: &Path) -> bool {
-    match raw_session::read_raw_session(path) {
-        Ok(segments) => !raw_session::is_silent(&segments),
+    match raw_session::is_silent_on_disk(path) {
+        Ok(silent) => !silent,
         Err(RawSessionError::Io { source, .. }) if source.kind() == io::ErrorKind::NotFound => {
             false
         }
@@ -166,34 +171,11 @@ fn source_value(file_name: &str) -> String {
     format!("{SESSIONS_DIR}/{file_name}")
 }
 
-/// Every raw-artifact `source:` claimed by a note anywhere in the vault: the
-/// Inbox plus every discovered project (`list_projects` excludes the Inbox
-/// sentinel, and reports nested projects as their own slugs, so together these
-/// cover every note the app can see).
-fn claimed_sessions(vault_root: &Path) -> Result<HashSet<String>, SessionsError> {
-    let mut claimed = HashSet::new();
-    let projects = vault::list_projects(vault_root)?;
-    let slugs = std::iter::once(INBOX.to_string()).chain(projects.into_iter().map(|p| p.slug));
-
-    for slug in slugs {
-        // A note whose frontmatter doesn't parse lands in `scan.skipped` and
-        // claims nothing — the same "one bad file must not break the view"
-        // contract the rest of the vault layer keeps.
-        let scan = vault::scan_project_notes(vault_root, &slug)?;
-        for listed in scan.notes {
-            if let Source::RawArtifact(path) = listed.note.source {
-                claimed.insert(path);
-            }
-        }
-    }
-    Ok(claimed)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::device::DeviceId;
-    use crate::note::{Note, NoteId, NoteType, Routing};
+    use crate::note::{Note, NoteId, NoteType, Routing, Source, INBOX};
     use crate::raw_session::TranscriptSegment;
     use crate::transcription::Channel;
     use chrono::{DateTime, TimeZone, Utc};

@@ -10,6 +10,7 @@
 //! translation.
 
 use std::fs;
+use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -174,9 +175,46 @@ pub fn read_raw_session(path: &Path) -> Result<Vec<TranscriptSegment>> {
 /// two agree by construction — a silent capture is never surfaced as an error
 /// and never nagged about as retryable.
 pub fn is_silent(segments: &[TranscriptSegment]) -> bool {
-    segments
-        .iter()
-        .all(|segment| segment.text.trim().is_empty())
+    segments.iter().all(segment_is_silent)
+}
+
+/// [`is_silent`] for a transcript still on disk: streams the file a line at a
+/// time and stops at the first segment carrying real text, so answering
+/// "was anything said?" never reads or allocates a whole transcript. The
+/// needs-attention scan asks this of every unclaimed session on every refresh,
+/// where a spoken meeting answers on its first line instead of its last.
+///
+/// Shares [`segment_is_silent`] with the in-memory form, so the streaming and
+/// buffered answers cannot disagree.
+pub fn is_silent_on_disk(path: &Path) -> Result<bool> {
+    let file = fs::File::open(path).map_err(|source| RawSessionError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+
+    for line in BufReader::new(file).lines() {
+        let line = line.map_err(|source| RawSessionError::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        if line.trim().is_empty() {
+            continue;
+        }
+        let segment: TranscriptSegment =
+            serde_json::from_str(&line).map_err(|source| RawSessionError::Json {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        if !segment_is_silent(&segment) {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// The one definition of "this segment holds nothing worth distilling".
+fn segment_is_silent(segment: &TranscriptSegment) -> bool {
+    segment.text.trim().is_empty()
 }
 
 /// Writes `contents` to a fresh, process-unique scratch file in `dir` and
@@ -316,6 +354,62 @@ mod tests {
 
         // One segment with real text is enough to make the session distillable.
         assert!(!is_silent(&[line("  "), line("lets sync on the budget")]));
+    }
+
+    #[test]
+    fn is_silent_on_disk_agrees_with_the_in_memory_form() {
+        let dir = tempdir().unwrap();
+        let line = |text: &str| TranscriptSegment {
+            index: 0,
+            channel: Channel::You,
+            speaker: None,
+            start_ms: 0,
+            end_ms: 500,
+            text: text.to_string(),
+        };
+
+        // The streaming and buffered answers must match on every shape, or the
+        // needs-attention scan and the distill pass would disagree about which
+        // captures are silent.
+        for segments in [
+            Vec::new(),
+            vec![line("   "), line("\t\n")],
+            vec![line("  "), line("lets sync on the budget")],
+        ] {
+            let path = write_raw_session(
+                dir.path(),
+                instant(),
+                &device(),
+                Some("silence check"),
+                &segments,
+            )
+            .unwrap();
+            assert_eq!(
+                is_silent_on_disk(&path).unwrap(),
+                is_silent(&segments),
+                "streaming and buffered checks disagreed on {segments:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn is_silent_on_disk_stops_at_the_first_spoken_segment() {
+        // Real text on line one, unparseable garbage after it: the scan must
+        // answer "not silent" without reading far enough to hit the garbage.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("early-exit.jsonl");
+        let spoken = serde_json::to_string(&TranscriptSegment {
+            index: 0,
+            channel: Channel::You,
+            speaker: None,
+            start_ms: 0,
+            end_ms: 500,
+            text: "lets sync on the budget".to_string(),
+        })
+        .unwrap();
+        fs::write(&path, format!("{spoken}\nnot json at all\n")).unwrap();
+
+        assert!(!is_silent_on_disk(&path).unwrap());
     }
 
     #[test]
