@@ -6,7 +6,7 @@
 //! progress — same shape as `transcribe.rs`'s pipeline wiring.
 
 use std::path::{Component, Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 
 use kodabi_core::distill::{route_distilled, DistillError};
 use kodabi_llm::{ClaudeConfig, ClaudeRunner};
@@ -36,10 +36,22 @@ pub const DISTILL_STATE_EVENT: &str = "distill:state";
 #[serde(tag = "status", rename_all = "snake_case")]
 enum DistillStateEvent {
     Distilling,
-    RoutingFallback { message: String },
-    Saved { path: String },
-    Skipped { reason: String },
-    Error { message: String },
+    RoutingFallback {
+        message: String,
+    },
+    Saved {
+        path: String,
+    },
+    Skipped {
+        reason: String,
+    },
+    /// `session_path` names the session that failed, so a list of retryable
+    /// sessions can attribute the message to the right row (the transient
+    /// indicator ignores it and shows the message alone).
+    Error {
+        message: String,
+        session_path: String,
+    },
 }
 
 /// Serializes distill runs so back-to-back sessions never hold two headless
@@ -47,6 +59,36 @@ enum DistillStateEvent {
 /// purpose: a distill (a subprocess call) must not block the next meeting's
 /// transcription (a model load), or vice versa.
 static DISTILL_LOCK: Mutex<()> = Mutex::new(());
+
+/// Sessions queued for or currently being distilled.
+///
+/// [`list_failed_sessions`] subtracts these from what it reports. A session on
+/// disk with no note yet is exactly what a *failed* distill looks like, so
+/// without this the seconds between a capture landing and its automatic distill
+/// finishing would surface the meeting as needing attention — and a click there
+/// would queue a second run that writes a duplicate note. Shell state on
+/// purpose: it describes runs this process has in hand, which is not something
+/// the vault on disk can answer.
+static DISTILLS_IN_FLIGHT: Mutex<Vec<PathBuf>> = Mutex::new(Vec::new());
+
+fn in_flight() -> MutexGuard<'static, Vec<PathBuf>> {
+    DISTILLS_IN_FLIGHT
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn mark_in_flight(session_path: &Path) {
+    in_flight().push(session_path.to_path_buf());
+}
+
+/// Drops one claim on `session_path`. Removes a single entry, not every match,
+/// so two queued runs of the same session release independently.
+fn clear_in_flight(session_path: &Path) {
+    let mut guard = in_flight();
+    if let Some(index) = guard.iter().position(|path| path == session_path) {
+        guard.swap_remove(index);
+    }
+}
 
 /// Queues the raw session at `session_path` for distillation. Validation is
 /// synchronous (a bad path fails the IPC call directly); the distill itself
@@ -67,12 +109,50 @@ pub fn distill_session(app: AppHandle, session_path: String) -> Result<(), Strin
     Ok(())
 }
 
+/// One session needing attention, in the shape the frontend lists. `path` is
+/// absolute — the exact value [`distill_session`] takes back for a retry.
+/// Mirrors `kodabi_core::sessions::FailedSession`.
+#[derive(serde::Serialize)]
+pub struct FailedSessionDto {
+    path: String,
+    file_name: String,
+    slug: Option<String>,
+    captured_at: String,
+}
+
+/// Lists captured sessions that never became a note: a distill that failed, or
+/// one the app died in the middle of. Runs currently queued or in progress are
+/// excluded, so a meeting only appears once there is genuinely nothing coming
+/// for it. Silent captures never appear at all.
+#[tauri::command]
+pub async fn list_failed_sessions(app: AppHandle) -> Result<Vec<FailedSessionDto>, String> {
+    let kb = knowledge_base_dir(&app)?;
+    let sessions = kodabi_core::sessions::list_failed_sessions(&kb).map_err(|e| e.to_string())?;
+    // Take the claim list once for the whole filter rather than per session.
+    let queued = in_flight();
+    Ok(sessions
+        .into_iter()
+        .filter(|session| !queued.contains(&session.path))
+        .map(|session| FailedSessionDto {
+            path: session.path.display().to_string(),
+            file_name: session.file_name,
+            slug: session.slug,
+            captured_at: session.captured_at,
+        })
+        .collect())
+}
+
 /// Spawns the distill on a background thread and returns immediately, so
 /// neither the IPC call above nor the tail of the transcription pipeline
 /// (which chains here after `Saved`) ever blocks on the headless Claude
 /// call. Concurrent runs are serialized on [`DISTILL_LOCK`].
 pub(crate) fn spawn_distill(app: &AppHandle, session_path: PathBuf) {
     let app = app.clone();
+    // Claim the session before the thread starts, not inside it: the claim has
+    // to cover the queued window too, or a list refetched between this call and
+    // the run reaching the front of the lock would offer a retry for a session
+    // already on its way.
+    mark_in_flight(&session_path);
     std::thread::spawn(move || {
         let _guard = DISTILL_LOCK
             .lock()
@@ -87,6 +167,11 @@ pub(crate) fn spawn_distill(app: &AppHandle, session_path: PathBuf) {
         // stuck on "distilling" forever (and poisoning the lock).
         let outcome =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| run(&app, &session_path)));
+        // Release the claim before anything is announced below: both emits
+        // prompt a refetch of the needs-attention list, and that refetch has to
+        // see this run finished — otherwise a session that just failed would be
+        // filtered out of the very list meant to surface it.
+        clear_in_flight(&session_path);
         let event = match outcome {
             Ok(Ok(path)) => {
                 // The session distilled into a note — enforce a
@@ -95,6 +180,11 @@ pub(crate) fn spawn_distill(app: &AppHandle, session_path: PathBuf) {
                 // Best-effort: a failed delete never turns a successful distill
                 // into an error the user sees.
                 apply_retention_after_distill(&app, &session_path);
+                // The distill wrote its note straight through kodabi-core
+                // rather than the note commands, so this is the only in-app
+                // announcement of that write; without it the new note (and the
+                // cleared needs-attention row) would wait on the file watcher.
+                let _ = app.emit(crate::events::VAULT_CHANGED_EVENT, ());
                 DistillStateEvent::Saved {
                     path: path.display().to_string(),
                 }
@@ -104,12 +194,18 @@ pub(crate) fn spawn_distill(app: &AppHandle, session_path: PathBuf) {
             }
             Ok(Err(DistillFailure::Other(message))) => {
                 eprintln!("distill pipeline failed: {message}");
-                DistillStateEvent::Error { message }
+                DistillStateEvent::Error {
+                    message,
+                    session_path: session_path.display().to_string(),
+                }
             }
             Err(panic) => {
                 let message = format!("distill panicked: {}", panic_message(panic.as_ref()));
                 eprintln!("{message}");
-                DistillStateEvent::Error { message }
+                DistillStateEvent::Error {
+                    message,
+                    session_path: session_path.display().to_string(),
+                }
             }
         };
         let _ = app.emit(DISTILL_STATE_EVENT, event);
@@ -243,6 +339,49 @@ mod tests {
             value,
             serde_json::json!({ "status": "routing_fallback", "message": "boom" })
         );
+    }
+
+    #[test]
+    fn error_event_carries_the_failing_session_path() {
+        // The needs-attention list keys its per-row failure message off
+        // `session_path`; without it a failed retry can't be pinned to a row.
+        let value = serde_json::to_value(DistillStateEvent::Error {
+            message: "claude exited 1".into(),
+            session_path: "kb/sessions/s.jsonl".into(),
+        })
+        .unwrap();
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "status": "error",
+                "message": "claude exited 1",
+                "session_path": "kb/sessions/s.jsonl",
+            })
+        );
+    }
+
+    #[test]
+    fn in_flight_claims_release_one_at_a_time() {
+        // Two queued runs of the same session must release independently: the
+        // first finishing can't un-claim the one still queued behind it, or the
+        // list would offer a retry for a session already on its way.
+        let path = PathBuf::from("kb/sessions/in-flight-test.jsonl");
+        let claimed = |p: &Path| in_flight().iter().filter(|held| *held == p).count();
+
+        mark_in_flight(&path);
+        mark_in_flight(&path);
+        assert_eq!(claimed(&path), 2);
+
+        clear_in_flight(&path);
+        assert_eq!(claimed(&path), 1);
+
+        clear_in_flight(&path);
+        assert_eq!(claimed(&path), 0);
+
+        // Releasing something never claimed is a no-op, not a panic.
+        clear_in_flight(&path);
+        assert_eq!(claimed(&path), 0);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { DISTILL_STATE_EVENT } from "./events";
 import type { CapturePhase } from "./useCaptureState";
 
 export type DistillState =
@@ -7,7 +8,9 @@ export type DistillState =
   | { status: "distilling" }
   | { status: "saved"; path: string }
   | { status: "skipped"; reason: string }
-  | { status: "error"; message: string };
+  /** `session_path` names the session that failed, so the needs-attention list
+   * can pin the message to its row; this hook shows the message alone. */
+  | { status: "error"; message: string; session_path: string };
 
 /**
  * The wire payload, which is `DistillState` plus one non-terminal warning the
@@ -19,8 +22,6 @@ export type DistillState =
 type DistillEvent =
   | DistillState
   | { status: "routing_fallback"; message: string };
-
-const DISTILL_STATE_EVENT = "distill:state";
 
 /**
  * Subscribes to the backend's end-of-meeting distill progress: `distilling`

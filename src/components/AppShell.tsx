@@ -1,5 +1,6 @@
 import { useCommandPalette } from "../useCommandPalette";
 import { useConsentNudge } from "../useConsentNudge";
+import { useSessionsChangedBridge } from "../useSessionsChangedBridge";
 import { useVaultChangedBridge } from "../useVaultChangedBridge";
 import { CommandPalette } from "./CommandPalette";
 import { ConsentNudge } from "./ConsentNudge";
@@ -16,6 +17,8 @@ export function AppShell() {
   const { open: consentOpen, closeNudge } = useConsentNudge();
   // Refresh this window's lists when another window (quick capture) writes.
   useVaultChangedBridge();
+  // ...and when the retention sweep prunes the raw sessions behind them.
+  useSessionsChangedBridge();
 
   return (
     <div className="flex h-screen overflow-hidden bg-bg font-sans text-text">

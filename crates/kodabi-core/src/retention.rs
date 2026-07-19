@@ -44,6 +44,16 @@ pub struct PruneReport {
 /// A missing sessions directory is not an error (nothing has been captured
 /// yet) — it yields an empty report. `now` is injected so the age decision is
 /// deterministic under test.
+///
+/// The sweep ages sessions purely by capture time and **never consults note
+/// existence**: a session whose distill failed (or never ran) is pruned once it
+/// crosses the cutoff, exactly like a distilled one. This is deliberate — a
+/// KeepDays user asked for raw transcripts to expire on a schedule, and a
+/// failed distill doesn't earn an indefinite exception to that. The
+/// needs-attention surface (`crate::sessions::list_failed_sessions`) derives
+/// from disk, so an expired failed session simply drops out of the list; the
+/// shell announces the deletion via its `sessions:changed` event so any open
+/// list refetches.
 pub fn prune_sessions(
     sessions_dir: &Path,
     policy: RetentionPolicy,
@@ -129,7 +139,12 @@ fn is_expired(file_name: &str, mtime: Option<SystemTime>, cutoff: DateTime<Utc>)
     }
 }
 
-fn session_time(file_name: &str, mtime: Option<SystemTime>) -> Option<DateTime<Utc>> {
+/// When a session was captured: its filename timestamp, else the file's mtime.
+/// `None` when neither is available. Shared with
+/// [`crate::sessions`] so "when was this session captured" has one definition —
+/// the age the sweep prunes by and the timestamp the needs-attention list shows
+/// can never disagree.
+pub(crate) fn session_time(file_name: &str, mtime: Option<SystemTime>) -> Option<DateTime<Utc>> {
     naming::parse_session_filename(file_name)
         .and_then(|parsed| naming::parse_session_timestamp(&parsed.timestamp))
         .or_else(|| mtime.map(DateTime::<Utc>::from))

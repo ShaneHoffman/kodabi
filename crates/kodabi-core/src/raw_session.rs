@@ -167,6 +167,18 @@ pub fn read_raw_session(path: &Path) -> Result<Vec<TranscriptSegment>> {
         .collect()
 }
 
+/// Whether a transcript holds nothing worth distilling: every segment's text
+/// is whitespace (an empty transcript included). The single definition the
+/// distill pass (which treats it as a benign skip, not a failure) and the
+/// failed-session scan (which excludes it from "needs attention") share, so the
+/// two agree by construction — a silent capture is never surfaced as an error
+/// and never nagged about as retryable.
+pub fn is_silent(segments: &[TranscriptSegment]) -> bool {
+    segments
+        .iter()
+        .all(|segment| segment.text.trim().is_empty())
+}
+
 /// Writes `contents` to a fresh, process-unique scratch file in `dir` and
 /// returns its path. On a write error the partial scratch file is removed, so
 /// a failed write leaves nothing behind.
@@ -284,6 +296,26 @@ mod tests {
             end_ms,
             text: text.to_string(),
         }
+    }
+
+    #[test]
+    fn is_silent_covers_empty_whitespace_and_spoken_transcripts() {
+        let line = |text: &str| TranscriptSegment {
+            index: 0,
+            channel: Channel::You,
+            speaker: None,
+            start_ms: 0,
+            end_ms: 500,
+            text: text.to_string(),
+        };
+
+        // No segments at all, and segments holding only whitespace, are both
+        // "nothing was said" — the benign skip, never a failure to retry.
+        assert!(is_silent(&[]));
+        assert!(is_silent(&[line("   "), line("\t\n")]));
+
+        // One segment with real text is enough to make the session distillable.
+        assert!(!is_silent(&[line("  "), line("lets sync on the budget")]));
     }
 
     #[test]

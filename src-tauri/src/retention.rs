@@ -6,7 +6,7 @@
 use std::time::Duration;
 
 use kodabi_core::retention::prune_sessions;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
 use crate::settings_cmds::SettingsState;
 use crate::transcribe::knowledge_base_dir;
@@ -58,6 +58,13 @@ fn prune_once(app: &AppHandle) {
         Ok(report) => {
             for path in &report.failed {
                 eprintln!("retention: failed to prune {}", path.display());
+            }
+            // Announce only a sweep that actually removed something: a
+            // needs-attention list on screen may be showing a session this pass
+            // just deleted, and it should drop the row rather than offer a retry
+            // that would fail on a missing file.
+            if !report.deleted.is_empty() {
+                let _ = app.emit(crate::events::SESSIONS_CHANGED_EVENT, ());
             }
         }
         Err(err) => eprintln!("retention prune failed: {err}"),

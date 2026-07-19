@@ -13,3 +13,9 @@ pub const VAULT_CHANGED_EVENT: &str = "vault:changed";
 /// tagged-status payload the Settings UI subscribes to. Mirrors the
 /// `transcription:state` shape.
 pub const INDEX_STATE_EVENT: &str = "index:state";
+
+/// Emitted after the retention sweep deleted raw sessions, so any surface
+/// listing sessions refetches instead of offering a retry for a file that is
+/// gone. Distinct from [`VAULT_CHANGED_EVENT`]: a prune touches no note, so
+/// nothing about the vault itself changed. Payload: none.
+pub const SESSIONS_CHANGED_EVENT: &str = "sessions:changed";
