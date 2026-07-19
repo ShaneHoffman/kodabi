@@ -48,6 +48,7 @@ pub fn run() {
                 })
                 .build(),
         )
+        .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
             let config_dir = app.path().app_config_dir()?;
             let device_config = config_dir.join("device.toml");

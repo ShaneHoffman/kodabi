@@ -13,6 +13,7 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, Wry};
 use tauri_plugin_global_shortcut::Shortcut;
+use tauri_plugin_notification::NotificationExt;
 
 use crate::audio_cmds::{
     event_from_state, start_capture_impl, starting_event, stop_capture_and_transcribe,
@@ -214,7 +215,11 @@ pub(crate) fn perform_one_toggle(app: &AppHandle, press: TogglePress) {
     // NOT acknowledged, so nothing is ever recorded without consent.
     let active = state.is_active().unwrap_or(false);
     let consent = consent_acknowledged(app);
-    let result = match next_action(active, consent, press) {
+    let decision = next_action(active, consent, press);
+    // Remembered before the match consumes it: it is the toggle path's
+    // fresh-start discriminator for the capture-start toast below.
+    let is_fresh_start = decision == ToggleAction::Start;
+    let result = match decision {
         ToggleAction::Start => {
             // The hotkey and the tray are both user presses, so the pill reads
             // the manual setting. Recorded before the first broadcast, which is
@@ -246,7 +251,10 @@ pub(crate) fn perform_one_toggle(app: &AppHandle, press: TogglePress) {
     // Re-derive the resulting state from the backend (not the intended
     // action — a start where both devices failed must still report idle)
     // and push it to the frontend + tray.
-    broadcast_truth(app, state.inner());
+    let event = broadcast_truth(app, state.inner());
+    // The toast is keyed on that same re-derived truth, so a start that
+    // captured nothing never claims otherwise.
+    notify_capture_start(app, is_fresh_start, &event);
 }
 
 /// Run `action` (a start/stop) under the toggle lock and broadcast the
@@ -258,36 +266,44 @@ pub(crate) fn perform_one_toggle(app: &AppHandle, press: TogglePress) {
 ///
 /// `announce_start` marks an action that begins a capture, so the in-flight
 /// negotiation window is announced rather than looking like a dead press.
+///
+/// The announce, the action, the resulting truth broadcast and the capture-start
+/// toast all run *inside* the lock: reading the resulting state after releasing
+/// it would let a queued second start slip in between, so a start that failed
+/// could read the other call's `Listening` and toast a capture it never began.
 pub fn run_under_toggle_lock<T>(
     app: &AppHandle,
     state: &CaptureState,
     announce_start: bool,
     action: impl FnOnce(&AppHandle, &CaptureState) -> Result<T, String>,
 ) -> Result<T, String> {
-    let announce = |app: &AppHandle, state: &CaptureState| {
-        if should_announce_start(announce_start, state.is_active().unwrap_or(false)) {
+    let run = move |app: &AppHandle, state: &CaptureState| {
+        // Doubles as the fresh-start discriminator for the toast: an action
+        // that isn't a start, or a start over an already-live session (the
+        // idempotent mid-session device rebuild), is neither announced nor
+        // toasted.
+        let fresh_start = should_announce_start(announce_start, state.is_active().unwrap_or(false));
+        if fresh_start {
             broadcast_starting(app, state);
         }
+        let result = action(app, state);
+        let event = broadcast_truth(app, state);
+        notify_capture_start(app, fresh_start, &event);
+        result
     };
     // Serialize against the toggle when the controller is available; if it
     // isn't yet (very early startup), just act — there is no concurrent
     // toggle to race.
-    let result = match app.try_state::<CaptureController>() {
+    match app.try_state::<CaptureController>() {
         Some(controller) => {
             let _guard = controller
                 .toggle_lock
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
-            announce(app, state);
-            action(app, state)
+            run(app, state)
         }
-        None => {
-            announce(app, state);
-            action(app, state)
-        }
-    };
-    broadcast_truth(app, state);
-    result
+        None => run(app, state),
+    }
 }
 
 /// Whether an action about to run under the toggle lock should announce a
@@ -302,7 +318,10 @@ fn should_announce_start(announce_start: bool, active: bool) -> bool {
 /// Derived from per-source liveness (not just "is a session installed"), so a
 /// device that dropped out mid-session surfaces as degraded instead of the
 /// indicator continuing to claim it is listening.
-pub(crate) fn broadcast_truth(app: &AppHandle, state: &CaptureState) {
+///
+/// Returns the state it broadcast, so a caller that just performed a start can
+/// key the capture-start toast on the same truth the tray and window show.
+pub(crate) fn broadcast_truth(app: &AppHandle, state: &CaptureState) -> CaptureStateEvent {
     // A health read that fails leaves us unable to prove anything is being
     // captured, so report idle rather than going silent and leaving a stale
     // "listening" on screen.
@@ -311,6 +330,7 @@ pub(crate) fn broadcast_truth(app: &AppHandle, state: &CaptureState) {
         idle_event()
     });
     broadcast_event(app, event);
+    event
 }
 
 /// Announce an in-flight start: the per-source truth (nothing live yet) with
@@ -413,6 +433,71 @@ fn tray_copy(event: &CaptureStateEvent) -> (&'static str, &'static str) {
                 _ => ("Stop capture", "Kodabi: reconnecting audio devices"),
             }
         }
+    }
+}
+
+/// Title and body of the capture-start toast, or `None` when this start earns
+/// no toast at all.
+///
+/// The trust invariant (`docs/FOUNDING_DOC.md` §3.7) is that *every capture
+/// start* announces itself, which is why the toast is fired from the shell
+/// rather than the window: a hotkey press with the window hidden to the tray
+/// would otherwise produce no visible feedback whatsoever.
+///
+/// Two shapes deliberately stay silent, and both are about never claiming a
+/// capture that isn't running: a start that isn't fresh (a stop, or the
+/// idempotent re-start of an already-live session that rebuilds a device
+/// mid-meeting), and a fresh start whose re-derived truth says nothing is being
+/// recorded. The body mirrors [`tray_copy`]'s reading of which source is down,
+/// so the two surfaces can never disagree.
+fn capture_start_notification(
+    fresh_start: bool,
+    event: &CaptureStateEvent,
+) -> Option<(&'static str, &'static str)> {
+    if !fresh_start {
+        return None;
+    }
+    let body = match event.phase {
+        // A start deriving `Idle` captured nothing (both devices failed, or the
+        // health read failed and fell back to idle), and `Starting` is never
+        // derived truth — neither may announce a capture.
+        CapturePhase::Idle | CapturePhase::Starting => return None,
+        CapturePhase::Listening => "Listening to system audio and mic.",
+        CapturePhase::Degraded => {
+            let loopback_live = matches!(event.sources.loopback, SourceState::Live);
+            let microphone_live = matches!(event.sources.microphone, SourceState::Live);
+            match (loopback_live, microphone_live) {
+                (true, false) => "Mic unavailable, capturing system audio.",
+                (false, true) => "System audio unavailable, capturing mic.",
+                // Engaged but nothing live yet (a source stalled out of the
+                // gate). Says so rather than claiming audio is recorded.
+                _ => "Reconnecting audio devices.",
+            }
+        }
+    };
+    Some(("Capture started", body))
+}
+
+/// Fire the capture-start toast, if this start earns one. The OS dismisses it
+/// on its own after the default banner duration.
+///
+/// Fired through the Rust `NotificationExt` API, which is not ACL-gated — the
+/// notification permission in `capabilities/` gates only the plugin's *webview*
+/// commands, so deliberately none is granted: nothing in the window should be
+/// able to mint the banner that says "you are being recorded".
+///
+/// Errors are logged and swallowed rather than failing the capture, which is
+/// already running. On desktop that logging is belt-and-braces: the plugin
+/// spawns the real OS call onto the async runtime and drops its result, so
+/// `show()` returns `Ok` even when the banner never renders. A toast that
+/// silently doesn't appear is therefore possible, and by design preferable to
+/// trading a missing announcement for a missing meeting.
+fn notify_capture_start(app: &AppHandle, fresh_start: bool, event: &CaptureStateEvent) {
+    let Some((title, body)) = capture_start_notification(fresh_start, event) else {
+        return;
+    };
+    if let Err(err) = app.notification().builder().title(title).body(body).show() {
+        eprintln!("capture start notification failed: {err}");
     }
 }
 
@@ -745,6 +830,142 @@ mod tests {
             )),
             ("Stop capture", "Kodabi: reconnecting audio devices")
         );
+    }
+
+    /// Every `(fresh_start, event)` shape the toast can be asked about that
+    /// actually produces copy. Used to sweep the copy rules.
+    fn notifying_shapes() -> Vec<CaptureStateEvent> {
+        vec![
+            event(
+                CapturePhase::Listening,
+                SourceState::Live,
+                SourceState::Live,
+            ),
+            event(
+                CapturePhase::Degraded,
+                SourceState::Live,
+                SourceState::Failed,
+            ),
+            event(
+                CapturePhase::Degraded,
+                SourceState::Stalled,
+                SourceState::Live,
+            ),
+            event(
+                CapturePhase::Degraded,
+                SourceState::Stalled,
+                SourceState::Stalled,
+            ),
+        ]
+    }
+
+    #[test]
+    fn capture_start_notification_fires_only_for_a_fresh_start() {
+        // The stop path (`announce_start = false`) and the idempotent re-start
+        // of an already-live session both arrive here with `fresh_start =
+        // false`, and neither may re-announce a capture already under way.
+        for event in notifying_shapes() {
+            assert_eq!(capture_start_notification(false, &event), None);
+        }
+        assert_eq!(capture_start_notification(false, &idle_event()), None);
+    }
+
+    #[test]
+    fn a_failed_start_fires_no_notification() {
+        // Both devices failed: `phase_of` derives `Idle`, so nothing is being
+        // recorded and nothing may claim otherwise.
+        assert_eq!(
+            capture_start_notification(
+                true,
+                &event(CapturePhase::Idle, SourceState::Failed, SourceState::Failed)
+            ),
+            None
+        );
+        // The same holds for `broadcast_truth`'s fallback when the health read
+        // itself fails: unable to prove a capture, so it doesn't announce one.
+        assert_eq!(capture_start_notification(true, &idle_event()), None);
+    }
+
+    #[test]
+    fn a_starting_phase_never_notifies() {
+        // `Starting` is never derived truth, so `broadcast_truth` can't produce
+        // it today. Locked anyway: the toast announces a capture that started,
+        // not one still negotiating devices.
+        assert_eq!(
+            capture_start_notification(
+                true,
+                &event(CapturePhase::Starting, SourceState::Off, SourceState::Off)
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn capture_start_notification_copy_per_outcome() {
+        // Plain listening is the only body claiming both sources.
+        assert_eq!(
+            capture_start_notification(
+                true,
+                &event(
+                    CapturePhase::Listening,
+                    SourceState::Live,
+                    SourceState::Live
+                )
+            ),
+            Some(("Capture started", "Listening to system audio and mic."))
+        );
+        // Degraded says which source is down, mirroring `tray_copy`.
+        assert_eq!(
+            capture_start_notification(
+                true,
+                &event(
+                    CapturePhase::Degraded,
+                    SourceState::Live,
+                    SourceState::Failed
+                )
+            ),
+            Some((
+                "Capture started",
+                "Mic unavailable, capturing system audio."
+            ))
+        );
+        assert_eq!(
+            capture_start_notification(
+                true,
+                &event(
+                    CapturePhase::Degraded,
+                    SourceState::Stalled,
+                    SourceState::Live
+                )
+            ),
+            Some((
+                "Capture started",
+                "System audio unavailable, capturing mic."
+            ))
+        );
+        // Nothing live at all: never claim any audio is being captured.
+        assert_eq!(
+            capture_start_notification(
+                true,
+                &event(
+                    CapturePhase::Degraded,
+                    SourceState::Stalled,
+                    SourceState::Stalled
+                )
+            ),
+            Some(("Capture started", "Reconnecting audio devices."))
+        );
+    }
+
+    #[test]
+    fn capture_start_notification_copy_has_no_em_dashes() {
+        // `.claude/rules/copy-style.md` bans the em dash in user-facing copy,
+        // and a toast is as user-facing as it gets.
+        for event in notifying_shapes() {
+            let (title, body) = capture_start_notification(true, &event).unwrap();
+            assert!(!title.contains('\u{2014}'), "em dash in title: {title}");
+            assert!(!body.contains('\u{2014}'), "em dash in body: {body}");
+        }
     }
 
     #[test]
