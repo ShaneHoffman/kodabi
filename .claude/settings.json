@@ -8,6 +8,7 @@
       "Bash(cargo build:*)",
       "Bash(pnpm install:*)",
       "Bash(pnpm build:*)",
+      "Bash(pnpm test:*)",
       "Bash(pnpm exec eslint:*)",
       "Bash(pnpm tauri build --no-bundle:*)",
       "Bash(git status:*)",

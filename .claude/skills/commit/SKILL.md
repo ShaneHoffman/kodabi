@@ -32,7 +32,7 @@ These mirror CI exactly (`CLAUDE.md`). Match every surface the diff touches:
 | Any Rust (`crates/**`, `src-tauri/**`) | Ensure `dist/` exists (else `pnpm install --frozen-lockfile && pnpm build`), then `cargo fmt --all --check` → `cargo clippy --workspace --all-targets --locked -- -D warnings` → `cargo test --workspace --locked` |
 | `crates/kodabi-transcribe` | + `cargo clippy -p kodabi-transcribe --features parakeet …`, `--features vad …`, `--features whisper …` (each `--all-targets --locked -- -D warnings`) |
 | `crates/kodabi-embed` **or** `crates/kodabi-core` | + `cargo clippy -p kodabi-embed --features bge --all-targets --locked -- -D warnings` |
-| Frontend (`src/**`, `index.css`, frontend config) | `pnpm exec eslint . --max-warnings=0` + `pnpm build` |
+| Frontend (`src/**`, `index.css`, frontend config) | `pnpm exec eslint . --max-warnings=0` + `pnpm test` + `pnpm build` |
 | Docs / `.claude` only | No build gates. `validate.mjs --check-schema` if either schema doc changed; the validator's `test.mjs` if the validator itself changed |
 
 Notes: the `whisper` leg needs an MSVC dev environment (`vcvars64.bat`) and
