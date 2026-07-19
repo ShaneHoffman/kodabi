@@ -197,7 +197,8 @@ pub enum OrphanKind {
 /// Scan the in-flight root for orphaned sessions. Each directory is either
 /// recoverable, discardable, or (skipped, not returned) still held by a live
 /// session. A session is recoverable only if its lock is free, its metadata is
-/// valid, and both channels hold at least `min_duration` of audio — the same
+/// valid, both channels captured something (a never-attached sibling leaves an
+/// empty spill file), and the longer channel clears `min_duration` — the same
 /// mis-tap / lone-source bar a normal stop applies.
 ///
 /// A missing in-flight root is not an error (nothing has spilled yet): it
@@ -311,7 +312,25 @@ fn classify(dir: &Path, min_duration: Duration) -> Classification {
     let mic_pcm = dir.join(MIC_PCM_FILE);
     let system_pcm = dir.join(SYSTEM_PCM_FILE);
     let min_samples = (min_duration.as_secs_f64() * meta.sample_rate as f64) as u64;
-    if !has_min_samples(&mic_pcm, min_samples) || !has_min_samples(&system_pcm, min_samples) {
+    let mic_samples = sample_count(&mic_pcm);
+    let system_samples = sample_count(&system_pcm);
+
+    // Mirror the bar a normal stop applies, so recovery never discards a
+    // recording a live stop would have kept:
+    //   * both sources must have attached — a never-attached sibling leaves an
+    //     empty (or missing) spill file, the on-disk tell of a lone-channel /
+    //     mis-tap session;
+    //   * the session as a whole (its longer channel) must clear the mis-tap
+    //     floor. A channel that attached but stayed near-silent is fine, exactly
+    //     as it is on a normal stop — the two channels are transcribed
+    //     independently.
+    if mic_samples == 0 || system_samples == 0 {
+        return Classification::Discard {
+            dir: dir.to_path_buf(),
+            reason: "a channel never captured (lone source / mis-tap)".to_string(),
+        };
+    }
+    if mic_samples.max(system_samples) < min_samples {
         return Classification::Discard {
             dir: dir.to_path_buf(),
             reason: "too little captured audio to be a meeting".to_string(),
@@ -327,11 +346,9 @@ fn classify(dir: &Path, min_duration: Duration) -> Classification {
     })
 }
 
-/// Whether `path` holds at least `min_samples` whole `f32` samples.
-fn has_min_samples(path: &Path, min_samples: u64) -> bool {
-    fs::metadata(path)
-        .map(|m| m.len() / 4 >= min_samples)
-        .unwrap_or(false)
+/// Whole `f32` samples a spill file holds, or `0` if it can't be read.
+fn sample_count(path: &Path) -> u64 {
+    fs::metadata(path).map(|m| m.len() / 4).unwrap_or(0)
 }
 
 fn read_meta(dir: &Path) -> Result<InflightMeta, String> {
@@ -552,6 +569,28 @@ mod tests {
         let orphans = scan(&inflight_root(sessions.path()), Duration::from_millis(1)).unwrap();
         assert_eq!(orphans.len(), 1);
         assert!(matches!(orphans[0], OrphanKind::Discard { .. }));
+    }
+
+    #[test]
+    fn scan_recovers_when_one_channel_is_present_but_short() {
+        // Both sources attached (each channel holds *some* audio), and the
+        // session as a whole clears the mis-tap floor — a normal stop would
+        // transcribe this, so recovery must too, even though the system channel
+        // alone falls under the per-channel floor. Guards against recovery being
+        // stricter than a live stop.
+        let sessions = tempdir().unwrap();
+        let session = create_session(sessions.path(), &device(), instant(0), 48_000).unwrap();
+        // 1ms @ 48kHz = 48 samples. Mic clears it; system is present but under.
+        write_pcm(&session.mic_path(), 1_000);
+        write_pcm(&session.system_path(), 10);
+        drop(session);
+
+        let orphans = scan(&inflight_root(sessions.path()), Duration::from_millis(1)).unwrap();
+        assert_eq!(orphans.len(), 1);
+        assert!(
+            matches!(orphans[0], OrphanKind::Recoverable(_)),
+            "a both-present session must recover even if one channel is short"
+        );
     }
 
     #[test]

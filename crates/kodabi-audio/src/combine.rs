@@ -348,24 +348,21 @@ impl SourcePipeline {
     /// dropping audio or killing the session. Only safe to call once `t0` is
     /// final (no more `prepend_silence`); the coordinator gates on that.
     fn maybe_spill(&mut self, threshold: usize) {
-        if self.out.len() < threshold {
-            return;
-        }
-        let Some(writer) = self.spill.as_mut() else {
-            return;
-        };
-        match writer.append(&self.out) {
-            Ok(()) => {
-                self.flushed += self.out.len() as u64;
-                self.out.clear();
-            }
-            Err(err) => self.log_spill_error(err),
+        if self.out.len() >= threshold {
+            self.drain_out();
         }
     }
 
     /// Drain whatever remains in `out` to the spill file at session end.
     /// A no-op (leaving `out` intact) when not spilling or on I/O error.
     fn final_spill(&mut self) {
+        self.drain_out();
+    }
+
+    /// Stream the whole of `out` to the spill file and clear it (retaining
+    /// capacity). A no-op — leaving `out` intact — when not spilling, when `out`
+    /// is empty, or on I/O error (the caller degrades to in-memory growth).
+    fn drain_out(&mut self) {
         if self.out.is_empty() {
             return;
         }
@@ -384,6 +381,13 @@ impl SourcePipeline {
     /// Append `n` samples of trailing silence directly to the spill file, to
     /// pad the shorter channel up to the session's frame count at finalize
     /// (the on-disk equivalent of `AlignedSession`'s equal-length padding).
+    ///
+    /// Written in bounded chunks from a reused buffer rather than one
+    /// `vec![0.0; n]`: when the two channels diverge sharply — a capture device
+    /// that dropped mid-meeting while its sibling ran on for an hour, or a
+    /// lone source's never-started sibling — `n` can be many minutes of audio,
+    /// and a single allocation of that size would spike memory (defeating the
+    /// bounded-memory guarantee) or OOM.
     fn pad_spill(&mut self, n: usize) {
         if n == 0 {
             return;
@@ -391,10 +395,19 @@ impl SourcePipeline {
         let Some(writer) = self.spill.as_mut() else {
             return;
         };
-        let silence = vec![0.0; n];
-        match writer.append(&silence) {
-            Ok(()) => self.flushed += n as u64,
-            Err(err) => self.log_spill_error(err),
+        // One second of silence per write at most, reused across the loop, so a
+        // large pad never allocates more than this.
+        const PAD_CHUNK: usize = 48_000;
+        let silence = vec![0.0; n.min(PAD_CHUNK)];
+        let mut remaining = n;
+        while remaining > 0 {
+            let take = remaining.min(silence.len());
+            if let Err(err) = writer.append(&silence[..take]) {
+                self.log_spill_error(err);
+                return;
+            }
+            self.flushed += take as u64;
+            remaining -= take;
         }
     }
 
@@ -613,18 +626,14 @@ fn coordinator_loop(
                     target_rate,
                     t0_final,
                 );
-                if spilling {
-                    update_t0_final(
-                        &mut t0_final,
-                        &mic_pipeline,
-                        &system_pipeline,
-                        force_t0_final_samples,
-                    );
-                    if t0_final {
-                        mic_pipeline.maybe_spill(spill_threshold);
-                        system_pipeline.maybe_spill(spill_threshold);
-                    }
-                }
+                post_frame_spill(
+                    spilling,
+                    &mut t0_final,
+                    &mut mic_pipeline,
+                    &mut system_pipeline,
+                    force_t0_final_samples,
+                    spill_threshold,
+                );
             }
             // This source's `Capture` stopped and dropped its sender.
             Action::Mic(Err(_)) => mic_rx = None,
@@ -637,24 +646,42 @@ fn coordinator_loop(
                     target_rate,
                     t0_final,
                 );
-                if spilling {
-                    update_t0_final(
-                        &mut t0_final,
-                        &mic_pipeline,
-                        &system_pipeline,
-                        force_t0_final_samples,
-                    );
-                    if t0_final {
-                        mic_pipeline.maybe_spill(spill_threshold);
-                        system_pipeline.maybe_spill(spill_threshold);
-                    }
-                }
+                post_frame_spill(
+                    spilling,
+                    &mut t0_final,
+                    &mut mic_pipeline,
+                    &mut system_pipeline,
+                    force_t0_final_samples,
+                    spill_threshold,
+                );
             }
             Action::System(Err(_)) => system_rx = None,
         }
     }
 
     finalize(mic_pipeline, system_pipeline, target_rate)
+}
+
+/// After a frame is routed, advance the shared-origin latch and — once it is
+/// frozen — flush either channel that has crossed the spill threshold. A no-op
+/// when the session isn't spilling. Extracted so the mic and system arms of the
+/// coordinator loop can't drift apart. See [`update_t0_final`] for the latch.
+fn post_frame_spill(
+    spilling: bool,
+    t0_final: &mut bool,
+    mic: &mut SourcePipeline,
+    system: &mut SourcePipeline,
+    force_samples: u64,
+    threshold: usize,
+) {
+    if !spilling {
+        return;
+    }
+    update_t0_final(t0_final, mic, system, force_samples);
+    if *t0_final {
+        mic.maybe_spill(threshold);
+        system.maybe_spill(threshold);
+    }
 }
 
 /// Freeze the shared origin once it can no longer legitimately move: both
