@@ -5,6 +5,7 @@ mod index_state;
 mod note_cmds;
 mod quick_capture;
 mod retention;
+mod routing_env;
 mod settings_cmds;
 mod transcribe;
 

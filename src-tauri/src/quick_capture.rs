@@ -14,10 +14,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use kodabi_core::capture::quick_capture;
 use kodabi_core::note::{self, Note};
-use kodabi_core::routing::RoutingConfig;
 use tauri::{AppHandle, Emitter, Manager, Runtime, Window};
 use tauri_plugin_global_shortcut::Shortcut;
 
+use crate::routing_env::routing_config_from_env;
 use crate::transcribe::knowledge_base_dir;
 
 /// Label of the statically-configured quick-capture window
@@ -39,11 +39,6 @@ pub const VAULT_CHANGED_EVENT: &str = "vault:changed";
 /// Emitted to the capture window when it is shown, so its UI can refocus the
 /// textarea and clear any stale flash/error left from a prior capture.
 const SHOWN_EVENT: &str = "quick-capture:shown";
-
-/// Environment override for the routing threshold, applied at this src-tauri
-/// boundary (its documented home — `kodabi_core::routing` takes config as a
-/// parameter and never reads the environment itself).
-const ROUTING_THRESHOLD_ENV: &str = "KODABI_ROUTING_THRESHOLD";
 
 /// The routed note echoed back to the capture UI so it can flash where the note
 /// landed before dismissing. `project: null` is the Inbox sentinel (matching the
@@ -171,6 +166,15 @@ fn submit_impl(app: &AppHandle, text: &str) -> Result<QuickCaptureOutcome, Strin
     let captured = quick_capture(&kb, text, &date, &routing_config_from_env())
         .map_err(|err| err.to_string())?;
 
+    // A broken glossary is contained to its own project (routing still ran); log
+    // it so the user can fix the file. The capture itself succeeded.
+    for failure in &captured.glossary_failures {
+        eprintln!(
+            "quick-capture: project \"{}\" has an unreadable glossary; it routes on its name only until fixed: {}",
+            failure.project, failure.error
+        );
+    }
+
     // Broadcast to every window so the main window's lists refresh even while it
     // is hidden to the tray.
     let _ = app.emit(VAULT_CHANGED_EVENT, ());
@@ -193,26 +197,10 @@ fn outcome(note: &Note, rel_path: &std::path::Path) -> QuickCaptureOutcome {
     }
 }
 
-/// Resolve the routing config from the `KODABI_ROUTING_THRESHOLD` environment
-/// variable, falling back to the default when it is unset or unparseable. An
-/// out-of-range value is accepted here and clamped by
-/// `RoutingConfig::effective_threshold` at use, keeping the intent visible.
-fn routing_config_from_env() -> RoutingConfig {
-    routing_config_from(std::env::var(ROUTING_THRESHOLD_ENV).ok().as_deref())
-}
-
-fn routing_config_from(raw: Option<&str>) -> RoutingConfig {
-    match raw.and_then(|s| s.trim().parse::<f64>().ok()) {
-        Some(threshold) => RoutingConfig { threshold },
-        None => RoutingConfig::default(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use kodabi_core::note::{NoteId, NoteType, Routing, Source};
-    use kodabi_core::routing::DEFAULT_THRESHOLD;
     use std::path::Path;
 
     #[test]
@@ -235,18 +223,6 @@ mod tests {
     fn default_quick_capture_shortcut_parses() {
         // A typo in the constant should fail this test, not a runtime `.expect`.
         let _ = default_quick_capture_shortcut();
-    }
-
-    #[test]
-    fn routing_config_reads_a_valid_override_and_falls_back_otherwise() {
-        assert_eq!(routing_config_from(Some("0.4")).threshold, 0.4);
-        assert_eq!(routing_config_from(Some(" 0.4 ")).threshold, 0.4);
-        assert_eq!(routing_config_from(None).threshold, DEFAULT_THRESHOLD);
-        assert_eq!(
-            routing_config_from(Some("junk")).threshold,
-            DEFAULT_THRESHOLD
-        );
-        assert_eq!(routing_config_from(Some("")).threshold, DEFAULT_THRESHOLD);
     }
 
     #[test]
