@@ -8,9 +8,9 @@ use rusqlite::{params, params_from_iter, OptionalExtension, Row};
 use super::note::{normalize_date_to_utc, IndexedNote, NoteRow};
 use super::{NoteIndex, Result};
 
-/// The columns [`map_row`] reads, in order — shared by the by-id and by-project
-/// queries so the two stay in lockstep.
-const NOTE_COLUMNS: &str =
+/// The columns [`map_row`] reads, in order — shared by the by-id, by-project,
+/// and hybrid-search (`super::search`) queries so they stay in lockstep.
+pub(super) const NOTE_COLUMNS: &str =
     "id, path, title, type, project, date_raw, date_utc, source, confidence, body";
 
 impl NoteIndex {
@@ -212,7 +212,10 @@ impl NoteIndex {
     /// Loads the tags for many notes at once, keyed by note `id` and sorted
     /// within each note. Ids absent from the map (or the whole map, for an empty
     /// input) simply have no tags.
-    fn load_tags_by_ids(&self, ids: &[&str]) -> Result<HashMap<String, Vec<String>>> {
+    ///
+    /// Shared with `super::search`, which hydrates a search page's tags the same
+    /// batched way `notes_by_project` does.
+    pub(super) fn load_tags_by_ids(&self, ids: &[&str]) -> Result<HashMap<String, Vec<String>>> {
         let mut tags_by_id: HashMap<String, Vec<String>> = HashMap::new();
         if ids.is_empty() {
             return Ok(tags_by_id);
@@ -241,7 +244,7 @@ impl NoteIndex {
 
 /// Builds a [`NoteRow`] from a `SELECT` of [`NOTE_COLUMNS`]. `tags` are filled
 /// separately by the caller.
-fn map_row(row: &Row<'_>) -> rusqlite::Result<NoteRow> {
+pub(super) fn map_row(row: &Row<'_>) -> rusqlite::Result<NoteRow> {
     Ok(NoteRow {
         id: row.get("id")?,
         path: row.get("path")?,
