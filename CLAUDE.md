@@ -43,14 +43,19 @@ response never echoes the branch, so verify with
 - **Manual gate between every stage** — a human drags each card onward. The one exception:
   **Planning → Executing auto-advances on plan approval** (plan approval *is* the gate there).
 - **Executing** implements the task and **commits on the task branch — but never pushes.**
-- **Code Review** is a fresh, independent session running `/code-review high` on `git diff main...HEAD`.
+- **Code Review** is a fresh, independent session running the `/code-review-fix` skill: it reviews
+  `git diff main...HEAD` at high rigor, fixes the real in-scope findings, runs the gates, and
+  **commits on the task branch — but never pushes.** Findings too large to fix during review are
+  reported as skips for the human gate.
 - **Open PR** runs the `/pull-request` skill: push → `gh pr create --base main` → `kangentic_link_pr`.
   **It never merges** — a human merges on GitHub, then drags the card to Done.
 - **Never drag a card back to Backlog** — that kills the session and removes its worktree.
   "Request changes" from Code Review goes back to **Executing**.
 
 Commit subjects follow Conventional Commits: `<type>: <imperative summary>`, matching the branch's
-`type` (branch `feat/scaffold-tauri-app` → `feat: scaffold Tauri app shell`).
+`type` (branch `feat/scaffold-tauri-app` → `feat: scaffold Tauri app shell`). One sanctioned
+exception: Code Review's own remediation commit is `fix: fix code-review findings` (`docs:` when
+the fixes are docs-only) whatever the branch prefix, so review-driven corrections read as such.
 
 ## Engineering rules
 
@@ -110,6 +115,8 @@ Task-shaped workflows live under `.claude/skills/`:
 - `add-tauri-command` — scaffold a command across all layers, then audit parity.
 - `add-migration` — append a note-index migration safely, then audit.
 - `commit` — run the gates for the changed surface, then commit (never pushes).
+- `code-review-fix` — review the branch diff, fix the in-scope findings, then gate and commit via
+  `commit` (Code Review board column; never pushes).
 - `scaffold-feature` — plan and build a full-stack feature bottom-up.
 - `sync-docs` — reconcile docs with code via the anchor list.
 - `test` — run the tiers, or delegate audit/write to `test-builder`.

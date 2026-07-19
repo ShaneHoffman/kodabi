@@ -13,7 +13,10 @@ Hard rules:
 - **Never amend** — always a new commit.
 - **Never skip a gate** that the changed surface requires.
 - Subject is `<type>: <imperative summary>`, `<type>` matching the branch prefix
-  (`feat/…` → `feat:`), per Conventional Commits.
+  (`feat/…` → `feat:`), per Conventional Commits. Sanctioned exception: review-driven
+  corrections from the Code Review column (`/code-review-fix`) use
+  `fix: fix code-review findings` (`docs:` when the fixes are docs-only) regardless of
+  the branch prefix.
 
 Message hint from the caller (may be empty): $ARGUMENTS
 
