@@ -94,6 +94,38 @@ pub struct DualStatus {
     pub microphone: SourceStatus,
 }
 
+/// Whether one source is actually capturing right now, and if not, why.
+///
+/// [`SourceStatus`] cannot answer this: a slot that is present but
+/// mid-rebuild and a slot that was never started both report
+/// `running: false, error: None`. Distinguishing them needs slot *presence*
+/// and liveness read together, which is what [`DualCapture::health`] does — so
+/// an indicator can tell "not recording, and that's expected" from "claims to
+/// be recording but no audio is flowing".
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SourceHealth {
+    /// No capture installed and no failure recorded: this source is simply not
+    /// running (never started, or cleanly stopped).
+    Off,
+    /// No capture installed because the last start attempt failed. Retained
+    /// until the next successful start or an explicit stop.
+    Failed(String),
+    /// Capture installed and its stream is running: audio is flowing.
+    Live,
+    /// Capture installed but its stream is not running — the device dropped
+    /// out mid-session and the capture thread is retrying the rebuild. Nothing
+    /// is being captured on this source, even though it still counts as
+    /// "active" for [`DualCapture::is_active`].
+    Stalled,
+}
+
+/// Health of both capture sources, read together under one lock.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DualHealth {
+    pub loopback: SourceHealth,
+    pub microphone: SourceHealth,
+}
+
 #[derive(Default)]
 struct Inner {
     loopback: Slot,
@@ -443,6 +475,23 @@ impl DualCapture {
         let guard = self.lock()?;
         Ok(guard.loopback.capture.is_some() || guard.microphone.capture.is_some())
     }
+
+    /// Per-source health: whether each source is actually capturing, and if
+    /// not, whether that is expected (never started / stopped), a failed start,
+    /// or a stream that died mid-session and is being rebuilt.
+    ///
+    /// One locked read, so both sources are observed at the same instant.
+    /// Complements [`DualCapture::is_active`] (slot presence) with liveness,
+    /// which is what an honest indicator needs: `is_active` stays true through
+    /// a rebuild, so on its own it cannot tell "listening" from "the device
+    /// vanished and nothing is being recorded".
+    pub fn health(&self) -> Result<DualHealth> {
+        let guard = self.lock()?;
+        Ok(DualHealth {
+            loopback: health_of_slot(&guard.loopback),
+            microphone: health_of_slot(&guard.microphone),
+        })
+    }
 }
 
 fn slot_mut(inner: &mut Inner, source: CaptureSource) -> &mut Slot {
@@ -461,6 +510,31 @@ fn status_of_slot(slot: &Slot) -> SourceStatus {
             Some(message) => SourceStatus::failed(message.clone()),
             None => SourceStatus::idle(),
         },
+    }
+}
+
+/// A slot's health, from its capture's liveness and its persisted start error.
+fn health_of_slot(slot: &Slot) -> SourceHealth {
+    slot_health(
+        slot.capture.as_ref().map(|capture| capture.is_running()),
+        &slot.last_error,
+    )
+}
+
+/// The health mapping itself, split out from the slot so every case is
+/// testable without real audio hardware (`Live`/`Stalled` need a running
+/// stream to reach through a [`Slot`]).
+///
+/// `present_running` is `None` when no capture is installed, otherwise the
+/// stream's `is_running()`. A retained `last_error` only matters when no
+/// capture is installed: a successful start clears it, so a present capture is
+/// never `Failed`.
+fn slot_health(present_running: Option<bool>, last_error: &Option<String>) -> SourceHealth {
+    match (present_running, last_error) {
+        (Some(true), _) => SourceHealth::Live,
+        (Some(false), _) => SourceHealth::Stalled,
+        (None, Some(message)) => SourceHealth::Failed(message.clone()),
+        (None, None) => SourceHealth::Off,
     }
 }
 
@@ -537,6 +611,51 @@ mod tests {
         let (stopped, _) = dual.stop().unwrap();
         assert!(stopped.microphone.error.is_none());
         assert!(dual.status().unwrap().microphone.error.is_none());
+    }
+
+    #[test]
+    fn slot_health_maps_all_four_states() {
+        // A present, running stream is the only "audio is flowing" case.
+        assert_eq!(slot_health(Some(true), &None), SourceHealth::Live);
+        // Present but not running: the device dropped and the capture thread
+        // is rebuilding. This is the state `SourceStatus` cannot express.
+        assert_eq!(slot_health(Some(false), &None), SourceHealth::Stalled);
+        // Absent with a retained error: the last start attempt failed.
+        assert_eq!(
+            slot_health(None, &Some("no default microphone".to_string())),
+            SourceHealth::Failed("no default microphone".to_string())
+        );
+        // Absent with no error: never started, or cleanly stopped.
+        assert_eq!(slot_health(None, &None), SourceHealth::Off);
+    }
+
+    #[test]
+    fn health_is_off_for_a_fresh_capture() {
+        let dual = DualCapture::new(CaptureTuning::new(4, 48_000));
+        let health = dual.health().unwrap();
+        assert_eq!(health.loopback, SourceHealth::Off);
+        assert_eq!(health.microphone, SourceHealth::Off);
+    }
+
+    #[test]
+    fn health_reports_failed_from_a_retained_start_error() {
+        let dual = DualCapture::new(CaptureTuning::new(4, 48_000));
+        // Simulate a failed start, as `persisted_start_error_is_reported_by_
+        // status_until_stopped` does: no live capture, only the retained error.
+        dual.inner.lock().unwrap().microphone.last_error =
+            Some("no default microphone".to_string());
+
+        let health = dual.health().unwrap();
+        assert_eq!(
+            health.microphone,
+            SourceHealth::Failed("no default microphone".to_string())
+        );
+        // The sibling source is untouched by the other's failure.
+        assert_eq!(health.loopback, SourceHealth::Off);
+
+        // An explicit stop resets the slot to a clean idle.
+        dual.stop().unwrap();
+        assert_eq!(dual.health().unwrap().microphone, SourceHealth::Off);
     }
 
     // Starts real loopback + mic streams, so it needs actual audio hardware

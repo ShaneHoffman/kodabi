@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { DISTILL_STATE_EVENT } from "./events";
-import type { CapturePhase } from "./useCaptureState";
+import { isCaptureActive, type CapturePhase } from "./useCaptureState";
 
 /**
  * How a distill run ended. Every variant carries `session_path` — the session
@@ -47,9 +47,12 @@ export type DistillEvent =
  *
  * Mirrors `useTranscriptionState`'s lifecycle exactly, for the same reasons:
  * resets to `idle` when a new capture begins, and drops events that arrive
- * while a capture is live — a distill can run for minutes, so its terminal
+ * while a capture is engaged — a distill can run for minutes, so its terminal
  * event may land mid-way through the next recording and would otherwise show
- * a stale label for the wrong meeting.
+ * a stale label for the wrong meeting. "Engaged" spans every non-idle phase,
+ * not just `listening`: a capture that is starting or degraded is still the
+ * current meeting, and a stale event landing in one of those windows belongs
+ * to the previous one just the same.
  *
  * A `routing_fallback` warning is non-fatal and never becomes label state: it
  * is logged and bypasses the capture-phase guard entirely (a log line, unlike
@@ -61,7 +64,7 @@ export function useDistillState(capturePhase: CapturePhase): DistillState {
   capturePhaseRef.current = capturePhase;
 
   useEffect(() => {
-    if (capturePhase === "listening") setState({ status: "idle" });
+    if (isCaptureActive(capturePhase)) setState({ status: "idle" });
   }, [capturePhase]);
 
   useEffect(() => {
@@ -78,7 +81,7 @@ export function useDistillState(capturePhase: CapturePhase): DistillState {
         );
         return;
       }
-      if (capturePhaseRef.current !== "listening") setState(event.payload);
+      if (!isCaptureActive(capturePhaseRef.current)) setState(event.payload);
     }).then((fn) => {
       if (active) {
         unlisten = fn;

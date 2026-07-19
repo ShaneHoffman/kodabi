@@ -28,6 +28,6 @@ pub use format::{AudioFormat, SampleTag};
 pub use frame::{AudioFrame, CaptureItem, SegmentReason};
 pub use meter::MeterSnapshot;
 pub use resample::{MonoResampler, ResampleParams};
-pub use session::{CaptureTuning, DualCapture, DualStatus, SourceStatus};
+pub use session::{CaptureTuning, DualCapture, DualHealth, DualStatus, SourceHealth, SourceStatus};
 pub use source::CaptureSource;
 pub use spill::{SpillConfig, SpillReader};

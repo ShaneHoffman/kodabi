@@ -1,3 +1,4 @@
+import { captureLabel, markMode } from "../captureLabel";
 import { useCaptureState } from "../useCaptureState";
 import { useDebouncedValue } from "../useDebouncedValue";
 import { useDistillState } from "../useDistillState";
@@ -40,29 +41,34 @@ function distillLabel(state: ReturnType<typeof useDistillState>): string | null 
  * always visible in the sidebar foot regardless of the active view.
  */
 export function ListeningIndicator() {
-  const phase = useCaptureState();
+  const captureState = useCaptureState();
   // The mark reacts instantly for immediate visual feedback, but the text
-  // label — an aria-live region — follows a debounced phase so a flapping VAD
+  // label — an aria-live region — follows a debounced state so a flapping VAD
   // doesn't spam screen readers (or flicker the label) on every toggle.
-  const settled = useDebouncedValue(phase, 400) === "listening";
-  const transcription = useTranscriptionState(phase);
+  const label = captureLabel(useDebouncedValue(captureState, 400));
+  const transcription = useTranscriptionState(captureState.phase);
   const transcriptionText = transcriptionLabel(transcription);
-  const distill = useDistillState(phase);
+  const distill = useDistillState(captureState.phase);
   const distillText = distillLabel(distill);
 
   return (
     <div className="flex flex-col gap-2xs">
       <div className="flex items-center gap-xs">
-        <SpiritMark phase={phase} size="1rem" halo="0.9rem" />
+        <SpiritMark mode={markMode(captureState)} size="1rem" halo="0.9rem" />
         <p
           role="status"
           className={`text-cap uppercase tracking-wide ${
-            settled ? "text-accent-dot" : "text-text-faint"
+            label.live ? "text-accent-dot" : "text-text-faint"
           }`}
         >
-          {settled ? "Listening" : "Idle"}
+          {label.text}
         </p>
       </div>
+      {label.detail && (
+        <p role="status" className="text-cap uppercase tracking-wide text-text-faint">
+          {label.detail}
+        </p>
+      )}
       {transcriptionText && (
         <p role="status" className="text-cap uppercase tracking-wide text-text-faint">
           {transcriptionText}

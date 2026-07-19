@@ -1,5 +1,6 @@
 mod audio_cmds;
 mod capture_control;
+mod capture_watchdog;
 mod distill_cmds;
 mod events;
 mod index_cmds;
@@ -85,6 +86,12 @@ pub fn run() {
             // moments of launch can't reach the toggle before the controller
             // it depends on exists.
             capture_control::build_tray(app.handle())?;
+
+            // Keep the indicators honest about state changes no toggle drives:
+            // a device lost mid-meeting leaves the capture thread retrying
+            // silently, which would otherwise show as "listening" forever.
+            // Started after the tray, whose `CaptureController` it reads.
+            capture_watchdog::start(app.handle());
 
             // A clashing OS-global shortcut must not prevent launch — the
             // tray toggle still works even if the hotkey couldn't bind. The two

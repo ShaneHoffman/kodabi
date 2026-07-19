@@ -94,9 +94,13 @@ convention (`Sidebar.css`), carried by every primitive:
 }
 ```
 
-**The reserved green (`--accent-dot`) is untouchable.** It belongs to the listening state alone. Selected
-and highlighted rows read through **value**, not hue — an ink wash of the text colour, identical in both
-themes:
+**The reserved green (`--accent-dot`) is untouchable.** It belongs to the listening state alone. Precisely:
+it means **audio is actually being recorded**. A degraded capture that still has a live source keeps the
+green (it *is* recording, and dropping the green would falsely imply privacy), while a capture whose
+sources have all dropped out shows no green at all — the label carries the reconnecting state instead.
+Capture failure states get no red or amber: there is no such token, and they read through **value**
+(`text-text-faint` captions), like every other status line. Selected and highlighted rows likewise read
+through value, not hue — an ink wash of the text colour, identical in both themes:
 
 ```css
 background: color-mix(in srgb, var(--text) 8%, transparent);   /* never var(--accent-dot) */
