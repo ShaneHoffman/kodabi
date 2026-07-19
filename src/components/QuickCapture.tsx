@@ -1,11 +1,11 @@
 import {
-  useEffect,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { hideQuickCaptureWindow, submitQuickCapture } from "../quickCapture";
 import { useTauriEvent } from "../useTauriEvent";
+import { useTimeout } from "../useTimeout";
 import { QUICK_CAPTURE_SHOWN_EVENT } from "../events";
 import "./QuickCapture.css";
 
@@ -54,11 +54,10 @@ export function QuickCapture() {
 
   // Flash the destination, then dismiss. The timer is the "then hide" half of
   // the submit; cleared on unmount or if status moves on (e.g. a re-show).
-  useEffect(() => {
-    if (status.kind !== "filed") return;
-    const timer = setTimeout(() => void hideQuickCaptureWindow(), FLASH_MS);
-    return () => clearTimeout(timer);
-  }, [status]);
+  useTimeout(
+    () => void hideQuickCaptureWindow(),
+    status.kind === "filed" ? FLASH_MS : null,
+  );
 
   const submit = () => {
     const trimmed = text.trim();
