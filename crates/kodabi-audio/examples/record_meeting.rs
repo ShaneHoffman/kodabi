@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 
 use hound::{SampleFormat, WavSpec, WavWriter};
 use kodabi_audio::{
-    levels, AlignedSession, CaptureTuning, DualCapture, DualStatus, SessionChannel,
+    levels, AlignedSession, CaptureTuning, CombinedSession, DualCapture, DualStatus, SessionChannel,
 };
 
 const TWO_CHANNEL_SAMPLE_RATE: u32 = 48_000;
@@ -39,7 +39,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     eprintln!("Starting loopback + microphone capture...");
     let capture = DualCapture::new(CaptureTuning::new(FRAME_CAPACITY, TWO_CHANNEL_SAMPLE_RATE));
-    let status = capture.start()?;
+    // No spill: this example keeps the recording in memory and writes WAV at
+    // the end (bounded by --max-secs), unlike the app's on-disk capture path.
+    let status = capture.start(None)?;
     if let Some(err) = &status.loopback.error {
         return Err(format!("loopback capture failed to start: {err}").into());
     }
@@ -63,11 +65,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("Stopping capture...");
     let stop_started = Instant::now();
     let (status, session) = capture.stop()?;
-    let session = session.ok_or(
-        "only one capture source attached — no two-channel session was produced; \
-         check that both a default output device (loopback) and a default input \
-         device (microphone) were available",
-    )?;
+    let session = match session {
+        Some(CombinedSession::InMemory(session)) => session,
+        // This example never configures a spill, so the combiner always
+        // finalizes in memory.
+        Some(CombinedSession::Spilled(_)) => {
+            return Err("unexpected spilled session — this example captures in memory".into());
+        }
+        None => {
+            return Err(
+                "only one capture source attached — no two-channel session was produced; \
+                 check that both a default output device (loopback) and a default input \
+                 device (microphone) were available"
+                    .into(),
+            );
+        }
+    };
     eprintln!("Stopped in {:?}.", stop_started.elapsed());
 
     print_summary(&status, &session);
