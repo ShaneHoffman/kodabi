@@ -40,7 +40,8 @@ pub const WINDOW_LABEL: &str = "capture-overlay";
 /// dismissal is deliberately *per capture session* rather than persistent: it
 /// clears when capture returns to idle, so hiding the pill once never silently
 /// disables the visibility guarantee for every future recording. The persistent
-/// choice is the setting, not this.
+/// choice is the setting, not this — which is also why changing that setting
+/// clears the dismissal ([`apply_settings_change`]) rather than losing to it.
 #[derive(Default)]
 pub struct OverlayController {
     dismissed: AtomicBool,
@@ -53,7 +54,8 @@ impl OverlayController {
         self.dismissed.store(true, Ordering::SeqCst);
     }
 
-    /// Capture returned to idle: the next one is announced again.
+    /// Capture returned to idle, or the user changed the overlay setting: the
+    /// pill is announced again.
     fn clear_dismissal(&self) {
         self.dismissed.store(false, Ordering::SeqCst);
     }
@@ -124,12 +126,29 @@ pub(crate) fn sync(app: &AppHandle, event: &CaptureStateEvent) {
     apply(app, show);
 }
 
+/// Bring the pill in line with a just-changed overlay setting.
+///
+/// Clears the session dismissal before re-deriving: turning the setting on is
+/// an explicit, persistent request to see the pill, and it has to outrank a
+/// dismissal of the capture that happens to still be running. Without this the
+/// toggle is a dead control for the rest of that capture — the user hides the
+/// pill, later switches the setting on, and nothing appears — which is exactly
+/// the precedence [`OverlayController`] documents the other way round.
+///
+/// Turning the setting *off* is unaffected: the pill is hidden either way.
+pub(crate) fn apply_settings_change(app: &AppHandle) {
+    if let Some(controller) = app.try_state::<OverlayController>() {
+        controller.clear_dismissal();
+    }
+    resync(app);
+}
+
 /// Re-derive visibility from the last broadcast capture state.
 ///
 /// Used when something other than a capture transition changes the answer —
 /// today, the user toggling the setting — so the pill appears or disappears
 /// mid-capture instead of waiting for the next start/stop.
-pub(crate) fn resync(app: &AppHandle) {
+fn resync(app: &AppHandle) {
     // Reading `last_broadcast` is safe without the toggle lock: it is its own
     // leaf mutex. Unlike [`sync`], this path never runs under `toggle_lock`.
     let Some(controller) = app.try_state::<CaptureController>() else {
