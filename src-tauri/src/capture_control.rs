@@ -5,6 +5,7 @@
 //! command wrappers.
 
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -13,7 +14,8 @@ use tauri::{AppHandle, Emitter, Manager, Wry};
 use tauri_plugin_global_shortcut::Shortcut;
 
 use crate::audio_cmds::{
-    start_capture_impl, stop_capture_and_transcribe, CapturePhase, CaptureState, CaptureStateEvent,
+    event_from_state, start_capture_impl, starting_event, stop_capture_and_transcribe,
+    CapturePhase, CaptureSources, CaptureState, CaptureStateEvent, SourceState,
 };
 use crate::settings_cmds::SettingsState;
 
@@ -42,8 +44,32 @@ pub const DEFAULT_TOGGLE_SHORTCUT: &str = "Ctrl+Shift+K";
 /// double-toggle) and holds the dynamic Start/Stop menu item so the toggle
 /// can relabel it.
 pub struct CaptureController {
-    toggle_lock: Mutex<()>,
+    /// Held for the whole read-decide-act of a toggle. Also the outermost lock
+    /// in this module: the capture engine's own state lock and
+    /// [`CaptureController::last_broadcast`] are only ever taken under it or
+    /// alone, never the reverse.
+    pub(crate) toggle_lock: Mutex<()>,
     toggle_item: MenuItem<Wry>,
+    /// Set when a toggle press arrives while another toggle holds the lock.
+    /// The in-flight toggle drains it before releasing, so any number of
+    /// mid-flight presses coalesce into exactly one follow-up toggle instead
+    /// of being silently dropped.
+    pub(crate) pending_toggle: AtomicBool,
+    /// The last event handed to [`broadcast_event`]. Seeds [`crate::audio_cmds::capture_phase`]
+    /// so a frontend mounting mid-start sees `Starting` (which is never
+    /// derivable from backend state), and gives the watchdog the baseline it
+    /// compares observed truth against.
+    last_broadcast: Mutex<CaptureStateEvent>,
+}
+
+impl CaptureController {
+    /// The most recently broadcast capture state.
+    pub(crate) fn last_broadcast(&self) -> CaptureStateEvent {
+        *self
+            .last_broadcast
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
 }
 
 enum ToggleAction {
@@ -70,9 +96,11 @@ fn next_action(active: bool, consent_acknowledged: bool) -> ToggleAction {
 /// controls always drive the same decision.
 ///
 /// Runs on a spawned thread (WASAPI negotiation can block for up to a
-/// second) and coalesces overlapping presses via `try_lock` — a press that
-/// arrives mid-toggle is dropped rather than queued, since re-toggling
-/// before the in-flight one settles has no well-defined outcome.
+/// second). A press arriving while another toggle is in flight is *coalesced*,
+/// not dropped: it sets `pending_toggle`, which the in-flight toggle drains
+/// before releasing the lock. Any number of mid-flight presses therefore
+/// collapse into exactly one follow-up toggle, and no press is ever silently
+/// ignored.
 pub fn toggle_capture(app: &AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || {
@@ -81,50 +109,119 @@ pub fn toggle_capture(app: &AppHandle) {
         let Some(controller) = app.try_state::<CaptureController>() else {
             return;
         };
-        let Ok(_guard) = controller.toggle_lock.try_lock() else {
+        let Some(_guard) = acquire_for_press(&controller) else {
+            // Another toggle holds the lock and has been told about this press.
             return;
         };
-        let state = app.state::<CaptureState>();
-
-        // Decide from the TRUE backend state, act idempotently. Consent is read
-        // fail-safe: a missing settings state (very early startup) counts as
-        // NOT acknowledged, so nothing is ever recorded without consent.
-        let active = state.is_active().unwrap_or(false);
-        let consent = consent_acknowledged(&app);
-        let result = match next_action(active, consent) {
-            ToggleAction::Start => start_capture_impl(&app, &state),
-            ToggleAction::Stop => stop_capture_and_transcribe(&app, &state),
-            ToggleAction::RequireConsent => {
-                // Surface the app window and let the frontend open the nudge.
-                // No capture starts; the tray/indicator stay idle.
-                show_main_window(&app);
-                let _ = app.emit(CONSENT_REQUIRED_EVENT, ConsentRequiredEvent {});
-                broadcast_capture_phase(&app, state.inner());
-                return;
-            }
-        };
-        if let Err(err) = result {
-            eprintln!("capture toggle failed: {err}");
-        }
-
-        // Re-derive the resulting phase from the backend (not the intended
-        // action — a start where both devices failed must still report idle)
-        // and push it to the frontend + tray.
-        broadcast_capture_phase(&app, state.inner());
+        drain_pending_toggles(&controller.pending_toggle, || perform_one_toggle(&app));
     });
 }
 
+/// Take the toggle lock for a press, recording the press for the in-flight
+/// toggle to pick up if the lock is busy.
+///
+/// The retry closes the race where the holder releases the lock between our
+/// failed `try_lock` and setting the flag: without it that press could be
+/// stranded until the watchdog's next tick.
+fn acquire_for_press<'a>(
+    controller: &'a CaptureController,
+) -> Option<std::sync::MutexGuard<'a, ()>> {
+    match try_lock_toggle(controller) {
+        Some(guard) => Some(guard),
+        None => {
+            controller.pending_toggle.store(true, Ordering::SeqCst);
+            try_lock_toggle(controller)
+        }
+    }
+}
+
+/// `try_lock` the toggle lock, treating a poisoned lock as acquirable — a
+/// panicked toggle must not wedge every later press (and leave the indicator
+/// stuck on whatever it last broadcast).
+pub(crate) fn try_lock_toggle(
+    controller: &CaptureController,
+) -> Option<std::sync::MutexGuard<'_, ()>> {
+    match controller.toggle_lock.try_lock() {
+        Ok(guard) => Some(guard),
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+        Err(std::sync::TryLockError::WouldBlock) => None,
+    }
+}
+
+/// Run `do_toggle`, then keep running it while presses arrive mid-toggle.
+///
+/// The flag is cleared *before* each toggle so a press that lands during one
+/// is always honored by the next pass; clearing after would let a press be
+/// swallowed by the toggle it arrived during. Call with the toggle lock held.
+pub(crate) fn drain_pending_toggles(pending: &AtomicBool, mut do_toggle: impl FnMut()) {
+    loop {
+        pending.store(false, Ordering::SeqCst);
+        do_toggle();
+        if !pending.load(Ordering::SeqCst) {
+            break;
+        }
+    }
+}
+
+/// One read-decide-act toggle. Call with the toggle lock held.
+pub(crate) fn perform_one_toggle(app: &AppHandle) {
+    let state = app.state::<CaptureState>();
+
+    // Decide from the TRUE backend state, act idempotently. Consent is read
+    // fail-safe: a missing settings state (very early startup) counts as
+    // NOT acknowledged, so nothing is ever recorded without consent.
+    let active = state.is_active().unwrap_or(false);
+    let consent = consent_acknowledged(app);
+    let result = match next_action(active, consent) {
+        ToggleAction::Start => {
+            // Announce the start before negotiating: device negotiation can
+            // block for ~1s, and an indicator that says nothing for that
+            // window is indistinguishable from a press that didn't register.
+            broadcast_starting(app, state.inner());
+            start_capture_impl(app, &state)
+        }
+        ToggleAction::Stop => stop_capture_and_transcribe(app, &state),
+        ToggleAction::RequireConsent => {
+            // Surface the app window and let the frontend open the nudge.
+            // No capture starts; the tray/indicator stay idle.
+            show_main_window(app);
+            let _ = app.emit(CONSENT_REQUIRED_EVENT, ConsentRequiredEvent {});
+            broadcast_truth(app, state.inner());
+            return;
+        }
+    };
+    if let Err(err) = result {
+        eprintln!("capture toggle failed: {err}");
+    }
+
+    // Re-derive the resulting state from the backend (not the intended
+    // action — a start where both devices failed must still report idle)
+    // and push it to the frontend + tray.
+    broadcast_truth(app, state.inner());
+}
+
 /// Run `action` (a start/stop) under the toggle lock and broadcast the
-/// resulting phase. The `start_capture`/`stop_capture` IPC commands go
+/// resulting state. The `start_capture`/`stop_capture` IPC commands go
 /// through here so they serialize with the hotkey/tray toggle (which holds
 /// the same lock) and every path that changes capture state keeps the UI and
-/// tray in sync. Unlike the toggle's `try_lock` coalescing, an explicit IPC
-/// command blocks for an in-flight toggle rather than being dropped.
+/// tray in sync. Unlike the toggle's coalescing, an explicit IPC command
+/// blocks for an in-flight toggle rather than folding into it.
+///
+/// `announce_start` marks an action that begins a capture, so the in-flight
+/// negotiation window is announced rather than looking like a dead press.
 pub fn run_under_toggle_lock<T>(
     app: &AppHandle,
     state: &CaptureState,
+    announce_start: bool,
     action: impl FnOnce(&AppHandle, &CaptureState) -> Result<T, String>,
 ) -> Result<T, String> {
+    let announce = |app: &AppHandle, state: &CaptureState| {
+        // Only when this really is a start: re-announcing a start over an
+        // already-running capture would flash `Starting` over `Listening`.
+        if announce_start && !state.is_active().unwrap_or(false) {
+            broadcast_starting(app, state);
+        }
+    };
     // Serialize against the toggle when the controller is available; if it
     // isn't yet (very early startup), just act — there is no concurrent
     // toggle to race.
@@ -134,35 +231,100 @@ pub fn run_under_toggle_lock<T>(
                 .toggle_lock
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
+            announce(app, state);
             action(app, state)
         }
-        None => action(app, state),
+        None => {
+            announce(app, state);
+            action(app, state)
+        }
     };
-    broadcast_capture_phase(app, state);
+    broadcast_truth(app, state);
     result
 }
 
-/// Broadcast the current capture phase to the frontend and sync the tray
-/// (menu label + tooltip) to it. Derives the phase from the true backend
-/// state so it can never disagree with what is actually being captured.
-fn broadcast_capture_phase(app: &AppHandle, state: &CaptureState) {
-    let phase = if state.is_active().unwrap_or(false) {
-        CapturePhase::Listening
-    } else {
-        CapturePhase::Idle
-    };
+/// Broadcast the true current capture state to the frontend and tray.
+///
+/// Derived from per-source liveness (not just "is a session installed"), so a
+/// device that dropped out mid-session surfaces as degraded instead of the
+/// indicator continuing to claim it is listening.
+pub(crate) fn broadcast_truth(app: &AppHandle, state: &CaptureState) {
+    // A health read that fails leaves us unable to prove anything is being
+    // captured, so report idle rather than going silent and leaving a stale
+    // "listening" on screen.
+    let event = event_from_state(state).unwrap_or_else(|err| {
+        eprintln!("capture health read failed: {err}");
+        idle_event()
+    });
+    broadcast_event(app, event);
+}
 
-    let (label, tooltip) = match phase {
-        CapturePhase::Listening => ("Stop capture", "Kodabi: listening"),
-        CapturePhase::Idle => ("Start capture", "Kodabi: idle"),
+/// Announce an in-flight start: the per-source truth (nothing live yet) with
+/// the phase overlaid, so the window and tray show a starting state for the
+/// device-negotiation window instead of nothing at all.
+fn broadcast_starting(app: &AppHandle, state: &CaptureState) {
+    let Ok(health) = state.health() else {
+        return;
     };
+    broadcast_event(app, starting_event(&health));
+}
+
+/// Push one capture state to the frontend and sync the tray (menu label +
+/// tooltip) to it. The single point where capture state reaches the UI, so the
+/// two can never disagree.
+pub(crate) fn broadcast_event(app: &AppHandle, event: CaptureStateEvent) {
+    let (label, tooltip) = tray_copy(&event);
     if let Some(controller) = app.try_state::<CaptureController>() {
+        *controller
+            .last_broadcast
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = event;
         let _ = controller.toggle_item.set_text(label);
     }
     if let Some(tray) = app.tray_by_id("main") {
         let _ = tray.set_tooltip(Some(tooltip));
     }
-    let _ = app.emit(CAPTURE_STATE_EVENT, CaptureStateEvent { phase });
+    let _ = app.emit(CAPTURE_STATE_EVENT, event);
+}
+
+/// The state broadcast when nothing is captured.
+fn idle_event() -> CaptureStateEvent {
+    CaptureStateEvent {
+        phase: CapturePhase::Idle,
+        sources: CaptureSources {
+            loopback: SourceState::Off,
+            microphone: SourceState::Off,
+        },
+    }
+}
+
+/// Tray menu label and tooltip for a capture state.
+///
+/// The tooltip never claims plain listening unless both sources are recording:
+/// a degraded capture says which source is down, and a capture with nothing
+/// live says it is reconnecting. The label stays a toggle verb in every phase
+/// (pressing during a start coalesces into a stop).
+fn tray_copy(event: &CaptureStateEvent) -> (&'static str, &'static str) {
+    match event.phase {
+        CapturePhase::Idle => ("Start capture", "Kodabi: idle"),
+        CapturePhase::Starting => ("Stop capture", "Kodabi: starting capture"),
+        CapturePhase::Listening => ("Stop capture", "Kodabi: listening"),
+        CapturePhase::Degraded => {
+            let loopback_live = matches!(event.sources.loopback, SourceState::Live);
+            let microphone_live = matches!(event.sources.microphone, SourceState::Live);
+            match (loopback_live, microphone_live) {
+                (true, false) => (
+                    "Stop capture",
+                    "Kodabi: mic unavailable, capturing system audio",
+                ),
+                (false, true) => (
+                    "Stop capture",
+                    "Kodabi: system audio unavailable, capturing mic",
+                ),
+                _ => ("Stop capture", "Kodabi: reconnecting audio devices"),
+            }
+        }
+    }
 }
 
 /// Build the tray icon, its Start/Stop + Show + Quit menu, and manage the
@@ -188,6 +350,10 @@ pub fn build_tray(app: &AppHandle) -> tauri::Result<()> {
     app.manage(CaptureController {
         toggle_lock: Mutex::new(()),
         toggle_item: toggle_item.clone(),
+        pending_toggle: AtomicBool::new(false),
+        // Matches the menu label and tooltip this tray is built with; the
+        // first broadcast (or the watchdog's first tick) replaces it.
+        last_broadcast: Mutex::new(idle_event()),
     });
 
     TrayIconBuilder::with_id("main")
@@ -271,6 +437,105 @@ mod tests {
         // Locks the wire shape the frontend's consent listener expects.
         let payload = serde_json::to_string(&ConsentRequiredEvent {}).unwrap();
         assert_eq!(payload, "{}");
+    }
+
+    fn event(
+        phase: CapturePhase,
+        loopback: SourceState,
+        microphone: SourceState,
+    ) -> CaptureStateEvent {
+        CaptureStateEvent {
+            phase,
+            sources: CaptureSources {
+                loopback,
+                microphone,
+            },
+        }
+    }
+
+    #[test]
+    fn tray_copy_per_phase() {
+        // Idle is the only phase offering "Start"; every other phase is
+        // something a press should stop.
+        assert_eq!(tray_copy(&idle_event()), ("Start capture", "Kodabi: idle"));
+        assert_eq!(
+            tray_copy(&event(
+                CapturePhase::Starting,
+                SourceState::Off,
+                SourceState::Off
+            )),
+            ("Stop capture", "Kodabi: starting capture")
+        );
+        assert_eq!(
+            tray_copy(&event(
+                CapturePhase::Listening,
+                SourceState::Live,
+                SourceState::Live
+            )),
+            ("Stop capture", "Kodabi: listening")
+        );
+
+        // Degraded never says plain "listening" — it says which source is
+        // down, so the tooltip can't imply the mic is being recorded when it
+        // isn't (and vice versa).
+        assert_eq!(
+            tray_copy(&event(
+                CapturePhase::Degraded,
+                SourceState::Live,
+                SourceState::Failed
+            )),
+            (
+                "Stop capture",
+                "Kodabi: mic unavailable, capturing system audio"
+            )
+        );
+        assert_eq!(
+            tray_copy(&event(
+                CapturePhase::Degraded,
+                SourceState::Stalled,
+                SourceState::Live
+            )),
+            (
+                "Stop capture",
+                "Kodabi: system audio unavailable, capturing mic"
+            )
+        );
+        // Nothing live at all: never claim any audio is being captured.
+        assert_eq!(
+            tray_copy(&event(
+                CapturePhase::Degraded,
+                SourceState::Stalled,
+                SourceState::Stalled
+            )),
+            ("Stop capture", "Kodabi: reconnecting audio devices")
+        );
+    }
+
+    #[test]
+    fn drain_pending_toggles_runs_once_when_nothing_pending() {
+        let pending = AtomicBool::new(false);
+        let mut runs = 0;
+        drain_pending_toggles(&pending, || runs += 1);
+        assert_eq!(runs, 1);
+        assert!(!pending.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn drain_pending_toggles_coalesces_presses_into_one_extra_toggle() {
+        let pending = AtomicBool::new(false);
+        let mut runs = 0;
+        drain_pending_toggles(&pending, || {
+            runs += 1;
+            // Several presses land during the first toggle. They must produce
+            // exactly one follow-up toggle, not one per press, and must not be
+            // dropped.
+            if runs == 1 {
+                pending.store(true, Ordering::SeqCst);
+                pending.store(true, Ordering::SeqCst);
+            }
+        });
+        assert_eq!(runs, 2);
+        assert!(!pending.load(Ordering::SeqCst));
     }
 
     #[test]

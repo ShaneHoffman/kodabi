@@ -8,8 +8,8 @@ to feel the breath.
 
 The listening indicator **is** the kodama. It is one mark doing three jobs at once: the app's
 **logo**, its **consent / trust signal** ("Kodabi is recording"), and its **screenshot moment** —
-the single element that carries the product in a still frame. It animates while listening and is
-still when idle.
+the single element that carries the product in a still frame. It animates while a capture is under
+way and is still when idle.
 
 ---
 
@@ -42,8 +42,9 @@ is not derivative of Ghibli's character. It descends directly from the moodboard
 
 ## States
 
-The mark has exactly two states and nothing ambiguous in between — that clarity is what lets it
-carry consent.
+The rule that makes the mark load-bearing for consent: **the green means audio is actually being
+recorded — nothing else.** Every state below follows from that one test, and nothing ambiguous
+sits in between.
 
 - **Idle (not recording) — the dormant neutral mark.** The core rendered in a quiet ink value
   (`--text` / near-neutral), **still**, with **no aura and no green**. This *is* the resting logo:
@@ -52,6 +53,18 @@ carry consent.
 - **Listening (recording) — the one green, breathing.** The core warms to the reserved green and a
   soft aura blooms and breathes around it. Because that green is spent *nowhere else in the app*,
   its presence is an unambiguous "recording now," and its absence is an unambiguous "not recording."
+- **Starting (a capture is being set up) — ink, waking.** Device negotiation can take about a
+  second, and a mark that showed nothing for that window would be indistinguishable from a press
+  that never registered. The core stays **ink** (nothing is recorded yet, so no green) and pulses
+  gently in opacity: anticipation, not on-air.
+- **Degraded (recording, but not everything) — green, breath without the field.** One source is
+  recording and the other has failed or dropped out. The green **stays**, because audio genuinely
+  is being captured and withdrawing it would falsely suggest privacy; but the aura collapses, so
+  the mark visibly is not full listening. The paired label names the source that is down.
+- **Reconnecting (engaged, nothing recorded) — the idle mark.** Every source has dropped and the
+  capture threads are rebuilding. Nothing reaches disk, so the mark wears **no green**: it is the
+  idle mark, with the label carrying the reconnecting state. A capture that claims to be on air
+  while recording nothing is the one failure the mark must never show.
 - **Wake / settle transitions.** Idle→listening *warms* the ink to green and draws the first breath
   over ~450 ms — the quiet "it woke up" beat. Listening→idle reverses it: green recedes, the breath
   settles to still, the aura fades. One deliberate motion, never a flourish.
@@ -78,6 +91,8 @@ P1-5 to refine against real audio; the moodboard's `breathe` / `halo` keyframes 
 - **Accessibility floor — reduced motion.** Under `prefers-reduced-motion: reduce`, all animation
   stops and listening becomes a **still green mark** — still unmistakably on-air by the reserved
   color and presence alone. This mirrors the locked behavior already in `design/moodboard.html`.
+  Degraded likewise settles to a still green mark; starting settles to a still ink mark, its state
+  carried by the text label the mark is always paired with.
 
 ---
 
@@ -88,9 +103,10 @@ P1-5 to refine against real audio; the moodboard's `breathe` / `halo` keyframes 
   **mark + `kodabi` wordmark** (in the interface humanist sans). Sizes down to a **16 px tray icon /
   favicon**, plus title-bar and About. **Clear space** is measured in *ma*: an empty margin of at
   least the core's own diameter on every side; the aura's reach is generous — never crop it.
-- **Trust / consent signal.** Green + breath = recording; still neutral = not recording. It is
-  unambiguous *because* the green is reserved — green anywhere in Kodabi means "live." This is the
-  consent story P1-5 must satisfy, seeded here.
+- **Trust / consent signal.** Green = recording; no green = not recording. (Motion alone doesn't
+  carry it: a *starting* mark animates in ink because nothing is recorded yet, and a *degraded* one
+  is green without its aura.) It is unambiguous *because* the green is reserved — green anywhere in
+  Kodabi means "live." This is the consent story P1-5 must satisfy, seeded here.
 - **Screenshot moment.** In an otherwise near-neutral interface, the one breathing green is the
   element that sells the app in a still marketing frame.
 
@@ -104,11 +120,14 @@ washi (light) and sumi (dark) grounds without redrawing.
 - **Not color alone.** The on-air read is backed by *motion* (breathing) and *presence* (the aura)
   in addition to the reserved green, and in the running app it is expected to pair with a text label
   and reflect real capture state (P1-5). It never depends solely on distinguishing one hue.
-- **Reduced motion** degrades to a still green mark (above) — never a blank or an ambiguous state.
+- **Reduced motion** degrades to a still green mark for the recording states (above) — never a
+  blank or an ambiguous state. Starting settles to a still ink mark, since it isn't recording; its
+  state is carried by the text label the mark is always paired with.
 - **Contrast & theme.** The green shifts by theme (`#5F7E5A` light / `#86A67E` dark — indicative,
   P0-4 locks the final value) so it stays legible on washi and on night grounds.
-- **Unambiguous by construction.** Two states, one reserved color, no in-between — the design makes
-  "am I being recorded?" answerable at a glance.
+- **Unambiguous by construction.** One reserved color, spent on exactly one meaning — audio is
+  being recorded — so every state resolves to green-or-not with no in-between. That is what makes
+  "am I being recorded?" answerable at a glance, however many states the capture engine has.
 
 ---
 
@@ -126,8 +145,9 @@ noted here and deferred.
   token set. Open questions for P0-4 to lock: the **final green hex** (light/dark), the **core
   diameter and aura geometry** as real tokens, and the **humanist-sans face** used in the wordmark
   lockup.
-- **→ P1-5 (runtime listening indicator):** the full behavior spec above — two states, wake/settle
-  transition, breathing baseline, the capped voice-amplitude "whisper" mapping, and the
+- **→ P1-5 (runtime listening indicator):** the full behavior spec above — the state set (idle,
+  starting, listening, degraded, reconnecting), wake/settle transition, breathing baseline, the
+  capped voice-amplitude "whisper" mapping, and the
   reduced-motion floor — plus the requirement that the mark reflect **real capture state** and be
   unambiguous enough to serve as the **consent signal**. `design/spirit-mark.html` is the reference
   implementation to build against (its voice envelope is *simulated*; P1-5 substitutes real audio).
