@@ -357,7 +357,7 @@ pub fn file_note_to_project(
     // ⑩ Title is re-derived from the (possibly suffixed) new path.
     Ok(Some(RoutedNote {
         note: ListedNote {
-            title: title_from_path(&new_path),
+            title: display_title(&new_path),
             path: new_path,
             note: moved_note,
         },
