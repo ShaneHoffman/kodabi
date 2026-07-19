@@ -14,9 +14,12 @@
 //! (the mover removes it from the previous one), so a note has at most one
 //! correction record vault-wide.
 //!
-//! The scorer does not read these yet — that is routing's future additive
-//! signal (see `routing.rs`'s module doc). Today this module only *logs* the
-//! corrections so that signal has data to consume when it lands.
+//! The scorer reads these: [`crate::routing::load_project_signals`] loads each
+//! candidate's examples alongside its glossary, and scoring credits a project
+//! for lexical similarity between the incoming note and its recorded
+//! corrections (`routing::EXAMPLE_WEIGHT`, capped below the auto-file threshold
+//! on its own so one correction never files a note single-handedly). A
+//! correction therefore measurably changes future routing — the loop is closed.
 
 use std::fs;
 use std::path::{Path, PathBuf};

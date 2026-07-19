@@ -186,6 +186,14 @@ fn run(app: &AppHandle, session_path: &Path) -> Result<PathBuf, DistillFailure> 
                 failure.project, failure.error
             );
         }
+        // Same containment for a broken corrections log: the project simply
+        // contributes no example evidence until the file is fixed.
+        for failure in &diagnostics.example_failures {
+            eprintln!(
+                "distill: project \"{}\" has an unreadable routing-examples log; recorded corrections there are ignored until fixed: {}",
+                failure.project, failure.error
+            );
+        }
         routing
     })
     .map(|distilled| distilled.path)

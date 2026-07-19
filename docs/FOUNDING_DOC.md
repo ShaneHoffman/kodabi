@@ -128,7 +128,7 @@ At meeting end (batch, not continuous — keeps token usage sane):
 1. Glossary cleanup already happened at transcription time (the Phase 1 post-pass), so distill starts from a clean transcript.
 2. A **single headless-Claude distill call** returns summary, action items, decisions, and open questions as one structured result. Transcripts over a configured token budget are chunked / map-reduced so a long meeting distills rather than erroring (tracked: task #59, `feat/distill-token-budget`).
 3. Route to a project with a **confidence split**: confident → filed directly; uncertain → an **Inbox** for one-click human routing. Miscategorized notes are worse than uncategorized ones.
-4. **Correction loop:** every manual re-route **records** the correction as a routing example (`_routing_examples.yml` in the project folder) for future categorization. Wiring routing into the distill pipeline is tracked as task #55 (`feat/wire-distill-routing`); Phase 3 makes routing *read* these recorded corrections as an additive scoring signal, so a correction measurably changes future routing (task #56, `feat/routing-examples-signal`).
+4. **Correction loop:** every manual re-route **records** the correction as a routing example (`_routing_examples.yml` in the project folder), and routing **reads** those examples back as an additive lexical-similarity signal, so a correction measurably changes future routing — a note about a corrected topic files itself next time (landed as task #56, `feat/routing-examples-signal`; capped below the auto-file threshold on its own so one correction never files a note single-handedly). Wiring routing into the distill pipeline is tracked as task #55 (`feat/wire-distill-routing`).
 
 ### 3.6 Storage & indexing
 

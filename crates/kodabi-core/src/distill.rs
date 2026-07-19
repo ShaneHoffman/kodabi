@@ -39,7 +39,9 @@ use crate::llm::{extract_balanced_spans, HeadlessClaude, LlmRequest, LlmRunError
 use crate::naming;
 use crate::note::{self, Note, NoteError, NoteId, NoteType, Routing, Source, Tag, INBOX};
 use crate::raw_session::{self, RawSessionError, TranscriptSegment};
-use crate::routing::{self, GlossaryLoadFailure, NoteText, RoutingConfig, RoutingError};
+use crate::routing::{
+    self, ExamplesLoadFailure, GlossaryLoadFailure, NoteText, RoutingConfig, RoutingError,
+};
 use crate::transcription::Channel;
 
 /// The owner token rendered for an action item nobody could be attributed to.
@@ -480,8 +482,11 @@ pub fn inbox_routing() -> Routing {
 ///   [`load_project_signals`] (it routes on its name only), routing proceeds
 ///   normally over every other project, and the failure is listed in
 ///   `glossary_failures`. The note lands wherever the surviving signals send it.
+/// - **A malformed routing-examples log** in one project: contained the same
+///   way — that project contributes no correction evidence but still routes on
+///   its name and glossary, and the failure is listed in `example_failures`.
 ///
-/// Both diagnostic fields are empty on the happy path.
+/// All three diagnostic fields are empty on the happy path.
 ///
 /// `vault_root` must be the same root passed to [`distill_session`]: signals
 /// are discovered where the note will be written.
@@ -492,7 +497,7 @@ pub fn route_distilled(
     config: &RoutingConfig,
 ) -> (Routing, RoutingDiagnostics) {
     match routing::load_project_signals(vault_root) {
-        Ok((signals, glossary_failures)) => {
+        Ok((signals, glossary_failures, example_failures)) => {
             let text = NoteText {
                 title: output.title.as_deref(),
                 body,
@@ -503,6 +508,7 @@ pub fn route_distilled(
                 RoutingDiagnostics {
                     discovery_failure: None,
                     glossary_failures,
+                    example_failures,
                 },
             )
         }
@@ -511,6 +517,7 @@ pub fn route_distilled(
             RoutingDiagnostics {
                 discovery_failure: Some(err),
                 glossary_failures: Vec::new(),
+                example_failures: Vec::new(),
             },
         ),
     }
@@ -518,7 +525,7 @@ pub fn route_distilled(
 
 /// Non-fatal signal-loading diagnostics from [`route_distilled`]: the note is
 /// always routed (never lost), but the signals behind that decision may have
-/// degraded. Both fields are empty on the happy path; see [`route_distilled`]
+/// degraded. All fields are empty on the happy path; see [`route_distilled`]
 /// for what each one means.
 #[derive(Debug, Default)]
 pub struct RoutingDiagnostics {
@@ -529,6 +536,10 @@ pub struct RoutingDiagnostics {
     /// treating each as having no vocabulary; this is a "fix your glossary"
     /// report, not a routing failure.
     pub glossary_failures: Vec<GlossaryLoadFailure>,
+    /// Projects whose `_routing_examples.yml` could not be parsed. Routing still
+    /// ran, treating each as having no recorded corrections; this is a "fix your
+    /// corrections log" report, not a routing failure.
+    pub example_failures: Vec<ExamplesLoadFailure>,
 }
 
 /// Distills the raw session at `session_path` into a meeting note under
@@ -1386,6 +1397,46 @@ mod tests {
         assert!(diag.discovery_failure.is_none());
         assert_eq!(diag.glossary_failures.len(), 1);
         assert_eq!(diag.glossary_failures[0].project, "Briarwood Golf");
+    }
+
+    #[test]
+    fn route_distilled_reports_a_broken_examples_log_and_still_routes() {
+        let vault = tempdir().unwrap();
+        routing_fixture(vault.path());
+        // Corrupt Growth/Q3's corrections log. Like a broken glossary it is
+        // contained to that project (which contributes no example evidence), so
+        // a term-rich Briarwood Golf note still routes normally — the failure is
+        // reported, not fatal.
+        std::fs::write(
+            crate::routing_examples::routing_examples_path(&project_dir(vault.path(), "Growth/Q3")),
+            "examples: [\n",
+        )
+        .unwrap();
+        let output = distill_output(
+            None,
+            "MERIDIAN rollout with TeeTrack on the GreenFlow irrigation tee sheet.",
+            &[],
+        );
+
+        let (routing, diag) = route_distilled(
+            vault.path(),
+            &output,
+            &render_body(&output),
+            &RoutingConfig::default(),
+        );
+
+        // Five unopposed body terms: saturate(5) = 5/7.
+        assert_eq!(
+            routing,
+            Routing::Routed {
+                project: "Briarwood Golf".to_string(),
+                confidence: 5.0 / 7.0,
+            }
+        );
+        assert!(diag.discovery_failure.is_none());
+        assert!(diag.glossary_failures.is_empty());
+        assert_eq!(diag.example_failures.len(), 1);
+        assert_eq!(diag.example_failures[0].project, "Growth/Q3");
     }
 
     #[test]
