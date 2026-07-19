@@ -8,13 +8,16 @@
 //! *why* it landed there (`docs/FRONTMATTER_SCHEMA.md`).
 //!
 //! The scorer is deterministic and purely lexical: each candidate project
-//! earns weight from distinct glossary term/alias matches and mentions of its
-//! own name, a margin rule subtracts the runner-up's weight so evidence split
-//! across projects reads as *low* confidence, and a saturating curve maps the
-//! net weight into `[0, 1)`. There is no model call anywhere in this module;
-//! the end-of-meeting distill pass can later blend a proposal in as one more
-//! additive signal without changing [`route`]'s contract.
+//! earns weight from distinct glossary term/alias matches, mentions of its own
+//! name, and lexical similarity to its recorded routing corrections (a manual
+//! re-route becomes an example the next similar note learns from); a margin rule
+//! subtracts the runner-up's weight so evidence split across projects reads as
+//! *low* confidence, and a saturating curve maps the net weight into `[0, 1)`.
+//! There is no model call anywhere in this module; the end-of-meeting distill
+//! pass can later blend a proposal in as one more additive signal without
+//! changing [`route`]'s contract.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -23,6 +26,7 @@ use unicode_normalization::UnicodeNormalization;
 
 use crate::glossary::{Glossary, GlossaryError};
 use crate::note::{project_dir, validate_project, Routing, INBOX, RESERVED_ROOT_DIRS};
+use crate::routing_examples::{RoutingExample, RoutingExamples, RoutingExamplesError};
 
 /// Weight of one distinct glossary entry (term or any alias) matched in the
 /// body.
@@ -36,6 +40,34 @@ const NAME_WEIGHT: f64 = 2.0;
 /// Titles are short and routing-dense ("Paradise Golf weekly sync"); bodies
 /// are long and mention other projects in passing.
 const TITLE_MULTIPLIER: f64 = 2.0;
+
+/// Weight of the routing-examples similarity signal at full similarity (the
+/// per-project contribution is `EXAMPLE_WEIGHT * best_similarity`). Deliberately
+/// equal to [`NAME_WEIGHT`]: one recorded human correction is as strong a cue as
+/// one literal name mention, and like a lone name mention it saturates to `0.5`
+/// alone — below the default threshold — so a correction never auto-files a note
+/// single-handedly, and a *single* example can never override strong opposing
+/// glossary evidence (its contribution is bounded by this constant regardless of
+/// how many examples a project has, since aggregation takes the max, not a sum).
+const EXAMPLE_WEIGHT: f64 = 2.0;
+/// Minimum length (in `char`s) of a token that may count toward example
+/// similarity. No stopword list exists, so this filter stands in for one: it
+/// drops the head of the English frequency list ("the", "and", "for", "with")
+/// that would otherwise inflate overlap between unrelated notes. A cost: short
+/// acronyms ("OKR", "Q3") don't ride the example channel — but those are
+/// glossary vocabulary, which scores on its own separate channel.
+const EXAMPLE_MIN_TOKEN_CHARS: usize = 4;
+/// Absolute floor on shared content tokens before an example counts at all.
+/// Guards short notes: any two English notes share a couple of long words by
+/// chance, so a single coincidental overlap must not register — three or more
+/// distinct content words in common is a topic, not noise.
+const EXAMPLE_MIN_SHARED_TOKENS: usize = 3;
+/// Relative floor on the overlap coefficient before an example counts. Guards
+/// long notes: a long note can share a handful of common long words with a short
+/// excerpt (a low coefficient) without being about the same thing — below this,
+/// the example contributes exactly `0.0`.
+const EXAMPLE_MIN_SIMILARITY: f64 = 0.3;
+
 /// Saturation constant `K` in `evidence = w / (w + K)` — diminishing returns.
 const SATURATION_WEIGHT: f64 = 2.0;
 
@@ -98,13 +130,18 @@ pub struct NoteText<'a> {
 
 /// One candidate project and the routing signals it contributes. Shaped so a
 /// future signal (the distill pass's model proposal) is one more field and
-/// weight, not a redesign.
+/// weight, not a redesign — the [`examples`](Self::examples) field is that shape
+/// realized once for the corrections signal.
 #[derive(Debug, Clone)]
 pub struct ProjectSignals {
     /// Frontmatter project slug, e.g. `"Paradise Golf"` or `"Growth/Q3"`.
     pub project: String,
     /// The project's glossary (empty when it has no `_glossary.yml`).
     pub glossary: Glossary,
+    /// The project's recorded routing corrections (empty when it has no
+    /// `_routing_examples.yml`). Scored as lexical similarity, see
+    /// [`EXAMPLE_WEIGHT`].
+    pub examples: RoutingExamples,
 }
 
 /// One candidate's evidence tally — diagnostics for tests, the Inbox UI's
@@ -117,6 +154,10 @@ pub struct ProjectScore {
     pub glossary_hits: usize,
     /// Distinct project-name path segments matched.
     pub name_hits: usize,
+    /// Best gated similarity to any of this project's routing examples that was
+    /// actually credited (`0.0` when no example spoke). The weight it
+    /// contributed is `EXAMPLE_WEIGHT * example_sim`.
+    pub example_sim: f64,
     /// Raw summed signal weight (the margin rule operates on this).
     pub weight: f64,
     /// `saturate(weight)` in `[0, 1)` — this candidate's standalone evidence.
@@ -151,6 +192,22 @@ pub struct GlossaryLoadFailure {
     pub project: String,
     /// Why it failed (malformed YAML, duplicate term).
     pub error: GlossaryError,
+}
+
+/// A project whose `_routing_examples.yml` could not be loaded — the exact
+/// glossary-failure treatment applied to the corrections signal. Routing
+/// proceeds with this project contributing no example evidence (it still matches
+/// its name and glossary and still receives notes), so a broken corrections log
+/// is *contained* to its own project rather than disabling routing vault-wide.
+/// A *missing* file is not a failure (a project without corrections is the
+/// normal case); only an unreadable or malformed one lands here for the caller
+/// to surface as a user-fixable mistake.
+#[derive(Debug)]
+pub struct ExamplesLoadFailure {
+    /// The project slug whose routing-examples log failed to load.
+    pub project: String,
+    /// Why it failed (malformed YAML, I/O error).
+    pub error: RoutingExamplesError,
 }
 
 // ---------------------------------------------------------------------------
@@ -221,6 +278,54 @@ fn best_location(
     None
 }
 
+/// The distinct "content tokens" of some already-tokenized text: every token at
+/// least [`EXAMPLE_MIN_TOKEN_CHARS`] long, deduplicated. Borrows from the input
+/// slices so example scoring allocates only the (small) example-side sets. This
+/// is the note-side vocabulary the corrections signal compares against; the
+/// length filter is the stand-in stopword list (see [`EXAMPLE_MIN_TOKEN_CHARS`]).
+fn content_token_set<'a>(token_slices: &[&'a [String]]) -> HashSet<&'a str> {
+    token_slices
+        .iter()
+        .flat_map(|slice| slice.iter())
+        .filter(|token| token.chars().count() >= EXAMPLE_MIN_TOKEN_CHARS)
+        .map(String::as_str)
+        .collect()
+}
+
+/// Lexical similarity between the note's content tokens and one routing
+/// example, in `[0, 1]`. The example's `title` and `excerpt` are tokenized with
+/// the same [`tokens`] fold used everywhere else, filtered to content tokens,
+/// and compared by *overlap coefficient* — `shared / min(|note|, |example|)` —
+/// so a short quick-capture that reuses the example's vocabulary scores near
+/// `1.0` even against a longer note, and a long note is judged by how much of
+/// the (capped, short) excerpt it reuses. Two gates return exactly `0.0`
+/// otherwise, so an unrelated note contributes nothing: fewer than
+/// [`EXAMPLE_MIN_SHARED_TOKENS`] shared tokens, or a coefficient below
+/// [`EXAMPLE_MIN_SIMILARITY`]. Deterministic: integer counts and one division,
+/// no model call.
+fn example_similarity(note_content: &HashSet<&str>, example: &RoutingExample) -> f64 {
+    if note_content.is_empty() {
+        return 0.0;
+    }
+    let title_tokens = tokens(&example.title);
+    let excerpt_tokens = tokens(&example.excerpt);
+    let example_content = content_token_set(&[&title_tokens, &excerpt_tokens]);
+    if example_content.is_empty() {
+        return 0.0;
+    }
+    let shared = note_content.intersection(&example_content).count();
+    if shared < EXAMPLE_MIN_SHARED_TOKENS {
+        return 0.0;
+    }
+    let denom = note_content.len().min(example_content.len());
+    let similarity = shared as f64 / denom as f64;
+    if similarity >= EXAMPLE_MIN_SIMILARITY {
+        similarity
+    } else {
+        0.0
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Scoring
 // ---------------------------------------------------------------------------
@@ -238,10 +343,13 @@ fn saturate(weight: f64) -> f64 {
 pub fn score_projects(text: NoteText<'_>, candidates: &[ProjectSignals]) -> Vec<ProjectScore> {
     let title = text.title.map(tokens).unwrap_or_default();
     let body = tokens(text.body);
+    // The note's content vocabulary, built once: the corrections signal compares
+    // every candidate's examples against this same set.
+    let note_content = content_token_set(&[&title, &body]);
 
     let mut scores: Vec<ProjectScore> = candidates
         .iter()
-        .map(|candidate| score_candidate(&title, &body, candidate))
+        .map(|candidate| score_candidate(&title, &body, &note_content, candidate))
         .collect();
     scores.sort_by(|a, b| {
         b.weight
@@ -251,7 +359,12 @@ pub fn score_projects(text: NoteText<'_>, candidates: &[ProjectSignals]) -> Vec<
     scores
 }
 
-fn score_candidate(title: &[String], body: &[String], candidate: &ProjectSignals) -> ProjectScore {
+fn score_candidate(
+    title: &[String],
+    body: &[String],
+    note_content: &HashSet<&str>,
+    candidate: &ProjectSignals,
+) -> ProjectScore {
     let mut glossary_hits = 0;
     let mut name_hits = 0;
     let mut weight = 0.0;
@@ -315,10 +428,30 @@ fn score_candidate(title: &[String], body: &[String], candidate: &ProjectSignals
         claimed.extend(needles);
     }
 
+    // The corrections signal: the single best-matching recorded example, scored
+    // as lexical similarity. Max, not sum — near-duplicate corrections of the
+    // same meeting series must not stack and outvote a glossary, so a project's
+    // example contribution is bounded by `EXAMPLE_WEIGHT` no matter how many
+    // examples it has. An example's tokens are compared against `note_content`
+    // without deduping the note's name/glossary spellings first: resembling a
+    // corrected note legitimately includes sharing its project's name, and the
+    // double count is bounded by that same cap. The explicit `> 0.0` guard keeps
+    // a project with no examples byte-identical to before this signal existed.
+    let example_sim = candidate
+        .examples
+        .examples()
+        .iter()
+        .map(|example| example_similarity(note_content, example))
+        .fold(0.0_f64, f64::max);
+    if example_sim > 0.0 {
+        weight += EXAMPLE_WEIGHT * example_sim;
+    }
+
     ProjectScore {
         project: candidate.project.clone(),
         glossary_hits,
         name_hits,
+        example_sim,
         weight,
         evidence: saturate(weight),
     }
@@ -460,42 +593,74 @@ fn walk_projects(
     Ok(())
 }
 
-/// [`discover_projects`] plus each project's glossary — the one-call signal
-/// loader for [`route`]. A project without a `_glossary.yml` contributes an
-/// empty glossary.
+/// What [`load_project_signals`] yields: the scored candidates, plus the two
+/// independent per-project signal-load failure reports (glossary, routing
+/// examples). Both failure lists are empty on the happy path.
+pub type LoadedProjectSignals = (
+    Vec<ProjectSignals>,
+    Vec<GlossaryLoadFailure>,
+    Vec<ExamplesLoadFailure>,
+);
+
+/// [`discover_projects`] plus each project's glossary and recorded routing
+/// examples — the one-call signal loader for [`route`], and the *only* place the
+/// scorer touches the disk (scoring itself is pure). A project without a
+/// `_glossary.yml` contributes an empty glossary; one without a
+/// `_routing_examples.yml` contributes no examples.
 ///
 /// Discovery I/O failure is fatal (the candidate set can't be enumerated), but a
-/// single project's malformed or duplicate-term glossary is *contained*: that
-/// project loads with an empty glossary — it still matches its own name and
-/// still receives notes — and its error is returned in the second field for the
-/// caller to surface. One project's broken `_glossary.yml` never disables
-/// routing for the rest of the vault; the mistake is reported, not allowed to
-/// take every other project's routing down with it. (The margin rule already
-/// guards against the miscategorization that a missing glossary might otherwise
-/// cause: routing into a project still demands net evidence over the runner-up.)
-pub fn load_project_signals(
-    vault_root: &Path,
-) -> Result<(Vec<ProjectSignals>, Vec<GlossaryLoadFailure>), RoutingError> {
+/// single project's malformed glossary *or* corrections log is *contained*: that
+/// signal loads empty — the project still matches its own name and still
+/// receives notes — and the error is returned for the caller to surface.
+/// Glossary failures and examples failures are independent: a project can appear
+/// in both lists. One project's broken file never disables routing for the rest
+/// of the vault; the mistake is reported, not allowed to take every other
+/// project's routing down with it. (The margin rule already guards against the
+/// miscategorization a missing signal might otherwise cause: routing into a
+/// project still demands net evidence over the runner-up.)
+pub fn load_project_signals(vault_root: &Path) -> Result<LoadedProjectSignals, RoutingError> {
     let projects = discover_projects(vault_root)?;
     let mut signals = Vec::with_capacity(projects.len());
-    let mut failures = Vec::new();
+    let mut glossary_failures = Vec::new();
+    let mut example_failures = Vec::new();
     for project in projects {
-        // `note::project_dir` is the writer's slug→folder mapping; using it
-        // here keeps glossaries loading from exactly the folder notes land in.
-        match Glossary::load(&project_dir(vault_root, &project)) {
-            Ok(glossary) => signals.push(ProjectSignals { project, glossary }),
+        // `note::project_dir` is the writer's slug→folder mapping; using it here
+        // keeps both signals loading from exactly the folder notes land in.
+        let dir = project_dir(vault_root, &project);
+
+        // Contain a glossary failure: the project still routes on its name.
+        let glossary = match Glossary::load(&dir) {
+            Ok(glossary) => glossary,
             Err(error) => {
-                // Contain the failure: the project still routes on its name, and
-                // the error rides out for the caller to report.
-                signals.push(ProjectSignals {
+                glossary_failures.push(GlossaryLoadFailure {
                     project: project.clone(),
-                    glossary: Glossary::default(),
+                    error,
                 });
-                failures.push(GlossaryLoadFailure { project, error });
+                Glossary::default()
             }
-        }
+        };
+
+        // Contain an examples failure independently: the project still routes on
+        // its name and glossary. A missing file is the normal case, not a
+        // failure — `RoutingExamples::load` already maps it to an empty set.
+        let examples = match RoutingExamples::load(&dir) {
+            Ok(examples) => examples,
+            Err(error) => {
+                example_failures.push(ExamplesLoadFailure {
+                    project: project.clone(),
+                    error,
+                });
+                RoutingExamples::default()
+            }
+        };
+
+        signals.push(ProjectSignals {
+            project,
+            glossary,
+            examples,
+        });
     }
-    Ok((signals, failures))
+    Ok((signals, glossary_failures, example_failures))
 }
 
 #[cfg(test)]
@@ -526,6 +691,39 @@ mod tests {
         ProjectSignals {
             project: project.to_string(),
             glossary: glossary(entries),
+            examples: RoutingExamples::default(),
+        }
+    }
+
+    /// A routing example carrying only the fields scoring reads (title +
+    /// excerpt); the rest are fixed dummies. Title/excerpt are the lexical
+    /// context the corrections signal compares against.
+    fn example(title: &str, excerpt: &str) -> RoutingExample {
+        RoutingExample {
+            note_id: "n_example".to_string(),
+            title: title.to_string(),
+            excerpt: excerpt.to_string(),
+            previous_project: None,
+            confidence: 1.0,
+            corrected_at: "2026-07-18T20:15:00Z".to_string(),
+            reason: None,
+        }
+    }
+
+    /// [`signals`] plus a set of recorded routing examples for the same project.
+    fn signals_with_examples(
+        project: &str,
+        entries: &[(&str, &[&str])],
+        examples: &[RoutingExample],
+    ) -> ProjectSignals {
+        let mut log = RoutingExamples::default();
+        for example in examples {
+            log.upsert(example.clone());
+        }
+        ProjectSignals {
+            project: project.to_string(),
+            glossary: glossary(entries),
+            examples: log,
         }
     }
 
@@ -1014,8 +1212,9 @@ mod tests {
         fs::create_dir_all(vault.path().join("Growth")).unwrap();
         glossary(&[("OKIES", &[])]).save(&golf_dir).unwrap();
 
-        let (signals, failures) = load_project_signals(vault.path()).unwrap();
+        let (signals, failures, example_failures) = load_project_signals(vault.path()).unwrap();
         assert!(failures.is_empty());
+        assert!(example_failures.is_empty());
         assert_eq!(signals.len(), 2);
         assert_eq!(signals[0].project, "Growth");
         assert!(signals[0].glossary.is_empty());
@@ -1030,13 +1229,257 @@ mod tests {
             "terms: [\n",
         )
         .unwrap();
-        let (signals, failures) = load_project_signals(vault.path()).unwrap();
+        let (signals, failures, _) = load_project_signals(vault.path()).unwrap();
         assert_eq!(signals.len(), 2);
         assert_eq!(failures.len(), 1);
         assert_eq!(failures[0].project, "Growth");
         assert_eq!(signals[0].project, "Growth");
         assert!(signals[0].glossary.is_empty());
         assert!(signals[1].glossary.get("okies").is_some());
+    }
+
+    // -- examples signal ---------------------------------------------------
+
+    #[test]
+    fn strong_example_match_lifts_a_borderline_note_over_the_threshold() {
+        // A body that only name-drops the project: 2.0, saturate(2) = 0.5, below
+        // threshold — it lands in Inbox with nothing else to go on.
+        let borderline = body("Paradise Golf clubhouse migration cutover plan");
+        let without = vec![signals("Paradise Golf", &[])];
+        assert_eq!(
+            route(borderline, &without, &RoutingConfig::default()),
+            Routing::Routed {
+                project: INBOX.to_string(),
+                confidence: 0.5,
+            }
+        );
+
+        // Record a correction about exactly this topic and the same note crosses:
+        // name (2.0) + a perfect example match (EXAMPLE_WEIGHT * 1.0 = 2.0) = 4.0,
+        // unopposed, so saturate(4 - 0) = 4/6, above the 0.6 threshold.
+        let with = vec![signals_with_examples(
+            "Paradise Golf",
+            &[],
+            &[example(
+                "Clubhouse pos migration",
+                "clubhouse migration cutover plan",
+            )],
+        )];
+        assert_eq!(
+            route(borderline, &with, &RoutingConfig::default()),
+            Routing::Routed {
+                project: "Paradise Golf".to_string(),
+                confidence: 4.0 / 6.0,
+            }
+        );
+        let scores = score_projects(borderline, &with);
+        assert_eq!(score_of(&scores, "Paradise Golf").example_sim, 1.0);
+    }
+
+    #[test]
+    fn an_example_match_alone_never_auto_files() {
+        // A perfect example match with no name or glossary evidence: 2.0,
+        // saturate(2) = 0.5 < threshold. One correction can't file a note by
+        // itself, exactly like one bare name mention.
+        let candidates = vec![signals_with_examples(
+            "Paradise Golf",
+            &[],
+            &[example(
+                "clubhouse migration",
+                "clubhouse migration cutover plan",
+            )],
+        )];
+        let text = body("clubhouse migration cutover plan");
+        assert_eq!(
+            route(text, &candidates, &RoutingConfig::default()),
+            Routing::Routed {
+                project: INBOX.to_string(),
+                confidence: 0.5,
+            }
+        );
+    }
+
+    #[test]
+    fn a_single_example_cannot_override_strong_glossary_evidence() {
+        // P earns four glossary hits (4.0); Q earns a perfect example (2.0). The
+        // example is real evidence but the margin (4 - 2 = 2, saturate = 0.5)
+        // reads the conflict as low confidence: the note lands in Inbox with P on
+        // top, never flipped to Q by one correction.
+        let text = body("OKIES ForeUp GreenFlow irrigation clubhouse migration cutover plan");
+        let four_terms = vec![
+            signals(
+                "Paradise Golf",
+                &[
+                    ("OKIES", &[]),
+                    ("ForeUp", &[]),
+                    ("GreenFlow", &[]),
+                    ("irrigation", &[]),
+                ],
+            ),
+            signals_with_examples(
+                "Growth/Q3",
+                &[],
+                &[example("clubhouse", "clubhouse migration cutover plan")],
+            ),
+        ];
+        let scores = score_projects(text, &four_terms);
+        assert_eq!(scores[0].project, "Paradise Golf");
+        assert_eq!(
+            route(text, &four_terms, &RoutingConfig::default()),
+            Routing::Routed {
+                project: INBOX.to_string(),
+                confidence: 0.5,
+            }
+        );
+
+        // A fifth glossary hit (5.0 vs 2.0, margin 3) is enough: strong evidence
+        // still wins despite a perfect opposing example.
+        let five_terms = vec![
+            signals(
+                "Paradise Golf",
+                &[
+                    ("OKIES", &[]),
+                    ("ForeUp", &[]),
+                    ("GreenFlow", &[]),
+                    ("irrigation", &[]),
+                    ("tee sheet", &[]),
+                ],
+            ),
+            signals_with_examples(
+                "Growth/Q3",
+                &[],
+                &[example("clubhouse", "clubhouse migration cutover plan")],
+            ),
+        ];
+        let text =
+            body("OKIES ForeUp GreenFlow irrigation tee sheet clubhouse migration cutover plan");
+        assert_eq!(
+            route(text, &five_terms, &RoutingConfig::default()),
+            Routing::Routed {
+                project: "Paradise Golf".to_string(),
+                confidence: DEFAULT_THRESHOLD,
+            }
+        );
+    }
+
+    #[test]
+    fn example_evidence_split_across_projects_reads_as_low_confidence() {
+        // Two projects each hold a perfect example for the same topic and nothing
+        // else distinguishes them: 2.0 vs 2.0, margin 0, saturate(0) = 0.0. Split
+        // precedent is a dead tie, so the note lands in Inbox at 0.0.
+        let excerpt = "clubhouse migration cutover plan";
+        let candidates = vec![
+            signals_with_examples("Ops", &[], &[example("clubhouse", excerpt)]),
+            signals_with_examples("Sales", &[], &[example("clubhouse", excerpt)]),
+        ];
+        let text = body("clubhouse migration cutover plan");
+        assert_eq!(
+            route(text, &candidates, &RoutingConfig::default()),
+            Routing::Routed {
+                project: INBOX.to_string(),
+                confidence: 0.0,
+            }
+        );
+    }
+
+    #[test]
+    fn examples_do_not_stack_beyond_the_best_match() {
+        // Three near-duplicate corrections of the same meeting series must not
+        // sum: the contribution is EXAMPLE_WEIGHT * best_similarity, capped at
+        // EXAMPLE_WEIGHT, not 3x it.
+        let excerpt = "clubhouse migration cutover plan";
+        let candidates = vec![signals_with_examples(
+            "Ops",
+            &[],
+            &[
+                example("clubhouse migration one", excerpt),
+                example("clubhouse migration two", excerpt),
+                example("clubhouse migration three", excerpt),
+            ],
+        )];
+        let scores = score_projects(body("clubhouse migration cutover plan"), &candidates);
+        let ops = score_of(&scores, "Ops");
+        assert_eq!(ops.example_sim, 1.0);
+        assert_eq!(ops.weight, EXAMPLE_WEIGHT);
+    }
+
+    #[test]
+    fn unrelated_text_earns_zero_example_similarity() {
+        // (i) Below the shared-token floor: two content words in common is
+        // coincidence, not a topic — under EXAMPLE_MIN_SHARED_TOKENS, so 0.0.
+        let too_few = vec![signals_with_examples(
+            "Ops",
+            &[],
+            &[example("", "budget review quarterly finance numbers")],
+        )];
+        let scores = score_projects(body("budget review dentist"), &too_few);
+        assert_eq!(score_of(&scores, "Ops").example_sim, 0.0);
+        assert_eq!(score_of(&scores, "Ops").weight, 0.0);
+
+        // (ii) Above the shared-token floor but below the similarity floor: a
+        // long note sharing three common words with a long excerpt (3/11 ≈ 0.27
+        // < EXAMPLE_MIN_SIMILARITY) is not about the same thing, so 0.0.
+        let too_thin = vec![signals_with_examples(
+            "Ops",
+            &[],
+            &[example(
+                "",
+                "budget review finance alpha bravo charlie delta echo foxtrot gamma hotel",
+            )],
+        )];
+        let scores = score_projects(
+            body("budget review finance india juliet kilo lima mike november oscar papa"),
+            &too_thin,
+        );
+        assert_eq!(score_of(&scores, "Ops").example_sim, 0.0);
+        assert_eq!(score_of(&scores, "Ops").weight, 0.0);
+
+        // (iii) Overlap only on sub-EXAMPLE_MIN_TOKEN_CHARS tokens: the texts
+        // share "okr", "abc", "the", but none survive the length filter, so the
+        // content overlap is empty and the example contributes 0.0.
+        let short_only = vec![signals_with_examples(
+            "Ops",
+            &[],
+            &[example("", "okr abc the budget review finance")],
+        )];
+        let scores = score_projects(body("okr abc the meeting agenda notes"), &short_only);
+        assert_eq!(score_of(&scores, "Ops").example_sim, 0.0);
+        assert_eq!(score_of(&scores, "Ops").weight, 0.0);
+    }
+
+    #[test]
+    fn load_project_signals_loads_examples_and_contains_failures() {
+        let vault = tempdir().unwrap();
+        let alpha_dir = vault.path().join("Alpha");
+        let beta_dir = vault.path().join("Beta");
+        fs::create_dir_all(&alpha_dir).unwrap();
+        fs::create_dir_all(&beta_dir).unwrap();
+
+        // Alpha has a valid corrections log; Beta's is malformed.
+        let mut alpha_log = RoutingExamples::default();
+        alpha_log.upsert(example(
+            "clubhouse migration",
+            "clubhouse migration cutover plan",
+        ));
+        alpha_log.save(&alpha_dir).unwrap();
+        fs::write(
+            crate::routing_examples::routing_examples_path(&beta_dir),
+            "examples: [\n",
+        )
+        .unwrap();
+
+        let (signals, glossary_failures, example_failures) =
+            load_project_signals(vault.path()).unwrap();
+
+        assert_eq!(signals.len(), 2);
+        assert!(glossary_failures.is_empty());
+        // Alpha (sorted first) carries its example; Beta is contained to empty.
+        assert_eq!(signals[0].project, "Alpha");
+        assert_eq!(signals[0].examples.examples().len(), 1);
+        assert_eq!(signals[1].project, "Beta");
+        assert!(signals[1].examples.is_empty());
+        assert_eq!(example_failures.len(), 1);
+        assert_eq!(example_failures[0].project, "Beta");
     }
 
     // -- integration: score → split → write_note → re-parse ----------------
@@ -1061,7 +1504,7 @@ mod tests {
         text: NoteText<'_>,
         title: Option<&str>,
     ) -> (Routing, std::path::PathBuf) {
-        let (candidates, _) = load_project_signals(vault).unwrap();
+        let (candidates, _, _) = load_project_signals(vault).unwrap();
         let routing = route(text, &candidates, &RoutingConfig::default());
         let note = Note::new(
             NoteId::generate().unwrap(),
@@ -1137,6 +1580,83 @@ mod tests {
                 .join("Growth")
                 .join("Q3")
                 .join("growth-q3-planning.md")
+        );
+    }
+
+    #[test]
+    fn recorded_correction_makes_a_similar_note_route_to_its_project() {
+        // The acceptance case, through the real recording path: a manual
+        // correction teaches routing, and the next similar note files itself.
+        let vault = fixture_vault();
+
+        // (i) A note that only name-drops Paradise Golf and talks about a topic
+        // absent from every glossary. Name alone (2.0) is saturate(2) = 0.5,
+        // below threshold — it lands in Inbox today.
+        let seed_text =
+            body("Paradise Golf clubhouse migration cutover plan and vendor timeline discussion");
+        let (seed_routing, seed_path) = write_routed(
+            vault.path(),
+            seed_text,
+            Some("Paradise Golf clubhouse migration"),
+        );
+        assert_eq!(
+            seed_routing,
+            Routing::Routed {
+                project: INBOX.to_string(),
+                confidence: 0.5,
+            }
+        );
+
+        // (ii) A human re-files it into Paradise Golf, which records the
+        // correction as a routing example in that project's folder.
+        let seed = Note::from_markdown(&fs::read_to_string(&seed_path).unwrap()).unwrap();
+        let routed = crate::vault::file_note_to_project(
+            vault.path(),
+            &seed.id,
+            "Paradise Golf",
+            &crate::vault::FileNoteOptions::default(),
+        )
+        .unwrap()
+        .expect("the seed note exists");
+        assert!(routed.moved);
+
+        // (iii) A NEW note about the same topic now crosses on its own: name
+        // (2.0) + a perfect similarity to the recorded example (2.0) = 4.0,
+        // unopposed, saturate(4) = 4/6.
+        let (followup_routing, followup_path) = write_routed(
+            vault.path(),
+            body("Paradise Golf clubhouse migration cutover plan"),
+            Some("Follow up sync"),
+        );
+        assert_eq!(
+            followup_routing,
+            Routing::Routed {
+                project: "Paradise Golf".to_string(),
+                confidence: 4.0 / 6.0,
+            }
+        );
+        assert_eq!(
+            followup_path,
+            vault.path().join("Paradise Golf").join("follow-up-sync.md")
+        );
+
+        // (iv) An unrelated note shares nothing with the example and is
+        // unaffected: no name, no glossary, no example evidence — Inbox at 0.0.
+        let (unrelated_routing, unrelated_path) = write_routed(
+            vault.path(),
+            body("Dentist appointment tomorrow morning reminder"),
+            Some("Dentist"),
+        );
+        assert_eq!(
+            unrelated_routing,
+            Routing::Routed {
+                project: INBOX.to_string(),
+                confidence: 0.0,
+            }
+        );
+        assert_eq!(
+            unrelated_path,
+            vault.path().join("Inbox").join("dentist.md")
         );
     }
 }

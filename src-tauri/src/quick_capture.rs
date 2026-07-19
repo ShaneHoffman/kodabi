@@ -170,6 +170,14 @@ fn submit_impl(app: &AppHandle, text: &str) -> Result<QuickCaptureOutcome, Strin
             failure.project, failure.error
         );
     }
+    // Same containment for a broken corrections log: the project simply
+    // contributes no example evidence until the file is fixed.
+    for failure in &captured.example_failures {
+        eprintln!(
+            "quick-capture: project \"{}\" has an unreadable routing-examples log; recorded corrections there are ignored until fixed: {}",
+            failure.project, failure.error
+        );
+    }
 
     // Broadcast to every window so the main window's lists refresh even while it
     // is hidden to the tray.

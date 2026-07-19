@@ -15,7 +15,9 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use crate::note::{self, Note, NoteError, NoteId, NoteType, Source, SourceKeyword};
-use crate::routing::{self, GlossaryLoadFailure, NoteText, RoutingConfig, RoutingError};
+use crate::routing::{
+    self, ExamplesLoadFailure, GlossaryLoadFailure, NoteText, RoutingConfig, RoutingError,
+};
 
 /// Errors produced while quick-capturing a note.
 #[derive(Debug, thiserror::Error)]
@@ -41,6 +43,11 @@ pub struct QuickCaptured {
     /// non-fatal "fix your glossary" report, empty on the happy path. See
     /// [`GlossaryLoadFailure`].
     pub glossary_failures: Vec<GlossaryLoadFailure>,
+    /// Projects whose routing-examples log could not load. Routing proceeded
+    /// treating each as having no recorded corrections (they still match on name
+    /// and glossary), so this is a non-fatal "fix your corrections log" report,
+    /// empty on the happy path. See [`ExamplesLoadFailure`].
+    pub example_failures: Vec<ExamplesLoadFailure>,
 }
 
 /// Files `body` as a routed `type: note`, `source: quick-capture` note under
@@ -69,7 +76,7 @@ pub fn quick_capture(
     // is skipped entirely. Title is `None` — a quick capture has no separate
     // title; the first body line only seeds the filename, never a routing
     // signal (that would double-count the same words as both title and body).
-    let (signals, glossary_failures) = routing::load_project_signals(vault_root)?;
+    let (signals, glossary_failures, example_failures) = routing::load_project_signals(vault_root)?;
     let routing = routing::route(NoteText { title: None, body }, &signals, config);
 
     let id = NoteId::generate().map_err(QuickCaptureError::IdGeneration)?;
@@ -87,6 +94,7 @@ pub fn quick_capture(
         note,
         path,
         glossary_failures,
+        example_failures,
     })
 }
 
@@ -234,5 +242,63 @@ mod tests {
         .unwrap();
 
         assert_eq!(read_back(&captured).id, captured.note.id);
+    }
+
+    #[test]
+    fn quick_capture_learns_from_recorded_corrections() {
+        use crate::routing_examples::{RoutingExample, RoutingExamples};
+
+        let vault = tempdir().unwrap();
+        let project_dir = vault.path().join("Paradise Golf");
+        std::fs::create_dir(&project_dir).unwrap();
+
+        // A prior correction about a clubhouse migration is on record for the
+        // project (no glossary involved).
+        let mut log = RoutingExamples::default();
+        log.upsert(RoutingExample {
+            note_id: "n_seed01".to_string(),
+            title: "Clubhouse migration".to_string(),
+            excerpt: "clubhouse migration cutover plan".to_string(),
+            previous_project: None,
+            confidence: 1.0,
+            corrected_at: "2026-07-18T20:15:00Z".to_string(),
+            reason: None,
+        });
+        log.save(&project_dir).unwrap();
+
+        // A new capture about the same topic files itself: name (2.0) + a perfect
+        // example match (2.0) = 4.0, saturate(4) = 4/6, clearing the 0.6 default.
+        let captured = quick_capture(
+            vault.path(),
+            "Paradise Golf clubhouse migration cutover plan",
+            "2026-07-18",
+            &RoutingConfig::default(),
+        )
+        .unwrap();
+        assert!(captured.path.starts_with(&project_dir));
+        assert_eq!(
+            read_back(&captured).routing,
+            Routing::Routed {
+                project: "Paradise Golf".to_string(),
+                confidence: 4.0 / 6.0,
+            }
+        );
+
+        // An unrelated capture is untouched by the correction.
+        let unrelated = quick_capture(
+            vault.path(),
+            "Buy groceries and call the plumber",
+            "2026-07-18",
+            &RoutingConfig::default(),
+        )
+        .unwrap();
+        assert!(unrelated.path.starts_with(vault.path().join("Inbox")));
+        assert_eq!(
+            read_back(&unrelated).routing,
+            Routing::Routed {
+                project: note::INBOX.to_string(),
+                confidence: 0.0,
+            }
+        );
     }
 }
