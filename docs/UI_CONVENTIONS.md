@@ -39,27 +39,26 @@ drift starts (the same control turning up as `px-3 py-1`, then `py-2`, then `px-
 | Role | Step | Utility | px |
 | --- | --- | --- | --- |
 | Control padding (button / select / field) | xs / 2xs | `px-xs py-2xs` | 12 / 8 |
-| View gutter | xl | `p-xl` | 64 |
+| View gutter | lg | `p-lg` | 40 |
 | Field stack gap (vertical) | sm | `gap-sm` | 16 |
 | Section gap | lg | `gap-lg` | 40 |
 | Inline label ↔ control gap | 2xs | `gap-2xs` | 8 |
 | Panel / container padding | md | `p-md` | 24 |
-| Tight list gap (nav rows, inline rows) | 3xs | `gap-3xs` | 4 |
-| Stacked list gap (title + meta) | sm | `gap-sm` | 16 |
-| Stacked list gap (title + meta + snippet) | md | `gap-md` | 24 |
+| Tight list gap (sidebar nav rows) | 3xs | `gap-3xs` | 4 |
+| Content list gap (every `ListRow` list) | sm | `gap-sm` | 16 |
 | List row vertical padding | 2xs | `py-2xs` | 8 |
 | Reading / writing column width | measure | `max-w-measure` | 33rem |
 
 The view gutter and the section gap are owned by [`ViewFrame`](../src/components/ui/ViewFrame.tsx), so
 a screen never spells them out. (This table previously claimed the gutter was `px-lg py-lg`; every view
-in the tree used `p-xl`. The component now settles it.)
+in the tree used `p-xl`. The component now settles it, and it settled on `p-lg`: 64px every side spent a tenth of a short window before the eyebrow started.)
 
-The three list gaps are one rule, not three numbers: **the gap between rows must beat the gap between
-the lines inside a row.** A `ListRow` stacks its own lines at `gap-3xs`, so an inline single-line row
-separates fine at `gap-3xs` too, a two-line row needs `gap-sm`, and a row carrying a snippet needs
-`gap-md`. Set it too tight and the list stops reading as rows at all — the Inbox shipped its
-three-line rows at `gap-3xs` and became one undifferentiated block. The gap belongs to the `<ul>`,
-since `ListRow` cannot know how tall its siblings are.
+**Every list of `ListRow`s separates at `gap-sm`, whatever its rows contain.** The gap has to beat the
+`gap-3xs` a row stacks its own lines at, or the list stops reading as rows — the Inbox shipped
+three-line rows at `gap-3xs` and became one undifferentiated block. It is tempting to then scale the
+gap per view (tighter for inline rows, looser once a snippet is in play); don't. That was tried, and
+the result was three list rhythms in one app, which reads as carelessness from across the room even
+though each number is defensible on its own screen. One gap, set by the densest thing a row can hold.
 
 Control padding is **`px-xs py-2xs` (12 / 8)**. (The tokens are named by *step*, not by pixel: `--space-sm`
 is 16px and `--space-xs` is 12px — so 12px horizontal padding is `px-xs`, not `px-sm`.) The primitives
@@ -316,7 +315,7 @@ audio is actually being recorded, and a settings control wearing it would be cla
 
 ### `ViewFrame` — the page scaffold, `variant="queue" | "library" | "panel"`
 
-The view gutter (`p-xl`), the centred content column, the section rhythm (`gap-lg`), and the
+The view gutter (`p-lg`), the centred content column, the section rhythm (`gap-lg`), and the
 eyebrow/title header. Every full view sits in one.
 
 **`variant` answers "what am I looking at" before the heading is read.** It is not decoration — it is the
