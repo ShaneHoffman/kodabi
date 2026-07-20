@@ -34,47 +34,54 @@
    ============================================================ */
 
 :root {
-  /* ---------- Layer 1 — pigments (the "paints"; same in both themes) ---------- */
-  --k-washi: #F1EFE6;   /* paper ground      */
-  --k-mist:  #DCE1D8;   /* recessive tone    */
-  --k-stone: #8B8F86;   /* quiet, secondary  */
-  --k-moss:  #59654F;   /* grounded mid      */
-  --k-fern:  #3B4636;   /* deep neutral      */
-  --k-sumi:  #23261F;   /* ink / primary text */
-  --k-green: #5F7E5A;   /* the one living green — listening */
+  /* ---------- Layer 1 — pigments (the "paints"; same in both themes) ----------
+     Re-tuned on feat/screen-overhaul. The hues and their relationships are the
+     ones DESIGN.md locked in Phase 0; the VALUES were rebuilt to product grade:
+     the day ground moved off beige toward a warm near-white, the raised plane
+     flipped from a darker mist fill to a paper card that sits ABOVE the ground,
+     and both greens gained life. Same palette, better paper. */
+  --k-washi: #F7F5EF;   /* paper ground       */
+  --k-mist:  #E4E7DF;   /* recessive tone     */
+  --k-stone: #8B8F86;   /* quiet, secondary   */
+  --k-moss:  #4F5B46;   /* grounded mid       */
+  --k-fern:  #3B4636;   /* deep neutral       */
+  --k-sumi:  #1F1E18;   /* ink / primary text */
+  --k-green: #5C8455;   /* the one living green — listening */
 
   /* ---------- Layer 1 — tuned functional shades & elevation ----------
-     Values that aren't one of the six pigments, defined ONCE here. The theme
+     Values that aren't one of the seven pigments, defined ONCE here. The theme
      blocks at the bottom only reference these, so an edit lands in one place. */
 
   /* light-side shades (the ones that aren't a raw pigment) */
-  --k-washi-sink: #EAE8DD;   /* recessed washi (light bg-sink) */
-  --k-stone-ink:  #60645C;   /* darkened stone — a11y-tuned faint text */
-  --k-accent:     #50694B;   /* desaturated green — interactive accent */
+  --k-washi-raised: #FDFCF8;   /* the paper card — LIGHTER than the ground */
+  --k-washi-sink:   #EFEDE4;   /* recessed washi (light bg-sink) */
+  --k-stone-ink:    #5C6058;   /* darkened stone — a11y-tuned faint text */
+  --k-accent:       #3E6B3A;   /* the interactive green */
 
-  /* Both values above were re-tuned by 2/255 per channel (from #62665E and
-     #526B4D) during the design-system pass. They cleared 4.5:1 on --bg and
-     --bg-sink but landed at 4.41 and 4.43 on --surface, the lightest raised
-     plane (mist) — and both are used there: the palette's hint text and the
-     Select caret are faint-on-surface, and --accent is the focus ring drawn
-     against it. The correction is below the perceptual threshold and takes
-     every light-theme text pair over AA. Full matrix: docs/DESIGN_SYSTEM.md. */
+  /* The light theme's raised plane used to be `mist` — a fill DARKER than the
+     ground, which is what made every button, dropdown and selected row read as
+     a grey box rather than a lifted card. It now reads the way paper does:
+     a hair lighter than the page, separated by value plus the hairline and
+     --lift. `mist` stays a pigment (the recessive tone) but no longer paints a
+     surface. Full contrast matrix: docs/DESIGN_SYSTEM.md §6. */
 
-  /* night palette */
-  --k-night:         #191B16;   /* night ground (deep sumi) */
-  --k-night-sink:    #131510;
-  --k-night-surface: #212419;   /* barely-there raised plane */
-  --k-paper:         #E9E8DE;   /* warm paper (dark text) */
-  --k-paper-soft:    #AEB3A7;
-  --k-paper-faint:   #868B81;   /* ≈ stone */
-  --k-accent-night:  #93B389;
-  --k-green-night:   #86A67E;
+  /* night palette — a deep warm black, not a blue-grey charcoal */
+  --k-night:         #131210;   /* night ground */
+  --k-night-sink:    #0E0D0B;
+  --k-night-surface: #1D1B17;   /* the lifted plane */
+  --k-paper:         #ECE9E0;   /* warm paper (dark-theme text) */
+  --k-paper-soft:    #B4B0A4;
+  --k-paper-faint:   #8C887C;
+  --k-accent-night:  #8FB585;
+  --k-green-night:   #8CB183;
 
-  /* elevation — geometry differs per theme, so two full sets (each defined once) */
-  --lift-day:        0 1px 2px rgba(35,38,31,.06), 0 8px 24px rgba(35,38,31,.05);
-  --lift-soft-day:   0 1px 1px rgba(35,38,31,.05), 0 4px 14px rgba(35,38,31,.04);
-  --lift-night:      0 1px 2px rgba(0,0,0,.35), 0 10px 30px rgba(0,0,0,.30);
-  --lift-soft-night: 0 1px 1px rgba(0,0,0,.30), 0 5px 16px rgba(0,0,0,.22);
+  /* elevation — geometry differs per theme, so two full sets (each defined once).
+     Three stops each (contact, key, ambient) so a raised plane reads crisp at
+     its edge and soft at its spread, rather than as one smudge. */
+  --lift-day:        0 1px 1px rgba(31,30,24,.05), 0 4px 10px rgba(31,30,24,.05), 0 14px 32px rgba(31,30,24,.06);
+  --lift-soft-day:   0 1px 1px rgba(31,30,24,.04), 0 3px 8px rgba(31,30,24,.04);
+  --lift-night:      0 1px 1px rgba(0,0,0,.40), 0 4px 12px rgba(0,0,0,.36), 0 16px 36px rgba(0,0,0,.34);
+  --lift-soft-night: 0 1px 1px rgba(0,0,0,.34), 0 3px 10px rgba(0,0,0,.28);
 
   /* ---------- Layer 3 — type ---------- */
 
@@ -86,13 +93,19 @@
   --serif: "Source Serif 4","Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
   --mono:  "Source Code Pro","Cascadia Mono",ui-monospace,"SF Mono",Consolas,"Liberation Mono",monospace;
 
-  /* size scale (rem; the big two are fluid) */
+  /* size scale (rem; the big two are fluid).
+
+     Two voices, deliberately diverging: the INTERFACE ramp (eyebrow → h2)
+     tightened on feat/screen-overhaul so lists and controls read at product
+     density, while the READING ramp (--fs-read/--lh-read) was left alone so a
+     note still opens like a page. Before, one loose ramp served both and the
+     UI wore reading-sized type. */
   --fs-eyebrow: .72rem;
   --fs-cap:     .8rem;
-  --fs-body:    1.06rem;
+  --fs-body:    .97rem;
   --fs-read:    1.18rem;
-  --fs-h3:      1.35rem;
-  --fs-h2:      clamp(1.55rem, 1.2rem + 1.4vw, 2.05rem);
+  --fs-h3:      1.25rem;
+  --fs-h2:      clamp(1.5rem, 1.15rem + 1.35vw, 1.95rem);
   --fs-display: clamp(2.35rem, 1.6rem + 3.6vw, 3.9rem);
 
   /* weights */
@@ -105,7 +118,7 @@
   --lh-display: 1.04;
   --lh-h2:      1.12;
   --lh-h3:      1.2;
-  --lh-body:    1.72;
+  --lh-body:    1.55;
   --lh-read:    1.6;
 
   /* letter-spacing (per role) */
@@ -149,10 +162,13 @@
   --radius-sm:    5px;
   --radius-md:    8px;
 
-  /* hairlines are translucent inset shadows, never borders (docs/DESIGN.md) */
-  --edge-faint:  rgba(128, 128, 120, 0.12);
-  --edge:        rgba(128, 128, 120, 0.20);
-  --edge-strong: rgba(128, 128, 120, 0.28);
+  /* hairlines are translucent inset shadows, never borders (docs/DESIGN.md).
+     A mid-grey at low alpha so one set of values reads on both a near-white
+     card and a near-black one. Opened up a step on feat/screen-overhaul: the
+     day ground got lighter, and the old alphas went invisible on it. */
+  --edge-faint:  rgba(128, 128, 120, 0.16);
+  --edge:        rgba(128, 128, 120, 0.26);
+  --edge-strong: rgba(128, 128, 120, 0.36);
   --hairline:    inset 0 0 0 1px var(--edge);
 
   /* ---------- Layer 3 — focus ----------
@@ -198,8 +214,16 @@
      green (docs/DESIGN.md). */
   --wash-active: color-mix(in srgb, var(--text) 8%, transparent);
 
-  /* the dimming behind a modal surface */
-  --scrim: color-mix(in srgb, var(--bg-sink) 60%, transparent);
+  /* The dimming behind a modal surface. Mixed from the deepest pigment rather
+     than a semantic, because a scrim is a shadow: it is dark in BOTH themes.
+     Mixing from --bg-sink meant the day theme dimmed washi with washi, and a
+     palette opened over the app barely registered as being in front of it.
+     Same inversion as --sheen below, which is white in both themes. */
+  --scrim: color-mix(in srgb, var(--k-night-sink) 46%, transparent);
+
+  /* selected text — the accent at wash strength, so a selection reads as ours
+     without fighting the ink it sits under. */
+  --selection: color-mix(in srgb, var(--accent) 22%, transparent);
 
   /* scrollbars are chrome, so they sit at the quiet end of the value ladder
      rather than wearing the platform default (which reads light-on-dark in the
@@ -219,7 +243,7 @@
      All four theme blocks below are pure references to Layer 1 — no literals here. */
   --bg:         var(--k-washi);
   --bg-sink:    var(--k-washi-sink);
-  --surface:    var(--k-mist);       /* one raised plane above bg */
+  --surface:    var(--k-washi-raised);  /* the one raised plane; lifts, never fills */
   --text:       var(--k-sumi);
   --text-soft:  var(--k-moss);
   --text-faint: var(--k-stone-ink);  /* a11y-tuned; micro-text only */
@@ -263,7 +287,7 @@
 :root[data-theme="light"] {
   --bg:         var(--k-washi);
   --bg-sink:    var(--k-washi-sink);
-  --surface:    var(--k-mist);
+  --surface:    var(--k-washi-raised);
   --text:       var(--k-sumi);
   --text-soft:  var(--k-moss);
   --text-faint: var(--k-stone-ink);

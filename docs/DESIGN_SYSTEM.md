@@ -5,7 +5,7 @@ cleanly:*
 
 | Document | Fixes | Changes when |
 | --- | --- | --- |
-| [`docs/DESIGN.md`](DESIGN.md) | The **aesthetic** — the four principles, the reference class, what we refuse | Never (locked in Phase 0) |
+| [`docs/DESIGN.md`](DESIGN.md) | The **aesthetic** — the four principles, the reference class, what we refuse | Almost never. The principles are fixed; the material was re-tuned once, on `feat/screen-overhaul` |
 | **This document** | The **system** — how a control behaves, what a view shows when it has nothing, what may move, what must be legible | A new interaction or state appears |
 | [`docs/UI_CONVENTIONS.md`](UI_CONVENTIONS.md) | The **mechanics** — spacing steps and the primitive catalogue | A primitive is added or changed |
 
@@ -25,14 +25,32 @@ answer is missing here and belongs here.
 | --- | --- | --- | --- |
 | `text-eyebrow` | `--fs-eyebrow` .72rem | Section eyebrows only, always with `uppercase tracking-eyebrow` | Body copy |
 | `text-cap` | `--fs-cap` .8rem | Captions, meta lines, hints, status text | A paragraph someone reads |
-| `text-body` | `--fs-body` 1.06rem | Interface body, list rows, buttons | — |
+| `text-body` | `--fs-body` .97rem | Interface body, list rows, buttons | — |
 | `text-read` | `--fs-read` 1.18rem | Note bodies, prose (with `font-serif`) | Interface chrome |
-| `text-h3` | `--fs-h3` | Sub-headings inside a view | — |
-| `text-h2` | `--fs-h2` | The view title (with `font-serif`) | More than once per view |
+| `text-h3` | `--fs-h3` 1.25rem | Sub-headings inside a view | — |
+| `text-h2` | `--fs-h2` (fluid, 1.5→1.95rem) | The view title (with `font-serif`) | More than once per view |
 | `text-display` | `--fs-display` | Reserved. Nothing ships with it yet | Any current screen |
 
 Sizes always come from this scale. Never `text-[13px]`, never a raw `font-size`. Enforced by the
 eslint rule described in §7.
+
+### Two voices: the interface ramp and the reading ramp
+
+The scale above is not one ramp, it is two, and they diverge on purpose.
+
+- **The interface ramp** — eyebrow, cap, body, h3, h2 — is the voice of lists, controls, and chrome.
+  It tightened on `feat/screen-overhaul`: `--fs-body` .97rem with `--lh-body` 1.55, `--fs-h3`
+  1.25rem, `--fs-h2` `clamp(1.5rem, 1.15rem + 1.35vw, 1.95rem)`.
+- **The reading ramp** — `--fs-read` 1.18rem at `--lh-read` 1.6 — is the voice of a note's body, and
+  it was deliberately left where it was.
+
+Before, one loose ramp served both, so the interface wore reading-sized type at reading line-height
+and every list read like a document. The gap between `--fs-body` and `--fs-read` is now the point:
+chrome is compact, a note still opens like a page. Weights, letter-spacings, eyebrow, cap, and
+display are unchanged.
+
+**Don't close the gap.** Reaching for `text-read` to make an interface element feel more generous
+re-merges the two voices; the interface answer is space (§1, list density), not a larger size.
 
 ### The eyebrow is one thing
 
@@ -137,6 +155,18 @@ background: var(--wash-active);   /* an ink wash of --text, both themes */
 
 Available as `.ui-wash`. **Never `--accent-dot`** for selection: the reserved green means audio is
 being recorded, and a selected row wearing it is a lie.
+
+### Selected *text* is ours too
+
+```css
+--selection: color-mix(in srgb, var(--accent) 22%, transparent);
+```
+
+Applied once, by the `::selection` rule in `src/index.css`. Highlighted text used to wear the
+platform's blue — the only colour in the app from outside the palette, and it appeared the moment
+anyone dragged across a note. The accent at wash strength reads as ours without fighting the ink
+sitting on top of it. This is the one place `--accent` paints a fill rather than marking
+interactivity, and it does not rank anything.
 
 ---
 
@@ -256,7 +286,41 @@ box-shadow: var(--hairline);                    /* a full ring */
 ```
 
 Use `--edge-faint` for a divider inside a surface, `--edge` for the edge of a control. Two adjacent
-elements must not use different edge tokens for the same visual line.
+elements must not use different edge tokens for the same visual line. The three edge alphas opened
+one step on `feat/screen-overhaul` (`--edge-faint` .16, `--edge` .26, `--edge-strong` .36): the day
+ground moved to a near-white and the old alphas went invisible on it. They remain a single mid-grey
+at low alpha, so one set of values reads on a near-white card and a near-black one alike.
+
+### A raised plane lifts, it does not fill
+
+`--surface` is **lighter than the page in both themes**. In the light theme it is `--k-washi-raised`
+(#FDFCF8) against a #F7F5EF ground; in the dark theme `--k-night-surface` (#1D1B17) against #131210.
+
+That is an inversion in the light theme, and it is the point of this pass. `--surface` used to map to
+`mist` — a fill *darker* than the ground — so every button, dropdown, selected row, and modal panel
+read as a grey box stamped onto the page. Paper does not work that way: a lifted sheet catches more
+light than what it sits on. `mist` remains a Layer-1 pigment (the recessive tone) but no longer
+paints a surface.
+
+So the recipe for "raised" is **value shift + `--hairline` + `--lift`** — three quiet signals, no
+box. If a raised element still doesn't read, the answer is the hairline or the lift, never a darker
+fill and never a border.
+
+### The lifts are three-stop shadows
+
+`--lift` and `--lift-soft` are built from three stops each, not two:
+
+| Stop | Job |
+| --- | --- |
+| Contact | `0 1px 1px` — the hard line where the plane meets the page; what makes the edge read crisp |
+| Key | the mid-distance offset shadow; the direction of the light |
+| Ambient | the wide, low-alpha spread; the softness around it |
+
+`--lift-soft` drops the ambient stop and is for something barely off the page; `--lift` is the full
+three for dropdowns and modals. The geometry differs per theme (the night lifts are darker and
+throw further, because a shadow on a near-black ground has less value to work with), which is why
+`--lift-day` / `--lift-night` are two full Layer-1 sets rather than one recipe. Never write a
+`box-shadow` with literal offsets in a component; use the token.
 
 ### Modals
 
@@ -264,6 +328,14 @@ Every modal goes through the `Overlay` primitive, which owns the scrim (`--scrim
 backdrop dismissal. Dismissal fires on **click, not pointerdown**, and only when the gesture both
 started and ended on the backdrop — otherwise a drag that begins inside the panel dismisses it, and
 an unmount at pointerdown lets the rest of the gesture fall through to whatever was underneath.
+
+**The scrim is dark in both themes.** `--scrim` is
+`color-mix(in srgb, var(--k-night-sink) 46%, transparent)` — mixed from the deepest pigment, not
+from a semantic token. It used to mix from `--bg-sink`, which meant the day theme dimmed washi with
+washi and a palette opened over the app barely registered as being in front of it. A scrim is a
+shadow, and a shadow does not re-theme. This is the same inversion as `--sheen`, which is white in
+both themes. It is still a Layer-3 derived recipe referencing a Layer-1 pigment; the ten semantic
+keys are unchanged.
 
 A modal traps focus (§6), takes `role="dialog"` + `aria-modal="true"`, and closes on Escape.
 
@@ -274,34 +346,43 @@ A modal traps focus (§6), takes `role="dialog"` + `aria-modal="true"`, and clos
 ### Contrast
 
 Measured, not estimated. Text pairs against WCAG AA (4.5:1); the spirit-mark is a graphic (3:1).
+Re-measured from the `feat/screen-overhaul` token values.
 
-**Light (washi day)**
-
-| | on `bg` | on `bg-sink` | on `surface` |
-| --- | --- | --- | --- |
-| `text` | 13.32 | 12.48 | 11.55 |
-| `text-soft` | 5.36 | 5.03 | 4.65 |
-| `text-faint` | 5.25 | 4.92 | 4.55 |
-| `accent` | 5.26 | 4.93 | 4.56 |
-| `accent-dot` *(graphic)* | 3.95 | 3.70 | 3.42 |
-
-**Dark (night)**
+**Light (washi day)** — `bg` #F7F5EF, `bg-sink` #EFEDE4, `surface` #FDFCF8
 
 | | on `bg` | on `bg-sink` | on `surface` |
 | --- | --- | --- | --- |
-| `text` | 14.10 | 14.93 | 12.82 |
-| `text-soft` | 8.11 | 8.58 | 7.37 |
-| `text-faint` | 4.98 | 5.27 | 4.53 |
-| `accent` | 7.48 | 7.92 | 6.80 |
-| `accent-dot` *(graphic)* | 6.42 | 6.80 | 5.84 |
+| `text` #1F1E18 | 15.32 | 14.24 | 16.27 |
+| `text-soft` #4F5B46 | 6.60 | 6.14 | 7.01 |
+| `text-faint` #5C6058 | 5.89 | 5.48 | 6.26 |
+| `accent` #3E6B3A | 5.72 | 5.31 | 6.07 |
+| `accent-dot` #5C8455 *(graphic)* | 3.94 | 3.66 | 4.19 |
 
-Every text pair clears 4.5. `--k-stone-ink` and `--k-accent` were re-tuned by 2/255 per channel
-during this pass to clear it on `--surface`, the lightest raised plane.
+**Dark (night)** — `bg` #131210, `bg-sink` #0E0D0B, `surface` #1D1B17
 
-**`--accent-dot` is a graphic, never text.** At 3.42–3.95 in the light theme it does not meet the
-text floor, and it never has to: it is spent on the spirit-mark, where 3:1 applies and it passes. The
-LISTENING *label* beside it is `--text` when live and `--text-faint` when not, so the state reads
-through value like every other status line, and the green stays the mark's alone.
+| | on `bg` | on `bg-sink` | on `surface` |
+| --- | --- | --- | --- |
+| `text` #ECE9E0 | 15.42 | 16.00 | 14.16 |
+| `text-soft` #B4B0A4 | 8.64 | 8.96 | 7.93 |
+| `text-faint` #8C887C | 5.28 | 5.48 | 4.85 |
+| `accent` #8FB585 | 8.13 | 8.43 | 7.46 |
+| `accent-dot` #8CB183 *(graphic)* | 7.78 | 8.08 | 7.15 |
+
+Every text pair clears 4.5, and now with real headroom. Note that `--surface` is the *easiest*
+column in the light theme, not the hardest: since the raised plane became lighter than the ground
+(§5), the light theme's worst case moved to `bg-sink`, where the tightest pair is `--accent` at 5.31.
+The dark theme's worst case is `--text-faint` on `--surface` at 4.85.
+
+*(History: before this pass the raised plane was the darkest light-theme column and `--k-stone-ink`
+and `--k-accent` had to be nudged 2/255 per channel to scrape past 4.5 on it, landing at 4.55/4.56.
+The rebuilt values clear it outright — the same two tokens now measure 6.26 and 6.07 there — so that
+correction no longer describes the file and is recorded here only as history.)*
+
+**`--accent-dot` is a graphic, never text.** At 3.66–4.19 in the light theme it does not meet the
+text floor, and it never has to: it is spent on the spirit-mark, where 3:1 applies and it passes
+everywhere in both themes. The LISTENING *label* beside it is `--text` when live and `--text-faint`
+when not, so the state reads through value like every other status line, and the green stays the
+mark's alone.
 
 Any new colour pair is measured before it ships.
 
