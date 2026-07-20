@@ -4,7 +4,7 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { useCommands, type Command } from "../useCommands";
+import { COMMAND_GROUP_LABEL, useCommands, type Command } from "../useCommands";
 import { useDialogFocus } from "../useDialogFocus";
 import { useFilteredCommands } from "../useFilteredCommands";
 import { useNavigation } from "../useNavigation";
@@ -49,6 +49,7 @@ export function CommandPalette({ onClose }: Props) {
       return [
         {
           id: "search-fallback",
+          group: "action",
           title: `Search for “${trimmed}”`,
           run: () => navigate({ kind: "search", query: trimmed }),
         },
@@ -58,6 +59,24 @@ export function CommandPalette({ onClose }: Props) {
   }, [filtered, query, navigate]);
 
   const active = rows.length > 0 ? Math.min(activeIndex, rows.length - 1) : 0;
+
+  // Sections, carrying each row's index in the flat `rows` array so the option
+  // ids (and so aria-activedescendant and the arrow keys) stay a single
+  // sequence over the whole list, whatever it is broken into visually.
+  //
+  // Only while unfiltered. A filtered list is a set of matches, not a table of
+  // contents, and a heading over it would be labelling a section that no longer
+  // exists; the per-row hint takes over there instead.
+  const sections = useMemo(() => {
+    const numbered = rows.map((command, index) => ({ command, index }));
+    if (query.trim()) return [{ label: null, rows: numbered }];
+    return (["jump", "action"] as const)
+      .map((group) => ({
+        label: COMMAND_GROUP_LABEL[group],
+        rows: numbered.filter(({ command }) => command.group === group),
+      }))
+      .filter((section) => section.rows.length > 0);
+  }, [rows, query]);
 
   // Focus the input on open; on close hand focus back to wherever it came
   // from — unless a run command unmounted that element in the meantime.
@@ -131,29 +150,45 @@ export function CommandPalette({ onClose }: Props) {
             No commands available yet.
           </li>
         )}
-        {rows.map((command, index) => (
-          <li
-            key={command.id}
-            id={optionId(index)}
-            role="option"
-            aria-selected={index === active}
-            onPointerDown={(event) => event.preventDefault()}
-            onMouseMove={(event) => {
-              const moved =
-                lastPointer.current?.x !== event.clientX ||
-                lastPointer.current?.y !== event.clientY;
-              lastPointer.current = { x: event.clientX, y: event.clientY };
-              if (moved && index !== active) setActiveIndex(index);
-            }}
-            onClick={() => runCommand(command)}
-            className={`command-palette__row flex items-baseline justify-between gap-md px-md py-2xs text-body text-text-soft${
-              index === active ? " ui-wash" : ""
-            }`}
-          >
-            <span>{command.title}</span>
-            {command.hint && (
-              <span className="text-cap text-text-faint">{command.hint}</span>
+        {sections.map((section) => (
+          // role="presentation" on the wrapper so the ul/li scaffolding does
+          // not put listitem semantics between the listbox and its options;
+          // the inner role="group" is what actually carries the section name.
+          <li key={section.label ?? "matches"} role="presentation">
+            {section.label && (
+              <p className="px-md pb-3xs pt-2xs text-eyebrow uppercase tracking-eyebrow text-text-faint">
+                {section.label}
+              </p>
             )}
+            <ul role="group" aria-label={section.label ?? undefined}>
+              {section.rows.map(({ command, index }) => (
+                <li
+                  key={command.id}
+                  id={optionId(index)}
+                  role="option"
+                  aria-selected={index === active}
+                  onPointerDown={(event) => event.preventDefault()}
+                  onMouseMove={(event) => {
+                    const moved =
+                      lastPointer.current?.x !== event.clientX ||
+                      lastPointer.current?.y !== event.clientY;
+                    lastPointer.current = { x: event.clientX, y: event.clientY };
+                    if (moved && index !== active) setActiveIndex(index);
+                  }}
+                  onClick={() => runCommand(command)}
+                  className={`command-palette__row flex items-baseline justify-between gap-md px-md py-2xs text-body text-text-soft${
+                    index === active ? " ui-wash" : ""
+                  }`}
+                >
+                  <span>{command.title}</span>
+                  {/* Only once the sections are gone: inside its own section
+                      the heading has already said this. */}
+                  {section.label === null && command.hint && (
+                    <span className="text-cap text-text-faint">{command.hint}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
           </li>
         ))}
       </ul>
