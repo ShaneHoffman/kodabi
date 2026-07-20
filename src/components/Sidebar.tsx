@@ -1,4 +1,6 @@
+import { DISTILL_STATE_EVENT } from "../events";
 import { PALETTE_SHORTCUT_LABEL } from "../useCommandPalette";
+import type { DistillEvent } from "../useDistillState";
 import { useNavigation } from "../useNavigation";
 import {
   entryView,
@@ -7,6 +9,9 @@ import {
   useProjects,
   type SidebarEntry,
 } from "../useProjects";
+import { useFailedSessions } from "../useSessions";
+import { useTauriEvent } from "../useTauriEvent";
+import { notifyVaultChanged } from "../useVaultQuery";
 import { ListeningIndicator } from "./ListeningIndicator";
 import { Button } from "./ui/Button";
 import { StatusMessage } from "./ui/StatusMessage";
@@ -98,6 +103,7 @@ export function Sidebar({ onOpenPalette }: Props) {
       </nav>
 
       <footer className="flex flex-col gap-sm">
+        <NeedsAttentionRow />
         <ListeningIndicator />
         <Button
           variant="quiet"
@@ -119,5 +125,53 @@ export function Sidebar({ onOpenPalette }: Props) {
         </Button>
       </footer>
     </aside>
+  );
+}
+
+/**
+ * The way in to NeedsAttentionView, and the reason failed captures could leave
+ * the Inbox at all: without a standing signal, moving them out of the way would
+ * have moved them out of sight.
+ *
+ * It appears only when there is something to act on and disappears at zero, so
+ * the sidebar carries no permanent reminder of a problem nobody has. It sits at
+ * the top of the footer rather than in the nav above: the nav is labelled
+ * "Knowledge base", and a capture that failed to distill is not knowledge, it is
+ * plumbing. The footer is bottom-anchored, so the row grows upward into the
+ * nav's slack and the listening indicator, Settings and Commands never move
+ * under the pointer.
+ *
+ * It also owns the distill-failure refetch. That listener used to live in the
+ * Inbox, which meant a failure only reached the list while the Inbox happened
+ * to be open; this row is mounted for the whole session, so it is the one place
+ * that can promise the signal arrives wherever the user is standing.
+ */
+function NeedsAttentionRow() {
+  const { sessions, error } = useFailedSessions();
+  const { view, navigate } = useNavigation();
+
+  useTauriEvent<DistillEvent>(DISTILL_STATE_EVENT, (payload) => {
+    if (payload.status === "error") notifyVaultChanged();
+  });
+
+  // A failed listing must not masquerade as all clear, so it keeps the row.
+  if (sessions.length === 0 && !error) return null;
+
+  const selected = view.kind === "needsAttention";
+  return (
+    <Button
+      variant="quiet"
+      data-testid="needs-attention-nav"
+      aria-current={selected ? "page" : undefined}
+      onClick={() => navigate({ kind: "needsAttention" })}
+      // A step above Settings' faint: this is work someone has to do, and rank
+      // is carried by value (docs/DESIGN_SYSTEM.md §1).
+      className="flex w-full items-baseline justify-between text-left text-cap text-text-soft"
+    >
+      <span>Needs attention</span>
+      {sessions.length > 0 && (
+        <span className="text-text-faint">{sessions.length}</span>
+      )}
+    </Button>
   );
 }
