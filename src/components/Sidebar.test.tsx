@@ -25,7 +25,12 @@ function serveVault(sessions: FailedSession[] = []): void {
   onCommand("list_projects", () => ({ inbox_note_count: 0, projects: [] }));
   onCommand("list_notes", () => []);
   onCommand("list_failed_sessions", () => sessions);
-  onCommand("get_capture_state", () => ({ phase: "idle", sources: [] }));
+  // The listening indicator in the footer reads this on mount; left unrouted it
+  // would reject and put an error beside the row under test.
+  onCommand("capture_phase", () => ({
+    phase: "idle",
+    sources: { loopback: "off", microphone: "off" },
+  }));
 }
 
 function renderShell() {

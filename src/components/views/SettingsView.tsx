@@ -4,11 +4,14 @@ import {
   buildRetentionPolicy,
   DEFAULT_KEEP_DAYS,
   RETENTION_OPTIONS,
+  setAppearance,
   setCaptureOverlay,
   setRetentionPolicy,
+  THEME_OPTIONS,
   useSettings,
   type OverlaySettings,
   type RetentionKind,
+  type Theme,
 } from "../../useSettings";
 import { INDEX_STATE_EVENT } from "../../events";
 import { useTauriEvent } from "../../useTauriEvent";
@@ -113,6 +116,8 @@ export function SettingsView() {
   // rather than flipping instantly and silently reverting if it fails.
   const [savingRetention, setSavingRetention] = useState(false);
   const [savingOverlay, setSavingOverlay] = useState(false);
+  const [appearanceError, setAppearanceError] = useState<string | null>(null);
+  const [savingAppearance, setSavingAppearance] = useState(false);
   // Set once the day field has been committed, so the save is visible: this
   // control persists on Enter or blur, and without an acknowledgement a
   // keyboard user has no signal that anything happened.
@@ -161,6 +166,21 @@ export function SettingsView() {
       setOverlayError(String(err));
     } finally {
       setSavingOverlay(false);
+    }
+  };
+
+  // The window does not re-theme from here: src/theme.ts listens for the
+  // settings event and applies it, so all three webviews change together
+  // rather than only the one holding this control.
+  const applyAppearanceTheme = async (theme: Theme) => {
+    setAppearanceError(null);
+    setSavingAppearance(true);
+    try {
+      setSettings(await setAppearance({ theme }));
+    } catch (err) {
+      setAppearanceError(String(err));
+    } finally {
+      setSavingAppearance(false);
     }
   };
 
@@ -225,6 +245,26 @@ export function SettingsView() {
               </StatusMessage>
             )}
           </div>
+        </SettingsSection>
+      )}
+
+      {settings && (
+        <SettingsSection title="Appearance">
+          <Select
+            label="Theme"
+            value={settings.appearance.theme}
+            onChange={(value) => applyAppearanceTheme(value as Theme)}
+            options={THEME_OPTIONS}
+            disabled={savingAppearance}
+          />
+          <p className="text-cap text-text-faint">
+            Matching the system follows your OS light and dark setting.
+          </p>
+          {appearanceError && (
+            <StatusMessage variant="error" compact>
+              Couldn&apos;t save: {appearanceError}
+            </StatusMessage>
+          )}
         </SettingsSection>
       )}
 
