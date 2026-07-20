@@ -123,7 +123,7 @@ Add [`ui-focus-ring`](../src/components/ui/ui.css) to the element:
 }
 ```
 
-The two sanctioned exceptions (the palette input, and nothing else) are listed in
+There is exactly one sanctioned exception (the palette input, and nothing else), stated in
 [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §2.
 
 **The reserved green (`--accent-dot`) is untouchable.** It belongs to the listening state alone. Precisely:
@@ -168,8 +168,11 @@ import { Button } from "./ui/Button";
 <Button variant="quiet" className="text-text-soft">Cancel</Button>
 ```
 
-**`loading` keeps a pending control mounted.** Swapping a focused button for a `<span>Saving…</span>`
-drops focus to `<body>` mid-task; this disables the button, sets `aria-busy`, and swaps only the label:
+**`loading` keeps a pending control mounted *and focusable*.** Swapping a focused button for a
+`<span>Saving…</span>` drops focus to `<body>` mid-task — and so does the native `disabled` attribute,
+so a busy button takes `aria-disabled` + `aria-busy`, swallows its own activation, and swaps only the
+label. `disabled` stays a genuine disable, for a control with nothing to do rather than something in
+flight; passing both for the same condition puts the focus loss back:
 
 ```tsx
 <Button loading={saving} loadingLabel="Saving…">Save</Button>

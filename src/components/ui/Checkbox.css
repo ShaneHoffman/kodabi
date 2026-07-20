@@ -63,11 +63,6 @@
   opacity: var(--disabled-opacity);
 }
 
-.ui-checkbox:focus-visible {
-  outline: var(--focus-width) solid var(--accent);
-  outline-offset: var(--focus-offset);
-}
-
 /* Indent the hint under the label rather than the box, so the text column
    reads as one block (control width + the inline gap-2xs beside it). */
 .ui-checkbox__hint {
