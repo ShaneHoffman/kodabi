@@ -1,0 +1,19 @@
+/* ============================================================
+   Overlay — the modal shell.
+
+   Only non-bridged tokens live here: the scrim, the stacking layer, and the
+   panel's elevation. No entrance animation, and nothing for
+   prefers-reduced-motion to disable: FOUNDING_DOC §4 reserves "one deliberate
+   motion" for the distill-and-route moment and keeps everything else
+   near-instant. Showing the surface IS the transition, and a hotkey surface
+   that fades in feels slow (docs/DESIGN_SYSTEM.md §4).
+   ============================================================ */
+
+.ui-overlay {
+  background: var(--scrim);
+  z-index: var(--layer-overlay);
+}
+
+.ui-overlay__panel {
+  box-shadow: var(--lift);
+}

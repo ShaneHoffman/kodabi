@@ -22,6 +22,11 @@ type Props = {
   /** Hide the label visually (still an accessible name) — for a control whose
    * purpose is clear from context, e.g. a per-row picker in a list. */
   hideLabel?: boolean;
+  /** Inert while a write is in flight, or when there is nothing to choose. */
+  disabled?: boolean;
+  /** What the list says when there are no options. It opens and says this
+   * rather than refusing to open, so the control never looks broken. */
+  emptyLabel?: string;
 };
 
 /**
@@ -41,6 +46,8 @@ export function Select({
   id,
   placeholder = "Select…",
   hideLabel = false,
+  disabled = false,
+  emptyLabel = "Nothing to choose yet.",
 }: Props) {
   const generatedId = useId();
   const baseId = id ?? generatedId;
@@ -66,8 +73,9 @@ export function Select({
 
   const active = options.length > 0 ? Math.min(activeIndex, options.length - 1) : 0;
 
+  // Opens even with no options: the list then says so. Refusing to open left a
+  // trigger that swallowed every click and looked broken.
   const openList = () => {
-    if (options.length === 0) return;
     setActiveIndex(selectedIndex >= 0 ? selectedIndex : 0);
     setOpen(true);
   };
@@ -184,9 +192,10 @@ export function Select({
         aria-controls={listboxId}
         aria-labelledby={`${labelId} ${baseId}`}
         aria-activedescendant={open && options.length > 0 ? optionId(active) : undefined}
+        disabled={disabled}
         onClick={() => (open ? setOpen(false) : openList())}
         onKeyDown={onKeyDown}
-        className="ui-select__trigger flex w-full items-center justify-between rounded-md bg-surface px-xs py-2xs text-body text-text"
+        className="ui-select__trigger ui-focus-ring flex w-full items-center justify-between rounded-md bg-surface px-xs py-2xs text-body text-text disabled:cursor-not-allowed disabled:text-text-faint"
       >
         <span className={selectedLabel === null ? "text-text-faint" : undefined}>
           {selectedLabel ?? placeholder}
@@ -211,8 +220,13 @@ export function Select({
           id={listboxId}
           role="listbox"
           aria-labelledby={labelId}
-          className="ui-select__list absolute inset-x-0 top-full z-10 mt-3xs max-h-64 overflow-y-auto rounded-md bg-surface py-2xs"
+          className="ui-select__list absolute inset-x-0 top-full mt-3xs max-h-64 overflow-y-auto rounded-md bg-surface py-2xs"
         >
+          {options.length === 0 && (
+            // Not a role=option: there is nothing to choose, so it must not be
+            // reachable by the arrow keys or announced as selectable.
+            <li className="px-xs py-2xs text-cap text-text-faint">{emptyLabel}</li>
+          )}
           {options.map((option, index) => (
             <li
               key={option.value}
@@ -229,7 +243,7 @@ export function Select({
               }}
               onClick={() => choose(index)}
               className={`ui-select__option flex items-center justify-between px-xs py-2xs text-body text-text-soft${
-                index === active ? " is-active" : ""
+                index === active ? " ui-wash is-active" : ""
               }${index === selectedIndex ? " is-selected" : ""}`}
             >
               <span>{option.label}</span>
