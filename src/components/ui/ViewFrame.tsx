@@ -63,12 +63,18 @@ export function ViewFrame({
   summary,
   children,
 }: Props) {
+  // Left-aligned, not centred. `mx-auto` made the side gutters a function of
+  // the window: at the content cap they were 40px, and every pixel the window
+  // grew past that split between left and right, so the same view had a 40px
+  // top and a 300px left on a wide screen. The gutter is now the gutter, on all
+  // four sides, whatever the window is doing.
+  //
   // Config reads narrow: a settings column that runs the full content width
   // makes every label and control drift apart from the thing it labels.
   const column =
     variant === "panel"
-      ? "mx-auto flex w-full max-w-measure flex-col gap-lg"
-      : "mx-auto flex w-full max-w-content flex-col gap-lg";
+      ? "flex w-full max-w-measure flex-col gap-lg"
+      : "flex w-full max-w-content flex-col gap-lg";
   const summaryClass = variant ? SUMMARY_CLASS[variant] : "";
 
   return (
