@@ -1,7 +1,8 @@
-import { useState, type FormEvent, type ReactNode } from "react";
+import { useState, type FormEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useNavigation, type View } from "../../useNavigation";
+import { noteMeta } from "../../noteMeta";
 import {
   createNote,
   INBOX_PROJECT,
@@ -13,6 +14,12 @@ import {
   type NoteType,
 } from "../../useNotes";
 import { formatSlug, useProjects } from "../../useProjects";
+import { Button } from "../ui/Button";
+import { Select } from "../ui/Select";
+import { StatusMessage } from "../ui/StatusMessage";
+import { Textarea } from "../ui/Textarea";
+import { TextField } from "../ui/TextField";
+import { ViewFrame } from "../ui/ViewFrame";
 import "./NoteEditorView.css";
 
 type Props = {
@@ -20,20 +27,21 @@ type Props = {
   project: string | null;
 };
 
-const NOTE_TYPES: NoteType[] = ["note", "meeting", "chat"];
-
-/** Value-shift field surface (bg-sink on bg), never a border. */
-const FIELD_CLASS =
-  "w-full rounded-md bg-bg-sink p-xs text-body text-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
-
-const ACTION_CLASS =
-  "flex-none text-body text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:text-text-faint";
+const NOTE_TYPE_OPTIONS = (["note", "meeting", "chat"] satisfies NoteType[]).map(
+  (value) => ({ value, label: value }),
+);
 
 /**
  * The note screen's three lives: a create form (no id yet), the serif reading
  * view, and an in-place editor. All writes go through the backend's Markdown
  * writer, so the on-disk frontmatter stays schema-valid; on edit the backend
  * preserves `id`, `source`, and routing verbatim.
+ *
+ * This screen used to run a parallel design system — its own FIELD_CLASS and
+ * ACTION_CLASS strings, a local `Field` label wrapper whose labels were eyebrows
+ * rather than field labels, a native <select> that ignored the token theme
+ * entirely, and five hand-rolled buttons. All of it now comes from the shared
+ * primitives (docs/UI_CONVENTIONS.md).
  */
 export function NoteEditorView({ noteId, project }: Props) {
   if (noteId === null) {
@@ -43,36 +51,14 @@ export function NoteEditorView({ noteId, project }: Props) {
     // Unreachable via current navigation: every opened note arrives with its
     // project. A quiet dead-end beats a crash if a future caller slips.
     return (
-      <Frame>
-        <p className="text-body text-text-soft">
+      <ViewFrame>
+        <StatusMessage variant="empty">
           This note arrived without its project. Open it from a project list.
-        </p>
-      </Frame>
+        </StatusMessage>
+      </ViewFrame>
     );
   }
   return <OpenedNote key={noteId} noteId={noteId} project={project} />;
-}
-
-/** The shared page scaffold: centered content column inside a padded page. */
-function Frame({ children }: { children: ReactNode }) {
-  return (
-    <section className="flex min-h-full flex-col p-xl">
-      <div className="mx-auto flex w-full max-w-content flex-col gap-lg">
-        {children}
-      </div>
-    </section>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <label className="flex flex-1 flex-col gap-3xs">
-      <span className="text-eyebrow uppercase tracking-wide text-text-faint">
-        {label}
-      </span>
-      {children}
-    </label>
-  );
 }
 
 /** The date/type/tags row shared by the create and edit forms. */
@@ -83,40 +69,39 @@ function MetaFields(props: {
   onDate: (d: string) => void;
   tagsRaw: string;
   onTagsRaw: (t: string) => void;
+  disabled?: boolean;
 }) {
   return (
     <div className="flex flex-wrap gap-md">
-      <Field label="Type">
-        <select
+      <div className="min-w-48 flex-1">
+        <Select
+          label="Type"
           value={props.noteType}
-          onChange={(e) => props.onNoteType(e.target.value as NoteType)}
-          className={FIELD_CLASS}
-        >
-          {NOTE_TYPES.map((t) => (
-            <option key={t} value={t}>
-              {t}
-            </option>
-          ))}
-        </select>
-      </Field>
-      <Field label="Date">
+          onChange={(value) => props.onNoteType(value as NoteType)}
+          options={NOTE_TYPE_OPTIONS}
+          disabled={props.disabled}
+        />
+      </div>
+      <div className="min-w-48 flex-1">
         {/* A plain text input, not type="date": an RFC 3339 timestamp must
             stay editable verbatim (the backend stores dates as written). */}
-        <input
+        <TextField
+          label="Date"
           value={props.date}
           onChange={(e) => props.onDate(e.target.value)}
           placeholder="2026-07-17"
-          className={FIELD_CLASS}
+          disabled={props.disabled}
         />
-      </Field>
-      <Field label="Tags">
-        <input
+      </div>
+      <div className="min-w-48 flex-1">
+        <TextField
+          label="Tags"
           value={props.tagsRaw}
           onChange={(e) => props.onTagsRaw(e.target.value)}
           placeholder="comma or space separated"
-          className={FIELD_CLASS}
+          disabled={props.disabled}
         />
-      </Field>
+      </div>
     </div>
   );
 }
@@ -172,54 +157,59 @@ function CreateNote({ initialProject }: { initialProject: string | null }) {
   };
 
   return (
-    <Frame>
+    <ViewFrame>
       <form onSubmit={submit} className="flex flex-col gap-md">
         <header className="flex items-baseline justify-between gap-md">
           <h2 className="font-serif text-h2 text-text">New note</h2>
-          <button
+          <Button
             type="submit"
-            disabled={!trimmedProject || submitting}
-            className={ACTION_CLASS}
+            variant="quiet"
+            disabled={!trimmedProject}
+            loading={submitting}
+            loadingLabel="Creating…"
+            className="-mr-xs flex-none text-body text-accent"
           >
             Create note
-          </button>
+          </Button>
         </header>
 
         <div className="flex flex-wrap gap-md">
-          <Field label="Project">
+          <div className="min-w-48 flex-1">
             {/* Native free-text + suggestions: an unknown name creates the
                 project folder on save. */}
-            <input
+            <TextField
+              label="Project"
               list="kodabi-project-slugs"
               value={project}
               onChange={(e) => setProject(e.target.value)}
               placeholder="e.g. Growth/Q3"
-              className={FIELD_CLASS}
+              disabled={submitting}
             />
             <datalist id="kodabi-project-slugs">
               {projectSlugs.map((slug) => (
                 <option key={slug} value={slug} />
               ))}
             </datalist>
-          </Field>
-          <Field label="Title">
-            <input
+          </div>
+          <div className="min-w-48 flex-1">
+            <TextField
+              label="Title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
               placeholder="names the file"
-              className={FIELD_CLASS}
+              disabled={submitting}
             />
-          </Field>
+          </div>
         </div>
 
-        <Field label="Body">
-          <textarea
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            placeholder="Markdown"
-            className={`${FIELD_CLASS} note-editor__body font-mono`}
-          />
-        </Field>
+        <Textarea
+          label="Body"
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          placeholder="Markdown"
+          disabled={submitting}
+          className="note-editor__body font-mono"
+        />
 
         <MetaFields
           noteType={noteType}
@@ -228,11 +218,14 @@ function CreateNote({ initialProject }: { initialProject: string | null }) {
           onDate={setDate}
           tagsRaw={tagsRaw}
           onTagsRaw={setTagsRaw}
+          disabled={submitting}
         />
 
-        {error && <p className="text-body text-text-soft">{error}</p>}
+        {error && (
+          <StatusMessage variant="error">Couldn&apos;t create this note: {error}</StatusMessage>
+        )}
       </form>
-    </Frame>
+    </ViewFrame>
   );
 }
 
@@ -242,9 +235,9 @@ function OpenedNote({ noteId, project }: { noteId: string; project: string }) {
 
   if (error) {
     return (
-      <Frame>
-        <p className="text-body text-text-soft">{error}</p>
-      </Frame>
+      <ViewFrame>
+        <StatusMessage variant="error">Couldn&apos;t open this note: {error}</StatusMessage>
+      </ViewFrame>
     );
   }
   if (!note) {
@@ -279,7 +272,6 @@ function ReadNote({
   onEdit: () => void;
 }) {
   const { navigate } = useNavigation();
-  const meta = [note.date.slice(0, 10), note.type, ...note.tags].join(" · ");
 
   // An unfiled note came from the Inbox, not a project — send "back" there
   // (navigating to a `project` view for the Inbox sentinel is a dead end).
@@ -290,24 +282,28 @@ function ReadNote({
   const backLabel = isInbox ? "Inbox" : formatSlug(project);
 
   return (
-    <Frame>
+    <ViewFrame>
       <article className="flex flex-col gap-lg">
         <header className="flex flex-col gap-3xs">
-          <button
-            type="button"
+          <Button
+            variant="quiet"
             onClick={() => navigate(backView)}
-            className="flex items-center gap-2xs self-start text-cap text-text-faint hover:text-text-soft focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+            className="-ml-xs flex items-center gap-2xs self-start text-cap text-text-faint"
           >
             <span aria-hidden="true">←</span>
             <span>{backLabel}</span>
-          </button>
+          </Button>
           <div className="flex items-baseline justify-between gap-md">
             <h2 className="font-serif text-h2 text-text">{note.title}</h2>
-            <button type="button" onClick={onEdit} className={ACTION_CLASS}>
+            <Button
+              variant="quiet"
+              onClick={onEdit}
+              className="-mr-xs flex-none text-body text-accent"
+            >
               Edit
-            </button>
+            </Button>
           </div>
-          <p className="text-cap text-text-faint">{meta}</p>
+          <p className="text-cap text-text-faint">{noteMeta(note, note.type)}</p>
         </header>
 
         {note.body_markdown ? (
@@ -317,10 +313,10 @@ function ReadNote({
             </ReactMarkdown>
           </div>
         ) : (
-          <p className="text-body text-text-soft">This note has no body yet.</p>
+          <StatusMessage variant="empty">This note has no body yet.</StatusMessage>
         )}
       </article>
-    </Frame>
+    </ViewFrame>
   );
 }
 
@@ -363,33 +359,40 @@ function EditNote({
   };
 
   return (
-    <Frame>
+    <ViewFrame>
       <form onSubmit={submit} className="flex flex-col gap-md">
         <header className="flex items-baseline justify-between gap-md">
           {/* Title and project are read-only here: the filename never changes
               on edit, and moving a note is the re-route flow, not an edit. */}
           <h2 className="font-serif text-h2 text-text">{note.title}</h2>
           <div className="flex flex-none items-baseline gap-md">
-            <button
-              type="button"
+            <Button
+              variant="quiet"
               onClick={onCancel}
-              className="text-body text-text-soft hover:text-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
+              disabled={saving}
+              className="text-body text-text-soft"
             >
               Cancel
-            </button>
-            <button type="submit" disabled={saving} className={ACTION_CLASS}>
+            </Button>
+            <Button
+              type="submit"
+              variant="quiet"
+              loading={saving}
+              loadingLabel="Saving…"
+              className="-mr-xs flex-none text-body text-accent"
+            >
               Save
-            </button>
+            </Button>
           </div>
         </header>
 
-        <Field label="Body">
-          <textarea
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-            className={`${FIELD_CLASS} note-editor__body font-mono`}
-          />
-        </Field>
+        <Textarea
+          label="Body"
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+          disabled={saving}
+          className="note-editor__body font-mono"
+        />
 
         <MetaFields
           noteType={noteType}
@@ -398,10 +401,13 @@ function EditNote({
           onDate={setDate}
           tagsRaw={tagsRaw}
           onTagsRaw={setTagsRaw}
+          disabled={saving}
         />
 
-        {error && <p className="text-body text-text-soft">{error}</p>}
+        {error && (
+          <StatusMessage variant="error">Couldn&apos;t save this note: {error}</StatusMessage>
+        )}
       </form>
-    </Frame>
+    </ViewFrame>
   );
 }

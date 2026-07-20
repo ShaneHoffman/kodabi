@@ -130,7 +130,7 @@ describe("QuickCapture", () => {
 
     await user.type(box(), "ring the vendor back{Enter}");
 
-    expect(await screen.findByText("the vault is not writable")).toBeInTheDocument();
+    expect(await screen.findByText(/the vault is not writable/)).toBeInTheDocument();
     // A lost thought is the failure that matters here: the draft stays put and
     // the window does not dismiss itself out from under it.
     expect(box()).toHaveValue("ring the vendor back");
@@ -154,13 +154,13 @@ describe("QuickCapture", () => {
     render(<QuickCapture />);
 
     await user.type(box(), "ring the vendor back{Enter}");
-    await screen.findByText("the vault is not writable");
+    await screen.findByText(/the vault is not writable/);
 
     await reshow();
 
     // A blur-dismiss must not bury a failed capture: the error and the draft
     // are both still there the next time the box pops.
-    expect(screen.getByText("the vault is not writable")).toBeInTheDocument();
+    expect(screen.getByText(/the vault is not writable/)).toBeInTheDocument();
     expect(box()).toHaveValue("ring the vendor back");
   });
 
@@ -222,7 +222,7 @@ describe("QuickCapture", () => {
     // or pin an error on a capture it has nothing to do with.
     expect(box()).toHaveValue("book the flights");
     expect(
-      screen.queryByText("the vault is not writable"),
+      screen.queryByText(/the vault is not writable/),
     ).not.toBeInTheDocument();
   });
 });

@@ -3,6 +3,7 @@ import { useCaptureState } from "../useCaptureState";
 import { useDebouncedValue } from "../useDebouncedValue";
 import { useDistillState } from "../useDistillState";
 import { useTranscriptionState } from "../useTranscriptionState";
+import { CaptureStatusLine } from "./CaptureStatusLine";
 import { SpiritMark } from "./SpiritMark";
 
 function transcriptionLabel(
@@ -55,30 +56,11 @@ export function ListeningIndicator() {
     <div className="flex flex-col gap-2xs">
       <div className="flex items-center gap-xs">
         <SpiritMark mode={markMode(captureState)} size="1rem" halo="0.9rem" />
-        <p
-          role="status"
-          className={`text-cap uppercase tracking-wide ${
-            label.live ? "text-accent-dot" : "text-text-faint"
-          }`}
-        >
-          {label.text}
-        </p>
+        <CaptureStatusLine live={label.live}>{label.text}</CaptureStatusLine>
       </div>
-      {label.detail && (
-        <p role="status" className="text-cap uppercase tracking-wide text-text-faint">
-          {label.detail}
-        </p>
-      )}
-      {transcriptionText && (
-        <p role="status" className="text-cap uppercase tracking-wide text-text-faint">
-          {transcriptionText}
-        </p>
-      )}
-      {distillText && (
-        <p role="status" className="text-cap uppercase tracking-wide text-text-faint">
-          {distillText}
-        </p>
-      )}
+      {label.detail && <CaptureStatusLine>{label.detail}</CaptureStatusLine>}
+      {transcriptionText && <CaptureStatusLine>{transcriptionText}</CaptureStatusLine>}
+      {distillText && <CaptureStatusLine>{distillText}</CaptureStatusLine>}
     </div>
   );
 }

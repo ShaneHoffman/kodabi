@@ -7,6 +7,9 @@ import { hideQuickCaptureWindow, submitQuickCapture } from "../quickCapture";
 import { useTauriEvent } from "../useTauriEvent";
 import { useTimeout } from "../useTimeout";
 import { QUICK_CAPTURE_SHOWN_EVENT } from "../events";
+import { Button } from "./ui/Button";
+import { StatusMessage } from "./ui/StatusMessage";
+import { Textarea } from "./ui/Textarea";
 import "./QuickCapture.css";
 
 /** How long the destination flashes before the window dismisses itself. Short
@@ -97,26 +100,45 @@ export function QuickCapture() {
 
   return (
     <main className="quick-capture__panel flex h-screen flex-col gap-2xs bg-surface p-sm">
-      <textarea
+      <Textarea
         ref={textareaRef}
+        hideLabel
+        label="Capture a thought"
         autoFocus
         spellCheck={false}
         placeholder="Capture a thought…"
         value={text}
         onChange={(event) => setText(event.target.value)}
         onKeyDown={onKeyDown}
-        aria-label="Capture a thought"
-        className="quick-capture__input min-h-0 flex-1 resize-none rounded-md bg-bg-sink px-xs py-2xs text-body text-text placeholder:text-text-faint"
+        className="min-h-0 flex-1 resize-none"
       />
       <footer className="flex items-baseline justify-between gap-2xs text-cap text-text-faint">
-        <span className={status.kind === "error" ? "text-text-soft" : undefined}>
-          {status.kind === "error"
-            ? status.message
-            : "Enter files it · Shift+Enter for a new line · Esc dismisses"}
-        </span>
-        {status.kind === "submitting" && <span className="text-text-soft">Filing…</span>}
-        {status.kind === "filed" && (
-          <span className="text-text">→ {status.destination}</span>
+        {status.kind === "error" ? (
+          // role="alert": a failed capture arrives asynchronously and the user
+          // may not be looking at the box. It used to render as an unannounced
+          // span in place of the hint (docs/DESIGN_SYSTEM.md §6).
+          <StatusMessage variant="error" compact>
+            Couldn&apos;t file this: {status.message}
+          </StatusMessage>
+        ) : (
+          <span>Enter files it · Shift+Enter for a new line · Esc dismisses</span>
+        )}
+        {status.kind === "filed" ? (
+          <span className="flex-none text-text">→ {status.destination}</span>
+        ) : (
+          // A visible submit, because Enter is not a path a pointer-only user
+          // has: this window is opened by hotkey but must not be operable by
+          // hotkey alone (docs/DESIGN_SYSTEM.md §6).
+          <Button
+            variant="quiet"
+            onClick={submit}
+            disabled={!text.trim()}
+            loading={status.kind === "submitting"}
+            loadingLabel="Filing…"
+            className="-mr-xs flex-none text-cap text-text-soft"
+          >
+            File it
+          </Button>
         )}
       </footer>
     </main>

@@ -1,30 +1,23 @@
 /* ============================================================
    Command palette — the primary navigation surface.
 
-   Only non-bridged tokens live here: the theme-aware elevation and the
-   hairline edges (inset shadows, never borders — docs/DESIGN.md). The
-   palette appears near-instantly by design: "one deliberate motion" is
-   reserved for the distill-and-route moment, everything else is
-   near-instant (FOUNDING_DOC §4) — so there is no entrance animation
-   and nothing for prefers-reduced-motion to disable.
+   The scrim, stacking layer and panel elevation now come from the shared
+   Overlay primitive, and the active row from .ui-wash. What is left here is
+   this surface's own exception.
+
+   The input's focus ring is dropped deliberately: the dialog's only tabbable
+   element is this input, and it shows a caret, so a ring would be noise
+   rather than information. This is one of exactly two sanctioned exceptions
+   to the focus-ring rule (docs/DESIGN_SYSTEM.md §2).
+
+   The palette appears near-instantly by design: "one deliberate motion" is
+   reserved for the distill-and-route moment, everything else is near-instant
+   (FOUNDING_DOC §4) — so there is no entrance animation.
    ============================================================ */
 
-.command-palette__panel {
-  box-shadow: var(--lift);
-}
-
-/* The input's own focus ring is dropped: the dialog context makes focus
-   unambiguous (the input is the only tabbable element and shows a caret). */
 .command-palette__input {
   box-shadow: inset 0 -1px 0 var(--edge-faint);
 }
 .command-palette__input:focus {
   outline: none;
-}
-
-/* Active row — an ink-wash of the text color, value not hue, identical
-   logic in both themes. Never the reserved green. */
-.command-palette__row.is-active {
-  background: color-mix(in srgb, var(--text) 8%, transparent);
-  color: var(--text);
 }

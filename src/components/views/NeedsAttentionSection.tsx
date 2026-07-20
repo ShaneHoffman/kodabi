@@ -5,13 +5,24 @@ import { retryDistill, type FailedSession } from "../../useSessions";
 import { notifyVaultChanged } from "../../useVaultQuery";
 import type { DistillEvent } from "../../useDistillState";
 import { Button } from "../ui/Button";
+import { ListRow } from "../ui/ListRow";
+import { StatusMessage } from "../ui/StatusMessage";
 
-/** A readable name for a session: its slug de-hyphenated, else the raw filename.
- * Never the capture time, which the line below the title already shows. */
+/** A readable name for a session: its slug de-hyphenated, else an honest
+ * placeholder. Never the capture time, which the line below already shows, and
+ * never the filename — a session captured without a slug is named
+ * `20260719T190540729Z-5fonvqzd.jsonl`, and setting a machine id in the reading
+ * serif was the single ugliest thing on the screen. */
 function sessionTitle(session: FailedSession): string {
   const slug = session.slug?.split("-").filter(Boolean).join(" ").trim();
-  return slug || session.file_name;
+  return slug || "Untitled capture";
 }
+
+/** How many rows show before the section collapses behind an expander. This
+ * section is an exception list living inside a view named for something else;
+ * unbounded, it measured 498px against the Inbox's own 199px and pushed the
+ * notes it sits above off the screen entirely (docs/DESIGN_SYSTEM.md §1). */
+const COLLAPSED_ROWS = 3;
 
 /** The stored instant (UTC) rendered in the user's own zone, since this is a
  * timestamp a person reads rather than one anything sorts by. */
@@ -50,6 +61,7 @@ export function NeedsAttentionSection({
 }) {
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  const [expanded, setExpanded] = useState(false);
 
   useTauriEvent<DistillEvent>(DISTILL_STATE_EVENT, (payload) => {
     if (payload.status === "distilling" || payload.status === "routing_fallback") {
@@ -107,53 +119,69 @@ export function NeedsAttentionSection({
   // Nothing waiting and nothing broken: stay out of the way entirely.
   if (!error && sessions.length === 0) return null;
 
+  const hidden = Math.max(0, sessions.length - COLLAPSED_ROWS);
+  const visible = expanded ? sessions : sessions.slice(0, COLLAPSED_ROWS);
+
   return (
     <section className="flex flex-col gap-3xs" data-testid="needs-attention">
-      <p className="text-eyebrow uppercase tracking-wide text-text-faint">
+      <p className="text-eyebrow uppercase tracking-eyebrow text-text-faint">
         Needs attention
       </p>
       {error ? (
-        <p className="text-cap text-text-soft">{error}</p>
+        <StatusMessage variant="error" compact>
+          Couldn&apos;t list captured sessions: {error}
+        </StatusMessage>
       ) : (
-        <ul className="flex flex-col gap-3xs">
-          {sessions.map((session) => (
-            <li
-              key={session.path}
-              className="flex items-start justify-between gap-md py-2xs"
-            >
-              <div className="flex min-w-0 flex-1 flex-col gap-3xs">
-                <span className="font-serif text-body text-text-soft">
-                  {sessionTitle(session)}
-                </span>
-                <span className="text-cap text-text-faint">
-                  {formatCaptureTime(session.captured_at)} · no note was created
-                </span>
+        <>
+          <ul className="flex flex-col gap-3xs">
+            {visible.map((session) => (
+              <li key={session.path}>
+                <ListRow
+                  title={sessionTitle(session)}
+                  meta={`${formatCaptureTime(session.captured_at)} · no note was created`}
+                  action={
+                    // The button stays mounted while its retry runs. It used to
+                    // be swapped for a <span>Retrying…</span>, which unmounted
+                    // the focused control and dropped focus to <body>
+                    // (docs/DESIGN_SYSTEM.md §6).
+                    <div className="text-right">
+                      <Button
+                        variant="quiet"
+                        data-testid="retry-distill"
+                        // One retry at a time: each run spends a real headless
+                        // Claude call, and the backend serializes them anyway.
+                        disabled={pendingPath !== null}
+                        loading={pendingPath === session.path}
+                        loadingLabel="Retrying…"
+                        onClick={() => retry(session.path)}
+                        className="text-body text-text-soft"
+                      >
+                        Retry
+                      </Button>
+                    </div>
+                  }
+                />
                 {rowErrors[session.path] && (
-                  <p className="text-cap text-text-soft">
-                    {rowErrors[session.path]}
-                  </p>
+                  <StatusMessage variant="error" compact>
+                    Retry failed: {rowErrors[session.path]}
+                  </StatusMessage>
                 )}
-              </div>
-              <div className="w-48 flex-none text-right">
-                {pendingPath === session.path ? (
-                  <span className="text-cap text-text-faint">Retrying…</span>
-                ) : (
-                  <Button
-                    variant="quiet"
-                    data-testid="retry-distill"
-                    // One retry at a time: each run spends a real headless
-                    // Claude call, and the backend serializes them anyway.
-                    disabled={pendingPath !== null}
-                    onClick={() => retry(session.path)}
-                    className="text-body text-text-soft hover:text-text"
-                  >
-                    Retry
-                  </Button>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
+              </li>
+            ))}
+          </ul>
+          {hidden > 0 && (
+            <Button
+              variant="quiet"
+              onClick={() => setExpanded(!expanded)}
+              // -ml-xs cancels the primitive's own control padding so the
+              // label's text edge lines up with the row titles above it,
+              // rather than sitting 12px proud of the column.
+              className="-ml-xs self-start text-cap text-text-faint"
+            >
+              {expanded ? "Show fewer" : `Show ${hidden} more`}
+            </Button>
+          )}
+        </>
       )}
     </section>
   );
