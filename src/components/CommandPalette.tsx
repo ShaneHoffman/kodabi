@@ -115,7 +115,7 @@ export function CommandPalette({ onClose }: Props) {
           setActiveIndex(0);
         }}
         onKeyDown={onKeyDown}
-        className="command-palette__input w-full bg-surface px-sm py-xs text-body text-text placeholder:text-text-faint"
+        className="command-palette__input w-full bg-surface px-md py-sm text-body text-text placeholder:text-text-faint"
       />
       <ul
         id={LISTBOX_ID}
@@ -127,7 +127,7 @@ export function CommandPalette({ onClose }: Props) {
           // Only reachable with an empty query and no commands at all, which
           // means the project listing failed — never a blank pane
           // (docs/DESIGN_SYSTEM.md §3).
-          <li className="px-sm py-2xs text-body text-text-soft">
+          <li className="px-md py-2xs text-body text-text-soft">
             No commands available yet.
           </li>
         )}
@@ -146,7 +146,7 @@ export function CommandPalette({ onClose }: Props) {
               if (moved && index !== active) setActiveIndex(index);
             }}
             onClick={() => runCommand(command)}
-            className={`command-palette__row flex items-baseline justify-between px-sm py-2xs text-body text-text-soft${
+            className={`command-palette__row flex items-baseline justify-between gap-md px-md py-2xs text-body text-text-soft${
               index === active ? " ui-wash" : ""
             }`}
           >

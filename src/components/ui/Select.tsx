@@ -27,6 +27,18 @@ type Props = {
   /** What the list says when there are no options. It opens and says this
    * rather than refusing to open, so the control never looks broken. */
   emptyLabel?: string;
+  /**
+   * How much the resting control weighs.
+   *
+   *   boxed — a form field, and reads like one. The default.
+   *   quiet — an affordance sitting beside content it must not out-weigh (the
+   *           Inbox's per-row "File to…"). Rests as text, becomes a real
+   *           anchored control on hover and while open.
+   *
+   * Never `quiet` inside a form: a field that does not look like a field is a
+   * field people do not fill in (docs/UI_CONVENTIONS.md).
+   */
+  variant?: "boxed" | "quiet";
 };
 
 /**
@@ -48,6 +60,7 @@ export function Select({
   hideLabel = false,
   disabled = false,
   emptyLabel = "Nothing to choose yet.",
+  variant = "boxed",
 }: Props) {
   const generatedId = useId();
   const baseId = id ?? generatedId;
@@ -195,7 +208,11 @@ export function Select({
         disabled={disabled}
         onClick={() => (open ? setOpen(false) : openList())}
         onKeyDown={onKeyDown}
-        className="ui-select__trigger ui-focus-ring flex w-full items-center justify-between rounded-md bg-surface px-xs py-2xs text-body text-text disabled:cursor-not-allowed disabled:text-text-faint"
+        className={`ui-select__trigger ui-focus-ring flex w-full items-center justify-between rounded-md px-xs py-2xs text-body disabled:cursor-not-allowed disabled:text-text-faint ${
+          variant === "quiet"
+            ? "ui-select__trigger--quiet text-text-soft"
+            : "bg-surface text-text"
+        }`}
       >
         <span className={selectedLabel === null ? "text-text-faint" : undefined}>
           {selectedLabel ?? placeholder}

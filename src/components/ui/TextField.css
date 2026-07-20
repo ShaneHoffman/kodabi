@@ -8,7 +8,13 @@
    (docs/DESIGN_SYSTEM.md §2).
    ============================================================ */
 
+/* No fill. The field used to carry --surface as well as the line, which made
+   it a box wearing a writing line rather than a writing line — and on a form
+   with three of them in a row, three boxes out-weighed everything they were
+   labelling. The line alone is the affordance; it sits on whatever plane the
+   form sits on, page or panel. */
 .ui-field {
+  background: transparent;
   box-shadow: inset 0 -1px 0 var(--edge);
   transition: box-shadow var(--dur-quick) var(--ease-standard);
 }

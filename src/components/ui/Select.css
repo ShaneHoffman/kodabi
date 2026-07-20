@@ -27,6 +27,40 @@
   box-shadow: inset 0 0 0 1px var(--edge-faint);
 }
 
+/* ---- quiet ----
+   A picker that sits in a list row is not the subject of that row. Boxed, it
+   was the heaviest object on the Inbox: a filled, ringed field shouting beside
+   the note title it belongs to. So it rests as text and earns its box only
+   when the pointer or the keyboard is actually on it — the same
+   inherit-then-step-toward-ink logic as Button variant="quiet". */
+.ui-select__trigger--quiet {
+  background: transparent;
+  box-shadow: none;
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard);
+}
+
+.ui-select__trigger--quiet:hover:not(:disabled) {
+  background: var(--wash-active);
+  color: var(--text);
+}
+
+.ui-select__trigger--quiet:active:not(:disabled) {
+  transition: none;
+}
+
+/* Open, it IS the control the list hangs off, so it takes the real plane. */
+.ui-select__trigger--quiet[aria-expanded="true"] {
+  background: var(--surface);
+  box-shadow: var(--hairline);
+  color: var(--text);
+}
+
+.ui-select__trigger--quiet:disabled {
+  box-shadow: none;
+}
+
 /* Functional affordance, not decoration: a caret that scales with the
    type and inherits a faint value. */
 .ui-select__caret {
