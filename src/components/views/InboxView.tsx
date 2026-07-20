@@ -65,7 +65,11 @@ export function InboxView() {
           </StatusMessage>
         )
       ) : (
-        <ul className="flex flex-col gap-3xs">
+        // A row here is three lines tall (title, meta, snippet). At gap-3xs the
+        // space between two rows was no bigger than the space between a row's
+        // own lines, so the list read as one undifferentiated block: the gap
+        // separating rows has to beat the gap inside them.
+        <ul className="flex flex-col gap-md">
           {notes.map((note) => (
             // Keyed by path, not id: two files can carry the same id (an
             // external copy), and duplicate keys would mis-reconcile rows.

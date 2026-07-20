@@ -208,10 +208,15 @@ export function Select({
         disabled={disabled}
         onClick={() => (open ? setOpen(false) : openList())}
         onKeyDown={onKeyDown}
-        className={`ui-select__trigger ui-focus-ring flex w-full items-center justify-between rounded-md px-xs py-2xs text-body disabled:cursor-not-allowed disabled:text-text-faint ${
+        // Boxed fills its column and pushes the caret to the far edge, the way
+        // a form field should. Quiet shrink-wraps instead: with no ring holding
+        // the two ends together, a full-width trigger left its label and its
+        // caret marooned at opposite sides of the column, reading as two
+        // unrelated scraps of text rather than one control.
+        className={`ui-select__trigger ui-focus-ring flex items-center rounded-md px-xs py-2xs text-body disabled:cursor-not-allowed disabled:text-text-faint ${
           variant === "quiet"
-            ? "ui-select__trigger--quiet text-text-soft"
-            : "bg-surface text-text"
+            ? "ui-select__trigger--quiet w-auto self-start gap-2xs text-text-soft"
+            : "w-full justify-between bg-surface text-text"
         }`}
       >
         <span className={selectedLabel === null ? "text-text-faint" : undefined}>
