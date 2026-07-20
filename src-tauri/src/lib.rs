@@ -161,6 +161,7 @@ pub fn run() {
             settings_cmds::get_settings,
             settings_cmds::set_retention_policy,
             settings_cmds::set_capture_overlay,
+            settings_cmds::set_appearance,
             settings_cmds::acknowledge_consent,
         ])
         .on_window_event(|window, event| match event {

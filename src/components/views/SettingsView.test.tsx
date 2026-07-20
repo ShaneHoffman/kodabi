@@ -14,6 +14,7 @@ const DEFAULTS: Settings = {
   consent_acknowledged: true,
   retention: { policy: "keep_all" },
   overlay: { manual_captures: false, auto_captures: true },
+  appearance: { theme: "system" },
 };
 
 function settingsWith(overlay: OverlaySettings): Settings {
@@ -124,5 +125,71 @@ describe("SettingsView capture overlay", () => {
     expect(
       screen.getByText(/does not detect meetings on its own yet/i),
     ).toBeInTheDocument();
+  });
+});
+
+describe("SettingsView structure", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  it("names itself Settings and gives every group its own heading", async () => {
+    // The title used to be "Privacy", which named the first group and
+    // mislabelled the other two -- and let that first group get away with
+    // having no heading of its own.
+    await renderSeeded();
+
+    expect(
+      screen.getByRole("heading", { name: "Settings", level: 2 }),
+    ).toBeInTheDocument();
+    for (const group of ["Privacy", "Appearance", "Capture", "Knowledge base"]) {
+      expect(screen.getByRole("heading", { name: group, level: 3 })).toBeInTheDocument();
+    }
+  });
+});
+
+describe("SettingsView appearance", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  it("reflects the stored theme", async () => {
+    await renderSeeded({ ...DEFAULTS, appearance: { theme: "dark" } });
+
+    expect(screen.getByRole("combobox", { name: /Theme/ })).toHaveTextContent("Dark");
+  });
+
+  it("persists a chosen theme and adopts the echoed result", async () => {
+    const user = userEvent.setup();
+    const stored: Settings = { ...DEFAULTS, appearance: { theme: "dark" } };
+    onCommand("set_appearance", () => stored);
+    await renderSeeded();
+
+    await user.click(screen.getByRole("combobox", { name: /Theme/ }));
+    await user.click(screen.getByRole("option", { name: "Dark" }));
+
+    expect(invoke).toHaveBeenCalledWith("set_appearance", {
+      appearance: { theme: "dark" },
+    });
+    expect(screen.getByRole("combobox", { name: /Theme/ })).toHaveTextContent("Dark");
+  });
+
+  it("keeps the stored theme showing when the save fails", async () => {
+    const user = userEvent.setup();
+    onCommand("set_appearance", () => {
+      throw "the settings file is read only";
+    });
+    await renderSeeded();
+
+    await user.click(screen.getByRole("combobox", { name: /Theme/ }));
+    await user.click(screen.getByRole("option", { name: "Dark" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /the settings file is read only/,
+    );
+    // Not flipped optimistically: the control still shows what is on disk.
+    expect(screen.getByRole("combobox", { name: /Theme/ })).toHaveTextContent(
+      "Match the system",
+    );
   });
 });
