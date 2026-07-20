@@ -54,12 +54,16 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 ## Anchor 4 — UI primitives ↔ docs/UI_CONVENTIONS.md
 
 - **Source of truth:** `src/components/ui/` (the exported primitives and their props).
-- **Mirror:** the "Primitives" section of `docs/UI_CONVENTIONS.md` (`Button` variants,
-  `TextField` props, `Select` behavior).
+- **Mirror:** the "Primitives" section of `docs/UI_CONVENTIONS.md` — `Button` (variants,
+  `loading`), `TextField` (`error`, `hint`), `Textarea`, `Select` (`disabled`,
+  `emptyLabel`, keyboard behavior), `Checkbox`, `ViewFrame`, `StatusMessage`
+  (variant → ARIA role), `ListRow` (`layout`), `Overlay` — plus the
+  "What consumes these today" table.
 - **Verify:** read each primitive's exported prop types and compare against the
-  documented variants/props/behavior claims.
-- **Failure:** a documented variant or prop the component no longer has, or a new
-  primitive the doc omits.
+  documented variants/props/behavior claims. Also confirm the consumers table names
+  the primitives each surface actually imports.
+- **Failure:** a documented variant or prop the component no longer has, a new
+  primitive the doc omits, or a surface whose imports contradict the table.
 
 ## Anchor 5 — Feature legs ↔ Cargo features
 
@@ -77,6 +81,19 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   `src-tauri/src/transcribe.rs` still names it.
 - **Failure:** a feature CI checks that `CLAUDE.md`'s commit instructions don't
   mention.
+
+## Anchor 6 — Design tokens ↔ docs/DESIGN_SYSTEM.md
+
+- **Source of truth:** `design/tokens.css` (the token families) and the two guards,
+  `src/designTokens.test.ts` plus the `no-restricted-syntax` block in `eslint.config.js`.
+- **Mirror:** `docs/DESIGN_SYSTEM.md` — the motion table (`--dur-*` / `--ease-*`), the
+  layer names, the contrast matrix in §6, and the enforcement claims in §7.
+- **Verify:** every `--dur-*` and `--ease-*` token in `tokens.css` appears in the §4 table
+  and vice versa; the contrast figures match a recomputation from the Layer-1 pigments;
+  §7's description of what each guard catches matches what the guard actually asserts.
+- **Failure:** a motion token the table omits, a contrast figure that no longer matches
+  the pigments, or an enforcement claim the guards do not make.
+  (`pnpm test` covers the token/theme structure itself — this anchor covers the prose.)
 
 ---
 
