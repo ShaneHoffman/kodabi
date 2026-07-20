@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useNavigation } from "./useNavigation";
 import { entryView, formatSlug, useProjects } from "./useProjects";
+import { useFailedSessions } from "./useSessions";
 import { showQuickCaptureWindow } from "./quickCapture";
 
 export type Command = {
@@ -20,6 +21,7 @@ export type Command = {
 export function useCommands(): Command[] {
   const { navigate } = useNavigation();
   const { entries } = useProjects();
+  const { sessions } = useFailedSessions();
 
   return useMemo(() => {
     const commands: Command[] = entries.map((entry) => ({
@@ -28,6 +30,18 @@ export function useCommands(): Command[] {
       hint: "Jump to",
       run: () => navigate(entryView(entry)),
     }));
+
+    // Conditional, like the sidebar row it mirrors: a jump to a view whose only
+    // content is "all clear" is a command that wastes the one thing the palette
+    // sells, which is that everything in it is worth doing.
+    if (sessions.length > 0) {
+      commands.push({
+        id: "needs-attention",
+        title: "Needs attention",
+        hint: "Jump to",
+        run: () => navigate({ kind: "needsAttention" }),
+      });
+    }
 
     commands.push(
       {
@@ -57,5 +71,5 @@ export function useCommands(): Command[] {
     );
 
     return commands;
-  }, [entries, navigate]);
+  }, [entries, navigate, sessions]);
 }

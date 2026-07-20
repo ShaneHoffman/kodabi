@@ -10,6 +10,7 @@ import { createContext, useContext } from "react";
  */
 export type View =
   | { kind: "inbox" }
+  | { kind: "needsAttention" }
   | { kind: "project"; slug: string }
   | { kind: "noteEditor"; noteId: string | null; project: string | null }
   | { kind: "search"; query: string }

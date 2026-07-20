@@ -1,5 +1,6 @@
 import { useNavigation } from "../useNavigation";
 import { InboxView } from "./views/InboxView";
+import { NeedsAttentionView } from "./views/NeedsAttentionView";
 import { NoteEditorView } from "./views/NoteEditorView";
 import { ProjectView } from "./views/ProjectView";
 import { SearchView } from "./views/SearchView";
@@ -12,6 +13,8 @@ export function MainContent() {
   switch (view.kind) {
     case "inbox":
       return <InboxView />;
+    case "needsAttention":
+      return <NeedsAttentionView />;
     case "project":
       return <ProjectView slug={view.slug} />;
     case "noteEditor":

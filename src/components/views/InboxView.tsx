@@ -8,12 +8,10 @@ import {
   type NoteSummary,
 } from "../../useNotes";
 import { formatSlug, useProjects } from "../../useProjects";
-import { useFailedSessions } from "../../useSessions";
 import { ListRow } from "../ui/ListRow";
 import { Select, type SelectOption } from "../ui/Select";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
-import { NeedsAttentionSection } from "./NeedsAttentionSection";
 import "./InboxView.css";
 
 /**
@@ -23,12 +21,14 @@ import "./InboxView.css";
  * re-route moves the file, re-scores it, and logs a routing example, then the
  * corrected row settles out of view. Loading renders nothing (the list simply
  * appears), matching ProjectView.
+ *
+ * It has exactly one job: decide where these notes go. Captures that failed to
+ * become a note used to sit above this list wearing the same clothes — a queue
+ * about system health stacked on a queue about filing, no heading between them.
+ * They now have their own view (NeedsAttentionView).
  */
 export function InboxView() {
   const { notes, loading, error } = useProjectNotes(INBOX_PROJECT);
-  // Owned here, not inside the section: the empty state below has to know
-  // whether anything needs attention before it can claim nothing is waiting.
-  const { sessions, error: sessionsError } = useFailedSessions();
   const { entries } = useProjects();
   // Real projects only — the Inbox itself is never a re-route target. Memoized
   // (entries is stable from useProjects) so the same array reference reaches
@@ -44,21 +44,22 @@ export function InboxView() {
   );
 
   return (
-    <ViewFrame eyebrow="Unfiled" title="Inbox">
-      {/* Captured meetings that never became a note: they need an action
-          (a retry), so they sit above the notes waiting to be filed. Renders
-          nothing when there are none, which is the normal case. */}
-      <NeedsAttentionSection sessions={sessions} error={sessionsError} />
-
+    <ViewFrame
+      variant="queue"
+      eyebrow="Unfiled"
+      title="Inbox"
+      // The work, stated before the list is read. Omitted at zero: the empty
+      // state below says it better, and saying it twice says it worse.
+      summary={
+        notes.length > 0
+          ? `${notes.length} ${notes.length === 1 ? "note" : "notes"} to file`
+          : undefined
+      }
+    >
       {error ? (
         <StatusMessage variant="error">Couldn&apos;t load the inbox: {error}</StatusMessage>
       ) : notes.length === 0 ? (
-        // "Nothing waiting" has to mean the whole view, not just this list:
-        // claiming it above a populated needs-attention section would tell
-        // the user there is nothing to do while showing them something to do.
-        !loading &&
-        sessions.length === 0 &&
-        !sessionsError && (
+        !loading && (
           <StatusMessage variant="empty">
             Nothing waiting. Notes the router can&apos;t place land here.
           </StatusMessage>
@@ -151,6 +152,9 @@ function InboxRow({
               // this primitive's contract and is deliberately not made here.
               <Select
                 hideLabel
+                // Quiet: this picker sits beside the note title, and the note
+                // is the subject of the row, not the control.
+                variant="quiet"
                 label={`File "${note.title}" to project`}
                 value={null}
                 placeholder={pending ? "Filing…" : "File to…"}
