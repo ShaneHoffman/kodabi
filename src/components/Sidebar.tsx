@@ -106,27 +106,37 @@ export function Sidebar({ onOpenPalette }: Props) {
         </div>
       </nav>
 
-      <footer className="flex flex-col gap-sm">
-        <NeedsAttentionRow />
-        <ListeningIndicator />
-        <Button
-          variant="quiet"
-          aria-current={view.kind === "settings" ? "page" : undefined}
-          onClick={() => navigate({ kind: "settings" })}
-          className={`flex w-full items-baseline text-left text-cap ${
-            view.kind === "settings" ? "text-text-soft" : "text-text-faint"
-          }`}
-        >
-          <span>Settings</span>
-        </Button>
-        <Button
-          variant="quiet"
-          onClick={onOpenPalette}
-          className="flex w-full items-baseline justify-between text-left text-cap text-text-faint"
-        >
-          <span>Commands</span>
-          <span>{PALETTE_SHORTCUT_LABEL}</span>
-        </Button>
+      {/* Two groups, not four evenly-spaced rows: what capture is doing right
+          now is a status, and the rest are places to go. Flat at one gap they
+          read as one arbitrary list, and the indicator's mark sat 12px left of
+          every label because it alone carried no control padding. The px-xs
+          wrapper puts the mark on the same left edge as the row labels below,
+          so the group has one column instead of three. */}
+      <footer className="flex flex-col gap-md">
+        <div className="px-xs">
+          <ListeningIndicator />
+        </div>
+        <div className="flex flex-col gap-3xs">
+          <NeedsAttentionRow />
+          <Button
+            variant="quiet"
+            aria-current={view.kind === "settings" ? "page" : undefined}
+            onClick={() => navigate({ kind: "settings" })}
+            className={`flex w-full items-baseline text-left text-cap ${
+              view.kind === "settings" ? "text-text-soft" : "text-text-faint"
+            }`}
+          >
+            <span>Settings</span>
+          </Button>
+          <Button
+            variant="quiet"
+            onClick={onOpenPalette}
+            className="flex w-full items-baseline justify-between text-left text-cap text-text-faint"
+          >
+            <span>Commands</span>
+            <span>{PALETTE_SHORTCUT_LABEL}</span>
+          </Button>
+        </div>
       </footer>
     </aside>
   );
@@ -138,12 +148,11 @@ export function Sidebar({ onOpenPalette }: Props) {
  * have moved them out of sight.
  *
  * It appears only when there is something to act on and disappears at zero, so
- * the sidebar carries no permanent reminder of a problem nobody has. It sits at
- * the top of the footer rather than in the nav above: the nav is labelled
+ * the sidebar carries no permanent reminder of a problem nobody has. It leads
+ * the footer's nav group rather than the nav above: that nav is labelled
  * "Knowledge base", and a capture that failed to distill is not knowledge, it is
- * plumbing. The footer is bottom-anchored, so the row grows upward into the
- * nav's slack and the listening indicator, Settings and Commands never move
- * under the pointer.
+ * plumbing. The footer is bottom-anchored, so the row grows the group upward
+ * and Settings and Commands never move under the pointer.
  *
  * It also owns the distill-failure refetch. That listener used to live in the
  * Inbox, which meant a failure only reached the list while the Inbox happened

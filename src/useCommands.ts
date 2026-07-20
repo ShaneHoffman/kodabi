@@ -4,10 +4,23 @@ import { entryView, formatSlug, useProjects } from "./useProjects";
 import { useFailedSessions } from "./useSessions";
 import { showQuickCaptureWindow } from "./quickCapture";
 
+/** Which half of the palette a command belongs to: somewhere to go, or
+ * something to do. The palette heads these as sections while the list is
+ * unfiltered. */
+export type CommandGroup = "jump" | "action";
+
+export const COMMAND_GROUP_LABEL: Record<CommandGroup, string> = {
+  jump: "Jump to",
+  action: "Actions",
+};
+
 export type Command = {
   id: string;
   title: string;
-  /** Quiet right-aligned context, e.g. "Jump to". Searched along with title. */
+  group: CommandGroup;
+  /** Quiet right-aligned context, e.g. "Jump to". Searched along with title,
+   * and shown only once filtering has broken the sections up — inside its own
+   * section the heading has already said it. */
   hint?: string;
   run: () => void;
 };
@@ -27,6 +40,7 @@ export function useCommands(): Command[] {
     const commands: Command[] = entries.map((entry) => ({
       id: entry.kind === "inbox" ? "jump:inbox" : `jump:${entry.project.slug}`,
       title: entry.kind === "inbox" ? "Inbox" : formatSlug(entry.project.slug),
+      group: "jump",
       hint: "Jump to",
       run: () => navigate(entryView(entry)),
     }));
@@ -38,6 +52,7 @@ export function useCommands(): Command[] {
       commands.push({
         id: "needs-attention",
         title: "Needs attention",
+        group: "jump",
         hint: "Jump to",
         run: () => navigate({ kind: "needsAttention" }),
       });
@@ -46,11 +61,13 @@ export function useCommands(): Command[] {
     commands.push(
       {
         id: "new-note",
+        group: "action",
         title: "New note",
         run: () => navigate({ kind: "noteEditor", noteId: null, project: null }),
       },
       {
         id: "open-capture",
+        group: "action",
         title: "Quick capture",
         // Quick capture is its own window (#45), not a main-window view — the
         // palette action pops it, matching the global hotkey.
@@ -60,11 +77,13 @@ export function useCommands(): Command[] {
       },
       {
         id: "search",
+        group: "action",
         title: "Search notes",
         run: () => navigate({ kind: "search", query: "" }),
       },
       {
         id: "settings",
+        group: "action",
         title: "Settings",
         run: () => navigate({ kind: "settings" }),
       },
