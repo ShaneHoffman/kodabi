@@ -1,3 +1,6 @@
+import { StatusMessage } from "../ui/StatusMessage";
+import { ViewFrame } from "../ui/ViewFrame";
+
 type Props = {
   title: string;
   caption: string;
@@ -8,15 +11,19 @@ type Props = {
 /**
  * The shared Ma-forward placeholder every unbuilt destination renders:
  * one thing per view, hierarchy from type and space alone.
+ *
+ * It used to centre itself, which made it a fourth empty-state treatment
+ * alongside three left-aligned ones. A destination that exists but has nothing
+ * in it yet is an empty state like any other, so it now sits in the same
+ * scaffold and reads down the same column as every other view
+ * (docs/DESIGN_SYSTEM.md §3).
  */
 export function PlaceholderView({ title, caption, detail }: Props) {
   return (
-    <section className="flex min-h-full flex-col items-center justify-center gap-md p-xl text-center">
-      <h2 className="font-serif text-h2 text-text">{title}</h2>
-      <p className="max-w-measure text-body text-text-soft">{caption}</p>
-      {detail && (
-        <p className="text-cap uppercase tracking-wide text-text-faint">{detail}</p>
-      )}
-    </section>
+    <ViewFrame eyebrow={detail} title={title}>
+      <StatusMessage variant="empty" className="max-w-measure">
+        {caption}
+      </StatusMessage>
+    </ViewFrame>
   );
 }

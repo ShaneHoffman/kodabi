@@ -1,24 +1,28 @@
 /* ============================================================
    Inbox re-route rows.
 
-   Only non-bridged values live here (transition durations, the body-preview
-   line clamp), per docs/UI_CONVENTIONS.md — colors and spacing come through
-   design tokens on the elements themselves.
+   Only the exit transition lives here — the body-preview clamp moved to the
+   shared ListRow primitive, and the durations now come from tokens
+   (docs/DESIGN_SYSTEM.md §4) rather than the bare 0.2s this file used to
+   carry.
 
    A re-routed row collapses its height and fades as it leaves, covering the
    gap until the vault-changed refetch drops it from the list. This is the
    minimal form of the distill-and-route motion (FOUNDING_DOC §4 — "a note
    drifting into its project"); the full "spirit settling into a tree"
-   transition is polished in Phase 4. Literal durations follow SpiritMark.css
-   (there are no duration tokens to consume).
+   transition is polished in Phase 4.
+
+   Reduced motion is handled app-wide in src/index.css (transitions collapse
+   to 1ms), so there is no media query here: the row simply disappears on
+   refetch, which is the correct fallback.
    ============================================================ */
 
 .inbox-row {
   display: grid;
   grid-template-rows: 1fr;
   transition:
-    grid-template-rows 0.2s ease,
-    opacity 0.2s ease;
+    grid-template-rows var(--dur-settle) var(--ease-standard),
+    opacity var(--dur-settle) var(--ease-standard);
 }
 
 .inbox-row--leaving {
@@ -32,21 +36,4 @@
    overflows the row, isn't cut off. */
 .inbox-row--leaving > div {
   overflow: hidden;
-}
-
-/* Two-line body preview, ellipsized. */
-.inbox-row__snippet {
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-/* Accessibility floor: motion off → the row just disappears on refetch, no
-   collapse animation. */
-@media (prefers-reduced-motion: reduce) {
-  .inbox-row {
-    transition: none;
-  }
 }

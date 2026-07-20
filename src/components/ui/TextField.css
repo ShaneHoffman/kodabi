@@ -3,15 +3,31 @@
 
    Only non-bridged tokens live here: the bottom hairline (an inset
    shadow, never a border — reads as a writing line, not a box) and the
-   shared 2px accent focus ring. Unlike the command palette, a form field
-   keeps its focus ring (docs/UI_CONVENTIONS.md, docs/DESIGN.md).
+   interaction states. Focus comes from the shared .ui-focus-ring recipe;
+   unlike the command palette, a form field always keeps its ring
+   (docs/DESIGN_SYSTEM.md §2).
    ============================================================ */
 
 .ui-field {
   box-shadow: inset 0 -1px 0 var(--edge);
+  transition: box-shadow var(--dur-quick) var(--ease-standard);
 }
 
-.ui-field:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+/* Hover firms the writing line rather than filling the field — the affordance
+   is "you can write here", not "this is a box". */
+.ui-field:hover:not(:disabled):not([aria-invalid="true"]) {
+  box-shadow: inset 0 -1px 0 var(--edge-strong);
+}
+
+/* An invalid field carries a heavier line. There is no red token and DESIGN.md
+   does not rank with hue, so the signal is weight plus the announced message
+   (docs/DESIGN_SYSTEM.md §3). */
+.ui-field[aria-invalid="true"] {
+  box-shadow: inset 0 -2px 0 var(--edge-strong);
+}
+
+.ui-field:disabled {
+  color: var(--text-faint);
+  cursor: not-allowed;
+  box-shadow: inset 0 -1px 0 var(--edge-faint);
 }

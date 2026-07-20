@@ -61,12 +61,16 @@ describe("CaptureOverlayPill", () => {
   });
 
   it("shows the listening state when seeded mid-capture", async () => {
-    await renderSeeded(LISTENING);
+    const { container } = await renderSeeded(LISTENING);
 
     const label = screen.getByRole("status");
     expect(label).toHaveTextContent("Listening");
-    // The reserved green is what claims audio is genuinely being recorded.
-    expect(label).toHaveClass("text-accent-dot");
+    // Two carriers, and the invariant needs both. The reserved green claims
+    // audio is genuinely being recorded and lives on the mark alone (as text it
+    // fails the AA contrast floor in the light theme); the label says the same
+    // thing through value, at full ink rather than faint.
+    expect(container.querySelector(".spirit-mark")).toHaveClass("is-listening");
+    expect(label).toHaveClass("text-text");
   });
 
   it("renders nothing at all while capture is idle", async () => {
@@ -107,27 +111,33 @@ describe("CaptureOverlayPill", () => {
   });
 
   it("names what is still recording when a source drops out", async () => {
-    await renderSeeded({
+    const { container } = await renderSeeded({
       phase: "degraded",
       sources: { loopback: "failed", microphone: "live" },
     });
 
     const label = screen.getByRole("status");
-    // Never plain "Listening" while only one source survives, but still green:
-    // the mic genuinely is recording.
+    // Never plain "Listening" while only one source survives, but still on air:
+    // the mic genuinely is recording, so the mark keeps the green and the label
+    // stays at full ink.
     expect(label).toHaveTextContent("Mic only");
-    expect(label).toHaveClass("text-accent-dot");
+    expect(container.querySelector(".spirit-mark")).toHaveClass("is-degraded");
+    expect(label).toHaveClass("text-text");
   });
 
   it("drops the green when a degraded capture has nothing live", async () => {
-    await renderSeeded({
+    const { container } = await renderSeeded({
       phase: "degraded",
       sources: { loopback: "stalled", microphone: "stalled" },
     });
 
     const label = screen.getByRole("status");
     expect(label).toHaveTextContent("Reconnecting");
-    expect(label).not.toHaveClass("text-accent-dot");
+    // Nothing is reaching disk, so neither carrier may claim it is: the mark
+    // falls back to the moving ink form, and the label recedes to faint.
+    expect(container.querySelector(".spirit-mark")).toHaveClass("is-reconnecting");
+    expect(label).toHaveClass("text-text-faint");
+    expect(label).not.toHaveClass("text-text");
   });
 
   it("dismisses the pill for the current capture session", async () => {

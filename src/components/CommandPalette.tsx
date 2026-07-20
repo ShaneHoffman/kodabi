@@ -9,6 +9,7 @@ import { useDialogFocus } from "../useDialogFocus";
 import { useFilteredCommands } from "../useFilteredCommands";
 import { useNavigation } from "../useNavigation";
 import { useScrollIntoView } from "../useScrollIntoView";
+import { Overlay } from "./ui/Overlay";
 import "./CommandPalette.css";
 
 type Props = {
@@ -33,10 +34,6 @@ export function CommandPalette({ onClose }: Props) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  // Whether the current pointer gesture started on the backdrop itself —
-  // a press that starts inside the panel must never dismiss, even if it
-  // ends (or retargets, via common-ancestor click) on the backdrop.
-  const backdropPressed = useRef(false);
   // Last pointer position over the list: scrolling shifts rows under a
   // stationary cursor and Chromium re-fires boundary/move events, which
   // must not yank the keyboard highlight to whatever lands under the mouse.
@@ -101,79 +98,65 @@ export function CommandPalette({ onClose }: Props) {
   };
 
   return (
-    // Backdrop dismiss happens on click, not pointerdown: unmounting the
-    // overlay at pointerdown lets the rest of the gesture fall through to
-    // whatever sat underneath (the unmount flushes before mousedown), so a
-    // dismissing click would also press sidebar controls. The opening
-    // gesture predates the overlay, so it can never self-close.
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-bg-sink/60 px-md pt-2xl"
-      onPointerDown={(event) => {
-        backdropPressed.current = event.target === event.currentTarget;
-      }}
-      onClick={(event) => {
-        if (backdropPressed.current && event.target === event.currentTarget) {
-          onClose();
-        }
-      }}
-    >
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command palette"
-        className="command-palette__panel w-full max-w-measure overflow-hidden rounded-md bg-surface"
+    <Overlay onDismiss={onClose} label="Command palette" className="overflow-hidden">
+      <input
+        ref={inputRef}
+        role="combobox"
+        aria-expanded="true"
+        aria-controls={LISTBOX_ID}
+        aria-activedescendant={rows.length > 0 ? optionId(active) : undefined}
+        aria-label="Type a command or search"
+        placeholder="Type a command or search…"
+        autoComplete="off"
+        spellCheck={false}
+        value={query}
+        onChange={(event) => {
+          setQuery(event.target.value);
+          setActiveIndex(0);
+        }}
+        onKeyDown={onKeyDown}
+        className="command-palette__input w-full bg-surface px-sm py-xs text-body text-text placeholder:text-text-faint"
+      />
+      <ul
+        id={LISTBOX_ID}
+        role="listbox"
+        aria-label="Commands"
+        className="max-h-80 overflow-y-auto py-2xs"
       >
-        <input
-          ref={inputRef}
-          role="combobox"
-          aria-expanded="true"
-          aria-controls={LISTBOX_ID}
-          aria-activedescendant={rows.length > 0 ? optionId(active) : undefined}
-          aria-label="Type a command or search"
-          placeholder="Type a command or search…"
-          autoComplete="off"
-          spellCheck={false}
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setActiveIndex(0);
-          }}
-          onKeyDown={onKeyDown}
-          className="command-palette__input w-full bg-surface px-4 py-3 text-body text-text placeholder:text-text-faint"
-        />
-        <ul
-          id={LISTBOX_ID}
-          role="listbox"
-          aria-label="Commands"
-          className="max-h-80 overflow-y-auto py-2"
-        >
-          {rows.map((command, index) => (
-            <li
-              key={command.id}
-              id={optionId(index)}
-              role="option"
-              aria-selected={index === active}
-              onPointerDown={(event) => event.preventDefault()}
-              onMouseMove={(event) => {
-                const moved =
-                  lastPointer.current?.x !== event.clientX ||
-                  lastPointer.current?.y !== event.clientY;
-                lastPointer.current = { x: event.clientX, y: event.clientY };
-                if (moved && index !== active) setActiveIndex(index);
-              }}
-              onClick={() => runCommand(command)}
-              className={`command-palette__row flex items-baseline justify-between px-4 py-2 text-body text-text-soft${
-                index === active ? " is-active" : ""
-              }`}
-            >
-              <span>{command.title}</span>
-              {command.hint && (
-                <span className="text-cap text-text-faint">{command.hint}</span>
-              )}
-            </li>
-          ))}
-        </ul>
-      </div>
-    </div>
+        {rows.length === 0 && (
+          // Only reachable with an empty query and no commands at all, which
+          // means the project listing failed — never a blank pane
+          // (docs/DESIGN_SYSTEM.md §3).
+          <li className="px-sm py-2xs text-body text-text-soft">
+            No commands available yet.
+          </li>
+        )}
+        {rows.map((command, index) => (
+          <li
+            key={command.id}
+            id={optionId(index)}
+            role="option"
+            aria-selected={index === active}
+            onPointerDown={(event) => event.preventDefault()}
+            onMouseMove={(event) => {
+              const moved =
+                lastPointer.current?.x !== event.clientX ||
+                lastPointer.current?.y !== event.clientY;
+              lastPointer.current = { x: event.clientX, y: event.clientY };
+              if (moved && index !== active) setActiveIndex(index);
+            }}
+            onClick={() => runCommand(command)}
+            className={`command-palette__row flex items-baseline justify-between px-sm py-2xs text-body text-text-soft${
+              index === active ? " ui-wash" : ""
+            }`}
+          >
+            <span>{command.title}</span>
+            {command.hint && (
+              <span className="text-cap text-text-faint">{command.hint}</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </Overlay>
   );
 }

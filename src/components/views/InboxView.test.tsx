@@ -150,7 +150,10 @@ describe("InboxView", () => {
 
     await fileNote(user, "Quarterly planning", "briarwood-golf");
 
-    expect(await screen.findByText("no such project: briarwood-golf")).toBeInTheDocument();
+    // Substring, not exact: the message is rendered behind a prefix naming what
+    // failed, so the raw backend string is never the whole line
+    // (docs/DESIGN_SYSTEM.md §3).
+    expect(await screen.findByText(/no such project: briarwood-golf/)).toBeInTheDocument();
     // The note is still unfiled, so it must still be actionable: row present
     // and the picker back (not stuck on "Filing…").
     expect(screen.getByText("Quarterly planning")).toBeInTheDocument();
@@ -188,6 +191,35 @@ describe("InboxView", () => {
     expect(screen.queryByText(/Nothing waiting/)).not.toBeInTheDocument();
   });
 
+  it("caps the needs-attention list so it cannot bury the notes below it", async () => {
+    // The section is an exception list inside a view named for something else;
+    // unbounded it pushes the Inbox's own subject off the screen
+    // (docs/DESIGN_SYSTEM.md §1). It caps, and says how much it is holding back.
+    const user = userEvent.setup();
+    serveVault(
+      [PLANNING],
+      ["briarwood-golf"],
+      ["team-sync", "vendor-call", "board-prep", "retro"].map(makeSession),
+    );
+
+    renderInbox();
+
+    expect(await screen.findByTestId("needs-attention")).toBeInTheDocument();
+    expect(screen.getAllByTestId("retry-distill")).toHaveLength(3);
+    expect(screen.queryByText("retro")).not.toBeInTheDocument();
+    // The note the view is actually named for is still on screen.
+    expect(screen.getByText("Quarterly planning")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Show 1 more" }));
+
+    expect(screen.getAllByTestId("retry-distill")).toHaveLength(4);
+    expect(screen.getByText("retro")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Show fewer" }));
+
+    expect(screen.getAllByTestId("retry-distill")).toHaveLength(3);
+  });
+
   it("never claims nothing is waiting when the session listing failed", async () => {
     // Same rule for the other unknown: a failed read is not an empty list.
     serveVault([], ["briarwood-golf"]);
@@ -198,7 +230,7 @@ describe("InboxView", () => {
     renderInbox();
 
     expect(
-      await screen.findByText("the sessions folder is unreadable"),
+      await screen.findByText(/the sessions folder is unreadable/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Nothing waiting/)).not.toBeInTheDocument();
   });
@@ -212,7 +244,7 @@ describe("InboxView", () => {
 
     renderInbox();
 
-    expect(await screen.findByText("the vault is unreadable")).toBeInTheDocument();
+    expect(await screen.findByText(/the vault is unreadable/)).toBeInTheDocument();
     expect(screen.queryByText(/Nothing waiting/)).not.toBeInTheDocument();
   });
 });

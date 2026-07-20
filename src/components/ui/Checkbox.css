@@ -3,7 +3,8 @@
 
    Only non-bridged tokens live here: the hairline ring (an inset shadow,
    never a border, matching TextField), the ink fill and check glyph, and
-   the shared 2px accent focus ring.
+   the interaction states. Focus comes from the shared .ui-focus-ring
+   recipe in ui.css (docs/DESIGN_SYSTEM.md §2).
 
    The checked state is ink on surface — value, not hue. The reserved green
    (--accent-dot) is never used here: it means audio is actually being
@@ -21,6 +22,18 @@
   cursor: pointer;
   display: grid;
   place-content: center;
+  transition: background-color var(--dur-quick) var(--ease-standard);
+}
+
+/* Hover firms the ring on an unchecked box and deepens the fill on a checked
+   one — the same "step toward --text" the other controls use. */
+.ui-checkbox:hover:not(:disabled):not(:checked) {
+  background: color-mix(in srgb, var(--text) 6%, var(--surface));
+}
+
+.ui-checkbox:active:not(:disabled) {
+  transition: none;
+  transform: scale(0.92);
 }
 
 .ui-checkbox::before {
@@ -43,14 +56,11 @@
   opacity: 1;
 }
 
+/* The box has no text to fade, so it dims instead — the one sanctioned use of
+   --disabled-opacity (docs/DESIGN_SYSTEM.md §2). */
 .ui-checkbox:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-
-.ui-checkbox:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  cursor: not-allowed;
+  opacity: var(--disabled-opacity);
 }
 
 /* Indent the hint under the label rather than the box, so the text column

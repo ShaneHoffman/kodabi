@@ -77,6 +77,37 @@ describe("QuickCapture", () => {
     });
   });
 
+  it("submits the draft from the visible button, not only from Enter", async () => {
+    // The pointer-only path this window is required to have: it is opened by
+    // hotkey, but a user who never focused it cannot press Enter into it
+    // (docs/DESIGN_SYSTEM.md §6).
+    const user = userEvent.setup();
+    onCommand("quick_capture_submit", () => outcome("briarwood-golf"));
+    render(<QuickCapture />);
+
+    await user.type(box(), "  ring the vendor back  ");
+    await user.click(screen.getByRole("button", { name: "File it" }));
+
+    expect(invoke).toHaveBeenCalledWith("quick_capture_submit", {
+      text: "ring the vendor back",
+    });
+    expect(await screen.findByText("→ briarwood-golf")).toBeInTheDocument();
+  });
+
+  it("offers no submit until there is something to file", async () => {
+    const user = userEvent.setup();
+    onCommand("quick_capture_submit", () => outcome(null));
+    render(<QuickCapture />);
+
+    await user.click(screen.getByRole("button", { name: "File it" }));
+    expect(invokedCommands()).not.toContain("quick_capture_submit");
+
+    // Whitespace is not a thought either.
+    await user.type(box(), "   ");
+    await user.click(screen.getByRole("button", { name: "File it" }));
+    expect(invokedCommands()).not.toContain("quick_capture_submit");
+  });
+
   it("clears the draft and flashes where the note landed", async () => {
     const user = userEvent.setup();
     onCommand("quick_capture_submit", () => outcome("briarwood-golf"));
@@ -130,7 +161,7 @@ describe("QuickCapture", () => {
 
     await user.type(box(), "ring the vendor back{Enter}");
 
-    expect(await screen.findByText("the vault is not writable")).toBeInTheDocument();
+    expect(await screen.findByText(/the vault is not writable/)).toBeInTheDocument();
     // A lost thought is the failure that matters here: the draft stays put and
     // the window does not dismiss itself out from under it.
     expect(box()).toHaveValue("ring the vendor back");
@@ -154,13 +185,13 @@ describe("QuickCapture", () => {
     render(<QuickCapture />);
 
     await user.type(box(), "ring the vendor back{Enter}");
-    await screen.findByText("the vault is not writable");
+    await screen.findByText(/the vault is not writable/);
 
     await reshow();
 
     // A blur-dismiss must not bury a failed capture: the error and the draft
     // are both still there the next time the box pops.
-    expect(screen.getByText("the vault is not writable")).toBeInTheDocument();
+    expect(screen.getByText(/the vault is not writable/)).toBeInTheDocument();
     expect(box()).toHaveValue("ring the vendor back");
   });
 
@@ -222,7 +253,7 @@ describe("QuickCapture", () => {
     // or pin an error on a capture it has nothing to do with.
     expect(box()).toHaveValue("book the flights");
     expect(
-      screen.queryByText("the vault is not writable"),
+      screen.queryByText(/the vault is not writable/),
     ).not.toBeInTheDocument();
   });
 });

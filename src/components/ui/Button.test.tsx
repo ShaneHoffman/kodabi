@@ -1,0 +1,97 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import type { FormEvent } from "react";
+import { describe, expect, it, vi } from "vitest";
+import { Button } from "./Button";
+
+/*
+ * `loading` exists for one reason: a pending action must not cost the user
+ * their place in the page (docs/DESIGN_SYSTEM.md §6). Keeping the control
+ * mounted is only half of it — the native `disabled` attribute blurs a focused
+ * element just as unmounting it does — so these assert the control stays
+ * focusable AND stays inert, which is the pair that makes the rule true.
+ */
+describe("Button", () => {
+  it("keeps a busy control focusable instead of disabling it", () => {
+    render(
+      <Button loading loadingLabel="Saving…">
+        Save
+      </Button>,
+    );
+
+    const button = screen.getByRole("button");
+    expect(button).not.toBeDisabled();
+    expect(button).toHaveAttribute("aria-disabled", "true");
+    expect(button).toHaveAttribute("aria-busy", "true");
+    expect(button).toHaveTextContent("Saving…");
+
+    button.focus();
+    expect(button).toHaveFocus();
+  });
+
+  it("swallows activation while busy", async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    render(
+      <Button loading loadingLabel="Saving…" onClick={onClick}>
+        Save
+      </Button>,
+    );
+
+    await user.click(screen.getByRole("button"));
+    // Enter as well as the pointer: a focusable button is one a keyboard can
+    // still reach, which is the whole point of not disabling it.
+    screen.getByRole("button").focus();
+    await user.keyboard("{Enter}");
+
+    expect(onClick).not.toHaveBeenCalled();
+  });
+
+  it("does not submit its form while busy", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn((event: FormEvent) => event.preventDefault());
+    render(
+      <form onSubmit={onSubmit}>
+        <Button type="submit" loading loadingLabel="Saving…">
+          Save
+        </Button>
+      </form>,
+    );
+
+    await user.click(screen.getByRole("button"));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
+  it("falls back to its own children when no loading label is given", () => {
+    render(<Button loading>Retry</Button>);
+
+    expect(screen.getByRole("button")).toHaveTextContent("Retry");
+  });
+
+  it("still disables genuinely, and `disabled` beats `loading`", () => {
+    const { rerender } = render(<Button disabled>Save</Button>);
+
+    expect(screen.getByRole("button")).toBeDisabled();
+
+    // A caller passing both means the control has nothing to do, not that
+    // something is in flight — so it is really disabled, not merely busy.
+    rerender(
+      <Button disabled loading>
+        Save
+      </Button>,
+    );
+    expect(screen.getByRole("button")).toBeDisabled();
+    expect(screen.getByRole("button")).not.toHaveAttribute("aria-disabled");
+  });
+
+  it("passes a caller's handler through when it is not busy", async () => {
+    const user = userEvent.setup();
+    const onClick = vi.fn();
+    render(<Button onClick={onClick}>Save</Button>);
+
+    await user.click(screen.getByRole("button"));
+
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+});

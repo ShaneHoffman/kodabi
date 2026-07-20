@@ -9,9 +9,10 @@ import {
   type RetentionKind,
 } from "../useSettings";
 import { Button } from "./ui/Button";
+import { Overlay } from "./ui/Overlay";
 import { Select } from "./ui/Select";
+import { StatusMessage } from "./ui/StatusMessage";
 import { TextField } from "./ui/TextField";
-import "./ConsentNudge.css";
 
 type Props = {
   onClose: () => void;
@@ -41,12 +42,8 @@ export function ConsentNudge({ onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
 
   const panelRef = useRef<HTMLDivElement>(null);
-  // Whether the current pointer gesture started on the backdrop itself, so a
-  // press that began inside the panel never dismisses (the palette's guard).
-  const backdropPressed = useRef(false);
 
-  // Focus the primary action on open; restore focus on close. Focused by id
-  // rather than a ref since `Button` doesn't forward one.
+  // Focus the primary action on open; restore focus on close.
   useDialogFocus(() => document.getElementById(PRIMARY_ID));
 
   const acknowledge = async () => {
@@ -96,75 +93,65 @@ export function ConsentNudge({ onClose }: Props) {
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-bg-sink/60 px-md pt-2xl"
-      onPointerDown={(event) => {
-        backdropPressed.current = event.target === event.currentTarget;
-      }}
-      onClick={(event) => {
-        if (backdropPressed.current && event.target === event.currentTarget) {
-          onClose();
-        }
-      }}
+    <Overlay
+      onDismiss={onClose}
+      labelledBy="consent-nudge-title"
+      panelRef={panelRef}
+      onKeyDown={onKeyDown}
+      className="flex flex-col gap-md p-md"
     >
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="consent-nudge-title"
-        onKeyDown={onKeyDown}
-        className="consent-nudge__panel flex w-full max-w-measure flex-col gap-md rounded-md bg-surface p-md"
-      >
-        <h2 id="consent-nudge-title" className="font-serif text-h2 text-text">
-          Before your first capture
-        </h2>
+      <h2 id="consent-nudge-title" className="font-serif text-h2 text-text">
+        Before your first capture
+      </h2>
 
-        <div className="flex flex-col gap-sm text-body text-text-soft">
-          <p>
-            Kodabi records your microphone and system audio while the listening
-            indicator is green. It only ever records while that indicator shows.
-          </p>
-          <p>
-            Please announce your recordings. Many places (Massachusetts among
-            them) require everyone on a call to consent before you record.
-          </p>
-          <p>
-            Transcripts stay on this device as plain files. Choose how long
-            Kodabi keeps the raw transcripts:
-          </p>
-        </div>
-
-        <Select
-          label="Retention"
-          value={kind}
-          onChange={(value) => setKind(value as RetentionKind)}
-          options={RETENTION_OPTIONS}
-        />
-        {kind === "keep_days" && (
-          <TextField
-            label="Days to keep"
-            type="number"
-            min={1}
-            value={days}
-            onChange={(event) => setDays(event.target.value)}
-          />
-        )}
-
-        {error && (
-          <p role="alert" className="text-cap text-text-soft">
-            {error}
-          </p>
-        )}
-
-        <div className="flex items-center justify-end gap-sm">
-          <Button variant="quiet" onClick={onClose} disabled={submitting}>
-            Not now
-          </Button>
-          <Button id={PRIMARY_ID} onClick={acknowledge} disabled={submitting}>
-            I understand, start capture
-          </Button>
-        </div>
+      <div className="flex flex-col gap-sm text-body text-text-soft">
+        <p>
+          Kodabi records your microphone and system audio while the listening
+          indicator is green. It only ever records while that indicator shows.
+        </p>
+        <p>
+          Please announce your recordings. Many places (Massachusetts among
+          them) require everyone on a call to consent before you record.
+        </p>
+        <p>
+          Transcripts stay on this device as plain files. Choose how long
+          Kodabi keeps the raw transcripts:
+        </p>
       </div>
-    </div>
+
+      <Select
+        label="Retention"
+        value={kind}
+        onChange={(value) => setKind(value as RetentionKind)}
+        options={RETENTION_OPTIONS}
+        disabled={submitting}
+      />
+      {kind === "keep_days" && (
+        <TextField
+          label="Days to keep"
+          type="number"
+          min={1}
+          value={days}
+          disabled={submitting}
+          onChange={(event) => setDays(event.target.value)}
+        />
+      )}
+
+      {error && <StatusMessage variant="error" compact>{error}</StatusMessage>}
+
+      <div className="flex items-center justify-end gap-sm">
+        <Button variant="quiet" onClick={onClose} disabled={submitting}>
+          Not now
+        </Button>
+        <Button
+          id={PRIMARY_ID}
+          onClick={acknowledge}
+          loading={submitting}
+          loadingLabel="Starting…"
+        >
+          I understand, start capture
+        </Button>
+      </div>
+    </Overlay>
   );
 }
