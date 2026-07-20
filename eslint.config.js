@@ -31,6 +31,16 @@ export default tseslint.config(
           ],
         },
       ],
+      // The token guard's TSX half. `src/designTokens.test.ts` covers CSS
+      // files; these cover the utility strings, which eslint can see and a CSS
+      // parser cannot. Together they make "never hard-code a colour, font or
+      // spacing value" (CLAUDE.md) a gate rather than a review convention.
+      //
+      // The numeric pattern deliberately ends with (?![\w-]) so the NAMED steps
+      // that begin with a digit — gap-3xs, py-2xs, p-2xl — are not flagged;
+      // only a bare `gap-4` or `px-2.5` is. Layout dimensions (w-48, max-h-80,
+      // z-10) are absent from the prefix list on purpose: they are not spacing
+      // roles, and docs/UI_CONVENTIONS.md allows the plain utility for them.
       "no-restricted-syntax": [
         "error",
         {
@@ -38,6 +48,39 @@ export default tseslint.config(
             "CallExpression[callee.property.name=/^(useEffect|useLayoutEffect)$/]",
           message:
             "Effects live only in blessed bridge hooks — see .claude/rules/no-use-effect.md.",
+        },
+        {
+          selector:
+            'JSXAttribute[name.name="className"] Literal[value=/(^|\\s)-?(p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ms|me|gap|gap-x|gap-y|space-x|space-y)-[0-9]+(\\.[0-9]+)?(?![\\w-])/]',
+          message:
+            "Use the named spacing steps (px-xs, py-2xs, gap-sm…), never the numeric utilities — docs/UI_CONVENTIONS.md.",
+        },
+        {
+          selector:
+            'JSXAttribute[name.name="className"] TemplateElement[value.raw=/(^|\\s)-?(p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ms|me|gap|gap-x|gap-y|space-x|space-y)-[0-9]+(\\.[0-9]+)?(?![\\w-])/]',
+          message:
+            "Use the named spacing steps (px-xs, py-2xs, gap-sm…), never the numeric utilities — docs/UI_CONVENTIONS.md.",
+        },
+        {
+          selector:
+            'JSXAttribute[name.name="className"] Literal[value=/-\\[[^\\]]+\\]/]',
+          message:
+            "No arbitrary values in className (text-[13px], bg-[#fff]) — every value comes from design/tokens.css.",
+        },
+        {
+          selector:
+            'JSXAttribute[name.name="className"] TemplateElement[value.raw=/-\\[[^\\]]+\\]/]',
+          message:
+            "No arbitrary values in className (text-[13px], bg-[#fff]) — every value comes from design/tokens.css.",
+        },
+        {
+          // The NoteEditorView pattern: a class string hoisted to a const, out
+          // of reach of the className selectors above. It is how that screen
+          // grew a parallel field system in the first place.
+          selector:
+            'VariableDeclarator[id.name=/(CLASS|CLASSES)$/] > Literal[value=/(^|\\s)-?(p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ms|me|gap)-[0-9]+(\\.[0-9]+)?(?![\\w-])/]',
+          message:
+            "Use the named spacing steps in hoisted class strings too — docs/UI_CONVENTIONS.md.",
         },
       ],
     },
