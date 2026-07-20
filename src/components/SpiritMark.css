@@ -29,7 +29,7 @@
   inset: calc(-1 * var(--halo-spread));
   border-radius: 50%;
   opacity: 0;
-  transition: opacity 0.45s ease;
+  transition: opacity var(--dur-wake) var(--ease-standard);
 }
 
 /* The aura is a small field of ma. Rather than one static, lopsided glow,
@@ -74,24 +74,26 @@
     transparent 52%
   );
   /* transform is transitioned too, so the breath eases back to rest on settle instead of snapping */
-  transition: background-color 0.45s ease, transform 0.45s ease;
+  transition:
+    background-color var(--dur-wake) var(--ease-standard),
+    transform var(--dur-wake) var(--ease-standard);
 }
 
 .spirit-mark.is-listening .spirit-mark__core {
   background-color: var(--accent-dot);
-  animation: spirit-mark-breathe 4.2s ease-in-out infinite;
+  animation: spirit-mark-breathe var(--dur-breath) var(--ease-breath) infinite;
 }
 .spirit-mark.is-listening .spirit-mark__aura {
   opacity: 1;
 }
 .spirit-mark.is-listening .spirit-mark__bloom {
-  animation: spirit-mark-halo 4.2s ease-in-out infinite;
+  animation: spirit-mark-halo var(--dur-breath) var(--ease-breath) infinite;
 }
 .spirit-mark.is-listening .spirit-mark__bloom::before {
-  animation: spirit-mark-blob-a 15s linear infinite;
+  animation: spirit-mark-blob-a var(--dur-drift) var(--ease-drift) infinite;
 }
 .spirit-mark.is-listening .spirit-mark__bloom::after {
-  animation: spirit-mark-blob-b 21s linear infinite;
+  animation: spirit-mark-blob-b var(--dur-drift-slow) var(--ease-drift) infinite;
 }
 
 /* starting / reconnecting — capture is engaged but nothing is recorded yet, so
@@ -101,7 +103,7 @@
    session that isn't running at all). */
 .spirit-mark.is-starting .spirit-mark__core,
 .spirit-mark.is-reconnecting .spirit-mark__core {
-  animation: spirit-mark-wake 1.6s ease-in-out infinite;
+  animation: spirit-mark-wake var(--dur-pulse) var(--ease-breath) infinite;
 }
 
 /* degraded — one source is recording and the other isn't. The green stays
@@ -109,7 +111,7 @@
    the field of ma collapses: no aura, so it is visibly not full listening. */
 .spirit-mark.is-degraded .spirit-mark__core {
   background-color: var(--accent-dot);
-  animation: spirit-mark-breathe 4.2s ease-in-out infinite;
+  animation: spirit-mark-breathe var(--dur-breath) var(--ease-breath) infinite;
 }
 
 @keyframes spirit-mark-wake {

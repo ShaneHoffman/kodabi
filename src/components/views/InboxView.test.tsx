@@ -150,7 +150,10 @@ describe("InboxView", () => {
 
     await fileNote(user, "Quarterly planning", "paradise-golf");
 
-    expect(await screen.findByText("no such project: paradise-golf")).toBeInTheDocument();
+    // Substring, not exact: the message is rendered behind a prefix naming what
+    // failed, so the raw backend string is never the whole line
+    // (docs/DESIGN_SYSTEM.md §3).
+    expect(await screen.findByText(/no such project: paradise-golf/)).toBeInTheDocument();
     // The note is still unfiled, so it must still be actionable: row present
     // and the picker back (not stuck on "Filing…").
     expect(screen.getByText("Quarterly planning")).toBeInTheDocument();
@@ -198,7 +201,7 @@ describe("InboxView", () => {
     renderInbox();
 
     expect(
-      await screen.findByText("the sessions folder is unreadable"),
+      await screen.findByText(/the sessions folder is unreadable/),
     ).toBeInTheDocument();
     expect(screen.queryByText(/Nothing waiting/)).not.toBeInTheDocument();
   });
@@ -212,7 +215,7 @@ describe("InboxView", () => {
 
     renderInbox();
 
-    expect(await screen.findByText("the vault is unreadable")).toBeInTheDocument();
+    expect(await screen.findByText(/the vault is unreadable/)).toBeInTheDocument();
     expect(screen.queryByText(/Nothing waiting/)).not.toBeInTheDocument();
   });
 });

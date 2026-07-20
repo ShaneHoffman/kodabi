@@ -1,24 +1,21 @@
 /* ============================================================
    Quick capture — the chromeless hotkey text box.
 
-   Only non-bridged tokens live here: the hairline ring that gives the
-   frameless window its single edge, and the body line-height. Showing and
-   hiding the window IS the motion — FOUNDING_DOC §4 reserves "one deliberate
-   motion" for the distill-and-route moment and keeps everything else
-   near-instant — so there is no entrance animation and nothing for
-   prefers-reduced-motion to disable.
+   Only the frameless window's single edge lives here now; the field's body
+   line-height and writing-line hairline come from the shared Textarea
+   primitive.
+
+   The textarea keeps its focus ring, unlike the command palette's lone input.
+   That exception was justified while this window held exactly one control —
+   it no longer does. Adding a visible "File it" button (so the window is not
+   operable by hotkey alone) means Tab has somewhere to go, and a focus ring
+   is the only thing that says where it went (docs/DESIGN_SYSTEM.md §2, §6).
+
+   Showing and hiding the window IS the motion — FOUNDING_DOC §4 reserves
+   "one deliberate motion" for the distill-and-route moment and keeps
+   everything else near-instant — so there is no entrance animation.
    ============================================================ */
 
 .quick-capture__panel {
   box-shadow: var(--hairline);
-}
-
-/* The textarea's own focus ring is dropped: this window is a single text box,
-   so focus is unambiguous (the caret is the only affordance) — the same
-   reasoning as the command palette's lone input. */
-.quick-capture__input {
-  line-height: var(--lh-body);
-}
-.quick-capture__input:focus {
-  outline: none;
 }
