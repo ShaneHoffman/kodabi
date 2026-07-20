@@ -313,6 +313,15 @@ Any new colour pair is measured before it ships.
 - **Focus must survive an optimistic swap.** Replacing the focused control with a `<span>Filing…</span>`
   drops focus to `<body>` mid-task and silently strips the user's place in the page. Keep the control
   mounted and use `Button loading` instead.
+- **`disabled` drops focus too, so a *busy* control is `aria-disabled`, not `disabled`.** An element
+  that is focused when it becomes disabled is blurred and focus resets to `<body>` (the HTML focus
+  fixup rule) — the same failure as unmounting it, and worse inside a modal, whose Escape and Tab
+  handling lives on an ancestor the focus has just left. `Button loading` therefore sets
+  `aria-disabled` + `aria-busy` and swallows its own activation; the native attribute stays for
+  `disabled`, which means "there is nothing to do here", not "something is in flight". A caller must
+  not pass both for the same condition — `disabled` wins, and the focus goes.
+  `Select` and `Checkbox` do not do this yet: their `disabled` prop is a genuine disable, so a write
+  in flight behind one still costs the user their place in the page.
 - **`aria-current="page"`** marks the selected navigation row.
 - Items in an `aria-activedescendant` listbox are deliberately not tabbable; focus stays on the
   controlling input.

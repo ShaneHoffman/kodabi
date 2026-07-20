@@ -140,17 +140,21 @@ export function NeedsAttentionSection({
                   title={sessionTitle(session)}
                   meta={`${formatCaptureTime(session.captured_at)} · no note was created`}
                   action={
-                    // The button stays mounted while its retry runs. It used to
-                    // be swapped for a <span>Retrying…</span>, which unmounted
-                    // the focused control and dropped focus to <body>
-                    // (docs/DESIGN_SYSTEM.md §6).
+                    // The button stays mounted and focusable while its retry
+                    // runs. It used to be swapped for a <span>Retrying…</span>,
+                    // which unmounted the focused control and dropped focus to
+                    // <body> (docs/DESIGN_SYSTEM.md §6).
                     <div className="text-right">
                       <Button
                         variant="quiet"
                         data-testid="retry-distill"
                         // One retry at a time: each run spends a real headless
                         // Claude call, and the backend serializes them anyway.
-                        disabled={pendingPath !== null}
+                        // The running row is excluded from the `disabled` half
+                        // on purpose — `loading` makes it busy-but-focusable,
+                        // and a native `disabled` would blur the very control
+                        // the user just pressed.
+                        disabled={pendingPath !== null && pendingPath !== session.path}
                         loading={pendingPath === session.path}
                         loadingLabel="Retrying…"
                         onClick={() => retry(session.path)}

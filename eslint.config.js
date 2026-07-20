@@ -4,6 +4,62 @@ import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
+// The token guard's TSX half. `src/designTokens.test.ts` covers CSS files;
+// these cover the utility strings, which eslint can see and a CSS parser
+// cannot. Together they make "never hard-code a colour, font or spacing value"
+// (CLAUDE.md) a gate rather than a review convention.
+//
+// The numeric pattern deliberately ends with (?![\w-]) so the NAMED steps that
+// begin with a digit — gap-3xs, py-2xs, p-2xl — are not flagged; only a bare
+// `gap-4` or `px-2.5` is. Layout dimensions (w-48, max-h-80, z-10) are absent
+// from the prefix list on purpose: they are not spacing roles, and
+// docs/UI_CONVENTIONS.md allows the plain utility for them.
+//
+// Hoisted to a const because the bridge-hook override below turns
+// `no-restricted-syntax` off to allow useEffect, and a blanket "off" would take
+// these with it — silently un-guarding thirteen files.
+const SPACING_STEPS =
+  "(p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ms|me|gap|gap-x|gap-y|space-x|space-y)";
+const NUMERIC_SPACING = `(^|\\s)-?${SPACING_STEPS}-[0-9]+(\\.[0-9]+)?(?![\\w-])`;
+const ARBITRARY_VALUE = "-\\[[^\\]]+\\]";
+const SPACING_MESSAGE =
+  "Use the named spacing steps (px-xs, py-2xs, gap-sm…), never the numeric utilities — docs/UI_CONVENTIONS.md.";
+const ARBITRARY_MESSAGE =
+  "No arbitrary values in className (text-[13px], bg-[#fff]) — every value comes from design/tokens.css.";
+
+const tokenGuardSelectors = [
+  {
+    selector: `JSXAttribute[name.name="className"] Literal[value=/${NUMERIC_SPACING}/]`,
+    message: SPACING_MESSAGE,
+  },
+  {
+    selector: `JSXAttribute[name.name="className"] TemplateElement[value.raw=/${NUMERIC_SPACING}/]`,
+    message: SPACING_MESSAGE,
+  },
+  {
+    selector: `JSXAttribute[name.name="className"] Literal[value=/${ARBITRARY_VALUE}/]`,
+    message: ARBITRARY_MESSAGE,
+  },
+  {
+    selector: `JSXAttribute[name.name="className"] TemplateElement[value.raw=/${ARBITRARY_VALUE}/]`,
+    message: ARBITRARY_MESSAGE,
+  },
+  {
+    // The NoteEditorView pattern: a class string hoisted to a const, out of
+    // reach of the className selectors above. It is how that screen grew a
+    // parallel field system in the first place.
+    selector: `VariableDeclarator[id.name=/(CLASS|CLASSES)$/] > Literal[value=/${NUMERIC_SPACING}/]`,
+    message:
+      "Use the named spacing steps in hoisted class strings too — docs/UI_CONVENTIONS.md.",
+  },
+];
+
+const noEffectSelector = {
+  selector: "CallExpression[callee.property.name=/^(useEffect|useLayoutEffect)$/]",
+  message:
+    "Effects live only in blessed bridge hooks — see .claude/rules/no-use-effect.md.",
+};
+
 export default tseslint.config(
   { ignores: ["dist", "target", "src-tauri"] },
   {
@@ -31,67 +87,21 @@ export default tseslint.config(
           ],
         },
       ],
-      // The token guard's TSX half. `src/designTokens.test.ts` covers CSS
-      // files; these cover the utility strings, which eslint can see and a CSS
-      // parser cannot. Together they make "never hard-code a colour, font or
-      // spacing value" (CLAUDE.md) a gate rather than a review convention.
-      //
-      // The numeric pattern deliberately ends with (?![\w-]) so the NAMED steps
-      // that begin with a digit — gap-3xs, py-2xs, p-2xl — are not flagged;
-      // only a bare `gap-4` or `px-2.5` is. Layout dimensions (w-48, max-h-80,
-      // z-10) are absent from the prefix list on purpose: they are not spacing
-      // roles, and docs/UI_CONVENTIONS.md allows the plain utility for them.
-      "no-restricted-syntax": [
-        "error",
-        {
-          selector:
-            "CallExpression[callee.property.name=/^(useEffect|useLayoutEffect)$/]",
-          message:
-            "Effects live only in blessed bridge hooks — see .claude/rules/no-use-effect.md.",
-        },
-        {
-          selector:
-            'JSXAttribute[name.name="className"] Literal[value=/(^|\\s)-?(p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ms|me|gap|gap-x|gap-y|space-x|space-y)-[0-9]+(\\.[0-9]+)?(?![\\w-])/]',
-          message:
-            "Use the named spacing steps (px-xs, py-2xs, gap-sm…), never the numeric utilities — docs/UI_CONVENTIONS.md.",
-        },
-        {
-          selector:
-            'JSXAttribute[name.name="className"] TemplateElement[value.raw=/(^|\\s)-?(p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ms|me|gap|gap-x|gap-y|space-x|space-y)-[0-9]+(\\.[0-9]+)?(?![\\w-])/]',
-          message:
-            "Use the named spacing steps (px-xs, py-2xs, gap-sm…), never the numeric utilities — docs/UI_CONVENTIONS.md.",
-        },
-        {
-          selector:
-            'JSXAttribute[name.name="className"] Literal[value=/-\\[[^\\]]+\\]/]',
-          message:
-            "No arbitrary values in className (text-[13px], bg-[#fff]) — every value comes from design/tokens.css.",
-        },
-        {
-          selector:
-            'JSXAttribute[name.name="className"] TemplateElement[value.raw=/-\\[[^\\]]+\\]/]',
-          message:
-            "No arbitrary values in className (text-[13px], bg-[#fff]) — every value comes from design/tokens.css.",
-        },
-        {
-          // The NoteEditorView pattern: a class string hoisted to a const, out
-          // of reach of the className selectors above. It is how that screen
-          // grew a parallel field system in the first place.
-          selector:
-            'VariableDeclarator[id.name=/(CLASS|CLASSES)$/] > Literal[value=/(^|\\s)-?(p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ms|me|gap)-[0-9]+(\\.[0-9]+)?(?![\\w-])/]',
-          message:
-            "Use the named spacing steps in hoisted class strings too — docs/UI_CONVENTIONS.md.",
-        },
-      ],
+      // The effect ban plus the token guard (both defined at the top of this
+      // file, so the override below can re-state the token half verbatim).
+      "no-restricted-syntax": ["error", noEffectSelector, ...tokenGuardSelectors],
     },
   },
   // The blessed bridge hooks — the only files that may call useEffect directly.
   // This list is the enforcement point (deliberately explicit rather than a
   // `src/use*.ts` glob, which would silently bless every new hook), and it
   // mirrors the list in .claude/rules/no-use-effect.md; keep the two in
-  // lockstep. no-restricted-syntax currently holds only the effect selector —
-  // if another selector is added above, re-declare it here rather than leaving
-  // the blanket "off".
+  // lockstep.
+  //
+  // These files are exempt from the EFFECT selector only. `no-restricted-syntax`
+  // is a single rule, so the exemption has to re-declare everything that stays
+  // on — a blanket "off" here would take the token guard down with it in
+  // thirteen files, silently and without a diff to notice.
   {
     files: [
       "src/useCaptureState.ts",
@@ -110,7 +120,7 @@ export default tseslint.config(
     ],
     rules: {
       "no-restricted-imports": "off",
-      "no-restricted-syntax": "off",
+      "no-restricted-syntax": ["error", ...tokenGuardSelectors],
     },
   },
 );

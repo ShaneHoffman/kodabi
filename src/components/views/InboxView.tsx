@@ -133,16 +133,22 @@ function InboxRow({
             options.length === 0 ? (
               // No picker at all when there is nothing to file into: a control
               // whose only outcome is a dead end should not be offered.
-              <StatusMessage variant="status" compact>
+              // variant="empty", not "status": the variant fixes the ARIA role,
+              // and a static sentence repeated once per row must not be N live
+              // regions (docs/DESIGN_SYSTEM.md §3).
+              <StatusMessage variant="empty" compact>
                 Create a project to file notes.
               </StatusMessage>
             ) : (
-              // The picker stays mounted through the whole re-route. It used to
-              // be replaced by a <span>Filing…</span>, which unmounted the very
-              // control the user had just operated — dropping keyboard focus to
-              // <body> mid-task. Disabled-with-a-placeholder says the same
-              // thing and keeps focus where the user put it
-              // (docs/DESIGN_SYSTEM.md §6).
+              // The picker stays mounted through the whole re-route rather than
+              // being replaced by a <span>Filing…</span>, so the row does not
+              // reflow under the user and the message sits on the control that
+              // earned it (docs/DESIGN_SYSTEM.md §6).
+              //
+              // It does NOT preserve focus: `disabled` blurs a focused control
+              // just as unmounting it does (the HTML focus fixup rule). Making
+              // a Select busy-but-focusable the way Button does is a change to
+              // this primitive's contract and is deliberately not made here.
               <Select
                 hideLabel
                 label={`File "${note.title}" to project`}

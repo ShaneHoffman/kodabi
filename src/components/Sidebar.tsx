@@ -86,7 +86,10 @@ export function Sidebar({ onOpenPalette }: Props) {
               the app opened by telling the user their vault was empty
               (docs/DESIGN_SYSTEM.md §3). */}
           {projectEntries.length === 0 && !loading && !error && (
-            <StatusMessage variant="status" compact>
+            // variant="empty", not "status": the variant fixes the ARIA role,
+            // and this is first-run copy rather than progress — role="status"
+            // would make a static sentence a live region (§3).
+            <StatusMessage variant="empty" compact>
               No projects yet.
             </StatusMessage>
           )}

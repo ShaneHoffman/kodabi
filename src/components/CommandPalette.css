@@ -7,8 +7,9 @@
 
    The input's focus ring is dropped deliberately: the dialog's only tabbable
    element is this input, and it shows a caret, so a ring would be noise
-   rather than information. This is one of exactly two sanctioned exceptions
-   to the focus-ring rule (docs/DESIGN_SYSTEM.md §2).
+   rather than information. This is the ONE sanctioned exception to the
+   focus-ring rule (docs/DESIGN_SYSTEM.md §2) — quick capture stopped being a
+   second one when it gained a visible File it button and a second tab stop.
 
    The palette appears near-instantly by design: "one deliberate motion" is
    reserved for the distill-and-route moment, everything else is near-instant
