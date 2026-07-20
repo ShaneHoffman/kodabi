@@ -44,13 +44,22 @@ drift starts (the same control turning up as `px-3 py-1`, then `py-2`, then `px-
 | Section gap | lg | `gap-lg` | 40 |
 | Inline label ↔ control gap | 2xs | `gap-2xs` | 8 |
 | Panel / container padding | md | `p-md` | 24 |
-| Tight list gap (nav rows) | 3xs | `gap-3xs` | 4 |
+| Tight list gap (nav rows, inline rows) | 3xs | `gap-3xs` | 4 |
+| Stacked list gap (title + meta) | sm | `gap-sm` | 16 |
+| Stacked list gap (title + meta + snippet) | md | `gap-md` | 24 |
 | List row vertical padding | 2xs | `py-2xs` | 8 |
 | Reading / writing column width | measure | `max-w-measure` | 33rem |
 
 The view gutter and the section gap are owned by [`ViewFrame`](../src/components/ui/ViewFrame.tsx), so
 a screen never spells them out. (This table previously claimed the gutter was `px-lg py-lg`; every view
 in the tree used `p-xl`. The component now settles it.)
+
+The three list gaps are one rule, not three numbers: **the gap between rows must beat the gap between
+the lines inside a row.** A `ListRow` stacks its own lines at `gap-3xs`, so an inline single-line row
+separates fine at `gap-3xs` too, a two-line row needs `gap-sm`, and a row carrying a snippet needs
+`gap-md`. Set it too tight and the list stops reading as rows at all — the Inbox shipped its
+three-line rows at `gap-3xs` and became one undifferentiated block. The gap belongs to the `<ul>`,
+since `ListRow` cannot know how tall its siblings are.
 
 Control padding is **`px-xs py-2xs` (12 / 8)**. (The tokens are named by *step*, not by pixel: `--space-sm`
 is 16px and `--space-xs` is 12px — so 12px horizontal padding is `px-xs`, not `px-sm`.) The primitives

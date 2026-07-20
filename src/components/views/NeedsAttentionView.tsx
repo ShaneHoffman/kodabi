@@ -132,7 +132,9 @@ export function NeedsAttentionView() {
           </StatusMessage>
         )
       ) : (
-        <ul className="flex flex-col gap-3xs" data-testid="needs-attention">
+        // Two lines a row, so a step below the Inbox's gap-md but still clear
+        // of the row's own internal spacing.
+        <ul className="flex flex-col gap-sm" data-testid="needs-attention">
           {sessions.map((session) => (
             <li key={session.path}>
               <ListRow
