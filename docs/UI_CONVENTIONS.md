@@ -186,6 +186,13 @@ Label stacked a `gap-2xs` above the input; bound by `id` (generated via `useId` 
 carries the control padding, a bottom hairline (inset shadow), and the focus ring. Optional `hint` renders
 below and is wired through `aria-describedby`.
 
+**No fill — the line is the whole affordance.** `.ui-field` sets `background: transparent`, and the input's
+className carries no `bg-*`. It used to carry `--surface` *as well as* the writing line, which made it a box
+wearing a line rather than a line; three of them stacked in a form out-weighed everything they labelled. The
+field now sits on whatever plane the form sits on, page or panel. Hover still firms the line
+(`--edge` → `--edge-strong`) rather than filling the field, `aria-invalid` carries a heavier line, and
+disabled drops it to `--edge-faint`.
+
 ```tsx
 import { TextField } from "./ui/TextField";
 
@@ -213,11 +220,15 @@ travel together, and every hand-rolled version in the app set one without the ot
 body line-height (`--lh-body`). Height and resize behaviour are the caller's, since a capture box and a
 note body want very different room. `hideLabel` keeps the label as the accessible name only.
 
+It **keeps its fill** (`bg-bg-sink`) where `TextField` gave one up. That is deliberate, not drift: a
+multi-line box you write paragraphs into is a writing well, and the sunk plane is what says "this area is
+yours". A single-line field has no area to speak of.
+
 ```tsx
 <Textarea label="Body" value={body} onChange={…} className="note-editor__body font-mono" />
 ```
 
-### `Select` — token-styled dropdown
+### `Select` — token-styled dropdown, `variant="boxed" | "quiet"`
 
 A hand-rolled collapsible listbox (WAI-ARIA active-descendant), **not** a headless dependency — the same
 combobox know-how the command palette proves, minus the dep, keeping the app's zero-UI-dependency posture.
@@ -247,6 +258,27 @@ Pass `disabled` while a write is in flight, and `emptyLabel` for what the list s
 options — it opens and explains rather than refusing to open, which used to leave a trigger that
 swallowed every click.
 
+**`variant` fixes how much the *resting* trigger weighs; nothing else changes.** The dropdown list, the
+focus ring, and every keyboard behaviour are identical across both.
+
+- **`boxed`** (the default) is the form field and reads like one: `bg-surface`, the full `--hairline` ring,
+  `text-text`.
+- **`quiet`** rests as text — transparent, no hairline, `text-text-soft`. Hover takes `--wash-active` and
+  steps the colour to `--text`; while open (`[aria-expanded="true"]`) it takes `--surface` + `--hairline` +
+  `--text`, because open it *is* the anchored control the list hangs off. Same
+  inherit-then-step-toward-ink logic as `Button variant="quiet"`.
+
+```tsx
+<Select hideLabel variant="quiet" label={`File "${note.title}" to project`} … />
+```
+
+**`quiet` is for an in-content affordance sitting beside content it must not out-weigh — never in a form.**
+A field that doesn't look like a field is a field people don't fill in. Its only consumer is the Inbox's
+per-row *File to…* picker, where boxed made the control the heaviest object on the screen while the note
+title was the subject of the row (against DESIGN.md's *space instead of borders and boxes* and *typography
+carries the hierarchy*). Settings' retention picker, the note editor's pickers, and `ConsentNudge` all stay
+`boxed`.
+
 **Never a raw `<select>`.** The native control ignores the token theme entirely (system chrome, no focus
 ring, no value wash), so this primitive is the only dropdown.
 
@@ -273,17 +305,47 @@ import { Checkbox } from "./ui/Checkbox";
 The checked state is ink on surface — **value, not hue**. The reserved green is never used here: it means
 audio is actually being recorded, and a settings control wearing it would be claiming something false.
 
-### `ViewFrame` — the page scaffold
+### `ViewFrame` — the page scaffold, `variant="queue" | "library" | "panel"`
 
-The view gutter, the centred content column, the section rhythm, and the eyebrow/title header. Every
-full view sits in one. Omit `eyebrow` and `title` for the bare scaffold when a view's header is a
-genuinely different shape (the note editor's carries a back link and its own actions).
+The view gutter (`p-xl`), the centred content column, the section rhythm (`gap-lg`), and the
+eyebrow/title header. Every full view sits in one.
+
+**`variant` answers "what am I looking at" before the heading is read.** It is not decoration — it is the
+one place a view declares its kind, so two views of the same kind can't drift apart:
+
+| `variant` | The view is | Column | `summary` renders as |
+| --- | --- | --- | --- |
+| `queue` | work to get through | `max-w-content` | `text-body text-text-soft` — a workload sentence ("5 notes to file") |
+| `library` | a place to browse | `max-w-content` | `text-cap text-text-faint` — a quiet count ("12 notes") |
+| `panel` | configuration | `max-w-measure` | not rendered |
+| *omitted* | the bare scaffold | `max-w-content` | not rendered |
 
 ```tsx
-<ViewFrame eyebrow="Project" title={formatSlug(slug)} action={<Button …>New note</Button>}>
+<ViewFrame variant="library" eyebrow="Project" title={formatSlug(slug)}
+           summary={`${notes.length} notes`} action={<Button …>New note</Button>}>
   {…}
 </ViewFrame>
 ```
+
+**`summary` is not a free styling slot.** The variant fixes its typographic role, so a workload sentence
+can never render at a count's weight in one view and a heading's in another. Call sites pass the content,
+never a class — there is no `className` on it to reach for.
+
+**Omit `summary` at zero.** The empty `StatusMessage` in the body already says there's nothing here, and
+two "nothing here" voices in one header is one too many. Every call site does this with a conditional
+(`notes.length > 0 ? … : undefined`).
+
+`panel` narrows the column to `max-w-measure` and owns that measure for the whole view: a config screen
+whose labels and controls run the full content width drifts apart from what it labels. A panel view
+therefore does **not** wrap its own blocks in `max-w-measure` — sections inside it are plain
+`<section className="flex flex-col gap-sm">` with a `font-serif text-h3 text-text` heading (see
+`SettingsView`'s local `SettingsSection`).
+
+Omit `variant` *and* `eyebrow`/`title` for the bare scaffold, when a view's header is a genuinely
+different shape (the note editor's carries a back link and its own actions and supplies its own header as
+a child — five uses). `PlaceholderView` / `SearchView` deliberately take no variant either: real Search
+arrives in Phase 3, and a silhouette invented with nothing to check it against is a guess the rest of the
+system would then have to honour.
 
 ### `StatusMessage` — `variant="empty" | "error" | "status"`
 
@@ -348,12 +410,12 @@ behind; a new screen should find its shape here rather than inventing one.
 
 | Surface | Composes |
 | --- | --- |
-| `Sidebar` | `Button variant="quiet"` rows, `StatusMessage` |
-| `InboxView` | `ViewFrame`, `ListRow`, `Select`, `StatusMessage` |
-| `NeedsAttentionSection` | `ListRow`, `Button` (with `loading`), `StatusMessage` |
-| `ProjectView` | `ViewFrame`, `ListRow layout="inline"`, `Button`, `StatusMessage` |
-| `NoteEditorView` | `ViewFrame`, `TextField`, `Textarea`, `Select`, `Button`, `StatusMessage` |
-| `SettingsView` | `ViewFrame`, `Select`, `TextField`, `Checkbox`, `Button`, `StatusMessage` |
+| `Sidebar` | `Button variant="quiet"` rows (including the needs-attention row), `StatusMessage` |
+| `InboxView` | `ViewFrame variant="queue"`, `ListRow`, `Select variant="quiet"`, `StatusMessage` |
+| `NeedsAttentionView` | `ViewFrame variant="queue"`, `ListRow`, `Button` (with `loading`), `StatusMessage` |
+| `ProjectView` | `ViewFrame variant="library"`, `ListRow layout="inline"`, `Button`, `StatusMessage` |
+| `NoteEditorView` | `ViewFrame` (bare), `TextField`, `Textarea`, `Select`, `Button`, `StatusMessage` |
+| `SettingsView` | `ViewFrame variant="panel"`, `Select`, `TextField`, `Checkbox`, `Button`, `StatusMessage` |
 | `PlaceholderView` / `SearchView` | `ViewFrame`, `StatusMessage` |
 | `CommandPalette` | `Overlay` (+ its own combobox input) |
 | `ConsentNudge` | `Overlay`, `Select`, `TextField`, `Button`, `StatusMessage` |
@@ -364,7 +426,10 @@ Three surfaces keep a documented departure, each forced by what the window is ra
 
 - **`CommandPalette`** — its input keeps a bespoke treatment (no focus ring, its own inset hairline,
   `role="combobox"`). It is a search-combobox, not a generic form field. The shell around it is `Overlay`
-  like any other modal.
+  like any other modal. Its own rhythm is the modal's, not a control's: the input is `px-md py-sm` and the
+  rows (and the no-commands row) are `px-md`, with `gap-md` between a row's title and its hint — a panel
+  people read a list in, indented off its own edge rather than padded like a button. Row vertical padding
+  stays `py-2xs`, the app's list-row step.
 - **`QuickCapture`** — a hotkey-first window that now also carries a visible **File it** button, because a
   pointer-only user cannot press Enter into a window they never focused. Adding it is why the textarea
   regained its focus ring: Tab finally has somewhere to go.
