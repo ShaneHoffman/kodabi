@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   buildRetentionPolicy,
@@ -75,9 +75,32 @@ function RebuildIndexControl() {
 }
 
 /**
- * The Settings view — Privacy only for now. Shows whether recording consent
- * has been acknowledged and lets the user change the raw-transcript retention
- * policy, which persists (and prunes) immediately on change.
+ * One settings section: a serif heading and the controls under it.
+ *
+ * The three groups here already existed; two of them had headings and the first
+ * did not, because the view's own title said "Privacy" and stood in for one.
+ * That made the page title a lie about the other two thirds of the page. Every
+ * group now names itself, and the title says what the view actually is.
+ */
+function SettingsSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <section className="flex flex-col gap-sm">
+      <h3 className="font-serif text-h3 text-text">{title}</h3>
+      {children}
+    </section>
+  );
+}
+
+/**
+ * The Settings view: consent and retention, the capture pill, and the index.
+ * Reads as a panel rather than a queue or a library (a narrower column, sections
+ * led by their own headings) because nothing here is a list you work through.
  */
 export function SettingsView() {
   const { settings, error, setSettings } = useSettings();
@@ -142,13 +165,13 @@ export function SettingsView() {
   };
 
   return (
-    <ViewFrame eyebrow="Settings" title="Privacy">
+    <ViewFrame variant="panel" eyebrow="System" title="Settings">
       {error && (
         <StatusMessage variant="error">Couldn&apos;t load settings: {error}</StatusMessage>
       )}
 
       {settings && (
-        <div className="flex max-w-measure flex-col gap-lg">
+        <SettingsSection title="Privacy">
           <p className="text-body text-text-soft">
             {settings.consent_acknowledged
               ? "Recording consent acknowledged."
@@ -202,12 +225,11 @@ export function SettingsView() {
               </StatusMessage>
             )}
           </div>
-        </div>
+        </SettingsSection>
       )}
 
       {settings && (
-        <div className="flex max-w-measure flex-col gap-sm">
-          <h3 className="font-serif text-h3 text-text">Capture</h3>
+        <SettingsSection title="Capture">
           <Checkbox
             label="Show the capture pill during captures you start"
             hint="A small pill stays on top of full screen apps while a capture is running, so a recording is never invisible. Drag it anywhere, or hide it for the current capture."
@@ -229,13 +251,12 @@ export function SettingsView() {
               Couldn&apos;t save: {overlayError}
             </StatusMessage>
           )}
-        </div>
+        </SettingsSection>
       )}
 
-      <div className="flex max-w-measure flex-col gap-sm">
-        <h3 className="font-serif text-h3 text-text">Knowledge base</h3>
+      <SettingsSection title="Knowledge base">
         <RebuildIndexControl />
-      </div>
+      </SettingsSection>
     </ViewFrame>
   );
 }
