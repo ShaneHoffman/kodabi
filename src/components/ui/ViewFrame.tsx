@@ -72,7 +72,11 @@ export function ViewFrame({
   const summaryClass = variant ? SUMMARY_CLASS[variant] : "";
 
   return (
-    <section className="flex min-h-full flex-col p-xl">
+    // p-lg, not p-xl. 64px on every edge spent a tenth of a 640px-tall window
+    // on nothing before the eyebrow even started, and pushed the first row of
+    // every list past 200px down. Ma is space that does work; this was space
+    // that just cost.
+    <section className="flex min-h-full flex-col p-lg">
       <div className={column}>
         {title && (
           <header className="flex items-baseline justify-between gap-md">

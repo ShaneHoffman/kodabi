@@ -53,7 +53,7 @@ export function ProjectView({ slug }: Props) {
           </StatusMessage>
         )
       ) : (
-        <ul className="flex flex-col gap-3xs">
+        <ul className="flex flex-col gap-sm">
           {notes.map((note) => (
             // Keyed by path, not id: two files can carry the same id (an
             // external copy), and duplicate keys would mis-reconcile rows.
