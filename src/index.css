@@ -6,11 +6,14 @@
    our tokens.
 
    Nothing here redefines a value — design/tokens.css stays the single
-   source of truth. This file only documents the mapping.
+   source of truth. This file documents the mapping, pulls in the shared
+   primitive recipes, and applies the two bits of global chrome (scrollbars,
+   reduced motion) that belong to no single component.
    ============================================================ */
 
 @import "tailwindcss";
 @import "../design/tokens.css";
+@import "./components/ui/ui.css";
 
 /* `@theme inline` is the critical keyword: it makes Tailwind emit utilities
    that REFERENCE var(--bg) at runtime rather than baking the light value in at
@@ -31,6 +34,23 @@
   --font-sans:  var(--sans);
   --font-serif: var(--serif);
   --font-mono:  var(--mono);
+
+  /* type — tracking. Bridged because the eyebrow role was otherwise reaching
+     for Tailwind's own `tracking-wide` (0.025em) at most call sites while the
+     Sidebar used --ls-eyebrow (0.22em) through a CSS class — the same role
+     rendering 8.8x apart. `tracking-eyebrow` is now the only spelling. */
+  --tracking-eyebrow: var(--ls-eyebrow);
+  --tracking-caps:    var(--ls-caps);
+
+  /* type — weights. Tailwind's own font-medium/semibold happen to match, but
+     bridging makes the token the source rather than the coincidence. */
+  --font-weight-medium:   var(--fw-medium);
+  --font-weight-semibold: var(--fw-semibold);
+
+  /* type — line-heights (leading-* utilities), so a reading column no longer
+     needs a co-located CSS file just to set its line-height. */
+  --leading-body: var(--lh-body);
+  --leading-read: var(--lh-read);
 
   /* type — size scale (exposed as text-* utilities) */
   --text-eyebrow: var(--fs-eyebrow);
@@ -63,4 +83,51 @@
      --radius-md at :root (unlayered), overriding Tailwind's same-named theme
      defaults, so `rounded-sm` / `rounded-md` already resolve to our tokens.
      Re-declaring `--radius-sm: var(--radius-sm)` here would be a self-cycle. */
+}
+
+/* ---------- global chrome ----------
+   Scrollbars were shipping as the platform default, which renders a light bar
+   over the night theme — the one piece of the window that never got a value.
+   Styled here rather than per-component because any scroll container should
+   look the same. Firefox takes the standard properties; Chromium (and so
+   WebView2, which is what actually ships) takes the pseudo-elements. */
+* {
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+  scrollbar-width: thin;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--scrollbar-track);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--scrollbar-thumb);
+  border-radius: var(--radius-md);
+  /* Inset the thumb from the track with a transparent border so it reads as a
+     floating bar rather than a filled gutter. */
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+
+/* Accessibility floor, app-wide: when the OS asks for reduced motion, nothing
+   animates or transitions by default. Components that need a *different*
+   reduced-motion resting state (SpiritMark keeps a still green mark rather
+   than a blank one) override this in their own CSS. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    /* token-guard-allow: 1ms is the standard reduced-motion idiom, not a
+       duration choice — it collapses motion while still letting transitionend
+       and animationend fire, which `none` would suppress. Tokenising it would
+       imply it is tunable; it is not. */
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    /* token-guard-allow: as above. */
+    transition-duration: 1ms !important;
+    scroll-behavior: auto !important;
+  }
 }
