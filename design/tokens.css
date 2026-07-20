@@ -17,7 +17,10 @@
                                      elevation — every literal is defined here EXACTLY ONCE
      2. semantic  (--bg, --text …)   remapped per theme (references only, never new literals);
                                      what components actually consume
-     3. scales    (--fs-/--fw-/--lh-/--ls-/--space-/--flow-/--radius-/--edge-) theme-independent
+     3. scales    (--fs-/--fw-/--lh-/--ls-/--space-/--flow-/--radius-/--edge-/--focus-/--dur-/
+                   --ease-/--layer-) theme-independent
+        …plus a few DERIVED values (--wash-active, --scrim, --scrollbar-*) that live in layer 3 but
+        reference layer 2, so they re-theme with it. They are recipes, not new literals.
 
    Theming — same triple-selector mechanism as the moodboard. The dark mapping is stated twice
    (a media query cannot be merged with a plain selector), but both copies only *reference* the
@@ -46,8 +49,16 @@
 
   /* light-side shades (the ones that aren't a raw pigment) */
   --k-washi-sink: #EAE8DD;   /* recessed washi (light bg-sink) */
-  --k-stone-ink:  #62665E;   /* darkened stone — a11y-tuned faint text */
-  --k-accent:     #526B4D;   /* desaturated green — interactive accent */
+  --k-stone-ink:  #60645C;   /* darkened stone — a11y-tuned faint text */
+  --k-accent:     #50694B;   /* desaturated green — interactive accent */
+
+  /* Both values above were re-tuned by 2/255 per channel (from #62665E and
+     #526B4D) during the design-system pass. They cleared 4.5:1 on --bg and
+     --bg-sink but landed at 4.41 and 4.43 on --surface, the lightest raised
+     plane (mist) — and both are used there: the palette's hint text and the
+     Select caret are faint-on-surface, and --accent is the focus ring drawn
+     against it. The correction is below the perceptual threshold and takes
+     every light-theme text pair over AA. Full matrix: docs/DESIGN_SYSTEM.md. */
 
   /* night palette */
   --k-night:         #191B16;   /* night ground (deep sumi) */
@@ -102,6 +113,12 @@
   --ls-h2:      -0.01em;
   --ls-h3:      -0.005em;
   --ls-eyebrow: 0.22em;
+  /* Uppercase micro-text that is NOT a section eyebrow — the capture status
+     lines. Caps need opening up to stay readable, but nowhere near an
+     eyebrow's 0.22em, which would read as a heading. Before this token the
+     role reached for Tailwind's own `tracking-wide` (0.025em), which is both
+     off-system and too tight for caps. */
+  --ls-caps:    0.08em;
 
   /* ---------- Layer 3 — spacing ---------- */
 
@@ -137,6 +154,61 @@
   --edge:        rgba(128, 128, 120, 0.20);
   --edge-strong: rgba(128, 128, 120, 0.28);
   --hairline:    inset 0 0 0 1px var(--edge);
+
+  /* ---------- Layer 3 — focus ----------
+     The one focus treatment: a 2px accent outline held off the control by its
+     own width (docs/DESIGN_SYSTEM.md). Width matches --radius-focus above. */
+  --focus-width:  2px;
+  --focus-offset: 2px;
+
+  /* ---------- Layer 3 — motion ----------
+     Durations are the values the app already shipped, named rather than
+     restated: --settle was InboxView's row exit, --wake/--breath/--pulse and
+     the two drifts were SpiritMark's. --quick is the only new one, for the
+     control state changes the primitives previously left unanimated.
+
+     FOUNDING_DOC §4 reserves "one deliberate motion" for distill-and-route and
+     keeps everything else near-instant, so this scale stays deliberately short
+     at the top and is spent only where docs/DESIGN_SYSTEM.md says it may be. */
+  --dur-quick:      120ms;   /* hover/active on a control      */
+  --dur-settle:     200ms;   /* a row leaving a list           */
+  --dur-wake:       450ms;   /* the mark waking / settling     */
+  --dur-pulse:     1600ms;   /* starting + reconnecting pulse  */
+  --dur-breath:    4200ms;   /* the listening breath cycle     */
+  --dur-drift:    15000ms;   /* aura blob A                    */
+  --dur-drift-slow: 21000ms; /* aura blob B (counter-rotating) */
+
+  --ease-standard: ease;          /* entrances, exits, state changes */
+  --ease-breath:   ease-in-out;   /* the continuous listening motion */
+  --ease-drift:    linear;        /* constant-rate rotation          */
+
+  /* ---------- Layer 3 — stacking ----------
+     Two layers above the page, so overlay surfaces stop agreeing by accident. */
+  --layer-dropdown: 10;   /* a list opened by a control (Select) */
+  --layer-overlay:  50;   /* modal surfaces (palette, nudge)     */
+
+  /* ---------- Layer 3 — derived values ----------
+     These reference Layer 2, so they re-theme with it: a custom property
+     substitutes at computed-value time, and both live on :root, so a theme
+     block that rewrites --text or --bg-sink rewrites these too. Defining them
+     once here is what keeps the recipe from being retyped per component. */
+
+  /* selected / highlighted rows read through VALUE, never hue — an ink wash of
+     the text colour, identical logic in both themes, and never the reserved
+     green (docs/DESIGN.md). */
+  --wash-active: color-mix(in srgb, var(--text) 8%, transparent);
+
+  /* the dimming behind a modal surface */
+  --scrim: color-mix(in srgb, var(--bg-sink) 60%, transparent);
+
+  /* scrollbars are chrome, so they sit at the quiet end of the value ladder
+     rather than wearing the platform default (which reads light-on-dark in the
+     night theme). */
+  --scrollbar-thumb: color-mix(in srgb, var(--text) 22%, transparent);
+  --scrollbar-track: transparent;
+
+  /* a disabled control that has no text to fade (the checkbox box) */
+  --disabled-opacity: 0.5;
 
   /* caught-light sheen — a faint white specular highlight for glossy marks.
      Off the pigment ladder by design (like the edges above): white, not a hue,

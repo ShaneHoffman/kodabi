@@ -1,0 +1,30 @@
+/* ============================================================
+   Shared primitive recipes.
+
+   Two treatments were being retyped in every component that needed them —
+   the focus ring in eight places (four primitive CSS files, one more in
+   CaptureOverlayPill.css, and three as inline Tailwind in the views), and
+   the active-row wash in two. Both are single-meaning things: there is one
+   focus ring and one wash in this app. They live here once.
+
+   This file is imported from src/index.css, not from a component, because
+   it is shared by all of them. Everything else stays co-located in the
+   owning Component.css (docs/UI_CONVENTIONS.md).
+   ============================================================ */
+
+/* The one focus treatment: a 2px accent outline held off the control by its
+   own width. :focus-visible (not :focus) so a pointer press never draws it.
+   Applied as a class so a component opts in by name rather than by restating
+   three declarations. */
+.ui-focus-ring:focus-visible {
+  outline: var(--focus-width) solid var(--accent);
+  outline-offset: var(--focus-offset);
+}
+
+/* Selected / highlighted rows read through VALUE, not hue: an ink wash of the
+   text colour, identical in both themes, and never the reserved green
+   (docs/DESIGN.md). Used by the command palette, Select, and list rows. */
+.ui-wash {
+  background: var(--wash-active);
+  color: var(--text);
+}
