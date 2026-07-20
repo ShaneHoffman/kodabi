@@ -64,8 +64,12 @@ export function Sidebar({ onOpenPalette }: Props) {
   return (
     <aside className="sidebar flex w-64 flex-none flex-col gap-md bg-bg-sink p-md">
       {/* The document's h1: heading navigation needs a level-1 root even
-          though the wordmark reads quietly (preflight strips h1 sizing). */}
-      <h1 className="font-serif text-body text-text-soft">kodabi</h1>
+          though the wordmark reads quietly (preflight strips h1 sizing).
+          It sits at ink value rather than soft — it is the one piece of the
+          window that names the app, and reading like a disabled nav row was
+          under-selling it — with the eyebrow's tracking to set it apart from
+          the rows below without making it bigger than them. */}
+      <h1 className="font-serif text-body tracking-caps text-text">kodabi</h1>
 
       <nav
         aria-label="Knowledge base"
