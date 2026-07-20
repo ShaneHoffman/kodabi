@@ -15,7 +15,9 @@ import { useTauriEvent } from "../../useTauriEvent";
 import { Button } from "../ui/Button";
 import { Checkbox } from "../ui/Checkbox";
 import { Select } from "../ui/Select";
+import { StatusMessage } from "../ui/StatusMessage";
 import { TextField } from "../ui/TextField";
+import { ViewFrame } from "../ui/ViewFrame";
 
 /** The `index:state` payload, mirroring the Rust `IndexStateEvent` tagged enum
  * in `src-tauri/src/index_state.rs`. */
@@ -51,22 +53,22 @@ function RebuildIndexControl() {
   return (
     <div className="flex flex-col gap-sm">
       <div>
-        <Button onClick={rebuild} disabled={busy}>
-          {busy ? "Rebuilding..." : "Rebuild index"}
+        <Button onClick={rebuild} loading={busy} loadingLabel="Rebuilding…">
+          Rebuild index
         </Button>
       </div>
       <p className="text-cap text-text-faint">
         Reconstructs the search index from your note files. Safe to run anytime.
       </p>
       {state.status === "ready" && (
-        <p className="text-cap text-text-faint">
+        <StatusMessage variant="status" compact>
           Index rebuilt. {state.notes} {state.notes === 1 ? "note" : "notes"} indexed.
-        </p>
+        </StatusMessage>
       )}
       {state.status === "error" && (
-        <p role="alert" className="text-cap text-text-soft">
-          Couldn't rebuild the index: {state.message}
-        </p>
+        <StatusMessage variant="error" compact>
+          Couldn&apos;t rebuild the index: {state.message}
+        </StatusMessage>
       )}
     </div>
   );
@@ -84,6 +86,14 @@ export function SettingsView() {
   const [days, setDays] = useState(String(DEFAULT_KEEP_DAYS));
   const [saveError, setSaveError] = useState<string | null>(null);
   const [overlayError, setOverlayError] = useState<string | null>(null);
+  // Which async write is in flight, so the control that started it can say so
+  // rather than flipping instantly and silently reverting if it fails.
+  const [savingRetention, setSavingRetention] = useState(false);
+  const [savingOverlay, setSavingOverlay] = useState(false);
+  // Set once the day field has been committed, so the save is visible: this
+  // control persists on Enter or blur, and without an acknowledgement a
+  // keyboard user has no signal that anything happened.
+  const [daysSaved, setDaysSaved] = useState(false);
 
   // Seed the day field from the stored policy the first time a keep_days value
   // is seen, so editing starts from the stored value rather than the
@@ -100,11 +110,16 @@ export function SettingsView() {
 
   const apply = async (nextKind: RetentionKind, nextDays: number) => {
     setSaveError(null);
+    setSavingRetention(true);
     try {
       const updated = await setRetentionPolicy(buildRetentionPolicy(nextKind, nextDays));
       setSettings(updated);
+      setDaysSaved(true);
     } catch (err) {
       setSaveError(String(err));
+      setDaysSaved(false);
+    } finally {
+      setSavingRetention(false);
     }
   };
 
@@ -115,92 +130,112 @@ export function SettingsView() {
   const applyOverlay = async (change: Partial<OverlaySettings>) => {
     if (!settings) return;
     setOverlayError(null);
+    setSavingOverlay(true);
     try {
       const updated = await setCaptureOverlay({ ...settings.overlay, ...change });
       setSettings(updated);
     } catch (err) {
       setOverlayError(String(err));
+    } finally {
+      setSavingOverlay(false);
     }
   };
 
   return (
-    <section className="flex min-h-full flex-col p-xl">
-      <div className="mx-auto flex w-full max-w-content flex-col gap-lg">
-        <header className="flex flex-col gap-3xs">
-          <p className="text-eyebrow uppercase tracking-wide text-text-faint">Settings</p>
-          <h2 className="font-serif text-h2 text-text">Privacy</h2>
-        </header>
+    <ViewFrame eyebrow="Settings" title="Privacy">
+      {error && (
+        <StatusMessage variant="error">Couldn&apos;t load settings: {error}</StatusMessage>
+      )}
 
-        {error && <p className="text-body text-text-soft">Couldn't load settings: {error}</p>}
+      {settings && (
+        <div className="flex max-w-measure flex-col gap-lg">
+          <p className="text-body text-text-soft">
+            {settings.consent_acknowledged
+              ? "Recording consent acknowledged."
+              : "The consent nudge is shown before your first capture."}
+          </p>
 
-        {settings && (
-          <div className="flex max-w-measure flex-col gap-lg">
-            <p className="text-body text-text-soft">
-              {settings.consent_acknowledged
-                ? "Recording consent acknowledged."
-                : "The consent nudge is shown before your first capture."}
-            </p>
-
-            <div className="flex flex-col gap-sm">
-              <Select
-                label="Retention"
-                value={kind}
-                onChange={(value) => apply(value as RetentionKind, Number(days))}
-                options={RETENTION_OPTIONS}
+          <div className="flex flex-col gap-sm">
+            <Select
+              label="Retention"
+              value={kind}
+              onChange={(value) => apply(value as RetentionKind, Number(days))}
+              options={RETENTION_OPTIONS}
+              disabled={savingRetention}
+            />
+            {kind === "keep_days" && (
+              <TextField
+                label="Days to keep"
+                type="number"
+                min={1}
+                value={days}
+                hint="Saves when you press Enter or leave the field."
+                onChange={(event) => {
+                  setDays(event.target.value);
+                  setDaysSaved(false);
+                }}
+                // Enter as well as blur. Blur-only made this the one setting a
+                // keyboard user could change without ever being told it saved,
+                // and without a way to commit it deliberately
+                // (docs/DESIGN_SYSTEM.md §6).
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    void apply("keep_days", Number(days));
+                  }
+                }}
+                onBlur={() => apply("keep_days", Number(days))}
               />
-              {kind === "keep_days" && (
-                <TextField
-                  label="Days to keep"
-                  type="number"
-                  min={1}
-                  value={days}
-                  onChange={(event) => setDays(event.target.value)}
-                  onBlur={() => apply("keep_days", Number(days))}
-                />
-              )}
-              <p className="text-cap text-text-faint">
-                Discard after distilling applies to captures from now on. Sessions
-                distilled before you chose it are not removed.
-              </p>
-              {saveError && (
-                <p role="alert" className="text-cap text-text-soft">
-                  Couldn't save: {saveError}
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-
-        {settings && (
-          <div className="flex max-w-measure flex-col gap-sm">
-            <h3 className="font-serif text-h3 text-text">Capture</h3>
-            <Checkbox
-              label="Show the capture pill during captures you start"
-              hint="A small pill stays on top of full screen apps while a capture is running, so a recording is never invisible. Drag it anywhere, or hide it for the current capture."
-              data-testid="overlay-manual-captures"
-              checked={settings.overlay.manual_captures}
-              onChange={(checked) => applyOverlay({ manual_captures: checked })}
-            />
-            <Checkbox
-              label="Show the capture pill for auto detected captures"
-              hint="Applies when meeting auto detection arrives. Kodabi does not detect meetings on its own yet, so this setting has nothing to act on today."
-              data-testid="overlay-auto-captures"
-              checked={settings.overlay.auto_captures}
-              onChange={(checked) => applyOverlay({ auto_captures: checked })}
-            />
-            {overlayError && (
-              <p role="alert" className="text-cap text-text-soft">
-                Couldn't save: {overlayError}
-              </p>
+            )}
+            {daysSaved && kind === "keep_days" && (
+              <StatusMessage variant="status" compact>
+                Saved.
+              </StatusMessage>
+            )}
+            <p className="text-cap text-text-faint">
+              Discard after distilling applies to captures from now on. Sessions
+              distilled before you chose it are not removed.
+            </p>
+            {saveError && (
+              <StatusMessage variant="error" compact>
+                Couldn&apos;t save: {saveError}
+              </StatusMessage>
             )}
           </div>
-        )}
-
-        <div className="flex max-w-measure flex-col gap-sm">
-          <h3 className="font-serif text-h3 text-text">Knowledge base</h3>
-          <RebuildIndexControl />
         </div>
+      )}
+
+      {settings && (
+        <div className="flex max-w-measure flex-col gap-sm">
+          <h3 className="font-serif text-h3 text-text">Capture</h3>
+          <Checkbox
+            label="Show the capture pill during captures you start"
+            hint="A small pill stays on top of full screen apps while a capture is running, so a recording is never invisible. Drag it anywhere, or hide it for the current capture."
+            data-testid="overlay-manual-captures"
+            checked={settings.overlay.manual_captures}
+            disabled={savingOverlay}
+            onChange={(checked) => applyOverlay({ manual_captures: checked })}
+          />
+          <Checkbox
+            label="Show the capture pill for auto detected captures"
+            hint="Applies when meeting auto detection arrives. Kodabi does not detect meetings on its own yet, so this setting has nothing to act on today."
+            data-testid="overlay-auto-captures"
+            checked={settings.overlay.auto_captures}
+            disabled={savingOverlay}
+            onChange={(checked) => applyOverlay({ auto_captures: checked })}
+          />
+          {overlayError && (
+            <StatusMessage variant="error" compact>
+              Couldn&apos;t save: {overlayError}
+            </StatusMessage>
+          )}
+        </div>
+      )}
+
+      <div className="flex max-w-measure flex-col gap-sm">
+        <h3 className="font-serif text-h3 text-text">Knowledge base</h3>
+        <RebuildIndexControl />
       </div>
-    </section>
+    </ViewFrame>
   );
 }

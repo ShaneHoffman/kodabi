@@ -1,15 +1,15 @@
 import { useNavigation } from "../../useNavigation";
-import { useProjectNotes, type NoteSummary } from "../../useNotes";
+import { noteMeta } from "../../noteMeta";
+import { useProjectNotes } from "../../useNotes";
 import { formatSlug } from "../../useProjects";
+import { Button } from "../ui/Button";
+import { ListRow } from "../ui/ListRow";
+import { StatusMessage } from "../ui/StatusMessage";
+import { ViewFrame } from "../ui/ViewFrame";
 
 type Props = {
   slug: string;
 };
-
-/** The quiet meta line a list row earns: day, then tags. */
-function noteMeta(note: NoteSummary): string {
-  return [note.date.slice(0, 10), ...note.tags].join(" · ");
-}
 
 /**
  * A project's notes, newest first — typography-first: serif titles carry the
@@ -21,55 +21,47 @@ export function ProjectView({ slug }: Props) {
   const { notes, loading, error } = useProjectNotes(slug);
 
   return (
-    <section className="flex min-h-full flex-col p-xl">
-      <div className="mx-auto flex w-full max-w-content flex-col gap-lg">
-        <header className="flex items-baseline justify-between gap-md">
-          <div className="flex flex-col gap-3xs">
-            <p className="text-eyebrow uppercase tracking-wide text-text-faint">
-              Project
-            </p>
-            <h2 className="font-serif text-h2 text-text">{formatSlug(slug)}</h2>
-          </div>
-          <button
-            type="button"
-            onClick={() =>
-              navigate({ kind: "noteEditor", noteId: null, project: slug })
-            }
-            className="flex-none text-body text-accent focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-          >
-            New note
-          </button>
-        </header>
-
-        {error ? (
-          <p className="text-body text-text-soft">{error}</p>
-        ) : notes.length === 0 ? (
-          !loading && (
-            <p className="text-body text-text-soft">No notes here yet.</p>
-          )
-        ) : (
-          <ul className="flex flex-col gap-3xs">
-            {notes.map((note) => (
-              // Keyed by path, not id: two files can carry the same id (an
-              // external copy), and duplicate keys would mis-reconcile rows.
-              <li key={note.path}>
-                <button
-                  type="button"
-                  onClick={() =>
-                    navigate({ kind: "noteEditor", noteId: note.id, project: slug })
-                  }
-                  className="flex w-full items-baseline justify-between gap-md rounded-md py-2xs text-left text-text-soft hover:text-text focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-                >
-                  <span className="font-serif text-body">{note.title}</span>
-                  <span className="flex-none text-cap text-text-faint">
-                    {noteMeta(note)}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-    </section>
+    <ViewFrame
+      eyebrow="Project"
+      title={formatSlug(slug)}
+      action={
+        <Button
+          variant="quiet"
+          className="text-body text-accent"
+          onClick={() => navigate({ kind: "noteEditor", noteId: null, project: slug })}
+        >
+          New note
+        </Button>
+      }
+    >
+      {error ? (
+        <StatusMessage variant="error">Couldn&apos;t load notes: {error}</StatusMessage>
+      ) : notes.length === 0 ? (
+        // Gated on !loading as well, so a cold start shows nothing rather than
+        // flashing the empty state before the first read lands.
+        !loading && (
+          <StatusMessage variant="empty">
+            No notes here yet. Notes filed to this project land here.
+          </StatusMessage>
+        )
+      ) : (
+        <ul className="flex flex-col gap-3xs">
+          {notes.map((note) => (
+            // Keyed by path, not id: two files can carry the same id (an
+            // external copy), and duplicate keys would mis-reconcile rows.
+            <li key={note.path}>
+              <ListRow
+                layout="inline"
+                title={note.title}
+                meta={noteMeta(note)}
+                onOpen={() =>
+                  navigate({ kind: "noteEditor", noteId: note.id, project: slug })
+                }
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+    </ViewFrame>
   );
 }

@@ -37,9 +37,12 @@ body,
   box-shadow: var(--hairline), var(--lift-soft);
 }
 
-.capture-overlay-pill__label {
-  /* The pill is sized to the longest state text; nothing should reflow the
-     window if a label runs long. */
+/* The pill is sized to the longest state text; nothing should reflow the
+   window if a label runs long. Applied to the wrapper AND the status line
+   inside it, since the text now lives in the shared CaptureStatusLine. */
+.capture-overlay-pill__label,
+.capture-overlay-pill__label > p {
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -50,8 +53,4 @@ body,
      drag handle. */
   cursor: pointer;
   line-height: 1;
-}
-.capture-overlay-pill__dismiss:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
 }

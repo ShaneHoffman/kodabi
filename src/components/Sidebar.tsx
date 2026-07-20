@@ -9,6 +9,7 @@ import {
 } from "../useProjects";
 import { ListeningIndicator } from "./ListeningIndicator";
 import { Button } from "./ui/Button";
+import { StatusMessage } from "./ui/StatusMessage";
 import "./Sidebar.css";
 
 type Props = {
@@ -24,7 +25,7 @@ type Props = {
  * Selection is a surface value shift — never the reserved green.
  */
 export function Sidebar({ onOpenPalette }: Props) {
-  const { entries, error } = useProjects();
+  const { entries, loading, error } = useProjects();
   const { view, navigate } = useNavigation();
 
   const inboxEntry = entries.find((entry) => entry.kind === "inbox");
@@ -46,9 +47,7 @@ export function Sidebar({ onOpenPalette }: Props) {
           paddingInlineStart: `calc(var(--space-xs) + ${depth} * var(--space-sm))`,
         }}
         className={`sidebar__row flex w-full items-baseline justify-between text-left text-body ${
-          selected
-            ? "is-selected bg-surface text-text"
-            : "text-text-soft hover:text-text"
+          selected ? "is-selected bg-surface text-text" : "text-text-soft"
         }`}
       >
         <span>{name}</span>
@@ -69,7 +68,9 @@ export function Sidebar({ onOpenPalette }: Props) {
       >
         {/* A failed listing must not masquerade as an empty vault. */}
         {error && (
-          <p className="text-cap text-text-soft">Couldn't load projects: {error}</p>
+          <StatusMessage variant="error" compact>
+            Couldn&apos;t load projects: {error}
+          </StatusMessage>
         )}
 
         {inboxEntry && (
@@ -77,11 +78,20 @@ export function Sidebar({ onOpenPalette }: Props) {
         )}
 
         <div className="sidebar__group flex flex-col gap-3xs pt-md">
-          <p className="sidebar__eyebrow mb-2xs text-eyebrow uppercase text-text-faint">
+          <p className="mb-2xs text-eyebrow uppercase tracking-eyebrow text-text-faint">
             Projects
           </p>
-          {projectEntries.length === 0 && !error && (
-            <p className="text-cap text-text-faint">No projects yet.</p>
+          {/* Gated on !loading too: without it the first read of every cold
+              start rendered "No projects yet." before the listing landed, so
+              the app opened by telling the user their vault was empty
+              (docs/DESIGN_SYSTEM.md §3). */}
+          {projectEntries.length === 0 && !loading && !error && (
+            // variant="empty", not "status": the variant fixes the ARIA role,
+            // and this is first-run copy rather than progress — role="status"
+            // would make a static sentence a live region (§3).
+            <StatusMessage variant="empty" compact>
+              No projects yet.
+            </StatusMessage>
           )}
           {projectEntries.map(renderRow)}
         </div>
@@ -93,7 +103,7 @@ export function Sidebar({ onOpenPalette }: Props) {
           variant="quiet"
           aria-current={view.kind === "settings" ? "page" : undefined}
           onClick={() => navigate({ kind: "settings" })}
-          className={`flex w-full items-baseline text-left text-cap hover:text-text-soft ${
+          className={`flex w-full items-baseline text-left text-cap ${
             view.kind === "settings" ? "text-text-soft" : "text-text-faint"
           }`}
         >
@@ -102,7 +112,7 @@ export function Sidebar({ onOpenPalette }: Props) {
         <Button
           variant="quiet"
           onClick={onOpenPalette}
-          className="flex w-full items-baseline justify-between text-left text-cap text-text-faint hover:text-text-soft"
+          className="flex w-full items-baseline justify-between text-left text-cap text-text-faint"
         >
           <span>Commands</span>
           <span>{PALETTE_SHORTCUT_LABEL}</span>

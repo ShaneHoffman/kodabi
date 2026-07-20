@@ -23,8 +23,9 @@ type Props = Omit<
  *
  * The checked state reads through value, not hue: the mark is ink, never the
  * reserved green, which means "audio is being recorded" and nothing else
- * (docs/UI_CONVENTIONS.md). The box, its hairline and the focus ring live in
- * Checkbox.css; the label sits inline beside the control.
+ * (docs/UI_CONVENTIONS.md). The box and its hairline live in Checkbox.css, the
+ * focus ring comes from the shared `ui-focus-ring` recipe, and the label sits
+ * inline beside the control.
  */
 export function Checkbox({
   label,
@@ -48,7 +49,7 @@ export function Checkbox({
           checked={checked}
           aria-describedby={hintId}
           onChange={(event) => onChange(event.target.checked)}
-          className={`ui-checkbox rounded-sm${className ? ` ${className}` : ""}`}
+          className={`ui-checkbox ui-focus-ring rounded-sm${className ? ` ${className}` : ""}`}
           {...rest}
         />
         <label htmlFor={inputId} className="text-cap text-text-soft">

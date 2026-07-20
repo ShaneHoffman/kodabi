@@ -1,19 +1,20 @@
 /* ============================================================
    Sidebar — the quiet project switcher.
 
-   Only non-bridged tokens live here (the eyebrow tracking and the
-   selected-row weight); control padding, rounding and the focus ring now
-   come from the shared Button primitive (src/components/ui/Button.tsx).
+   Only non-bridged tokens live here (the two hairlines and the selected-row
+   weight); control padding, rounding, the focus ring and hover now come from
+   the shared Button primitive (src/components/ui/Button.tsx).
    Separation from the main region is a value shift (bg-bg-sink vs bg-bg)
    plus this hairline — an inset shadow, never a border (docs/DESIGN.md).
+
+   The old `.sidebar__eyebrow` rule is gone: --ls-eyebrow is bridged as the
+   `tracking-eyebrow` utility now, so the eyebrow is spelled the same way here
+   as in every other view instead of being the one place that used the token
+   while everywhere else used Tailwind's `tracking-wide`.
    ============================================================ */
 
 .sidebar {
   box-shadow: inset -1px 0 0 var(--edge-faint);
-}
-
-.sidebar__eyebrow {
-  letter-spacing: var(--ls-eyebrow);
 }
 
 /* Divides the Inbox (unfiled) from the projects: a hairline at the top of the

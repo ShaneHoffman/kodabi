@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useNavigation } from "../../useNavigation";
+import { matchScore, noteMeta } from "../../noteMeta";
 import {
   fileNoteToProject,
   INBOX_PROJECT,
@@ -8,15 +9,12 @@ import {
 } from "../../useNotes";
 import { formatSlug, useProjects } from "../../useProjects";
 import { useFailedSessions } from "../../useSessions";
+import { ListRow } from "../ui/ListRow";
 import { Select, type SelectOption } from "../ui/Select";
+import { StatusMessage } from "../ui/StatusMessage";
+import { ViewFrame } from "../ui/ViewFrame";
 import { NeedsAttentionSection } from "./NeedsAttentionSection";
 import "./InboxView.css";
-
-/** The quiet meta line for an unfiled note: day, routing score, then tags. */
-function inboxMeta(note: NoteSummary): string {
-  const score = `${Math.round((note.confidence ?? 0) * 100)}% match`;
-  return [note.date.slice(0, 10), score, ...note.tags].join(" · ");
-}
 
 /**
  * The Inbox: notes the router couldn't place with confidence, each with a
@@ -46,44 +44,35 @@ export function InboxView() {
   );
 
   return (
-    <section className="flex min-h-full flex-col p-xl">
-      <div className="mx-auto flex w-full max-w-content flex-col gap-lg">
-        <header className="flex flex-col gap-3xs">
-          <p className="text-eyebrow uppercase tracking-wide text-text-faint">
-            Unfiled
-          </p>
-          <h2 className="font-serif text-h2 text-text">Inbox</h2>
-        </header>
+    <ViewFrame eyebrow="Unfiled" title="Inbox">
+      {/* Captured meetings that never became a note: they need an action
+          (a retry), so they sit above the notes waiting to be filed. Renders
+          nothing when there are none, which is the normal case. */}
+      <NeedsAttentionSection sessions={sessions} error={sessionsError} />
 
-        {/* Captured meetings that never became a note: they need an action
-            (a retry), so they sit above the notes waiting to be filed. Renders
-            nothing when there are none, which is the normal case. */}
-        <NeedsAttentionSection sessions={sessions} error={sessionsError} />
-
-        {error ? (
-          <p className="text-body text-text-soft">{error}</p>
-        ) : notes.length === 0 ? (
-          // "Nothing waiting" has to mean the whole view, not just this list:
-          // claiming it above a populated needs-attention section would tell
-          // the user there is nothing to do while showing them something to do.
-          !loading &&
-          sessions.length === 0 &&
-          !sessionsError && (
-            <p className="text-body text-text-soft">
-              Nothing waiting. Notes the router can&apos;t place land here.
-            </p>
-          )
-        ) : (
-          <ul className="flex flex-col gap-3xs">
-            {notes.map((note) => (
-              // Keyed by path, not id: two files can carry the same id (an
-              // external copy), and duplicate keys would mis-reconcile rows.
-              <InboxRow key={note.path} note={note} options={options} />
-            ))}
-          </ul>
-        )}
-      </div>
-    </section>
+      {error ? (
+        <StatusMessage variant="error">Couldn&apos;t load the inbox: {error}</StatusMessage>
+      ) : notes.length === 0 ? (
+        // "Nothing waiting" has to mean the whole view, not just this list:
+        // claiming it above a populated needs-attention section would tell
+        // the user there is nothing to do while showing them something to do.
+        !loading &&
+        sessions.length === 0 &&
+        !sessionsError && (
+          <StatusMessage variant="empty">
+            Nothing waiting. Notes the router can&apos;t place land here.
+          </StatusMessage>
+        )
+      ) : (
+        <ul className="flex flex-col gap-3xs">
+          {notes.map((note) => (
+            // Keyed by path, not id: two files can carry the same id (an
+            // external copy), and duplicate keys would mis-reconcile rows.
+            <InboxRow key={note.path} note={note} options={options} />
+          ))}
+        </ul>
+      )}
+    </ViewFrame>
   );
 }
 
@@ -113,10 +102,11 @@ function InboxRow({
     setError(null);
     fileNoteToProject({ id: note.id, project: slug })
       .then(() => {
-        // Play the exit transition (InboxView.css, 0.2s). The re-route command
-        // broadcasts `vault:changed` itself, so the list refetches and drops the
-        // row promptly (and still converges if the file watcher never started);
-        // the fade is best-effort polish for the brief window before it does.
+        // Play the exit transition (InboxView.css, --dur-settle). The re-route
+        // command broadcasts `vault:changed` itself, so the list refetches and
+        // drops the row promptly (and still converges if the file watcher never
+        // started); the fade is best-effort polish for the brief window before
+        // it does.
         setLeaving(true);
       })
       .catch((err: unknown) => {
@@ -127,49 +117,55 @@ function InboxRow({
 
   return (
     <li className={`inbox-row${leaving ? " inbox-row--leaving" : ""}`}>
-      <div className="flex flex-col gap-2xs py-2xs">
-        <div className="flex items-start justify-between gap-md">
-          <button
-            type="button"
-            onClick={() =>
-              navigate({
-                kind: "noteEditor",
-                noteId: note.id,
-                project: INBOX_PROJECT,
-              })
-            }
-            className="flex min-w-0 flex-1 flex-col gap-3xs rounded-md text-left focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent"
-          >
-            <span className="font-serif text-body text-text-soft hover:text-text">
-              {note.title}
-            </span>
-            <span className="text-cap text-text-faint">{inboxMeta(note)}</span>
-            {note.snippet && (
-              <span className="inbox-row__snippet text-cap text-text-soft">
-                {note.snippet}
-              </span>
-            )}
-          </button>
-          <div className="w-48 flex-none">
-            {options.length === 0 ? (
-              <p className="text-cap text-text-faint">
+      <div className="flex flex-col gap-2xs">
+        <ListRow
+          title={note.title}
+          meta={noteMeta(note, matchScore(note.confidence))}
+          snippet={note.snippet}
+          onOpen={() =>
+            navigate({
+              kind: "noteEditor",
+              noteId: note.id,
+              project: INBOX_PROJECT,
+            })
+          }
+          action={
+            options.length === 0 ? (
+              // No picker at all when there is nothing to file into: a control
+              // whose only outcome is a dead end should not be offered.
+              // variant="empty", not "status": the variant fixes the ARIA role,
+              // and a static sentence repeated once per row must not be N live
+              // regions (docs/DESIGN_SYSTEM.md §3).
+              <StatusMessage variant="empty" compact>
                 Create a project to file notes.
-              </p>
-            ) : pending ? (
-              <span className="text-cap text-text-faint">Filing…</span>
+              </StatusMessage>
             ) : (
+              // The picker stays mounted through the whole re-route rather than
+              // being replaced by a <span>Filing…</span>, so the row does not
+              // reflow under the user and the message sits on the control that
+              // earned it (docs/DESIGN_SYSTEM.md §6).
+              //
+              // It does NOT preserve focus: `disabled` blurs a focused control
+              // just as unmounting it does (the HTML focus fixup rule). Making
+              // a Select busy-but-focusable the way Button does is a change to
+              // this primitive's contract and is deliberately not made here.
               <Select
                 hideLabel
                 label={`File "${note.title}" to project`}
                 value={null}
-                placeholder="File to…"
+                placeholder={pending ? "Filing…" : "File to…"}
                 options={options}
+                disabled={pending}
                 onChange={route}
               />
-            )}
-          </div>
-        </div>
-        {error && <p className="text-cap text-text-soft">{error}</p>}
+            )
+          }
+        />
+        {error && (
+          <StatusMessage variant="error" compact>
+            Couldn&apos;t file this note: {error}
+          </StatusMessage>
+        )}
       </div>
     </li>
   );
