@@ -96,6 +96,13 @@
   scrollbar-width: thin;
 }
 
+/* Selected text was wearing the platform blue — the one colour in the app that
+   came from outside the palette. An accent wash instead: ours, and quiet enough
+   that the ink underneath stays the thing you read. */
+::selection {
+  background: var(--selection);
+}
+
 ::-webkit-scrollbar {
   width: 10px;
   height: 10px;
