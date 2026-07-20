@@ -110,9 +110,15 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   `src/**/*.test.{ts,tsx}` and run by `pnpm test`. Mock **only** the Tauri IPC boundary — the
   `src/test/tauri.ts` harness stands in for `@tauri-apps/api`'s `invoke`/`listen`, and the
   component under test keeps its real hooks. Coverage is the load-bearing seams, not the whole UI.
-- **Design tokens:** never hard-code a color, font, or spacing value. `design/tokens.css` is the
-  single source of truth, bridged into Tailwind by `src/index.css` — consume tokens, never
-  duplicate them.
+- **Design tokens:** never hard-code a color, font, spacing, or motion value. `design/tokens.css` is
+  the single source of truth, bridged into Tailwind by `src/index.css` — consume tokens, never
+  duplicate them. **Enforced by two guards, not by review:** `src/designTokens.test.ts` (in
+  `pnpm test`) fails a literal colour/font/duration in any `src/**/*.css`, and the
+  `no-restricted-syntax` block in `eslint.config.js` fails numeric spacing utilities (`p-3`) and
+  arbitrary values (`text-[13px]`) in `className`. The escape hatch is a `token-guard-allow`
+  comment. `docs/DESIGN_SYSTEM.md` decides every visual question the tokens don't
+  (interaction states, view states, motion, elevation, the accessibility floor);
+  `docs/UI_CONVENTIONS.md` holds the spacing steps and the primitive catalogue.
 - **Spec agreement:** `docs/FRONTMATTER_SCHEMA.md` and `docs/MCP_TOOL_SURFACE.md` mirror each
   other (frontmatter fields ≡ the MCP `NoteSummary` shape). Editing one requires checking the
   other in the same change.
