@@ -22,8 +22,16 @@ export function ProjectView({ slug }: Props) {
 
   return (
     <ViewFrame
+      variant="library"
       eyebrow="Project"
       title={formatSlug(slug)}
+      // A library states its size, not its workload: nothing here is waiting on
+      // you. The quieter type is the difference you read before the words.
+      summary={
+        notes.length > 0
+          ? `${notes.length} ${notes.length === 1 ? "note" : "notes"}`
+          : undefined
+      }
       action={
         <Button
           variant="quiet"
