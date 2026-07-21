@@ -16,7 +16,7 @@
   /* Sits on the same left edge as the nav rows above it, so the foot reads as
      one column rather than three. The bottom inset is what separates it from
      the utility rows without a rule. */
-  padding: 0 var(--sidebar-row-x) 20px;
+  padding: 0 var(--sidebar-row-x) var(--sidebar-section-gap);
 }
 
 /* Live, the dot carries a glow that reaches well past its own 11px box, so
