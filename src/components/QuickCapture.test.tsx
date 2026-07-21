@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FLASH_MS, QuickCapture } from "./QuickCapture";
 import type { QuickCaptureOutcome } from "../quickCapture";
 import { QUICK_CAPTURE_SHOWN_EVENT } from "../events";
+import type { CaptureStateEvent } from "../useCaptureState";
 import {
   emitFromBackend,
   invoke,
@@ -55,14 +56,37 @@ async function reshow(): Promise<void> {
   });
 }
 
+/** A capture phase arriving from the backend, the way `audio_cmds` broadcasts
+ * it. */
+async function emitCapture(state: CaptureStateEvent): Promise<void> {
+  await act(async () => {
+    emitFromBackend("capture:state", state);
+  });
+}
+
+/** Audio genuinely reaching disk: the one state that earns the green. */
+const LISTENING: CaptureStateEvent = {
+  phase: "listening",
+  sources: { loopback: "live", microphone: "live" },
+};
+
+/** A capture that has been asked for but has not opened a device yet. Engaged,
+ * but nothing is being recorded. */
+const STARTING: CaptureStateEvent = {
+  phase: "starting",
+  sources: { loopback: "off", microphone: "off" },
+};
+
+/** A running capture whose sources have all dropped out. Still engaged (it
+ * will resume with no further press), still not recording. */
+const RECONNECTING: CaptureStateEvent = {
+  phase: "degraded",
+  sources: { loopback: "stalled", microphone: "stalled" },
+};
+
 /** Put the box into its recording state, the way `audio_cmds` does. */
 async function goLive(): Promise<void> {
-  await act(async () => {
-    emitFromBackend("capture:state", {
-      phase: "listening",
-      sources: { loopback: "live", microphone: "live" },
-    });
-  });
+  await emitCapture(LISTENING);
 }
 
 describe("QuickCapture", () => {
@@ -301,5 +325,124 @@ describe("QuickCapture", () => {
 
     fireEvent.keyDown(box(), { key: "Escape" });
     expect(invokedCommands()).toContain("stop_capture");
+  });
+
+  it("keeps the recording chrome through a start that has not gone live", async () => {
+    // "Engaged" and "on air" are different questions. A capture that is still
+    // opening its devices is engaged, so the header, the timer and Stop all
+    // belong on screen — but nothing is reaching disk, so none of it may wear
+    // the reserved green.
+    onCommand("start_capture", () => null);
+    const { container } = render(<QuickCapture />);
+
+    await emitCapture(STARTING);
+
+    expect(screen.getByRole("status")).toHaveTextContent("Starting…");
+    expect(container.querySelector(".capture__core")).not.toHaveClass(
+      "capture__core--live",
+    );
+    expect(container.querySelector(".capture__glow")).toBeNull();
+    expect(container.querySelector(".capture__wave")).toHaveClass(
+      "capture__wave--quiet",
+    );
+
+    // The affordances match the session, not the audio: Stop is the only thing
+    // on offer while a capture is running.
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Record" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "File it" })).not.toBeInTheDocument();
+    expect(screen.getByText(/stops and files/)).toBeInTheDocument();
+  });
+
+  it("stops the capture on Enter mid-start instead of filing and vanishing", async () => {
+    // The defect this guards: Enter pressed a beat after Record used to file
+    // the draft and dismiss the window, leaving a capture running behind a
+    // window that had just told the user it was done.
+    onCommand("start_capture", () => null);
+    onCommand("stop_capture", () => null);
+    onCommand("quick_capture_submit", () => outcome("paradise-golf"));
+    render(<QuickCapture />);
+
+    await emitCapture(STARTING);
+    fireEvent.change(box(), { target: { value: "ask about the invoice" } });
+    fireEvent.keyDown(box(), { key: "Enter" });
+
+    expect(invokedCommands()).toContain("stop_capture");
+    expect(invoke).toHaveBeenCalledWith("quick_capture_submit", {
+      text: "ask about the invoice",
+    });
+  });
+
+  it("stops the capture on Escape mid-start before hiding", async () => {
+    onCommand("start_capture", () => null);
+    onCommand("stop_capture", () => null);
+    render(<QuickCapture />);
+
+    await emitCapture(STARTING);
+    fireEvent.keyDown(box(), { key: "Escape" });
+
+    // Escape dismisses the window, so it must not leave a capture running
+    // behind it with no visible way back to Stop.
+    expect(invokedCommands()).toContain("stop_capture");
+    expect(invokedCommands()).toContain("hide_quick_capture");
+  });
+
+  it("keeps a reconnecting capture on screen, in ink", async () => {
+    onCommand("stop_capture", () => null);
+    const { container } = render(<QuickCapture />);
+
+    await emitCapture(RECONNECTING);
+
+    // Both sources dropped: the session is still engaged and will resume with
+    // no further press, so the chrome stays — but the green does not.
+    expect(screen.getByRole("status")).toHaveTextContent("Reconnecting");
+    expect(container.querySelector(".capture__core")).not.toHaveClass(
+      "capture__core--live",
+    );
+    expect(container.querySelector(".capture__glow")).toBeNull();
+    expect(container.querySelector(".capture__wave")).toHaveClass(
+      "capture__wave--quiet",
+    );
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+
+    fireEvent.keyDown(box(), { key: "Enter" });
+    expect(invokedCommands()).toContain("stop_capture");
+  });
+
+  it("keeps the clock running across a mid-capture dropout", async () => {
+    vi.useFakeTimers();
+    const { container } = render(<QuickCapture />);
+
+    // fireEvent/emit only under fake timers — see the flash test above.
+    await goLive();
+    expect(screen.getByText("0:00")).toBeInTheDocument();
+    act(() => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(screen.getByText("0:03")).toBeInTheDocument();
+
+    await emitCapture(RECONNECTING);
+    // The dot reacts at once; the announced label settles first.
+    expect(container.querySelector(".capture__core")).not.toHaveClass(
+      "capture__core--live",
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Listening");
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("Reconnecting");
+    // The clock is the length of the recording, not the length of the current
+    // uninterrupted stretch of audio: a dropout must not rewind it to 0:00.
+    expect(screen.getByText("0:04")).toBeInTheDocument();
+
+    await goLive();
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(container.querySelector(".capture__core")).toHaveClass(
+      "capture__core--live",
+    );
+    expect(screen.getByText("0:05")).toBeInTheDocument();
   });
 });
