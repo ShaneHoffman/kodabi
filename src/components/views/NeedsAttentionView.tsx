@@ -244,11 +244,18 @@ export function NeedsAttentionView() {
             ))}
           </ul>
           {/* The one piece of reassurance on the screen, and it belongs here
-              rather than in a tooltip: the whole reason Discard needs no
-              confirmation is that nothing it touches is destroyed. */}
+              rather than in a tooltip: the whole reason Dismiss needs no
+              confirmation is that nothing it touches is destroyed.
+
+              It says how long the hiding lasts, and the answer has to be the
+              one the code actually implements: `dismissed` is cleared on the
+              next listing (see the prune above) and is component-local, so it
+              is also gone the moment you leave this view. Saying "until you
+              restart Kodabi" promised a persistence nothing here has. */}
           <p className="attention__footnote text-cap text-text-faint">
             Retrying re-runs distillation on the original recording. Dismissing
-            hides a row until you restart Kodabi. Neither one deletes anything.
+            hides a row until this list next refreshes. Neither one deletes
+            anything.
           </p>
         </>
       )}

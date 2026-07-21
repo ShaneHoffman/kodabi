@@ -370,53 +370,61 @@ function EditNote({
           </h2>
         </header>
 
-        {/* A real list. The tags were a <div> of <span>s, so nothing announced
-            that there were tags, or how many, or where the row ended. */}
-        <ul className="mt-xs flex flex-wrap items-center gap-2xs" aria-label="Tags">
-          <li className="mr-3xs font-mono text-meta text-text-faint">{note.date}</li>
-          {tags.map((tag) => (
-            <li key={tag} className="note-edit__tag font-mono text-cap text-text-soft">
-              {tag}
-              <button
-                type="button"
-                aria-label={`Remove tag ${tag}`}
-                onClick={() => setTags(tags.filter((each) => each !== tag))}
-                className="ui-focus-ring text-text-soft"
-              >
-                ×
-              </button>
+        {/* The date sits OUTSIDE the tags list: it is not a tag, and folding
+            it in as the first <li> made a screen reader announce the note's
+            date as a member of "Tags" and count one item too many. It is a
+            sibling caption; the <ul> holds only the tags and the affordance
+            that adds one. */}
+        <div className="mt-xs flex flex-wrap items-center gap-2xs">
+          <span className="mr-3xs font-mono text-meta text-text-faint">{note.date}</span>
+          {/* A real list. The tags were a <div> of <span>s, so nothing
+              announced that there were tags, or how many, or where the row
+              ended. */}
+          <ul className="flex flex-wrap items-center gap-2xs" aria-label="Tags">
+            {tags.map((tag) => (
+              <li key={tag} className="note-edit__tag font-mono text-cap text-text-soft">
+                {tag}
+                <button
+                  type="button"
+                  aria-label={`Remove tag ${tag}`}
+                  onClick={() => setTags(tags.filter((each) => each !== tag))}
+                  className="ui-focus-ring text-text-soft"
+                >
+                  ×
+                </button>
+              </li>
+            ))}
+            <li>
+              {addingTag ? (
+                <input
+                  autoFocus
+                  value={draftTag}
+                  onChange={(event) => setDraftTag(event.target.value)}
+                  onBlur={commitTag}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      commitTag();
+                    } else if (event.key === "Escape") {
+                      setDraftTag("");
+                      setAddingTag(false);
+                    }
+                  }}
+                  aria-label="New tag"
+                  className="note-edit__tag-add ui-focus-ring w-24 font-mono text-cap text-text"
+                />
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setAddingTag(true)}
+                  className="note-edit__tag-add ui-focus-ring font-mono text-cap text-text-soft"
+                >
+                  + tag
+                </button>
+              )}
             </li>
-          ))}
-          <li>
-            {addingTag ? (
-              <input
-                autoFocus
-                value={draftTag}
-                onChange={(event) => setDraftTag(event.target.value)}
-                onBlur={commitTag}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    commitTag();
-                  } else if (event.key === "Escape") {
-                    setDraftTag("");
-                    setAddingTag(false);
-                  }
-                }}
-                aria-label="New tag"
-                className="note-edit__tag-add ui-focus-ring w-24 font-mono text-cap text-text"
-              />
-            ) : (
-              <button
-                type="button"
-                onClick={() => setAddingTag(true)}
-                className="note-edit__tag-add ui-focus-ring font-mono text-cap text-text-soft"
-              >
-                + tag
-              </button>
-            )}
-          </li>
-        </ul>
+          </ul>
+        </div>
 
         <div className="note__body relative">
           <textarea
