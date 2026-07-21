@@ -39,6 +39,20 @@
   justify-content: center;
 }
 
+/* Optically centred against the label, not geometrically. `align-items: center`
+   on the row lines up the two BOXES, but the quiet label is uppercase, and
+   uppercase has no descenders: its ink sits about 0.08em above the middle of
+   its own line box. Matching the boxes therefore leaves the dot sitting
+   visibly low against the caps. At the 12px cap step that is ~1px, and at this
+   size 1px is the whole of the effect. Transform, not margin, so the row's
+   height and the glow's 34px box are untouched.
+
+   Scoped to the quiet state on purpose: live, the label is the mixed-case
+   headline step, which has descenders and so needs no correction. */
+.listening:not(.listening--live) .listening__dot {
+  transform: translateY(-1px);
+}
+
 .listening__core {
   position: relative;
   width: 11px;
