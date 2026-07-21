@@ -110,9 +110,15 @@ export function QuickCapture() {
 
   // Enter means "finish what I am doing", and what that is depends on the
   // state: it stops a recording, or it files a typed thought.
+  //
+  // A draft typed alongside a recording is filed too. The box invites one
+  // ("Add a note alongside the recording…") and it is a separate note, not part
+  // of the transcript, so nothing downstream would ever pick it up — leaving it
+  // in the box means losing it when the window hides.
   const stopAndFile = () => {
     setCaptureError(null);
     stopCapture().catch((err: unknown) => setCaptureError(String(err)));
+    if (text.trim()) submit();
   };
 
   const record = () => {
@@ -173,7 +179,10 @@ export function QuickCapture() {
         ) : (
           <span className="font-mono text-micro text-text-faint">
             {live
-              ? "↵ stops and files · Esc cancels"
+              ? // Not "Esc cancels". There is no cancel: Escape runs the same
+                // stop-and-file path Enter does, and a hint that promised
+                // otherwise would be a lie about a recording.
+                "↵ or Esc stops and files"
               : "↵ files it · ⇧↵ new line · Esc dismisses"}
           </span>
         )}

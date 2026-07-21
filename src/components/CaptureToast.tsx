@@ -10,8 +10,10 @@ import "./CaptureToast.css";
 const DWELL_MS = 3500;
 
 type Notice = {
-  /** Identity, not content: when this changes the dwell timer restarts, so a
-   * second outcome never inherits the remains of the first one's clock. */
+  /** Identity, not content: it keys the dwell timer, so a second outcome never
+   * inherits the remains of the first one's clock. It names a KIND of outcome
+   * rather than a run, which is why `dismissedId` is cleared whenever the
+   * pipeline goes quiet. */
   id: string;
   text: string;
   /** A failure stays until dismissed and announces assertively; everything
@@ -97,11 +99,23 @@ export function CaptureToast() {
   // than cleared in an effect: a new notice id is a new thing to say, so the
   // dismissal of the previous one must not silence it.
   const [dismissedId, setDismissedId] = useState<string | null>(null);
+
+  // ...and the ids name a KIND of outcome, not a run, so the record of what has
+  // been seen has to end with the run it belongs to. The pipeline going quiet
+  // is that boundary: without this, dismissing one capture's failure would
+  // swallow the next capture's identical failure entirely. Adjusted during
+  // render rather than in an effect (.claude/rules/no-use-effect.md).
+  if (notice === null && dismissedId !== null) setDismissedId(null);
+
   const showing = notice && notice.id !== dismissedId ? notice : null;
 
+  // Keyed on the notice, not just the delay: every non-failed notice dwells for
+  // the same DWELL_MS, so without the key "Note saved." would inherit whatever
+  // was left of "Distilling…"'s clock and could flash past unread.
   useTimeout(
     () => setDismissedId(showing?.id ?? null),
     showing && !showing.failed ? DWELL_MS : null,
+    showing?.id ?? null,
   );
 
   if (!showing) return null;

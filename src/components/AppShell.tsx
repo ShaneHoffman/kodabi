@@ -1,6 +1,6 @@
 import { useCommandPalette } from "../useCommandPalette";
 import { useConsentNudge } from "../useConsentNudge";
-import { useNavigation } from "../useNavigation";
+import { useNavigation, viewKey } from "../useNavigation";
 import { useSessionsChangedBridge } from "../useSessionsChangedBridge";
 import { useVaultChangedBridge } from "../useVaultChangedBridge";
 import { AppErrorBoundary } from "./AppErrorBoundary";
@@ -29,8 +29,11 @@ export function AppShell() {
       <Sidebar onOpenPalette={openPalette} />
       <main className="flex-1 overflow-y-auto">
         {/* Only the routed view is guarded: a crash here leaves the sidebar
-            alive, so the user navigates out rather than restarting. */}
-        <AppErrorBoundary resetKey={view.kind}>
+            alive, so the user navigates out rather than restarting. The key is
+            the whole destination, not just its kind — the fallback tells the
+            user to pick another screen, and picking a second project (or a
+            second note, or a second search) has to actually clear it. */}
+        <AppErrorBoundary resetKey={viewKey(view)}>
           <MainContent />
         </AppErrorBoundary>
       </main>

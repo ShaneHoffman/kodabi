@@ -127,6 +127,11 @@ export function NeedsAttentionView() {
     if (remaining.length !== Object.keys(rowErrors).length) {
       setRowErrors(Object.fromEntries(remaining));
     }
+    // Discards last until the next listing, and no longer. Held any longer
+    // they would make this view claim "All clear" while the sidebar row beside
+    // it still counted the same sessions, which is the one thing a
+    // needs-attention surface must never do.
+    if (dismissed.size > 0) setDismissed(new Set());
   }
 
   const retry = (path: string) => {
@@ -213,6 +218,11 @@ export function NeedsAttentionView() {
                   </Button>
                   <Button
                     variant="quiet"
+                    // Disabled while this row's own retry is in flight. The row
+                    // owns `pendingPath`, so discarding it used to strand that
+                    // value and leave every other Retry disabled with nothing
+                    // on screen to say why.
+                    disabled={pendingPath === session.path}
                     onClick={() =>
                       setDismissed((current) =>
                         new Set(current).add(session.path),

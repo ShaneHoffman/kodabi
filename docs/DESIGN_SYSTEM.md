@@ -48,8 +48,11 @@ into a phone; the old `clamp()` steps only made the same role render at two
 sizes for no reader's benefit.
 
 **There are four view-title steps, not one.** That is the redesign's loudest
-move: a config panel and a note must not open at the same size, and `ViewFrame`
-picks the step from its `variant` so two views of the same kind cannot drift.
+move: a config panel and a note must not open at the same size. `ViewFrame`
+picks three of them from its `variant` (`panel`, `health`, `library`), so two
+views of the same kind cannot drift. `text-title-doc` is the exception, because
+`doc` renders no header of its own: the note editor spells the step itself, on
+the title it draws beside its back link.
 
 Sizes always come from this scale. Never `text-[13px]`, never a raw `font-size`. Enforced by the
 eslint rule described in §7.
@@ -84,7 +87,7 @@ steps**, and the step says how deep it sits:
 
 Nesting reads through the letter-spacing before it reads through the size. **Never Tailwind's
 `tracking-wide`** (0.025em) for any of them: before the tokens were bridged, the Sidebar used one
-value and twelve other call sites used the Tailwind default, so the same role rendered 8.8× apart.
+value and twelve other call sites used the Tailwind default, so the same role rendered 6.4× apart.
 
 The sidebar's rail eyebrow is the one that is sans-600 rather than mono, matching the design
 reference: it is chrome sitting directly above sans nav labels, not a label on content.
@@ -98,17 +101,24 @@ Per DESIGN.md, value carries the hierarchy. In practice:
 
 - **Rank a row** with `--fw-medium` (`font-medium`) and `text-text`, not with a larger size.
 - **Recede** with `text-text-soft`, then `text-text-faint`. Never with a smaller size than `text-cap`.
-- **Never rank with hue.** `--accent` marks *interactive*, `--accent-dot` marks *recording*. Neither
-  ranks anything.
+- **Never rank with hue.** There is exactly one hue left in the palette: `--accent-dot` marks
+  *recording*, and it ranks nothing. The old `--accent` that marked *interactive* is gone as a token,
+  so there is no second hue to reach for by accident.
 
 ### List density
 
 | Property | Value | Applies to |
 | --- | --- | --- |
-| Row vertical padding | `py-2xs` (8px) | Every list row |
-| Title ↔ action column gap | `gap-md` (24px) | Rows with a trailing control |
 | Row group gap | `gap-3xs` (4px) | Tight nav lists (Sidebar) |
-| Between list sections | `gap-lg` (40px) | Views composing several lists |
+| Row padding | Layer 4, per view | A content row draws its own (`.inbox__row` 20/16, `.project__row` 16/14) |
+| Title ↔ action column gap | Layer 4, per view | `.inbox__row` and `.project__row` both sit at 28px |
+| Card stack gap | `--gap-card` (14px) | Pre-lifted cards (`.attention__stack`) |
+| Header → list lead-in | `--lead-*` | The gap between a view's header and the thing it heads |
+
+A content row's geometry is not on the 4px step scale and is not shared between views: the row is
+where a queue, a library and a health view differ most, so each states its own in a co-located
+`*.css` (see `docs/UI_CONVENTIONS.md`, *Layer 4*). What is shared is the *rhythm* of a nav list, which
+is chrome rather than content and stays on the step scale.
 
 Rows align `items-start` when the row has a multi-line body, `items-baseline` when it is a single
 line. Pick by content, not by view.
@@ -283,7 +293,7 @@ disappears before the user can see the result — quick capture flashes its dest
 
 | Token | Value | Spent on |
 | --- | --- | --- |
-| `--dur-quick` | 120ms | Hover and colour changes on a control |
+| `--dur-quick` | 150ms | Hover and colour changes on a control |
 | `--dur-settle` | 200ms | A row leaving or entering a list |
 | `--dur-wake` | 450ms | The spirit-mark waking and settling |
 | `--dur-pulse` | 1600ms | Starting / reconnecting pulse |
@@ -344,14 +354,19 @@ Separation between adjacent planes is a **value shift plus a hairline**, never a
 
 ```css
 box-shadow: inset 0 -1px 0 var(--edge-faint);   /* one edge   */
-box-shadow: var(--hairline);                    /* a full ring */
+box-shadow: inset 0 0 0 1px var(--edge);        /* a full ring */
 ```
 
+There is no `--hairline` token to reach for: a standalone ring recipe would be a second place for an
+edge to be defined, and every lifted plane already carries its ring inside its own `--lift-*` value.
+Spell the inset shadow out with the edge token the line calls for.
+
 Use `--edge-faint` for a divider inside a surface, `--edge` for the edge of a control. Two adjacent
-elements must not use different edge tokens for the same visual line. The three edge alphas opened
-one step on `feat/screen-overhaul` (`--edge-faint` .16, `--edge` .26, `--edge-strong` .36): the day
-ground moved to a near-white and the old alphas went invisible on it. They remain a single mid-grey
-at low alpha, so one set of values reads on a near-white card and a near-black one alike.
+elements must not use different edge tokens for the same visual line. The ladder is **per theme, not
+one shared mid-grey**: day maps to the warm ink alphas (`--edge-faint` .05, `--edge` .06,
+`--edge-strong` .09 over `rgba(30, 28, 20, …)`), night to the paper alphas (.06 / .08 / .12 over
+`rgba(255, 250, 235, …)`). A single set cannot serve both, because the day ground is a near-white
+that swallows a dark line long before the night ground swallows a light one.
 
 ### A raised plane lifts, it does not fill
 
@@ -365,25 +380,28 @@ read as a grey box stamped onto the page. Paper does not work that way: a lifted
 light than what it sits on. `mist` remains a Layer-1 pigment (the recessive tone) but no longer
 paints a surface.
 
-So the recipe for "raised" is **value shift + `--hairline` + `--lift`** — three quiet signals, no
-box. If a raised element still doesn't read, the answer is the hairline or the lift, never a darker
-fill and never a border.
+So the recipe for "raised" is **value shift + a `--lift-*` token** — the fill steps lighter, and the
+token brings the ring and the shadow with it in one declaration. Two quiet signals, no box. If a
+raised element still doesn't read, the answer is a heavier lift, never a darker fill and never a
+border.
 
-### The lifts are three-stop shadows
+### A lift is a ring plus a shadow, in one value
 
-`--lift` and `--lift-soft` are built from three stops each, not two:
+Every `--lift-*` is written as `0 0 0 1px <edge>` followed by the shadow itself:
 
 | Stop | Job |
 | --- | --- |
-| Contact | `0 1px 1px` — the hard line where the plane meets the page; what makes the edge read crisp |
-| Key | the mid-distance offset shadow; the direction of the light |
-| Ambient | the wide, low-alpha spread; the softness around it |
+| Ring | `0 0 0 1px` at an edge alpha — the crisp line where the plane meets its ground |
+| Shadow | the offset, blurred stop; how far off the page the plane sits |
 
-`--lift-soft` drops the ambient stop and is for something barely off the page; `--lift` is the full
-three for dropdowns and modals. The geometry differs per theme (the night lifts are darker and
-throw further, because a shadow on a near-black ground has less value to work with), which is why
-`--lift-day` / `--lift-night` are two full Layer-1 sets rather than one recipe. Never write a
-`box-shadow` with literal offsets in a component; use the token.
+There is one lift per plane role rather than a soft/full pair: `--lift-chip` (a control at rest, a
+1px contact shadow) through `--lift-card` and `--lift-row` up to `--lift-menu` and `--lift-toolbar`.
+The two window recipes — `--lift-palette` and `--lift-capture` — are the only ones that add a
+*second* shadow stop, a wide negative-spread throw under a near-full-height surface. The geometry
+differs per theme, not just the alpha (the night lifts throw further, because a shadow on a
+near-black ground has less value to work with), which is why `--lift-*-day` / `--lift-*-night` are
+two full Layer-1 sets rather than one recipe with a swapped colour. Never write a `box-shadow` with
+literal offsets in a component; use the token.
 
 ### Modals
 
@@ -392,13 +410,18 @@ backdrop dismissal. Dismissal fires on **click, not pointerdown**, and only when
 started and ended on the backdrop — otherwise a drag that begins inside the panel dismisses it, and
 an unmount at pointerdown lets the rest of the gesture fall through to whatever was underneath.
 
-**The scrim is dark in both themes.** `--scrim` is
-`color-mix(in srgb, var(--k-night-sink) 46%, transparent)` — mixed from the deepest pigment, not
-from a semantic token. It used to mix from `--bg-sink`, which meant the day theme dimmed washi with
-washi and a palette opened over the app barely registered as being in front of it. A scrim is a
-shadow, and a shadow does not re-theme. This is the same inversion as `--sheen`, which is white in
-both themes. It is still a Layer-3 derived recipe referencing a Layer-1 pigment; the ten semantic
-keys are unchanged.
+**The scrim is dark in both themes, but it is not the same dark.** `--scrim` is a Layer-2 semantic
+key like any other: it maps to `--k-scrim-day` (`rgba(28, 25, 16, 0.34)`, a warm ink) in the light
+theme and `--k-scrim-night` (`rgba(0, 0, 0, 0.5)`) in the dark one. Two flat pigments, no mix — a
+scrim is the one thing in the app whose whole job is to take value *away* from what is behind it, so
+it is stated as an alpha directly rather than derived from a plane that would move with the theme.
+It re-themes because the two grounds need different amounts of it: half-strength black would crush a
+near-black page, and a 34% warm ink over washi is exactly enough to say the palette is in front. It
+used to mix from `--bg-sink`, which meant the day theme dimmed washi with washi and a palette opened
+over the app barely registered as being in front of it; that token is gone.
+
+`--sheen` is the genuinely theme-independent one — white in both themes, and it lives once in Layer 3
+rather than per theme.
 
 A modal traps focus (§6), takes `role="dialog"` + `aria-modal="true"`, and closes on Escape.
 
@@ -485,8 +508,9 @@ Any new colour pair is measured before it ships.
   `aria-disabled` + `aria-busy` and swallows its own activation; the native attribute stays for
   `disabled`, which means "there is nothing to do here", not "something is in flight". A caller must
   not pass both for the same condition — `disabled` wins, and the focus goes.
-  `Select` and `Checkbox` do not do this yet: their `disabled` prop is a genuine disable, so a write
-  in flight behind one still costs the user their place in the page.
+  `Select` does not do this yet: its `disabled` prop is a genuine disable, so a write in flight behind
+  one still costs the user their place in the page. (`Checkbox` has the same gap, but nothing composes
+  it today, so nothing is currently exposed to it.)
 - **`aria-current="page"`** marks the selected navigation row.
 - Items in an `aria-activedescendant` listbox are deliberately not tabbable; focus stays on the
   controlling input.

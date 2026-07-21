@@ -8,20 +8,27 @@ import { invoke } from "@tauri-apps/api/core";
  * the first UI that does, which is what these close the parity gap for
  * (.claude/rules/tauri-command-parity.md, layer 4).
  *
- * Neither returns anything useful: the authoritative state arrives as a
+ * Neither response is worth reading: the authoritative state arrives as a
  * `capture:state` event, which `useCaptureState` already listens for. So these
  * are fire-and-report — the caller shows the error, and the phase change it
  * was asking for shows up on its own.
+ *
+ * Both commands do resolve with a `CaptureStatus` all the same, so the invoke
+ * is typed `unknown` and the value dropped here. Typing it `void` would state
+ * a wire shape that is simply false, which is the drift
+ * .claude/rules/typescript-style.md's "wire types mirror the Rust DTOs" rule
+ * exists to stop; the mirror itself belongs to the first caller that wants the
+ * value, not to a placeholder nobody reads.
  */
 
 /** Begin a capture. Resolves once the backend has accepted the request; the
  * phase reaching `listening` arrives separately on `capture:state`. */
 export function startCapture(): Promise<void> {
-  return invoke<void>("start_capture");
+  return invoke<unknown>("start_capture").then(() => undefined);
 }
 
 /** End the running capture. Transcription and distillation follow on their own
  * events; this only closes the recording. */
 export function stopCapture(): Promise<void> {
-  return invoke<void>("stop_capture");
+  return invoke<unknown>("stop_capture").then(() => undefined);
 }

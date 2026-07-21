@@ -216,7 +216,6 @@ function EditNote({
   const [addingTag, setAddingTag] = useState(false);
   const [draftTag, setDraftTag] = useState("");
   const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [anchor, setAnchor] = useState<{ left: number; top: number } | null>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
@@ -229,7 +228,15 @@ function EditNote({
     setAnchor(textarea ? selectionAnchor(textarea) : null);
   };
 
-  const format = (markup: { wrap?: string; prefix?: string }) => {
+  // Derived, never tracked. A `saved` flag could only ever be false here — a
+  // successful save unmounts this component — so the line it fed claimed
+  // "Unsaved changes" over a note nobody had touched yet.
+  const dirty =
+    body !== note.body_markdown ||
+    tags.length !== note.tags.length ||
+    tags.some((tag, index) => tag !== note.tags[index]);
+
+  const format = (markup: { wrap?: string; prefix?: string; link?: true }) => {
     const textarea = bodyRef.current;
     if (!textarea) return;
     const next = applyMarkup(
@@ -239,7 +246,6 @@ function EditNote({
       markup,
     );
     setBody(next.value);
-    setSaved(false);
     // Restore the selection after React lands the new value, so a second
     // format acts on the same words rather than on a collapsed caret.
     queueMicrotask(() => {
@@ -257,7 +263,6 @@ function EditNote({
     if (tag && !tags.includes(tag)) setTags([...tags, tag]);
     setDraftTag("");
     setAddingTag(false);
-    setSaved(false);
   };
 
   const submit = (event: FormEvent) => {
@@ -292,8 +297,19 @@ function EditNote({
           </p>
           <div className="flex items-center gap-sm">
             <span className="font-mono text-cap text-text-faint">
-              {saving ? "Saving…" : saved ? "Saved" : "Unsaved changes"}
+              {saving ? "Saving…" : dirty ? "Unsaved changes" : "No changes"}
             </span>
+            {/* The way out that does not write. Without it the only exit from
+                compose mode was Done, so changing your mind still rewrote the
+                file on disk. */}
+            <Button
+              variant="quiet"
+              onClick={() => onDone(null)}
+              disabled={saving}
+              className="py-3xs text-label text-text-soft"
+            >
+              Cancel
+            </Button>
             <Button
               type="submit"
               variant="filled"
@@ -323,10 +339,7 @@ function EditNote({
               <button
                 type="button"
                 aria-label={`Remove tag ${tag}`}
-                onClick={() => {
-                  setTags(tags.filter((each) => each !== tag));
-                  setSaved(false);
-                }}
+                onClick={() => setTags(tags.filter((each) => each !== tag))}
                 className="ui-focus-ring text-text-faint"
               >
                 ×
@@ -369,7 +382,6 @@ function EditNote({
             aria-label="Note body"
             onChange={(event) => {
               setBody(event.target.value);
-              setSaved(false);
               syncToolbar();
             }}
             onSelect={syncToolbar}
@@ -392,7 +404,7 @@ function EditNote({
               />
               <span className="note-edit__tool-divider" />
               <Tool label="List" onApply={() => format({ prefix: "- " })} />
-              <Tool label="Link" onApply={() => format({ wrap: "[]()" })} />
+              <Tool label="Link" onApply={() => format({ link: true })} />
               <span className="note-edit__tail" aria-hidden="true" />
             </div>
           )}
