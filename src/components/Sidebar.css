@@ -25,13 +25,13 @@
    it earns its place: it separates what the app is called from what you can
    go to, which space alone kept reading as a fourth nav row. */
 .sidebar__wordmark {
-  padding: 0 var(--sidebar-row-x) 20px;
+  padding: 0 var(--sidebar-row-x) var(--sidebar-section-gap);
 }
 
 .sidebar__divider {
   height: 1px;
   background: var(--edge-rule);
-  margin: 0 var(--sidebar-row-x) 20px;
+  margin: 0 var(--sidebar-row-x) var(--sidebar-section-gap);
 }
 
 /* ---------- rows ----------

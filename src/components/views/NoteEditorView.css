@@ -38,18 +38,18 @@
   font-weight: var(--fw-semibold);
   line-height: var(--lh-heading);
   color: var(--text);
-  margin-top: 28px;
+  margin-top: var(--lead-doc-section);
 }
 
 .note-reading p {
-  margin-top: 12px;
+  margin-top: var(--space-xs);
   text-wrap: pretty;
 }
 
 .note-reading ul,
 .note-reading ol {
-  margin-top: 12px;
-  padding-left: 24px;
+  margin-top: var(--space-xs);
+  padding-left: var(--space-md);
   line-height: var(--lh-list);
 }
 
@@ -62,7 +62,7 @@
 }
 
 .note-reading li + li {
-  margin-top: 8px;
+  margin-top: var(--space-2xs);
 }
 
 /* A link is ink with an underline, never a colour: this palette has one hue
@@ -85,7 +85,7 @@
   background: var(--surface);
   border-radius: var(--radius-md);
   padding: var(--space-sm);
-  margin-top: 12px;
+  margin-top: var(--space-xs);
   overflow-x: auto;
 }
 
@@ -97,7 +97,7 @@
 .note-reading blockquote {
   box-shadow: inset 2px 0 0 var(--edge-rule);
   padding-left: var(--space-sm);
-  margin-top: 12px;
+  margin-top: var(--space-xs);
   color: var(--text-soft);
 }
 
@@ -114,13 +114,13 @@
 .note-reading ul:has(> li > input[type="checkbox"]) {
   list-style: none;
   padding-left: 0;
-  margin-top: 14px;
+  margin-top: var(--lead-doc-tasks);
 }
 
 .note-reading li:has(> input[type="checkbox"]) {
   display: flex;
   align-items: flex-start;
-  gap: 12px;
+  gap: var(--space-xs);
   line-height: var(--lh-snippet);
 }
 
@@ -132,7 +132,7 @@
   flex: none;
   width: 17px;
   height: 17px;
-  margin: 4px 0 0;
+  margin: var(--space-3xs) 0 0;
   border-radius: var(--radius-check);
   background: transparent;
   box-shadow: 0 0 0 1.4px var(--edge-check);
@@ -194,10 +194,10 @@
 .note-edit__tag {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  gap: var(--tag-gap);
   background: var(--surface);
   border-radius: var(--radius-item);
-  padding: 4px 9px;
+  padding: var(--space-3xs) var(--tag-pad-x);
   box-shadow: 0 0 0 1px var(--edge);
 }
 
@@ -206,7 +206,7 @@
 .note-edit__tag-add {
   border: 1px dashed var(--edge-open);
   border-radius: var(--radius-item);
-  padding: 4px 9px;
+  padding: var(--space-3xs) var(--tag-pad-x);
   background: transparent;
 }
 
@@ -240,17 +240,17 @@
   transform: translate(-50%, -100%);
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: var(--toolbar-gap);
   white-space: nowrap;
   background: var(--overlay);
   border-radius: var(--radius-control);
-  padding: 5px;
+  padding: var(--toolbar-pad);
   box-shadow: var(--lift-toolbar);
   z-index: var(--layer-dropdown);
 }
 
 .note-edit__tool {
-  padding: 5px 9px;
+  padding: var(--toolbar-pad) var(--toolbar-tool-x);
   border-radius: var(--radius-toolbar);
   transition: background-color var(--dur-quick) var(--ease-standard);
 }
@@ -263,7 +263,7 @@
   width: 1px;
   height: 18px;
   background: var(--edge-strong);
-  margin: 0 2px;
+  margin: 0 var(--toolbar-gap);
 }
 
 /* The tail that points at the selection. A rotated square of the same fill,

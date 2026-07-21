@@ -48,10 +48,10 @@
 .inbox__row {
   display: grid;
   grid-template-columns: 1fr auto;
-  column-gap: 28px;
+  column-gap: var(--gap-row-columns);
   align-items: center;
-  padding: 20px 16px;
-  margin: 0 -16px;
+  padding: var(--row-queue-y) var(--row-queue-x);
+  margin: 0 calc(-1 * var(--row-queue-x));
   border-radius: var(--radius-row);
   transition:
     background-color var(--dur-plane) var(--ease-standard),

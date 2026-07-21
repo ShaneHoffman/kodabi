@@ -55,7 +55,7 @@
   background: var(--text);
   color: var(--bg);
   border-radius: var(--radius-control);
-  padding: 8px 18px;
+  padding: var(--space-2xs) var(--btn-filled-x);
   font-weight: var(--fw-semibold);
 }
 
