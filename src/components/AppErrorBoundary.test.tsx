@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppErrorBoundary } from "./AppErrorBoundary";
 
@@ -37,10 +38,37 @@ describe("AppErrorBoundary", () => {
     );
 
     expect(screen.getByRole("alert")).toHaveTextContent(/were not touched/);
-    expect(screen.getByText(/Pick another screen/)).toBeInTheDocument();
+    expect(screen.getByText(/pick another screen/i)).toBeInTheDocument();
     // The underlying message is kept, quietly: it is the only clue a user can
-    // pass on, and hiding it helps nobody.
-    expect(screen.getByText("bad note shape")).toBeInTheDocument();
+    // pass on, and hiding it helps nobody. It is PREFIXED rather than bare —
+    // docs/DESIGN_SYSTEM.md §3 forbids leaking an exception on its own.
+    expect(
+      screen.getByText(/Reported by the app: bad note shape/),
+    ).toBeInTheDocument();
+  });
+
+  it("offers a retry that does not depend on navigating away", async () => {
+    // Recovery used to require the user to know that changing views reset the
+    // boundary. A transient render failure needs a button, not folklore.
+    const user = userEvent.setup();
+    let shouldThrow = true;
+    function Flaky() {
+      if (shouldThrow) throw new Error("transient");
+      return <p>recovered</p>;
+    }
+
+    render(
+      <AppErrorBoundary resetKey="inbox">
+        <Flaky />
+      </AppErrorBoundary>,
+    );
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+
+    shouldThrow = false;
+    await user.click(screen.getByRole("button", { name: /try this screen again/i }));
+
+    expect(screen.getByText("recovered")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("clears once the user navigates somewhere else", () => {

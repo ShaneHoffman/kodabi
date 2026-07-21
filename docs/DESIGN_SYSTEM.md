@@ -169,10 +169,18 @@ retype the declarations, and never use plain `:focus` (a pointer press would dra
 input, and it shows a caret, so a ring would be noise rather than information. A form field always keeps
 its ring.
 
-(The quick-capture textarea used to be a second exception on the same reasoning. It stopped being one
-when the window gained a visible **File it** button: with two tab stops, the ring is the only thing that
-says which one has focus. An exception justified by "there is only one control here" expires the moment
-that stops being true.)
+**It really is one.** Four fields carried `outline: none` and no ring — the quick-capture textarea,
+the search query input, and the note editor's title and body. Only the first was ever argued for,
+on the grounds that its window held a single control; that argument expired when the window gained
+a visible **File it** button, and the paragraph saying so shipped while the code did not. All four
+draw the ring now. An exception justified by "there is only one control here" expires the moment
+that stops being true.
+
+**When the focusable element is not the thing the user sees, the wrapper wears the ring.** The
+search query field is a padded pill containing a chrome-less `<input>`; ringing the input draws a
+second box inside the first. `ui.css` carries `.ui-focus-ring-within` for that shape — the *same*
+declaration at a `:has(:focus-visible)` trigger, one rule with two selectors, never a second copy
+of the recipe.
 
 ### Hover may enhance, never reveal
 
@@ -295,14 +303,28 @@ disappears before the user can see the result — quick capture flashes its dest
 | Token | Value | Spent on |
 | --- | --- | --- |
 | `--dur-quick` | 150ms | Hover and colour changes on a control |
+| `--dur-plane` | 180ms | A row rising onto the raised plane; the toggle knob's travel |
 | `--dur-settle` | 200ms | A row leaving or entering a list |
 | `--dur-wake` | 450ms | The spirit-mark waking and settling |
+| `--dur-wave` | 1000ms | One waveform bar's rise and fall |
 | `--dur-pulse` | 1600ms | Starting / reconnecting pulse |
+| `--dur-glow` | 2600ms | The listening dot's breath |
 | `--dur-breath` | 4200ms | The listening breath cycle |
 | `--dur-drift` / `--dur-drift-slow` | 15s / 21s | The aura's counter-rotating blobs |
 
+`--delay-wave-1` … `--delay-wave-4` (0 / 220 / 420 / 140ms) are the four offsets one waveform
+animation is started at, so the group reads as a voice rather than a metronome. The order is
+deliberately not monotonic.
+
 Easings: `--ease-standard` (state changes), `--ease-breath` (the continuous listening motion),
 `--ease-drift` (constant-rate rotation). Never a bare `0.2s` or `ease-in-out` in a component.
+
+**`--ease-standard` is a stated curve, not the CSS keyword.** It is
+`cubic-bezier(0.2, 0, 0, 1)` — leaves immediately, arrives softly. It used to be the bare keyword
+`ease`, whose symmetric ease-*in* makes a 150ms hover feel like it hesitates before it starts.
+Every state change in the app runs on this one curve, so the shape of the motion is a single
+decision made in `tokens.css` rather than a per-component one. `--ease-breath` stays symmetric on
+purpose: a breath has no direction.
 
 ### What animates
 
@@ -318,6 +340,17 @@ the spirit-mark, which is the app's one continuous motion.
 - **Layout.** Nothing reflows under the user.
 - **Anything on a list of unknown length.** Staggered row animations are decoration.
 
+**Two sanctioned layout transitions, and they are the only two.** "Never animates: layout" is about
+content moving under the reader, and neither of these does:
+
+| Where | Property | Why it stands |
+| --- | --- | --- |
+| `.inbox__fill` | `width` | The progress instrument is a 3px rule with rounded caps. `scaleX` would stretch the cap into an ellipse, and the element is three pixels tall — there is no reflow cost worth the distortion. |
+| `.inbox__slot` | `grid-template-rows` (`1fr` → `0fr`) | A filed row collapsing as it leaves. This *is* the minimal form of the distill-and-route motion FOUNDING_DOC §4 reserves, and the reflow is the point: the gap closes so the list does not jump when the refetch lands. |
+
+Recorded here so the next audit does not re-flag them. Anything else animating a layout property is
+still a bug.
+
 ### Reduced motion
 
 `src/index.css` applies an app-wide floor: under `prefers-reduced-motion: reduce`, animations and
@@ -327,6 +360,17 @@ A component needing a *different* reduced-motion resting state overrides it in i
 spirit-mark is the precedent and the reason the floor is 1ms rather than `none`: it must settle to a
 **still green mark**, because the green carries the recording state and a blank mark would imply
 privacy that does not exist. Never let reduced motion remove *information*.
+
+**An override is TWO rules, not one.** There are two ways into this state — the OS setting
+(`@media (prefers-reduced-motion: reduce)`) and Settings → Appearance, which sets
+`:root[data-reduce-motion="on"]` (`src/reduceMotion.ts`). A media query and a plain selector cannot
+share a rule, so a component that overrides the floor states its resting position in both blocks or
+it only honours one of the two switches. `QuickCapture.css` is the shape to copy;
+`ListeningIndicator.css` and `SpiritMark.css` shipped with only the media half, which meant the
+in-app switch fell through to the generic 1ms floor — and that floor shortens a *duration*, it
+cannot restore a resting *shape*. The spirit-mark's two bloom lobes are deliberately lopsided while
+they drift, so the in-app switch froze them mid-drift as two skewed blobs instead of settling them
+to `border-radius: 50%`.
 
 ---
 
@@ -376,10 +420,12 @@ light theme that ladder is #F2F0E9 → #FBFAF6 → #FEFDFB; in the dark theme #1
 #2A2618.
 
 That is an inversion in the light theme, and it is the point of this pass. `--surface` used to map to
-`mist` — a fill *darker* than the ground — so every button, dropdown, selected row, and modal panel
-read as a grey box stamped onto the page. Paper does not work that way: a lifted sheet catches more
-light than what it sits on. `mist` remains a Layer-1 pigment (the recessive tone) but no longer
-paints a surface.
+a pigment *darker* than the ground, so every button, dropdown, selected row, and modal panel read as
+a grey box stamped onto the page. Paper does not work that way: a lifted sheet catches more light
+than what it sits on. That pigment (`mist`, from the original moss/fern/mist family) is **gone**,
+along with the rest of that family — the re-tune replaced the whole ladder with the washi/sumi and
+night/paper sets in `design/tokens.css`, and nothing in Layer 1 is named for a recessive tone any
+more.
 
 So the recipe for "raised" is **value shift + a `--lift-*` token** — the fill steps lighter, and the
 token brings the ring and the shadow with it in one declaration. Two quiet signals, no box. If a
@@ -458,7 +504,25 @@ Measured, not estimated. Text pairs against WCAG AA (4.5:1); a graphic needs
 `text`, `text-read` and `text-soft` clear 4.5 everywhere with room to spare, in
 both themes.
 
-### `--text-faint` does not meet the text floor, and that is a known deviation
+### Text on the active-row wash
+
+`--menu-hover` is the ground under every selected or keyboard-focused row (it
+is what `--wash-active` and `.ui-wash` resolve to), and it is a *fill*, not one
+of the three planes — so the matrix above does not cover it. It has to, because
+it is the row the user is looking at.
+
+| | on `--menu-hover` (light #F0EEE6) | on `--menu-hover` (dark #37331F) |
+|---|---|---|
+| `text` #211F17 / #EFEDE3 | 14.20 | 10.81 |
+| `text-soft` #55524A / #B3AFA1 | 6.72 | 5.78 |
+| `text-faint` #8B8879 / #7B7768 *(do not use here)* | **3.07** | **2.83** |
+
+`--text-faint` on this fill is the worst pair in the app, and the dark value
+misses even the 3:1 a *graphic* is held to. Two things wore it: the command
+palette's `↵` hint on the active row, and `Select`'s check glyph on the chosen
+option — which is very often also the active one. Both are `--text-soft` now.
+
+### `--text-faint` is a metadata register, and it is not spent on anything else
 
 **It measures 3.12–3.50 in the light theme and 3.37–4.04 in the dark one,
 against a 4.5:1 requirement for text at these sizes.** The value comes from the
@@ -466,24 +530,57 @@ redesign's locked palette (`ink-3`), where it is specified for "metadata,
 counts, eyebrows, placeholders" — which are text, not graphics, so the 3:1
 graphic allowance does not apply to them.
 
-What currently wears it: section eyebrows, list counts, mono meta lines, the
-Inbox progress caption, search breadcrumbs, keyboard hints, placeholders, and
-the muted half of a two-action pair.
+Two exits were on the table: darken the pigment (`--k-stone` needs roughly
+#6F6C5F, `--k-paper-faint` roughly #93907F — both visibly darker than the
+design specifies, and both flatten the gap between `text-soft` and `text-faint`
+that the three-step ink ladder depends on), or stop spending it where it
+carries weight. **The second one is taken, applied narrowly.** The pigment is
+unchanged; what changed is which sites consume it.
 
-This is recorded rather than silently corrected because the palette is locked
-upstream and the value is a deliberate part of the design's near-silent
-register. It is a real accessibility gap all the same, and the two ways out are
-both one-line changes here:
+**It had already been widened well past its brief**, which is what forced the
+issue. Twelve sites wore it on things that are not metadata at all — the
+Commands nav row, an unselected Settings tab, the consent value, *Dismiss* on a
+needs-attention card, the note editor's back link, its remove-tag `×` and its
+`+ tag` ghost, the toast and overlay-pill dismiss buttons, `Select`'s entire
+`token` trigger (the Inbox's only filing affordance), and `StatusMessage`'s
+`status` variant. All are `--text-soft` now (6.84–7.67 light, 6.89–8.26 dark).
 
-- **Darken the pigment.** `--k-stone` needs roughly #6F6C5F to clear 4.5 on
-  `bg`, and `--k-paper-faint` roughly #93907F. Both are visibly darker than the
-  design specifies and would flatten the gap between `text-soft` and
-  `text-faint` that the three-step ink ladder depends on.
-- **Stop spending it on text.** Move metadata to `text-soft` (6.84–7.67 light,
-  6.89–8.26 dark) and keep `text-faint` for genuinely decorative marks.
+**What may still wear it**, and the whole list:
 
-Until one is chosen, do not widen its use: a new label reaching for
-`text-text-faint` is adding to a known deficit.
+- Section eyebrows, and the sidebar's rail eyebrow
+- List counts, and mono meta lines on a reading surface
+- The Inbox progress caption, and search breadcrumbs
+- Keyboard hints and key-sequence chips (`⌘K`, `Ctrl + Shift + K`)
+- Input placeholders
+- A capture status line in its *not live* state, where the value **is** the
+  information (`CaptureStatusLine`, and the label beside the listening dot)
+
+**Anything a user acts on, or is meant to read as a sentence, is `--text-soft`
+or darker.** A control label, an error, a status announcement, and a value the
+user may need to report back are none of them metadata. That rule is the
+resolution; the residual gap is the list above, and it is small, bounded, and
+deliberately near-silent.
+
+### The pill toggle's boundary is under 3:1, and the knob is what carries it
+
+Measured, since the toggle is a graphic: the ON track (`--toggle-on`) is
+**1.21:1** against `bg` in the light theme and **1.43:1** in the dark one, and
+the resting track plus its ring composites to about **1.10:1**. None of that
+clears 3:1.
+
+What does, comfortably, is the **knob** — `--text` on the raised plane, about
+15:1 — moving `--toggle-travel` (18px) across the track. The component is
+identifiable and its two states are distinguished by a large positional
+difference rather than by a fill nobody can see, which is what the requirement
+is actually asking for. The track's ring was `--edge-strong` (.09/.12) and is
+now `--edge-check` (.28/.32) — the same ring an unchecked `Checkbox` wears, so
+the app's two booleans agree — which roughly doubles the boundary without
+turning a quiet control into a bordered box.
+
+This is recorded, not fixed: reaching 3:1 on the track alone needs an edge at
+roughly 0.5 alpha, which is a visible frame and against DESIGN.md's *space
+instead of borders and boxes*. If a second toggle-like control ever ships, this
+is the paragraph to revisit.
 
 **`--accent-dot` is a graphic, never text.** At 4.06–4.56 in the light theme it
 does not meet the text floor, and it never has to: it is spent on the listening
@@ -509,9 +606,14 @@ Any new colour pair is measured before it ships.
   `aria-disabled` + `aria-busy` and swallows its own activation; the native attribute stays for
   `disabled`, which means "there is nothing to do here", not "something is in flight". A caller must
   not pass both for the same condition — `disabled` wins, and the focus goes.
-  `Select` does not do this yet: its `disabled` prop is a genuine disable, so a write in flight behind
-  one still costs the user their place in the page. (`Checkbox` has the same gap, but nothing composes
-  it today, so nothing is currently exposed to it.)
+  **`Select` and the Settings `Toggle` honour this too.** Both take a `busy` prop with the same
+  contract as `Button`'s `loading` — `aria-disabled` + `aria-busy`, focusable, activation swallowed
+  by the component — and `disabled` stays a genuine "there is nothing to choose here". Every
+  in-flight write in the app now goes through `busy`: the Inbox's file picker, all three Settings
+  writes, and the consent nudge's retention picker. The nudge is why this matters most: it is a
+  modal whose Escape and Tab handling lives on the panel, so dropping focus to `<body>` left the
+  user inside a dialog they could no longer close from the keyboard. Its day-count field takes
+  `readOnly` rather than `disabled` for the same reason — read-only keeps a field focusable.
 - **`aria-current="page"`** marks the selected navigation row.
 - Items in an `aria-activedescendant` listbox are deliberately not tabbable; focus stays on the
   controlling input.
@@ -555,13 +657,23 @@ Both guards run in gates CI already runs. Neither adds a dependency.
 
 - **[`src/designTokens.test.ts`](../src/designTokens.test.ts)** (`pnpm test`) reads `design/tokens.css`
   and every `src/**/*.css`, and fails on a literal colour, font-family, duration, or spacing value
-  (padding / margin / gap, in px, rem or em) outside `tokens.css` — plus asserts each `--k-*` pigment
-  is declared exactly once.
+  (padding / margin / gap, in px, rem or em) outside `tokens.css` — plus two structural assertions:
+  each `--k-*` pigment is declared exactly once, and **every semantic token is mapped in all four
+  theme blocks**. The second one is the quiet one and it earns its place: a new semantic key added to
+  `:root` and forgotten in one of the two dark paths keeps its *light* value down that path, and
+  nothing about that looks broken until someone runs the app in the OS-dark theme specifically.
 - **[`eslint.config.js`](../eslint.config.js)** (`pnpm exec eslint .`) fails numeric spacing utilities
   (`p-3`, `gap-4`) and arbitrary values (`text-[13px]`) inside `className`.
 
 Spacing is the one value checked on both sides, because it can be written in either place: eslint
 reads the class strings, the token test reads the stylesheets, and neither can see the other's half.
+
+**What neither guard can see at all is geometry.** The token test scopes its spacing check to
+`padding` / `margin` / `gap`, so a `width`, a `height`, a `border` thickness or a `translate` distance
+in a stylesheet passes both guards untouched. That is how the checkbox skin came to be written out
+twice in two files and the pill toggle's five numbers left unnamed. The `--check-*` and `--toggle-*`
+families exist because the rule holds whether or not a guard enforces it — see
+[`docs/UI_CONVENTIONS.md`](UI_CONVENTIONS.md), *Layer 4*.
 
 What they cannot catch — an eyebrow using the wrong tracking utility, a hover on the wrong element,
 a missing `role="alert"` — is review's job, and this document is the checklist.

@@ -28,7 +28,10 @@
   padding: 0 var(--sidebar-row-x) var(--sidebar-section-gap);
 }
 
+/* An <hr>; `border: none` clears preflight's 1px currentColor top border so
+   the line is only the translucent background box (see QuickCapture.css). */
 .sidebar__divider {
+  border: none;
   height: 1px;
   background: var(--edge-rule);
   margin: 0 var(--sidebar-row-x) var(--sidebar-section-gap);
@@ -81,6 +84,18 @@
   background: var(--surface);
   box-shadow: var(--lift);
   font-weight: var(--fw-semibold);
+}
+
+/* A selected row holds its plane while it is pressed.
+   `.ui-btn--quiet:active` paints --wash-active on every quiet button, and at
+   0-4-0 it out-specified the 0-2-0 rule above — so pressing the row you are
+   already on swapped its raised fill for the menu wash while keeping the lift
+   shadow, which read as the pill briefly breaking. The selectors are matched
+   here rather than excluded in Button.css: the exception belongs to the
+   sidebar, which is what knows a row can be selected at all. */
+.sidebar__row.is-selected:active:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--surface);
+  box-shadow: var(--lift);
 }
 
 /* The lead-in above the projects eyebrow is its own measurement, not a step

@@ -26,10 +26,17 @@
 .capture__body {
   padding: var(--capture-pad-top) var(--capture-pad-x)
     var(--capture-pad-bottom);
-  min-height: 132px;
+  min-height: var(--measure-capture-min);
 }
 
+/* `border: none` because this is an <hr> and Tailwind's preflight gives one a
+   1px top border in currentColor — which would draw a second, ink-coloured
+   line on top of the translucent one this rule is actually made of. The rule
+   is the background box, at an --edge-* value, like every other hairline in
+   the app. Same note on .command-palette__rule, .settings__rule and
+   .sidebar__divider. */
 .capture__rule {
+  border: none;
   height: 1px;
   background: var(--edge-rule);
 }
@@ -44,12 +51,17 @@
 
 /* The thought itself, written in the reading serif at 21px. A captured
    thought is a sentence someone will read back later, not a form value, and
-   this is the one place the app treats an input as prose. */
+   this is the one place the app treats an input as prose.
+
+   It KEEPS ITS FOCUS RING (.ui-focus-ring on the element). It was once an
+   exception on the grounds that the window held a single control, and that
+   exception expired the moment the footer gained a visible "File it" button:
+   with more than one tab stop, the ring is the only thing that says which one
+   has focus (docs/DESIGN_SYSTEM.md §2). */
 .capture__input {
   width: 100%;
   background: transparent;
   border: none;
-  outline: none;
   padding: 0;
   resize: none;
   font-family: var(--serif);

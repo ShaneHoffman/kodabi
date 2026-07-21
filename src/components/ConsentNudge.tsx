@@ -20,9 +20,28 @@ type Props = {
 
 // Focusable descendants for the dialog's Tab-wrap trap. The Select renders its
 // options as non-tabbable list items, so only the trigger, day field, and
-// buttons participate.
-const FOCUSABLE =
-  'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])';
+// buttons participate today.
+//
+// `textarea`, `select` and `[contenteditable]` are listed even though this
+// dialog renders none of them: the trap works by finding the FIRST and LAST
+// match, so a control this selector cannot see is not merely skipped — it
+// sits outside the wrap entirely and Tab escapes the modal at it. That is a
+// hole that opens silently, the first time someone adds a field here.
+//
+// Nothing inert is excluded by attribute either. `:not([disabled])` used to
+// be the whole guard, which was right when a busy control took the native
+// attribute; now that a write in flight is `aria-disabled` (it has to stay
+// focusable, see below), a busy control is still a real tab stop and still
+// belongs in the wrap.
+const FOCUSABLE = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "textarea:not([disabled])",
+  "select:not([disabled])",
+  "[contenteditable]:not([contenteditable='false'])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(", ");
 
 const PRIMARY_ID = "consent-nudge-primary";
 
@@ -110,8 +129,9 @@ export function ConsentNudge({ onClose }: Props) {
           indicator is green. It only ever records while that indicator shows.
         </p>
         <p>
-          Please announce your recordings. Many places (Massachusetts among
-          them) require everyone on a call to consent before you record.
+          Please announce your recordings. In many places everyone on a call
+          has to consent before you record, and the rules differ by where each
+          person is sitting.
         </p>
         <p>
           Transcripts stay on this device as plain files. Choose how long
@@ -119,12 +139,21 @@ export function ConsentNudge({ onClose }: Props) {
         </p>
       </div>
 
+      {/* Every control in here goes inert while the acknowledgement is in
+          flight, and NONE of them uses the native `disabled` attribute to do
+          it. This is the case docs/DESIGN_SYSTEM.md §6 singles out as the
+          worst one: disabling the focused element blurs it and focus resets
+          to <body>, which is outside the dialog — so the Tab wrap and the
+          Escape handler, both of which live on the panel, stop receiving
+          anything at all. The user is left inside a modal they can no longer
+          leave with the keyboard. `busy` / `readOnly` / `loading` all keep
+          their control focusable. */}
       <Select
         label="Retention"
         value={kind}
         onChange={(value) => setKind(value as RetentionKind)}
         options={RETENTION_OPTIONS}
-        disabled={submitting}
+        busy={submitting}
       />
       {kind === "keep_days" && (
         <TextField
@@ -132,7 +161,10 @@ export function ConsentNudge({ onClose }: Props) {
           type="number"
           min={1}
           value={days}
-          disabled={submitting}
+          // readOnly, not disabled: a read-only input stays focusable and in
+          // the tab order, and refusing the edit is exactly what is wanted
+          // here anyway.
+          readOnly={submitting}
           onChange={(event) => setDays(event.target.value)}
         />
       )}
@@ -140,7 +172,12 @@ export function ConsentNudge({ onClose }: Props) {
       {error && <StatusMessage variant="error" compact>{error}</StatusMessage>}
 
       <div className="flex items-center justify-end gap-sm">
-        <Button variant="quiet" onClick={onClose} disabled={submitting}>
+        {/* `loading` with no loadingLabel: the label is unchanged (Button
+            falls back to its children), and all this buys is the inert
+            treatment that keeps the button focusable. There is nothing to
+            report here — the primary beside it is the control doing the work
+            and the one that says so. */}
+        <Button variant="quiet" onClick={onClose} loading={submitting}>
           Not now
         </Button>
         <Button

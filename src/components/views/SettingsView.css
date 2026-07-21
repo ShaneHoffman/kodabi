@@ -26,6 +26,19 @@
   transition: color var(--dur-quick) var(--ease-standard);
 }
 
+/* An unselected tab steps toward ink under the pointer and lands on it when
+   pressed — the transition above was declared and then had nothing to drive
+   it, so the rail was the one control rail in the app that never answered a
+   hover. The selected tab is already at full ink and has nowhere to step. */
+.settings__tab:hover {
+  color: var(--text);
+}
+
+.settings__tab:active {
+  color: var(--text);
+  transition: none;
+}
+
 .settings__tab[aria-selected="true"] {
   box-shadow: 0 2px 0 var(--text);
 }
@@ -33,7 +46,10 @@
 /* The rule the tabs sit on. It runs the full pane rather than stopping at the
    settings column: it is the seat for the rail above it, not a divider for
    the rows below. */
+/* An <hr>; `border: none` clears preflight's 1px currentColor top border so
+   the line is only the translucent background box (see QuickCapture.css). */
 .settings__rule {
+  border: none;
   height: 1px;
   background: var(--edge-rule);
 }
@@ -80,36 +96,73 @@
 
 /* ---------- the pill toggle ----------
    The one control in the app whose state is its geometry rather than its
-   value: the knob is ink and it moves. The track lightens when on, but the
-   track alone would be a very quiet signal, which is why the travel carries
-   it (docs/DESIGN_SYSTEM.md §2). */
+   value: the knob is ink and it moves, and THE TRAVEL is what carries the
+   state (docs/DESIGN_SYSTEM.md §2).
+
+   That is not a stylistic preference here, it is the honest description. The
+   track's own contribution is very small and measured: --toggle-on against
+   --bg is 1.21:1 in the day theme and 1.43:1 at night, and the resting track
+   plus its ring composites to about 1.10:1. None of that clears the 3:1 a
+   graphic is held to. What does clear it, comfortably, is the knob — ink on
+   the raised plane, about 15:1 — so the component is identifiable and its two
+   states are told apart by an 18px positional difference rather than by a
+   fill nobody can see. The ring below was --edge-strong (.09/.12) and is now
+   --edge-check (.28/.32), the same ring an unchecked checkbox wears: still
+   under 3:1, but roughly twice the boundary it had, and consistent with the
+   app's other boolean. The remaining gap is recorded in DESIGN_SYSTEM §6
+   rather than papered over.
+
+   The track also DARKENS when on in the day theme (#DFDCCF against #F2F0E9);
+   a previous comment here claimed it lightened, which was never true. */
 .settings__toggle {
   position: relative;
-  width: 42px;
-  height: 24px;
+  width: var(--toggle-w);
+  height: var(--toggle-h);
   padding: 0;
   flex: none;
   border-radius: var(--radius-card);
   background: var(--surface);
-  box-shadow: inset 0 0 0 1px var(--edge-strong);
-  transition: background-color var(--dur-plane) var(--ease-standard);
+  box-shadow: inset 0 0 0 1px var(--edge-check);
+  transition:
+    background-color var(--dur-plane) var(--ease-standard),
+    box-shadow var(--dur-quick) var(--ease-standard);
 }
 
 .settings__toggle[aria-checked="true"] {
   background: var(--toggle-on);
 }
 
+/* Hover and press firm the ring, the same "step toward --text" every other
+   control uses, spent on the only edge this one has. Guarded on both inert
+   forms like Button.css, so a toggle mid-write does not answer the pointer. */
+.settings__toggle:hover:not(:disabled):not([aria-disabled="true"]) {
+  box-shadow: inset 0 0 0 1px var(--edge-dot);
+}
+
+.settings__toggle:active:not(:disabled):not([aria-disabled="true"]) {
+  box-shadow: inset 0 0 0 1px var(--text-faint);
+  transition: none;
+}
+
+/* It has no text to fade, so it dims — the sanctioned use of
+   --disabled-opacity (docs/DESIGN_SYSTEM.md §2). `aria-disabled` is the busy
+   form and looks identical. */
+.settings__toggle:disabled,
+.settings__toggle[aria-disabled="true"] {
+  opacity: var(--disabled-opacity);
+}
+
 .settings__knob {
   position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 18px;
-  height: 18px;
+  top: var(--toggle-inset);
+  left: var(--toggle-inset);
+  width: var(--toggle-knob);
+  height: var(--toggle-knob);
   border-radius: 50%;
   background: var(--text);
   transition: transform var(--dur-plane) var(--ease-standard);
 }
 
 .settings__toggle[aria-checked="true"] .settings__knob {
-  transform: translateX(18px);
+  transform: translateX(var(--toggle-travel));
 }

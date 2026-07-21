@@ -65,7 +65,7 @@ function BackLink({ project }: { project: string }) {
     <Button
       variant="quiet"
       onClick={() => navigate(view)}
-      className="flex items-center gap-2xs self-start py-3xs text-label text-text-faint"
+      className="flex items-center gap-2xs self-start py-3xs text-label text-text-soft"
     >
       <span aria-hidden="true">←</span>
       <span>{label}</span>
@@ -146,9 +146,14 @@ function ReadNote({
         </header>
 
         {note.body_markdown ? (
-          // The checkboxes GFM emits are interactive here rather than
-          // disabled: an action item you cannot tick in the view you read it
-          // in is a to-do list you have to open an editor to use.
+          // The checkboxes GFM emits render DISABLED, and are styled as such
+          // (no hover, no pointer cursor). mdast-util-to-hast hard-codes
+          // `disabled: true` on a task-list item and this view passes no
+          // `components` override, so ticking one here has never done
+          // anything — and there is no write path behind it if it did.
+          // Making them live means a components override plus a body write,
+          // which is a feature, not a style fix. Until then the box states
+          // the item's status and does not pretend to accept a click.
           <div className="note-reading note__body font-serif">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {note.body_markdown}
@@ -156,7 +161,9 @@ function ReadNote({
           </div>
         ) : (
           <div className="note__body">
-            <StatusMessage variant="empty">This note has no body yet.</StatusMessage>
+            <StatusMessage variant="empty">
+              This note has no body yet. Choose Edit to write one.
+            </StatusMessage>
           </div>
         )}
       </article>
@@ -167,23 +174,37 @@ function ReadNote({
 /** One button in the floating format toolbar. */
 function Tool({
   label,
+  name,
   onApply,
   className = "",
 }: {
   label: ReactNode;
+  /** The spoken name. The visible label is a single letter for three of these
+   * ("B", "I", "H"), which a screen reader reads out as a letter. */
+  name: string;
   onApply: () => void;
   className?: string;
 }) {
   return (
     <button
       type="button"
+      aria-label={name}
       // pointerdown, not click: clicking would blur the textarea first, which
       // collapses the very selection the button is about to act on.
       onPointerDown={(event) => {
         event.preventDefault();
         onApply();
       }}
-      className={`note-edit__tool text-label text-text ${className}`}
+      // ...and click as well, but ONLY for a keyboard activation. Enter and
+      // Space fire `click` with no preceding pointer event, and those carry
+      // `detail === 0`; a real pointer click carries the click count, so this
+      // cannot double-apply on top of the handler above. Without it the whole
+      // toolbar was pointer-only, which docs/DESIGN_SYSTEM.md §6 forbids
+      // outright ("every mouse flow has a keyboard flow, and the reverse").
+      onClick={(event) => {
+        if (event.detail === 0) onApply();
+      }}
+      className={`note-edit__tool ui-focus-ring text-label text-text ${className}`}
     >
       {label}
     </button>
@@ -201,6 +222,17 @@ function Tool({
  * selected, anchored just above the selection rather than parked in a bar at
  * the top of the screen.
  */
+
+/** How far above the selection the toolbar's tail sits, in px.
+ *
+ * A screen coordinate rather than a design value: it is added to a caret
+ * position measured at runtime, so it is spelled here rather than in
+ * `design/tokens.css`, which the component cannot read numerically. It is the
+ * tail's own 8px square plus the 4px it is pulled back by (`.note-edit__tail`
+ * in NoteEditorView.css) minus one, so the point of the tail lands on the
+ * selection rather than overlapping it. */
+const TOOLBAR_LIFT = 11;
+
 function EditNote({
   note,
   project,
@@ -296,8 +328,12 @@ function EditNote({
             Editing
           </p>
           <div className="flex items-center gap-sm">
+            {/* Says something only when there is something to say. "No
+                changes" was the resting label on every freshly opened editor:
+                an answer to a question nobody had asked yet, occupying the
+                one line that is supposed to mean "you have unsaved work". */}
             <span className="font-mono text-cap text-text-faint">
-              {saving ? "Saving…" : dirty ? "Unsaved changes" : "No changes"}
+              {saving ? "Saving…" : dirty ? "Unsaved changes" : ""}
             </span>
             {/* The way out that does not write. Without it the only exit from
                 compose mode was Done, so changing your mind still rewrote the
@@ -325,55 +361,62 @@ function EditNote({
         {/* Read-only: the filename never changes on edit, and moving a note is
             the filing flow, not an edit. The caret still sits beside it,
             because it marks where composing is happening. */}
-        <div className="note__title-row flex items-center">
-          <h2 className="font-serif text-title-doc font-semibold leading-title-doc tracking-title text-text">
+        {/* <header>, matching read mode. Compose and read draw the same
+            region of the same document and used to disagree about what it
+            was: read mode said <header>, edit and create said <div>. */}
+        <header className="note__title-row flex items-center">
+          <h2 className="ui-balance font-serif text-title-doc font-semibold leading-title-doc tracking-title text-text">
             {title}
           </h2>
-        </div>
+        </header>
 
-        <div className="mt-xs flex flex-wrap items-center gap-2xs">
-          <span className="mr-3xs font-mono text-meta text-text-faint">{note.date}</span>
+        {/* A real list. The tags were a <div> of <span>s, so nothing announced
+            that there were tags, or how many, or where the row ended. */}
+        <ul className="mt-xs flex flex-wrap items-center gap-2xs" aria-label="Tags">
+          <li className="mr-3xs font-mono text-meta text-text-faint">{note.date}</li>
           {tags.map((tag) => (
-            <span key={tag} className="note-edit__tag font-mono text-cap text-text-soft">
+            <li key={tag} className="note-edit__tag font-mono text-cap text-text-soft">
               {tag}
               <button
                 type="button"
                 aria-label={`Remove tag ${tag}`}
                 onClick={() => setTags(tags.filter((each) => each !== tag))}
-                className="ui-focus-ring text-text-faint"
+                className="ui-focus-ring text-text-soft"
               >
                 ×
               </button>
-            </span>
+            </li>
           ))}
-          {addingTag ? (
-            <input
-              autoFocus
-              value={draftTag}
-              onChange={(event) => setDraftTag(event.target.value)}
-              onBlur={commitTag}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  commitTag();
-                } else if (event.key === "Escape") {
-                  setDraftTag("");
-                  setAddingTag(false);
-                }
-              }}
-              aria-label="New tag"
-              className="note-edit__tag-add ui-focus-ring w-24 font-mono text-cap text-text"
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={() => setAddingTag(true)}
-              className="note-edit__tag-add ui-focus-ring font-mono text-cap text-text-faint"
-            >
-              + tag
-            </button>
-          )}
-        </div>
+          <li>
+            {addingTag ? (
+              <input
+                autoFocus
+                value={draftTag}
+                onChange={(event) => setDraftTag(event.target.value)}
+                onBlur={commitTag}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    commitTag();
+                  } else if (event.key === "Escape") {
+                    setDraftTag("");
+                    setAddingTag(false);
+                  }
+                }}
+                aria-label="New tag"
+                className="note-edit__tag-add ui-focus-ring w-24 font-mono text-cap text-text"
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setAddingTag(true)}
+                className="note-edit__tag-add ui-focus-ring font-mono text-cap text-text-soft"
+              >
+                + tag
+              </button>
+            )}
+          </li>
+        </ul>
 
         <div className="note__body relative">
           <textarea
@@ -387,24 +430,46 @@ function EditNote({
             onSelect={syncToolbar}
             onKeyUp={syncToolbar}
             onPointerUp={syncToolbar}
-            onBlur={() => setAnchor(null)}
-            className="note-edit__body ui-writing"
+            // Tearing the toolbar down on ANY blur made it unreachable by
+            // keyboard: Tab moved focus toward it and unmounted it on the way.
+            // A textarea keeps selectionStart/End while blurred, so holding
+            // the anchor open while focus is inside the toolbar keeps the
+            // selection the tools act on intact.
+            onBlur={(event) => {
+              const next = event.relatedTarget;
+              if (next instanceof HTMLElement && next.closest(".note-edit__toolbar")) return;
+              setAnchor(null);
+            }}
+            className="note-edit__body ui-focus-ring ui-writing"
           />
           {anchor && (
             <div
+              role="toolbar"
+              aria-label="Format selection"
               className="note-edit__toolbar"
-              style={{ left: anchor.left, top: anchor.top - 11 }}
+              style={{ left: anchor.left, top: anchor.top - TOOLBAR_LIFT }}
             >
-              <Tool label="B" onApply={() => format({ wrap: "**" })} className="font-bold" />
-              <Tool label="I" onApply={() => format({ wrap: "*" })} className="italic" />
+              <Tool
+                label="B"
+                name="Bold"
+                onApply={() => format({ wrap: "**" })}
+                className="font-bold"
+              />
+              <Tool
+                label="I"
+                name="Italic"
+                onApply={() => format({ wrap: "*" })}
+                className="italic"
+              />
               <Tool
                 label="H"
+                name="Heading"
                 onApply={() => format({ prefix: "## " })}
                 className="font-serif font-semibold"
               />
               <span className="note-edit__tool-divider" />
-              <Tool label="List" onApply={() => format({ prefix: "- " })} />
-              <Tool label="Link" onApply={() => format({ link: true })} />
+              <Tool label="List" name="Bullet list" onApply={() => format({ prefix: "- " })} />
+              <Tool label="Link" name="Link" onApply={() => format({ link: true })} />
               <span className="note-edit__tail" aria-hidden="true" />
             </div>
           )}
@@ -496,7 +561,7 @@ function CreateNote({ initialProject }: { initialProject: string | null }) {
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Untitled"
             aria-label="Title"
-            className="note-edit__title ui-writing font-serif text-title-doc font-semibold leading-title-doc tracking-title text-text placeholder:text-text-faint"
+            className="note-edit__title ui-focus-ring ui-writing font-serif text-title-doc font-semibold leading-title-doc tracking-title text-text placeholder:text-text-faint"
           />
         </div>
 
@@ -524,9 +589,9 @@ function CreateNote({ initialProject }: { initialProject: string | null }) {
           <textarea
             value={body}
             aria-label="Note body"
-            placeholder="Write here."
+            placeholder="Write here"
             onChange={(event) => setBody(event.target.value)}
-            className="note-edit__body ui-writing placeholder:text-text-faint"
+            className="note-edit__body ui-focus-ring ui-writing placeholder:text-text-faint"
           />
         </div>
 

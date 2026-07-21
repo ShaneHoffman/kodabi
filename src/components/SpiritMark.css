@@ -185,3 +185,32 @@
     transform: none;
   }
 }
+
+/* The same floor, reached from Settings → Appearance rather than from the OS
+   (src/reduceMotion.ts), and stated separately because a plain selector and
+   an @media block cannot share a rule.
+
+   This is the branch the app-wide 1ms floor in src/index.css genuinely cannot
+   stand in for. That floor shortens durations; it cannot restore the resting
+   SHAPE. The bloom's two lobes are deliberately lopsided and counter-rotating
+   while they drift, so collapsing only their duration froze them mid-drift as
+   two skewed blobs. `border-radius: 50%` plus `transform: none` is what makes
+   the mark settle into the still, round, green mark §4 requires — never let
+   reduced motion remove information. */
+:root[data-reduce-motion="on"] .spirit-mark__core,
+:root[data-reduce-motion="on"] .spirit-mark__bloom,
+:root[data-reduce-motion="on"] .spirit-mark__bloom::before,
+:root[data-reduce-motion="on"] .spirit-mark__bloom::after {
+  animation: none !important;
+}
+
+:root[data-reduce-motion="on"] .spirit-mark.is-starting .spirit-mark__core,
+:root[data-reduce-motion="on"] .spirit-mark.is-reconnecting .spirit-mark__core {
+  opacity: 1;
+}
+
+:root[data-reduce-motion="on"] .spirit-mark__bloom::before,
+:root[data-reduce-motion="on"] .spirit-mark__bloom::after {
+  border-radius: 50%;
+  transform: none;
+}
