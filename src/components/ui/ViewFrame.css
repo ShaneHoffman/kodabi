@@ -1,19 +1,24 @@
 /* ============================================================
    ViewFrame — the page scaffold, one stance per view type.
 
-   Only non-bridged tokens live here: the Layer-4 gutters and measures.
-   Type, colour and weight stay as utilities on the component.
+   Only non-bridged tokens live here: the gutter and the measures. Type, colour
+   and weight stay as utilities on the component.
 
-   THE GUTTERS ARE NOT ALL THE SAME, AND THAT IS THE DESIGN. A view type is
-   meant to be recognisable before any heading is read — by where its content
-   sits, how dense it is, and where the weight falls. A queue pinned hard left
-   at 44/60 and a library centred on a reading measure at 52/60 are two
-   different kinds of place; collapsing them onto one shared step would delete
-   the only thing telling them apart at a glance.
+   THE GUTTER IS THE SAME ON EVERY VIEW, AND ON ALL FOUR SIDES. Each variant
+   used to state its own padding and its own column alignment, so that where the
+   content sat was itself a signal of what kind of place you were in. Sound in
+   theory; in the running app it read as the page shifting under the pointer
+   every time you clicked a different sidebar row, because the eye reads a moved
+   left edge as instability long before it reads it as identity.
 
-   So each variant states its own padding and its own column, and there is no
-   "default" gutter to fall back on — a new view has to decide what kind of
-   place it is.
+   A view type is still meant to be recognisable before any heading is read.
+   That work is done by the header (a queue's one-line masthead against a
+   library's serif title), by density, and by where the weight falls — all of
+   which stay per-variant. The frame holds still underneath them.
+
+   The variant classes remain, because the measures below genuinely differ and
+   a future view may need to say something here. They are no longer a licence
+   to move the gutter.
    ============================================================ */
 
 .view {
@@ -21,54 +26,22 @@
   flex-direction: column;
   min-height: 100%;
   box-sizing: border-box;
-}
-
-.view--queue {
-  padding: var(--gutter-queue-y) var(--gutter-queue-x);
-}
-
-.view--library {
-  padding: var(--gutter-library-y) var(--gutter-library-x);
-}
-
-.view--panel {
-  padding: var(--gutter-panel-y) var(--gutter-panel-x);
-}
-
-.view--health {
-  padding: var(--gutter-health-y) var(--gutter-health-x);
-}
-
-.view--doc {
-  padding: var(--gutter-doc-y) var(--gutter-doc-x);
-}
-
-.view--search {
-  padding: var(--gutter-search-y) var(--gutter-search-x);
+  padding: var(--gutter-view-y) var(--gutter-view-x);
 }
 
 .view__column {
   width: 100%;
 }
 
-/* ---------- centred ----------
-   A library and a system-health view are things you READ, so they sit on a
-   measure in the middle of their pane. They are the only two that centre. */
-.view--library .view__column {
-  max-width: var(--measure-library);
-  margin: 0 auto;
-}
+/* ---------- measures ----------
+   Every column is pinned to the same left edge; a measure only decides how far
+   its content may run to the right before a line gets too long to track. So
+   they are set where line length actually hurts reading, and left unset where
+   the content is a list of rows that should use the width it has.
 
-.view--health .view__column {
-  max-width: var(--measure-health);
-  margin: 0 auto;
-}
-
-/* ---------- left-pinned ----------
-   A queue, a document and a result list all start at the same left edge and
-   stay there. A queue you work down wants a stable left margin to scan; a
-   document wants the measure it was written to, not a column that drifts with
-   the window. */
+   Nothing centres. A centred column puts a different amount of space on the
+   left of each view depending on how wide its measure happens to be, which is
+   the same instability the shared gutter above just removed. */
 .view--doc .view__column {
   max-width: var(--measure-doc);
 }
@@ -77,7 +50,8 @@
   max-width: var(--measure-search);
 }
 
-/* `queue` and `panel` deliberately cap nothing here. The Inbox's rows want the
-   full width of their gutter (their snippet caps itself), and a settings row
-   caps at --measure-setting on the row, so the tab rail above can still run
-   the pane's full width. */
+/* `queue`, `library`, `panel` and `health` deliberately cap nothing here. Their
+   rows are rows, not prose: they take the width the gutter leaves them, the
+   same width on every one of those views. A queue row's serif snippet caps
+   itself at --measure-snippet, and a settings row caps at --measure-setting on
+   the row, so the tab rail above can still run the pane's full width. */

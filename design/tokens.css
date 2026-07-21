@@ -353,27 +353,21 @@
   --sidebar-eyebrow-top: 30px; /* the lead-in above the PROJECTS eyebrow */
   --sidebar-row-gap: 1px; /* between project rows: a seam, not a step */
 
-  /* view gutters — vertical, then horizontal */
-  --gutter-queue-y: 44px; /* Inbox: the working queue, pinned left */
-  --gutter-queue-x: 60px;
-  --gutter-library-y: 52px; /* Project: the library, centred on a measure */
-  --gutter-library-x: 60px;
-  --gutter-panel-y: 46px; /* Settings: the config panel */
-  --gutter-panel-x: 56px;
-  --gutter-health-y: 52px; /* Needs attention: a narrow, airy, centred column */
-  --gutter-health-x: 60px;
-  --gutter-doc-y: 40px; /* Note: the reading room */
-  --gutter-doc-x: 64px;
-  --gutter-search-y: 40px; /* Search: results under a pinned query */
-  --gutter-search-x: 56px;
+  /* The view gutter — vertical, then horizontal. ONE pair, for every view.
+     Each view type used to state its own (44/60, 52/60, 46/56, 52/60, 40/64,
+     40/56) on the theory that where the content sat was part of what told a
+     queue from a library. In the running app it did not read as intent: it read
+     as the content moving every time you clicked something in the sidebar. View
+     identity is carried by the header, the density and the weight, which stay
+     per-variant; the frame around them holds still. */
+  --gutter-view-y: 44px;
+  --gutter-view-x: 60px;
 
   /* content measures */
   --measure-capture: 500px; /* the quick-capture window */
   --measure-setting: 520px; /* a settings row: label left, control right */
   --measure-snippet: 500px; /* how far a queue row's serif snippet may run */
-  --measure-health: 560px;
   --measure-palette: 560px;
-  --measure-library: 640px;
   --measure-search: 640px;
   --measure-doc: 660px;
   --measure-progress: 340px; /* the Inbox progress instrument */
