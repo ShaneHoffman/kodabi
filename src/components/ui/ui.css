@@ -1,30 +1,75 @@
 /* ============================================================
    Shared primitive recipes.
 
-   Two treatments were being retyped in every component that needed them —
-   the focus ring in eight places (four primitive CSS files, one more in
-   CaptureOverlayPill.css, and three as inline Tailwind in the views), and
-   the active-row wash in two. Both are single-meaning things: there is one
-   focus ring and one wash in this app. They live here once.
+   A treatment lands here when it is a SINGLE-MEANING thing used by more than
+   one component: there is one focus ring in this app, one active-row wash,
+   one raised plane, one overlay plane, one caret. Everything else stays
+   co-located in the owning Component.css (docs/UI_CONVENTIONS.md).
 
    This file is imported from src/index.css, not from a component, because
-   it is shared by all of them. Everything else stays co-located in the
-   owning Component.css (docs/UI_CONVENTIONS.md).
+   it is shared by all of them.
    ============================================================ */
 
-/* The one focus treatment: a 2px accent outline held off the control by its
-   own width. :focus-visible (not :focus) so a pointer press never draws it.
-   Applied as a class so a component opts in by name rather than by restating
-   three declarations. */
+/* ---------- focus ----------
+   A 2px outline held off the control by its own width. :focus-visible (not
+   :focus) so a pointer press never draws it.
+
+   It is INK, not a hue. The old interactive-green accent is retired: this
+   palette has exactly one green and it means audio is being recorded, so a
+   focused button wearing it would claim something false. Ink at --focus-width
+   reads at full contrast against all three planes in both themes, which is
+   more than the green ever managed in the day theme. */
 .ui-focus-ring:focus-visible {
-  outline: var(--focus-width) solid var(--accent);
+  outline: var(--focus-width) solid var(--text);
   outline-offset: var(--focus-offset);
 }
 
-/* Selected / highlighted rows read through VALUE, not hue: an ink wash of the
-   text colour, identical in both themes, and never the reserved green
-   (docs/DESIGN.md). Used by the command palette, Select, and list rows. */
+/* ---------- the active row ----------
+   A focused row in a menu or listbox reads through VALUE, never hue, and
+   never the reserved green (a selected row wearing it would claim a
+   recording). --wash-active resolves to the menu-hover fill, so the row a
+   pointer is over and the row the keyboard has landed on are the same
+   colour — as they should be, since they mean the same thing. */
 .ui-wash {
   background: var(--wash-active);
   color: var(--text);
+}
+
+/* ---------- the three planes ----------
+   Separation between adjacent planes is a value shift PLUS a ring, never a
+   border (docs/DESIGN.md: space instead of borders and boxes). Each --lift-*
+   token already carries its own `0 0 0 1px` ring, so these are one
+   declaration rather than a ring and a shadow that can drift apart.
+
+   A raised plane lifts LIGHTER than its ground in both themes. If one does
+   not read, the answer is the ring or the shadow — never a darker fill. */
+.ui-raised {
+  background: var(--surface);
+  box-shadow: var(--lift);
+}
+
+.ui-overlay-plane {
+  background: var(--overlay);
+  box-shadow: var(--lift-menu);
+}
+
+/* ---------- hairlines ----------
+   A divider is a translucent rule, and it earns its place only when it is
+   doing work the space around it cannot. Rendered as an inset shadow so it
+   occupies no layout box and cannot be mistaken for a border. */
+.ui-rule {
+  box-shadow: inset 0 -1px 0 var(--edge-rule);
+}
+
+/* ---------- the writing surface ----------
+   The one place besides the listening state where the reserved green is
+   spent: the live text cursor, wherever you are actually writing
+   (docs/DESIGN.md). Both mean the same thing — this is happening right now.
+
+   It is `caret-color` on the real control rather than a blinking bar drawn
+   beside it. A drawn caret is a lie the moment the text wraps, the field
+   scrolls, or the user clicks into the middle of a word; the platform's own
+   caret is always in the right place, and all it needed was the colour. */
+.ui-writing {
+  caret-color: var(--accent-dot);
 }

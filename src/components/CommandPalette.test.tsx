@@ -62,9 +62,10 @@ describe("CommandPalette sections", () => {
     ).toBeInTheDocument();
   });
 
-  it("drops the headings when filtering and lets the rows speak for themselves", async () => {
-    // A filtered list is a set of matches, not a table of contents, so the
-    // per-row hint has to take the heading's place.
+  it("drops the headings when filtering and marks the row Enter would run", async () => {
+    // A filtered list is a set of matches, not a table of contents. What
+    // replaces the heading is not a restatement of it — it is the one thing
+    // worth saying about the top row, which is that Enter runs it.
     const user = userEvent.setup();
     await renderPalette();
 
@@ -73,7 +74,21 @@ describe("CommandPalette sections", () => {
     expect(screen.queryByRole("group", { name: "Jump to" })).not.toBeInTheDocument();
     const [match] = screen.getAllByRole("option");
     expect(match).toHaveTextContent("briarwood-golf");
-    expect(match).toHaveTextContent("Jump to");
+    expect(match).toHaveTextContent("↵");
+  });
+
+  it("teaches the global shortcut of a command that has one, and invents none", async () => {
+    // The palette is where people learn the bindings, so a hint here has to be
+    // a real accelerator the backend registered. Every other row shows nothing
+    // rather than a label dressed up as a key.
+    await renderPalette();
+
+    expect(screen.getByRole("option", { name: /Quick capture/ })).toHaveTextContent(
+      "Ctrl+Alt+Space",
+    );
+    expect(screen.getByRole("option", { name: /New note/ })).not.toHaveTextContent(
+      "Ctrl",
+    );
   });
 
   it("walks the arrow keys straight across the section boundary", async () => {

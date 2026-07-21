@@ -102,18 +102,58 @@ const sheets = styleSheets(join(ROOT, "src")).filter((f) => f !== TOKENS);
 
 /** The semantic tokens every theme block must map. Named explicitly rather
  * than matched by prefix, so the Layer-1 `--lift-day` / `--lift-night`
- * primitives that live alongside them aren't mistaken for semantic keys. */
+ * primitives that live alongside them aren't mistaken for semantic keys.
+ *
+ * The list is long because the redesign made the palette answer more
+ * questions — three planes rather than two-and-a-sink, an eight-step edge
+ * ladder, and one elevation recipe per plane role — and every one of those
+ * has to be stated in all four theme blocks or it silently keeps its light
+ * value down one of the two dark paths. That silent-drift failure is exactly
+ * what this assertion exists to catch, so the list grows with the palette
+ * rather than being trimmed to the interesting few. */
 const SEMANTIC = [
+  // the three planes
   "--bg",
-  "--bg-sink",
   "--surface",
+  "--overlay",
+  // the ink ladder
   "--text",
+  "--text-read",
   "--text-soft",
   "--text-faint",
-  "--accent",
+  // the one reserved green, and its glow
   "--accent-dot",
+  "--glow",
+  "--glow-out",
+  // edges — a value ladder, named by what wears them
+  "--edge-faint",
+  "--edge",
+  "--edge-chip",
+  "--edge-rule",
+  "--edge-strong",
+  "--edge-open",
+  "--edge-check",
+  "--edge-dot",
+  // fills that are not planes
+  "--tint",
+  "--track",
+  "--highlight",
+  "--menu-hover",
+  "--token-active",
+  "--token-hover",
+  "--toggle-on",
+  "--scrim",
+  // elevation — one recipe per plane role, ring included
   "--lift",
-  "--lift-soft",
+  "--lift-card",
+  "--lift-row",
+  "--lift-chip",
+  "--lift-chip-hover",
+  "--lift-chip-open",
+  "--lift-menu",
+  "--lift-toolbar",
+  "--lift-palette",
+  "--lift-capture",
 ];
 
 describe("design tokens are the single source of truth", () => {

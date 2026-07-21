@@ -47,7 +47,7 @@ export class AppErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.message === null) return this.props.children;
     return (
-      <ViewFrame eyebrow="System" title="This screen stopped">
+      <ViewFrame variant="health" eyebrow="System" title="This screen stopped">
         <div className="flex flex-col gap-sm">
           <StatusMessage variant="error">
             Something went wrong drawing this screen. Your notes are files on

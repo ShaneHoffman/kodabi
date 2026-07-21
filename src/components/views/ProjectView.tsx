@@ -1,20 +1,23 @@
 import { useNavigation } from "../../useNavigation";
 import { noteMeta } from "../../noteMeta";
 import { useProjectNotes } from "../../useNotes";
-import { formatSlug } from "../../useProjects";
 import { Button } from "../ui/Button";
-import { ListRow } from "../ui/ListRow";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
+import "./ProjectView.css";
 
 type Props = {
   slug: string;
 };
 
 /**
- * A project's notes, newest first — typography-first: serif titles carry the
- * list, hierarchy from type and space, no boxes. Loading renders nothing (the
- * list simply appears); the one action is a quiet New note.
+ * A project's notes, newest first — the app's LIBRARY, and deliberately the
+ * opposite stance from the Inbox in every way that can be seen from across
+ * the room: centred on a reading measure rather than pinned left, the airiest
+ * gutter rather than the densest, the largest title in the app rather than no
+ * title at all, and a flat index whose rows only tint rather than lift.
+ *
+ * Nothing here is waiting on you. The layout is the thing that says so.
  */
 export function ProjectView({ slug }: Props) {
   const { navigate } = useNavigation();
@@ -24,9 +27,10 @@ export function ProjectView({ slug }: Props) {
     <ViewFrame
       variant="library"
       eyebrow="Project"
-      title={formatSlug(slug)}
-      // A library states its size, not its workload: nothing here is waiting on
-      // you. The quieter type is the difference you read before the words.
+      // The slug itself, not a prettified name: a project IS a folder, and the
+      // mono-path vocabulary the filing menu and the search breadcrumbs use
+      // should resolve to the same string that heads the view.
+      title={slug}
       summary={
         notes.length > 0
           ? `${notes.length} ${notes.length === 1 ? "note" : "notes"}`
@@ -35,7 +39,10 @@ export function ProjectView({ slug }: Props) {
       action={
         <Button
           variant="quiet"
-          className="text-body text-accent"
+          // Ink, not the reserved green: this is the one action on a reading
+          // screen, and it earns its place by being the only verb here — not
+          // by being a colour.
+          className="py-3xs text-label text-text-soft"
           onClick={() => navigate({ kind: "noteEditor", noteId: null, project: slug })}
         >
           New note
@@ -53,19 +60,27 @@ export function ProjectView({ slug }: Props) {
           </StatusMessage>
         )
       ) : (
-        <ul className="flex flex-col gap-sm">
+        <ul className="mt-md">
           {notes.map((note) => (
             // Keyed by path, not id: two files can carry the same id (an
             // external copy), and duplicate keys would mis-reconcile rows.
             <li key={note.path}>
-              <ListRow
-                layout="inline"
-                title={note.title}
-                meta={noteMeta(note)}
-                onOpen={() =>
+              <button
+                type="button"
+                className="project__row ui-focus-ring"
+                onClick={() =>
                   navigate({ kind: "noteEditor", noteId: note.id, project: slug })
                 }
-              />
+              >
+                {/* Serif, because in a library a title is something you read
+                    rather than a control you operate. */}
+                <span className="font-serif text-h3 text-text">{note.title}</span>
+                {/* A right rail, so the dates line up into their own column
+                    and the titles keep a clean left edge to scan down. */}
+                <span className="flex-none whitespace-nowrap font-mono text-meta text-text-faint">
+                  {noteMeta(note)}
+                </span>
+              </button>
             </li>
           ))}
         </ul>

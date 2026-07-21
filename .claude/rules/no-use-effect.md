@@ -27,7 +27,8 @@ in `eslint.config.js` fail any non-blessed file at the
   DOM: `useCommandPalette` (global ⌘K/Ctrl-K keydown), `useDialogFocus` (dialog
   focus hand-off), `useScrollIntoView` (active-descendant row visibility),
   `useOutsidePointerDown` (dismiss on outside press). Timers:
-  `useDebouncedValue`, `useTimeout`. The list is duplicated as the override
+  `useDebouncedValue`, `useTimeout`, `useElapsed` (the one-second
+  recording clock). The list is duplicated as the override
   block in `eslint.config.js` — **the two must stay in lockstep.**
 - **What qualifies as a bridge hook.** Named `useXxx`, flat in `src/`, owning
   exactly one external system. Cleanup is mandatory wherever there is anything

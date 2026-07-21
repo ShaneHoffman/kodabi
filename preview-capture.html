@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Kodabi — quick capture preview</title>
+    <!-- Dev-only, same harness as preview.html. Quick capture is its own Tauri
+         webview, so it needs its own page here too: ?recording=1 reports a live
+         capture, which is what puts the window into its listening state. -->
+    <script src="/preview-mock.js"></script>
+    <style>
+      /* The real window is frameless and transparent; this stands in for that
+         so the capture panel's own shadow has something to fall on. */
+      body {
+        margin: 0;
+        background: #c9c6bd;
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+      }
+      #root {
+        width: 500px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/capture.tsx"></script>
+  </body>
+</html>

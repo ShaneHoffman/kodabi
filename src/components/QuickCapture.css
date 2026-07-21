@@ -1,21 +1,207 @@
 /* ============================================================
-   Quick capture — the chromeless hotkey text box.
+   Quick capture — the summoned overlay window.
 
-   Only the frameless window's single edge lives here now; the field's body
-   line-height and writing-line hairline come from the shared Textarea
-   primitive.
+   Only non-bridged tokens live here: the window's plane, the body and footer
+   geometry, the waveform, and the two affordance glyphs.
 
-   The textarea keeps its focus ring, unlike the command palette's lone input.
-   That exception was justified while this window held exactly one control —
-   it no longer does. Adding a visible "File it" button (so the window is not
-   operable by hotkey alone) means Tab has somewhere to go, and a focus ring
-   is the only thing that says where it went (docs/DESIGN_SYSTEM.md §2, §6).
+   THIS IS A WINDOW, NOT A PANEL. It is its own frameless webview, so the
+   OVERLAY plane and the window shadow are what give it an edge — there is no
+   app behind it to sit on. Everything else about it is the same restraint as
+   the rest of the app: one thing on the screen, in the reading serif, and no
+   box around anything.
 
-   Showing and hiding the window IS the motion — FOUNDING_DOC §4 reserves
-   "one deliberate motion" for the distill-and-route moment and keeps
-   everything else near-instant — so there is no entrance animation.
+   Showing and hiding the window IS the motion (FOUNDING_DOC §4), so there is
+   no entrance animation.
    ============================================================ */
 
-.quick-capture__panel {
-  box-shadow: var(--hairline);
+.capture {
+  background: var(--overlay);
+  border-radius: var(--radius-window);
+  box-shadow: var(--lift-capture);
+  overflow: hidden;
+}
+
+/* A fixed floor so the window does not resize as the thought grows past one
+   line — a box that jumps while you type into it is a box you stop trusting. */
+.capture__body {
+  padding: 24px 28px 22px;
+  min-height: 132px;
+}
+
+.capture__rule {
+  height: 1px;
+  background: var(--edge-rule);
+}
+
+.capture__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 22px;
+}
+
+/* The thought itself, written in the reading serif at 21px. A captured
+   thought is a sentence someone will read back later, not a form value, and
+   this is the one place the app treats an input as prose. */
+.capture__input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0;
+  resize: none;
+  font-family: var(--serif);
+  font-size: var(--fs-capture);
+  line-height: var(--lh-snippet);
+  color: var(--text);
+}
+
+/* ---------- the record affordance ----------
+   A hollow ring, deliberately NOT green: nothing is being recorded yet, and a
+   green dot on a button that starts a recording would be claiming the state
+   it is offering to enter. */
+.capture__ring {
+  width: 11px;
+  height: 11px;
+  flex: none;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1.4px var(--edge-dot);
+}
+
+/* ---------- listening ---------- */
+
+.capture__dot {
+  position: relative;
+  width: 11px;
+  height: 11px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.capture__glow {
+  position: absolute;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--glow), var(--glow-out) 68%);
+  animation: capture-breathe var(--dur-glow) var(--ease-breath) infinite;
+}
+
+.capture__core {
+  position: relative;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--accent-dot);
+}
+
+@keyframes capture-breathe {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.15);
+  }
+}
+
+/* Four bars on one animation started at four offsets, so the group reads as a
+   voice rather than a metronome. This is the only place in the app where the
+   green paints more than a single dot, and it earns it: a waveform is the
+   most direct way to say "sound is arriving" without words. */
+.capture__wave {
+  display: flex;
+  align-items: center;
+  gap: 2.5px;
+  height: 15px;
+}
+
+.capture__bar {
+  width: 3px;
+  height: 15px;
+  border-radius: var(--radius-track);
+  background: var(--accent-dot);
+  transform-origin: center;
+  animation: capture-bar var(--dur-wave) var(--ease-breath) infinite;
+}
+
+.capture__bar:nth-child(1) {
+  animation-delay: var(--delay-wave-1);
+}
+.capture__bar:nth-child(2) {
+  animation-delay: var(--delay-wave-2);
+}
+.capture__bar:nth-child(3) {
+  animation-delay: var(--delay-wave-3);
+}
+.capture__bar:nth-child(4) {
+  animation-delay: var(--delay-wave-4);
+}
+
+@keyframes capture-bar {
+  0%,
+  100% {
+    transform: scaleY(0.3);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+
+/* Reduced motion settles the glow and the bars rather than removing them: the
+   green carries the recording state, and a still waveform still says sound is
+   being captured. Never let reduced motion remove information
+   (docs/DESIGN_SYSTEM.md §4). */
+@media (prefers-reduced-motion: reduce) {
+  .capture__glow {
+    animation: none;
+    opacity: 0.6;
+    transform: none;
+  }
+  .capture__bar {
+    animation: none;
+    transform: scaleY(0.6);
+  }
+}
+
+:root[data-reduce-motion="on"] .capture__glow {
+  animation: none;
+  opacity: 0.6;
+  transform: none;
+}
+
+:root[data-reduce-motion="on"] .capture__bar {
+  animation: none;
+  transform: scaleY(0.6);
+}
+
+/* ---------- the stop button ----------
+   The token fill rather than the filled-ink treatment "File it" uses: ending
+   a recording is not the same kind of commitment as filing a thought, and the
+   two must not look like the same button. */
+.capture__stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--token-active);
+  border-radius: var(--radius-control);
+  padding: 8px 15px;
+  transition: background-color var(--dur-quick) var(--ease-standard);
+}
+
+.capture__stop:hover {
+  background: var(--token-hover);
+}
+
+.capture__square {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: var(--radius-track);
+  background: var(--text);
 }

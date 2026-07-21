@@ -59,7 +59,10 @@ describe("NeedsAttentionView", () => {
 
     renderView();
 
-    expect(await screen.findByText("2 captures to retry")).toBeInTheDocument();
+    // The count plus when it last went wrong: "2 captures to retry · last
+    // failed Jul 19". The date is what turns a number into a situation.
+    expect(await screen.findByText(/2 captures to retry/)).toBeInTheDocument();
+    expect(await screen.findByText(/last failed/)).toBeInTheDocument();
   });
 
   it("retries one capture and keeps the other rows out of it", async () => {

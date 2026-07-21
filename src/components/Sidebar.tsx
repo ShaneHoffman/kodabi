@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { DISTILL_STATE_EVENT } from "../events";
 import { PALETTE_SHORTCUT_LABEL } from "../useCommandPalette";
 import type { DistillEvent } from "../useDistillState";
@@ -21,13 +22,28 @@ type Props = {
   onOpenPalette: () => void;
 };
 
+/** A row's nesting depth, handed to CSS so the indent composes with the row
+ * padding instead of overriding it. */
+function depthStyle(depth: number): CSSProperties | undefined {
+  return depth > 0 ? ({ "--row-depth": depth } as CSSProperties) : undefined;
+}
+
 /**
- * The quiet project switcher: the Inbox sentinel stands on its own at the top
- * (it is not a project — it is where unrouted notes wait), then the projects
- * below their own heading, nested ones indented by slug depth. A hairline
- * divides the two so the Inbox never reads as just another project. The
- * persistent listening indicator and the palette affordance sit at the foot.
- * Selection is a surface value shift — never the reserved green.
+ * The shell's left rail, top to bottom: what the app is called, where the
+ * work is, what you can browse, what capture is doing, and the chrome.
+ *
+ * Two structural ideas carry it. First, it shares the PAGE plane with the
+ * content beside it — one sheet of paper, divided by a single hairline —
+ * rather than sitting on a recessed fill that read as a second box. Second,
+ * the active destination is the only raised thing in it: a pill that lifts
+ * lighter than the page, so where you are is legible before any label is
+ * read. Selection is value, never the reserved green.
+ *
+ * The Inbox and Needs attention lead as PEERS in a system rail of their own,
+ * above the projects. They are the two places work waits; a project is a
+ * place to browse. The rule under the wordmark and the value step down to the
+ * footer are the only two lines in the rail, and each separates a genuinely
+ * different kind of thing.
  */
 export function Sidebar({ onOpenPalette }: Props) {
   const { entries, loading, error } = useProjects();
@@ -42,38 +58,41 @@ export function Sidebar({ onOpenPalette }: Props) {
     const count =
       entry.kind === "inbox" ? entry.note_count : entry.project.note_count;
     const depth = entry.kind === "inbox" ? 0 : slugDepth(entry.project.slug);
+    const rail = entry.kind === "inbox";
     return (
       <Button
         key={entry.kind === "inbox" ? "inbox" : entry.project.id}
         variant="quiet"
         aria-current={selected ? "page" : undefined}
         onClick={() => navigate(entryView(entry))}
-        style={{
-          paddingInlineStart: `calc(var(--space-xs) + ${depth} * var(--space-sm))`,
-        }}
-        className={`sidebar__row flex w-full items-baseline justify-between text-left text-body ${
-          selected ? "is-selected bg-surface text-text" : "text-text-soft"
+        style={depthStyle(depth)}
+        className={`sidebar__row${rail ? " sidebar__row--rail" : ""} flex w-full items-center justify-between gap-2xs text-left text-body ${
+          selected ? "is-selected text-text" : "text-text-soft"
         }`}
       >
-        <span>{name}</span>
-        <span className="text-cap text-text-faint">{count}</span>
+        <span className="truncate">{name}</span>
+        <span className="font-mono text-cap font-normal text-text-faint">
+          {count}
+        </span>
       </Button>
     );
   };
 
   return (
-    <aside className="sidebar flex w-64 flex-none flex-col gap-md bg-bg-sink p-md">
+    <aside className="sidebar flex flex-none flex-col bg-bg">
       {/* The document's h1: heading navigation needs a level-1 root even
-          though the wordmark reads quietly (preflight strips h1 sizing).
-          It sits at ink value rather than soft — it is the one piece of the
-          window that names the app, and reading like a disabled nav row was
-          under-selling it — with the eyebrow's tracking to set it apart from
-          the rows below without making it bigger than them. */}
-      <h1 className="font-serif text-body tracking-caps text-text">kodabi</h1>
+          though the wordmark reads quietly (preflight strips h1 sizing). It is
+          the one piece of the window that names the app, and it is the only
+          place the reading face appears outside a note — the wordmark is a
+          word you read, not a control you operate. */}
+      <h1 className="sidebar__wordmark font-serif text-wordmark tracking-wordmark text-text">
+        kodabi
+      </h1>
+      <div className="sidebar__divider" />
 
       <nav
         aria-label="Knowledge base"
-        className="flex min-h-0 flex-1 flex-col gap-md overflow-y-auto"
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto"
       >
         {/* A failed listing must not masquerade as an empty vault. */}
         {error && (
@@ -82,48 +101,43 @@ export function Sidebar({ onOpenPalette }: Props) {
           </StatusMessage>
         )}
 
-        {inboxEntry && (
-          <div className="flex flex-col gap-3xs">{renderRow(inboxEntry)}</div>
-        )}
-
-        <div className="sidebar__group flex flex-col gap-3xs pt-md">
-          <p className="mb-2xs text-eyebrow uppercase tracking-eyebrow text-text-faint">
-            Projects
-          </p>
-          {/* Gated on !loading too: without it the first read of every cold
-              start rendered "No projects yet." before the listing landed, so
-              the app opened by telling the user their vault was empty
-              (docs/DESIGN_SYSTEM.md §3). */}
-          {projectEntries.length === 0 && !loading && !error && (
-            // variant="empty", not "status": the variant fixes the ARIA role,
-            // and this is first-run copy rather than progress — role="status"
-            // would make a static sentence a live region (§3).
-            <StatusMessage variant="empty" compact>
-              No projects yet.
-            </StatusMessage>
-          )}
-          {projectEntries.map(renderRow)}
+        {/* The system rail: the two places work waits, as peers. */}
+        <div className="flex flex-col gap-3xs">
+          {inboxEntry && renderRow(inboxEntry)}
+          <NeedsAttentionRow />
         </div>
+
+        <p className="sidebar__eyebrow px-2xs pb-2xs text-eyebrow font-semibold uppercase tracking-rail text-text-faint">
+          Projects
+        </p>
+        {/* Gated on !loading too: without it the first read of every cold
+            start rendered "No projects yet." before the listing landed, so
+            the app opened by telling the user their vault was empty
+            (docs/DESIGN_SYSTEM.md §3). */}
+        {projectEntries.length === 0 && !loading && !error && (
+          // variant="empty", not "status": the variant fixes the ARIA role,
+          // and this is first-run copy rather than progress — role="status"
+          // would make a static sentence a live region (§3).
+          <StatusMessage variant="empty" compact>
+            No projects yet.
+          </StatusMessage>
+        )}
+        <div className="sidebar__list">{projectEntries.map(renderRow)}</div>
       </nav>
 
-      {/* Two groups, not four evenly-spaced rows: what capture is doing right
-          now is a status, and the rest are places to go. Flat at one gap they
-          read as one arbitrary list, and the indicator's mark sat 12px left of
-          every label because it alone carried no control padding. The px-xs
-          wrapper puts the mark on the same left edge as the row labels below,
-          so the group has one column instead of three. */}
-      <footer className="flex flex-col gap-md">
-        <div className="px-xs">
-          <ListeningIndicator />
-        </div>
-        <div className="flex flex-col gap-3xs">
-          <NeedsAttentionRow />
+      {/* mt-auto pins the foot, so the rows above can grow without the
+          Settings and Commands rows moving under the pointer. What capture is
+          doing is a status; the two below it are places to go, and the value
+          step between them is what says so. */}
+      <footer className="mt-auto flex flex-col">
+        <ListeningIndicator />
+        <div className="sidebar__list">
           <Button
             variant="quiet"
             aria-current={view.kind === "settings" ? "page" : undefined}
             onClick={() => navigate({ kind: "settings" })}
-            className={`flex w-full items-baseline text-left text-cap ${
-              view.kind === "settings" ? "text-text-soft" : "text-text-faint"
+            className={`sidebar__row flex w-full text-left text-body ${
+              view.kind === "settings" ? "is-selected text-text" : "text-text-soft"
             }`}
           >
             <span>Settings</span>
@@ -131,10 +145,10 @@ export function Sidebar({ onOpenPalette }: Props) {
           <Button
             variant="quiet"
             onClick={onOpenPalette}
-            className="flex w-full items-baseline justify-between text-left text-cap text-text-faint"
+            className="sidebar__row flex w-full items-center justify-between gap-2xs text-left text-body text-text-faint"
           >
             <span>Commands</span>
-            <span>{PALETTE_SHORTCUT_LABEL}</span>
+            <span className="font-mono text-cap">{PALETTE_SHORTCUT_LABEL}</span>
           </Button>
         </div>
       </footer>
@@ -147,12 +161,11 @@ export function Sidebar({ onOpenPalette }: Props) {
  * the Inbox at all: without a standing signal, moving them out of the way would
  * have moved them out of sight.
  *
- * It appears only when there is something to act on and disappears at zero, so
- * the sidebar carries no permanent reminder of a problem nobody has. It leads
- * the footer's nav group rather than the nav above: that nav is labelled
- * "Knowledge base", and a capture that failed to distill is not knowledge, it is
- * plumbing. The footer is bottom-anchored, so the row grows the group upward
- * and Settings and Commands never move under the pointer.
+ * It stands beside the Inbox in the system rail rather than down in the
+ * chrome, because it is the same kind of thing — a queue with a count that
+ * someone has to clear. It still disappears at zero, so the sidebar carries no
+ * permanent reminder of a problem nobody has, and the rail collapses to the
+ * single Inbox row it started as.
  *
  * It also owns the distill-failure refetch. That listener used to live in the
  * Inbox, which meant a failure only reached the list while the Inbox happened
@@ -177,13 +190,15 @@ function NeedsAttentionRow() {
       data-testid="needs-attention-nav"
       aria-current={selected ? "page" : undefined}
       onClick={() => navigate({ kind: "needsAttention" })}
-      // A step above Settings' faint: this is work someone has to do, and rank
-      // is carried by value (docs/DESIGN_SYSTEM.md §1).
-      className="flex w-full items-baseline justify-between text-left text-cap text-text-soft"
+      className={`sidebar__row sidebar__row--rail flex w-full items-center justify-between gap-2xs text-left text-body ${
+        selected ? "is-selected text-text" : "text-text-soft"
+      }`}
     >
       <span>Needs attention</span>
       {sessions.length > 0 && (
-        <span className="text-text-faint">{sessions.length}</span>
+        <span className="font-mono text-cap font-normal text-text-faint">
+          {sessions.length}
+        </span>
       )}
     </Button>
   );
