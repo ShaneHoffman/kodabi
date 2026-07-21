@@ -73,10 +73,9 @@
 }
 
 /* Indent the hint under the label rather than the box, so the text column
-   reads as one block (control width + the inline gap-2xs beside it).
-
-   token-guard-allow: the 1rem is not a spacing step. It restates the box's
-   own 1rem width, so it has to track the box rather than the rhythm. */
+   reads as one block (control width + the inline gap-2xs beside it). */
 .ui-checkbox__hint {
+  /* token-guard-allow: the 1rem is not a spacing step. It restates the box's
+     own 1rem width, so it has to track the box rather than the rhythm. */
   padding-left: calc(1rem + var(--space-2xs));
 }
