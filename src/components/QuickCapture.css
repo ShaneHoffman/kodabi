@@ -188,10 +188,14 @@
 
 /* Reduced motion settles the glow and the bars rather than removing them: the
    green carries the recording state, and a still waveform still says sound is
-   being captured. The quiet bars need their own override — they are a more
-   specific rule, so the plain `.capture__bar` one below can't reach them — and
-   they stay ink and settled, with the label carrying the state. Never let
-   reduced motion remove information (docs/DESIGN_SYSTEM.md §4). */
+   being captured. The quiet bars need their own override in both branches, and
+   each restates `transform` rather than inheriting one: in the media query the
+   base `.capture__bar` rule is the weaker selector, but under
+   `:root[data-reduce-motion="on"]` it is the *stronger* one (`:root` and the
+   attribute both score as classes), so an override that named only the
+   animation would leave the quiet bars at the live settled height. They stay
+   ink and at their floor either way, with the label carrying the state. Never
+   let reduced motion remove information (docs/DESIGN_SYSTEM.md §4). */
 @media (prefers-reduced-motion: reduce) {
   .capture__glow {
     animation: none;
@@ -204,6 +208,7 @@
   }
   .capture__wave--quiet .capture__bar {
     animation: none;
+    transform: scaleY(0.3);
     opacity: 0.6;
   }
 }
@@ -221,6 +226,7 @@
 
 :root[data-reduce-motion="on"] .capture__wave--quiet .capture__bar {
   animation: none;
+  transform: scaleY(0.3);
   opacity: 0.6;
 }
 
