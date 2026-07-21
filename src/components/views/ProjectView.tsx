@@ -60,7 +60,7 @@ export function ProjectView({ slug }: Props) {
           </StatusMessage>
         )
       ) : (
-        <ul className="mt-md">
+        <ul className="project__index">
           {notes.map((note) => (
             // Keyed by path, not id: two files can carry the same id (an
             // external copy), and duplicate keys would mis-reconcile rows.

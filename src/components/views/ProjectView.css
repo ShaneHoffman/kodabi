@@ -10,6 +10,12 @@
    looking different at all.
    ============================================================ */
 
+/* A library leads wider than a queue: you are here to read down the index,
+   not to get straight into it. */
+.project__index {
+  margin-top: var(--lead-library);
+}
+
 .project__row {
   display: flex;
   justify-content: space-between;

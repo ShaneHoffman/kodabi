@@ -113,7 +113,7 @@ export function SearchView({ query }: Props) {
           </StatusMessage>
         )
       ) : (
-        <ul className="mt-2xs">
+        <ul className="search__results">
           {hits.map((hit) => (
             <li key={hit.note.path}>
               <button

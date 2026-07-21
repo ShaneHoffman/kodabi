@@ -38,6 +38,12 @@
 }
 
 /* Results tint, never lift. Nothing here is waiting to be cleared. */
+/* Two pixels. The scope line is a caption on the results, not a heading over
+   them, so it sits almost against the first one. */
+.search__results {
+  margin-top: var(--lead-search);
+}
+
 .search__row {
   display: block;
   width: 100%;

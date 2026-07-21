@@ -371,6 +371,24 @@
   --measure-progress: 340px; /* the Inbox progress instrument */
   --measure-menu: 236px; /* an overlay menu's floor */
 
+  /* the lead-in between a view's header and the thing it heads.
+
+     These are per view for the same reason the gutters are: how much air sits
+     under a masthead is part of how dense the view reads, and rounding them
+     all onto the nearest 4px step is what made a lifted Inbox row collide
+     with the progress caption above it. A queue leads tightest — you are
+     meant to get straight into the list — and everything you read rather
+     than work through leads at 30. */
+  --lead-queue: 22px; /* Inbox: the progress instrument to the first row */
+  --lead-panel: 22px; /* Settings: the title to the tab rail */
+  --lead-library: 30px; /* Project: the header to the index */
+  --lead-health: 30px; /* Needs attention: the header to the cards */
+  --lead-doc: 30px; /* Note: the meta line to the body */
+  --lead-doc-title: 18px; /* Note: the back link to the title */
+  --lead-search: 2px; /* Search: the scope line to the results */
+  --lead-footnote: 22px; /* Needs attention: the cards to the reassurance */
+  --gap-card: 14px; /* between two pre-lifted cards */
+
   /* where a summoned overlay sits */
   --palette-top: 96px;
 

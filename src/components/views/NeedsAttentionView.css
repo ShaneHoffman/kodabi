@@ -12,6 +12,19 @@
    a statement about the item.
    ============================================================ */
 
+.attention__stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-card);
+  margin-top: var(--lead-health);
+}
+
+/* The reassurance sits its own lead-in below the cards, not tucked under the
+   last one: it is about all of them. */
+.attention__footnote {
+  margin-top: var(--lead-footnote);
+}
+
 .attention__card {
   display: flex;
   align-items: center;

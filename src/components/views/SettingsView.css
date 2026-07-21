@@ -10,6 +10,10 @@
    Laid across the top it is unmistakably a filter on the content below it.
    ============================================================ */
 
+.settings__rail {
+  margin-top: var(--lead-panel);
+}
+
 .settings__tabs {
   display: flex;
   gap: 26px;

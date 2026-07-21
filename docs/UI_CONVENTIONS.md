@@ -463,8 +463,25 @@ Project view centres 640px of reading measure at 52/60 *is* the design, and
 rounding both onto a shared step deletes it.
 
 So they are a **fourth token layer** in `design/tokens.css`: `--sidebar-*`,
-`--gutter-*-y` / `--gutter-*-x`, `--measure-*`, `--palette-top`, and the radius
-ladder.
+`--gutter-*-y` / `--gutter-*-x`, `--measure-*`, `--lead-*`, `--palette-top`,
+and the radius ladder.
+
+The `--lead-*` family is the gap between a view's header and the thing it
+heads, and it is per view for the same reason the gutters are:
+
+| Token | px | Where |
+| --- | --- | --- |
+| `--lead-queue` | 22 | Inbox: the progress instrument to the first row |
+| `--lead-panel` | 22 | Settings: the title to the tab rail |
+| `--lead-library` | 30 | Project: the header to the index |
+| `--lead-health` | 30 | Needs attention: the header to the cards |
+| `--lead-doc` | 30 | Note: the meta line to the body |
+| `--lead-search` | 2 | Search: the scope line to the results |
+
+A queue leads tightest — you are meant to get straight into the list — and
+anything you read rather than work through leads at 30. Rounding these onto the
+nearest named step is what let a lifted Inbox row rise into the progress caption
+above it, which is the exact failure this layer exists to prevent.
 
 **They are consumed from a co-located `Component.css`, never from `className`.**
 That is what keeps both guards armed: eslint still fails every arbitrary value

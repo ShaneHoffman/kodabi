@@ -73,7 +73,7 @@ export function InboxView() {
       ) : (
         <>
           <Progress filed={filedThisSession} remaining={remaining} percent={cleared} />
-          <ul>
+          <ul className="inbox__list">
             {notes.map((note) => (
               // Keyed by path, not id: two files can carry the same id (an
               // external copy), and duplicate keys would mis-reconcile rows.
