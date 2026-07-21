@@ -90,11 +90,19 @@
   animation: capture-breathe var(--dur-glow) var(--ease-breath) infinite;
 }
 
+/* The same 11px box in every state, so the header never reflows — only the
+   fill changes. Ink while a capture is engaged but nothing is reaching disk
+   (starting up, or every source dropped); the one reserved green the moment it
+   is. Mirrors `.listening__core` in ListeningIndicator.css. */
 .capture__core {
   position: relative;
   width: 11px;
   height: 11px;
   border-radius: 50%;
+  background: var(--text);
+}
+
+.capture__core--live {
   background: var(--accent-dot);
 }
 
@@ -111,9 +119,11 @@
 }
 
 /* Four bars on one animation started at four offsets, so the group reads as a
-   voice rather than a metronome. This is the only place in the app where the
-   green paints more than a single dot, and it earns it: a waveform is the
-   most direct way to say "sound is arriving" without words. */
+   voice rather than a metronome. Live, this is the only place in the app where
+   the green paints more than a single dot, and it earns it: a waveform is the
+   most direct way to say "sound is arriving" without words. Engaged but not
+   live, the same four bars stay put in ink (see `--quiet` below) — the header
+   must not change silhouette every time a source flaps. */
 .capture__wave {
   display: flex;
   align-items: center;
@@ -153,10 +163,35 @@
   }
 }
 
+/* Engaged, but nothing is reaching disk: starting up, or every source dropped
+   and reconnecting. The bars settle to their floor in ink — no green, because
+   no audio is arriving — and share one slow opacity pulse, deliberately in
+   unison rather than staggered: this is not a voice, it is a session that is
+   alive and trying. Same reasoning as `.is-starting` / `.is-reconnecting` in
+   SpiritMark.css. Placed after the `nth-child` delays so this shorthand clears
+   them. */
+.capture__wave--quiet .capture__bar {
+  background: var(--text);
+  transform: scaleY(0.3);
+  animation: capture-wake var(--dur-pulse) var(--ease-breath) infinite;
+}
+
+@keyframes capture-wake {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
 /* Reduced motion settles the glow and the bars rather than removing them: the
    green carries the recording state, and a still waveform still says sound is
-   being captured. Never let reduced motion remove information
-   (docs/DESIGN_SYSTEM.md §4). */
+   being captured. The quiet bars need their own override — they are a more
+   specific rule, so the plain `.capture__bar` one below can't reach them — and
+   they stay ink and settled, with the label carrying the state. Never let
+   reduced motion remove information (docs/DESIGN_SYSTEM.md §4). */
 @media (prefers-reduced-motion: reduce) {
   .capture__glow {
     animation: none;
@@ -166,6 +201,10 @@
   .capture__bar {
     animation: none;
     transform: scaleY(0.6);
+  }
+  .capture__wave--quiet .capture__bar {
+    animation: none;
+    opacity: 0.6;
   }
 }
 
@@ -178,6 +217,11 @@
 :root[data-reduce-motion="on"] .capture__bar {
   animation: none;
   transform: scaleY(0.6);
+}
+
+:root[data-reduce-motion="on"] .capture__wave--quiet .capture__bar {
+  animation: none;
+  opacity: 0.6;
 }
 
 /* ---------- the stop button ----------
