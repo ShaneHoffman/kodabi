@@ -45,8 +45,8 @@ drift starts (the same control turning up as `px-3 py-1`, then `py-2`, then `px-
 | Inline label ↔ control gap | 2xs | `gap-2xs` | 8 |
 | Panel / container padding | md | `p-md` | 24 |
 | Tight list gap (sidebar nav rows) | 3xs | `gap-3xs` | 4 |
-| Content list rhythm | (Layer 4) | the view's own `*.css` | per view |
-| List row padding | (Layer 4) | the view's own row rule | per view |
+| Content list rhythm | (Layer 4) | `--gap-row-columns`, in the view's own `*.css` | 28 |
+| List row padding | (Layer 4) | `--row-queue-*` / `--row-library-*` / `--row-search-*` | 20/16 · 16/14 · 15/12 |
 | Reading / writing column width | (Layer 4) | `--measure-doc` / `--measure-search` | 660 / 640 |
 
 The view gutter is owned by [`ViewFrame`](../src/components/ui/ViewFrame.tsx), so a screen never spells
@@ -55,15 +55,17 @@ on every view and on all four sides. The header lead-in is Layer 4 too, but it b
 one applies its own `--lead-*` in its co-located CSS (`.inbox__list`, `.project__index`,
 `.attention__stack`).
 
-**A content list's rhythm is Layer-4 geometry, and it lives in the view's own `*.css`.** There is no
-shared list gap and no shared row padding: an Inbox row is `padding: 20px 16px` with a matching
-negative inline margin so its hover plane reaches into the gutter, a `.project__row` is `16px 14px`
-and only tints, and `.attention__stack` separates its already-lifted cards at `--gap-card` (14px).
+**A content list's rhythm is Layer-4 geometry, and it is named in `design/tokens.css`.** There is no
+shared list gap and no shared row padding: an Inbox row is `--row-queue-y` / `--row-queue-x` (20/16)
+with a matching negative inline margin — written `calc(-1 * var(--row-queue-x))`, so the bleed
+provably tracks the pad — that lets its hover plane reach into the gutter, a `.project__row` is
+`--row-library-*` (16/14) and only tints, a `.search__row` is `--row-search-*` (15/12), and
+`.attention__stack` separates its already-lifted cards at `--gap-card` (14px).
 Those numbers are off the 4px step scale on purpose — what separates rows has to beat what a row
 stacks its own lines at, or the list stops reading as rows, and the Inbox once shipped three-line
-rows at `gap-3xs` and became one undifferentiated block. What the rule forbids is a fourth rhythm
-invented inline in a `className`: the numbers stay in the co-located CSS, where the three that exist
-can be read against each other.
+rows at `gap-3xs` and became one undifferentiated block. Off the step scale is not the same as
+unnamed: the numbers live in Layer 4 and are consumed from the co-located CSS, where the three
+stances can be read against each other.
 
 Control padding is **`px-xs py-2xs` (12 / 8)**. (The tokens are named by *step*, not by pixel: `--space-sm`
 is 16px and `--space-xs` is 12px — so 12px horizontal padding is `px-xs`, not `px-sm`.) The primitives
@@ -109,12 +111,16 @@ component (the pattern established by `Sidebar.css`, `SpiritMark.css`, and each 
 | Focus | `--focus-width`, `--focus-offset`, `--radius-focus` | rendered as `outline` |
 | Derived recipes | `--wash-active`, `--selection`, `--scrim`, `--scrollbar-*` | composed values |
 | Sheen | `--sheen` | specialised |
-| Layer-4 geometry | `--gutter-view-*`, `--measure-*`, `--sidebar-*`, `--lead-*` | per-view stance, off the step scale |
+| Layer-4 geometry | `--gutter-view-*`, `--measure-*`, `--sidebar-*`, `--lead-*`, `--row-*`, `--palette-*`, `--capture-*` | per-view stance, off the step scale |
 
 **Enforced, not aspirational.** [`src/designTokens.test.ts`](../src/designTokens.test.ts) fails any literal
-colour, font-family or duration in a `src/**/*.css` file, and `eslint.config.js` fails numeric spacing
-utilities and arbitrary values inside `className`. Both run in gates CI already runs. The escape hatch is
-a `token-guard-allow` comment, which is deliberately greppable.
+colour, font-family, duration **or spacing value** (padding / margin / gap, in px, rem or em) in a
+`src/**/*.css` file, and `eslint.config.js` fails numeric spacing utilities and arbitrary values inside
+`className`. Between them, spacing has no unguarded side: eslint owns the class strings it can parse, the
+test owns the stylesheets it cannot. Both run in gates CI already runs. The escape hatch is
+a `token-guard-allow` comment, which is deliberately greppable — and it must sit on the offending
+declaration or in the comment block directly above it, since an intervening line of code (a selector,
+say) ends its reach.
 
 Each `Component.css` opens with a banner comment stating that **only non-bridged tokens live there** —
 everything bridged stays a utility on the element. Keep that split.
@@ -509,10 +515,10 @@ Three surfaces keep a documented departure, each forced by what the window is ra
 
 - **`CommandPalette`** — its input keeps a bespoke treatment (no focus ring, its own inset hairline,
   `role="combobox"`). It is a search-combobox, not a generic form field. The shell around it is `Overlay`
-  like any other modal. Its own rhythm is the modal's, not a control's: the input is `px-md py-sm` and the
-  rows (and the no-commands row) are `px-md`, with `gap-md` between a row's title and its hint — a panel
-  people read a list in, indented off its own edge rather than padded like a button. Row vertical padding
-  stays `py-2xs`, the app's list-row step.
+  like any other modal. Its own rhythm is the modal's, not a control's, and it is Layer-4 geometry in
+  `CommandPalette.css` rather than utilities: the query row is `--palette-query-*` (20/22/18) and the rows
+  are `--palette-row-*` (11/13) — a panel people read a list in, indented off its own edge rather than
+  padded like a button.
 - **`QuickCapture`** — a hotkey-first window that now also carries a visible **File it** button, because a
   pointer-only user cannot press Enter into a window they never focused. Adding it is why the textarea
   regained its focus ring: Tab finally has somewhere to go.
@@ -535,7 +541,18 @@ told apart before any heading is read. Those measurements do not land on the
 
 So they are a **fourth token layer** in `design/tokens.css`: `--sidebar-*`,
 `--gutter-view-y` / `--gutter-view-x`, `--measure-*`, `--lead-*`,
-`--palette-top`, and the radius ladder.
+`--palette-top`, and the radius ladder — plus the per-view row stances
+(`--row-*`, `--card-pad-*`, `--gap-row-columns`), the control insets
+(`--chip-pad-y`, `--btn-filled-x`, `--tag-*`, `--toolbar-*`, `--token-pill-*`,
+`--field-search-y`, `--mark-pad-*`), the Settings panel's own furniture
+(`--gap-tab`, `--tab-pad-*`, `--gap-setting`, `--sublabel-tuck`) and the
+summoned surfaces (`--palette-*`, `--menu-*`, `--capture-*`).
+
+**Off the step scale is not a licence to be a literal.** These are named
+precisely *because* they are off it: a number that no ladder explains is one
+that only its own name can. Equal values with different jobs stay apart —
+a menu option and a palette row are both 13px across, but one is chosen and
+the other is read, and their vertical insets were tuned apart.
 
 **The gutter is not part of the stance.** Each view type used to set its own
 padding and its own column alignment — the Inbox pinned left at 44/60, the
@@ -567,18 +584,23 @@ nearest named step is what let a lifted Inbox row rise into the progress caption
 above it, which is the exact failure this layer exists to prevent.
 
 **They are consumed from a co-located `Component.css`, never from `className`.**
-That is what keeps both guards armed: eslint still fails every arbitrary value
-and numeric spacing utility in a class string, and the values still live in one
-file rather than scattered through TSX.
+That is what keeps all three guards armed: eslint fails every arbitrary value
+and numeric spacing utility in a class string, the token test fails a raw px in
+the stylesheet, and the values themselves live in one file rather than scattered
+through TSX.
 
 ```css
 /* src/components/views/InboxView.css */
 .inbox__row {
-  padding: 20px 16px;
-  margin: 0 -16px;              /* the lift reaches into the gutter */
+  padding: var(--row-queue-y) var(--row-queue-x);
+  margin: 0 calc(-1 * var(--row-queue-x)); /* the lift reaches into the gutter */
   border-radius: var(--radius-row);
 }
 ```
+
+The bleed is written as a `calc` off the pad rather than as its own number, so
+the two cannot drift: a row whose hover plane reaches into the gutter has to
+reach by exactly its own inset, and this is the form that proves it.
 
 The named `--space-*` steps are unchanged and still govern everything *inside* a
 component — gaps between elements, control padding, list rhythm. Layer 4 governs

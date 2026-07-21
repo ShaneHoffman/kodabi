@@ -20,11 +20,11 @@
   display: flex;
   justify-content: space-between;
   align-items: baseline;
-  gap: 28px;
+  gap: var(--gap-row-columns);
   width: 100%;
   text-align: left;
-  padding: 16px 14px;
-  margin: 0 -14px;
+  padding: var(--row-library-y) var(--row-library-x);
+  margin: 0 calc(-1 * var(--row-library-x));
   border-radius: var(--radius-md);
   transition: background-color var(--dur-quick) var(--ease-standard);
 }

@@ -18,10 +18,10 @@
 .search__field {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: var(--space-xs);
   background: var(--surface);
   border-radius: var(--radius-card);
-  padding: 13px 16px;
+  padding: var(--field-search-y) var(--space-sm);
   box-shadow: var(--lift);
 }
 
@@ -48,8 +48,8 @@
   display: block;
   width: 100%;
   text-align: left;
-  padding: 15px 12px;
-  margin: 0 -12px;
+  padding: var(--row-search-y) var(--row-search-x);
+  margin: 0 calc(-1 * var(--row-search-x));
   border-radius: var(--radius-control);
   transition: background-color var(--dur-quick) var(--ease-standard);
 }
@@ -66,5 +66,5 @@
   background: var(--highlight);
   color: var(--text);
   border-radius: var(--radius-match);
-  padding: 1px 3px;
+  padding: var(--mark-pad-y) var(--mark-pad-x);
 }

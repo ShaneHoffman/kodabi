@@ -356,6 +356,9 @@
   --sidebar-indent: 16px; /* one level of project nesting */
   --sidebar-eyebrow-top: 30px; /* the lead-in above the PROJECTS eyebrow */
   --sidebar-row-gap: 1px; /* between project rows: a seam, not a step */
+  /* The rail's section break: under the wordmark, under its divider, and
+     under the listening foot. One value, because they are one gesture. */
+  --sidebar-section-gap: 20px;
 
   /* The view gutter — vertical, then horizontal. ONE pair, for every view.
      Each view type used to state its own (44/60, 52/60, 46/56, 52/60, 40/64,
@@ -391,12 +394,80 @@
   --lead-health: 30px; /* Needs attention: the header to the cards */
   --lead-doc: 30px; /* Note: the meta line to the body */
   --lead-doc-title: 18px; /* Note: the back link to the title */
+  --lead-doc-section: 28px; /* Note: above a section header inside the body */
+  --lead-doc-tasks: 14px; /* Note: above the action-item list, which carries
+                             its own row gap and so needs less air than prose */
   --lead-search: 2px; /* Search: the scope line to the results */
   --lead-footnote: 22px; /* Needs attention: the cards to the reassurance */
   --gap-card: 14px; /* between two pre-lifted cards */
 
-  /* where a summoned overlay sits */
+  /* the list rows — per-view density.
+
+     A content row's box is the other half of the stance the lead-ins start:
+     how tightly a view packs its rows is most of what tells a queue from a
+     library. Each view states BOTH axes even where one lands on the step
+     scale, because the pair was tuned together and because a row whose hover
+     plane bleeds into the gutter has to bleed by exactly its own inset —
+     calc(-1 * var(--row-*-x)) makes that provable rather than remembered. */
+  --row-queue-y: 20px; /* Inbox: the roomiest, it carries a serif snippet */
+  --row-queue-x: 16px;
+  --row-library-y: 16px; /* Project: an index you scan, so it packs tighter */
+  --row-library-x: 14px;
+  --row-search-y: 15px; /* Search: between the two, and it never lifts */
+  --row-search-x: 12px;
+  --row-panel-y: 13px; /* Settings: the grid owns the width, so y only */
+  --gap-row-columns: 28px; /* a row's text column to its trailing action */
+  --card-pad-y: 18px; /* Needs attention: a card is pre-lifted, so its inset
+                         reads deeper than a row's at the same number */
+  --card-pad-x: 20px;
+
+  /* the controls.
+
+     A chip, a tag and a toolbar tool are all smaller than the step scale's
+     coarsest useful move, and each was tuned against its own type size. They
+     are named here rather than rounded onto --space-* because rounding them
+     is what makes a control chip look like a button that shrank. */
+  --chip-pad-y: 7px; /* a control chip (Select boxed, the Settings chip) */
+  --btn-filled-x: 18px; /* the filled button, which earns more width */
+  --token-pill-y: 5px; /* the file token's hover pill; it bleeds negatively
+                          so gaining a pill never moves the text */
+  --token-pill-x: 10px;
+  --tag-gap: 7px; /* inside a tag chip: label to its remove glyph */
+  --tag-pad-x: 9px;
+  --toolbar-pad: 5px; /* the format toolbar's own inset, and a tool's y */
+  --toolbar-tool-x: 9px;
+  --toolbar-gap: 2px; /* the seam between tools, and either side of a divider */
+  --field-search-y: 13px; /* the pinned query field */
+  --mark-pad-y: 1px; /* the box drawn around a matched term */
+  --mark-pad-x: 3px;
+  --gap-tab: 26px; /* between the Settings tab rail's tabs */
+  --tab-pad-x: 1px; /* optical, so the underline clears the text */
+  --tab-pad-bottom: 9px; /* tab text to the rule it sits on */
+  --gap-setting: 20px; /* a settings row: label column to control column */
+  --sublabel-tuck: -3px; /* negative: pulls a sublabel up under its label */
+
+  /* where a summoned overlay sits, and how the summoned surfaces are packed.
+
+     These windows are read, not worked in, so they are indented off their own
+     edge rather than padded like a control. */
   --palette-top: 96px;
+  --palette-query-top: 20px; /* the palette's query row */
+  --palette-query-x: 22px;
+  --palette-query-bottom: 18px;
+  --palette-row-y: 11px; /* one result row */
+  --palette-row-x: 13px;
+  --palette-section-gap: 14px; /* a later section's lead-in, and the list foot */
+  --palette-eyebrow-gap: 6px; /* a section eyebrow to its first row */
+  --menu-pad: 7px; /* an overlay menu's inset around its rows */
+  --menu-option-y: 10px; /* deliberately not the palette row's pair: a menu
+                            option is chosen, a palette row is read */
+  --menu-option-x: 13px;
+  --capture-pad-top: 24px; /* the quick-capture window body */
+  --capture-pad-x: 28px;
+  --capture-pad-bottom: 22px;
+  --capture-foot-y: 14px; /* its footer, which carries the transport */
+  --capture-foot-x: 22px;
+  --capture-stop-x: 15px; /* the stop button, wider than a filled button's y */
 
   /* ---------- Layer 3 — derived values ----------
      These reference Layer 2, so they re-theme with it: a custom property
