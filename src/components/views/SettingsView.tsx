@@ -213,6 +213,13 @@ export function SettingsView() {
   // control persists on Enter or blur, and without an acknowledgement a
   // keyboard user has no signal that anything happened.
   const [daysSaved, setDaysSaved] = useState(false);
+  // Bumped on every successful commit. `daysSaved` is a boolean, and Enter
+  // then blur (or two edits inside the window) both call `setDaysSaved(true)`
+  // while it is already true — which does not restart the clear timer, so the
+  // second "Saved." would inherit the first's remaining time and vanish early.
+  // This counter is the timer's `resetKey`: it changes on each save even when
+  // the flag does not, which is exactly the case `useTimeout`'s resetKey is for.
+  const [daysSavedTick, setDaysSavedTick] = useState(0);
   // Seeded from storage during render rather than an effect — it is a plain
   // synchronous read (src/reduceMotion.ts).
   const [reduceMotion, setReduceMotion] = useState(readReduceMotion);
@@ -232,7 +239,11 @@ export function SettingsView() {
   // the index rebuild's does: "Saved." that stays put has stopped reporting an
   // event and started describing a state. The three error lines on this screen
   // are deliberately not on a timer.
-  useTimeout(() => setDaysSaved(false), daysSaved ? CONFIRMATION_MS : null);
+  useTimeout(
+    () => setDaysSaved(false),
+    daysSaved ? CONFIRMATION_MS : null,
+    daysSavedTick,
+  );
 
   const kind: RetentionKind = settings?.retention.policy ?? "keep_all";
 
@@ -243,6 +254,7 @@ export function SettingsView() {
       const updated = await setRetentionPolicy(buildRetentionPolicy(nextKind, nextDays));
       setSettings(updated);
       setDaysSaved(true);
+      setDaysSavedTick((tick) => tick + 1);
     } catch (err) {
       setSaveError(String(err));
       setDaysSaved(false);
