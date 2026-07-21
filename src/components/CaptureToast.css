@@ -1,0 +1,47 @@
+/* ============================================================
+   CaptureToast — what the distill pipeline did, said once and then gone.
+
+   Only non-bridged tokens live here: the overlay plane, its elevation, and
+   the corner it sits in.
+
+   IT IS AN OVERLAY, NOT A PANEL IN THE PAGE. Transcription and distillation
+   run after a capture ends, on their own schedule, and their outcomes are
+   announcements rather than state — so they belong in front of the app for a
+   moment rather than stacked into the sidebar foot, which is where they used
+   to pile up under the IDLE dot.
+
+   Bottom right because that is the emptiest corner of every view in the app:
+   content is pinned left or centred on a measure, and the sidebar owns the
+   left edge outright.
+   ============================================================ */
+
+.toast {
+  position: fixed;
+  right: var(--space-md);
+  bottom: var(--space-md);
+  z-index: var(--layer-overlay);
+  display: flex;
+  align-items: center;
+  gap: var(--space-xs);
+  max-width: var(--measure-menu);
+  background: var(--overlay);
+  border-radius: var(--radius-pill);
+  padding: 12px 16px;
+  box-shadow: var(--lift-menu);
+}
+
+/* No entrance animation, and nothing for reduced motion to disable: showing
+   the surface IS the transition (FOUNDING_DOC §4). A toast that slides in
+   arrives after the thing it is reporting. */
+
+.toast__dismiss {
+  flex: none;
+  margin: -4px -4px -4px 0;
+  padding: 4px;
+  border-radius: var(--radius-toolbar);
+  transition: background-color var(--dur-quick) var(--ease-standard);
+}
+
+.toast__dismiss:hover {
+  background: var(--menu-hover);
+}

@@ -431,6 +431,7 @@ behind; a new screen should find its shape here rather than inventing one.
 | `ConsentNudge` | `Overlay`, `Select`, `TextField`, `Button`, `StatusMessage` |
 | `QuickCapture` | `Textarea`, `Button`, `StatusMessage` |
 | `ListeningIndicator` / `CaptureOverlayPill` | `CaptureStatusLine`, `SpiritMark` |
+| `CaptureToast` | the overlay plane directly (it is not a modal, so not `Overlay`) |
 
 Three surfaces keep a documented departure, each forced by what the window is rather than by preference:
 

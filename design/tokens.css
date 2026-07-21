@@ -339,8 +339,16 @@
   --sidebar-pad-top: 30px;
   --sidebar-pad-x: 22px;
   --sidebar-pad-bottom: 24px;
-  --sidebar-row-x: 8px; /* a plain nav row's own inset */
-  --sidebar-rail-x: 16px; /* the system rail, which carries the active pill */
+  /* A nav row's box, and it is ONE box per group whatever the row's state.
+     The reference draws the active pill larger than the row beside it (12/16
+     against 7/8), which is invisible in a static mock and awful in a live
+     one: selecting a project slid its label 8px right and grew the row 10px,
+     shoving every row below it down. Selection changes the FILL, the
+     ELEVATION and the WEIGHT. It never changes the box. */
+  --sidebar-row-x: 12px; /* the project list and the footer */
+  --sidebar-row-y: 9px;
+  --sidebar-rail-x: 16px; /* the system rail, which carries more weight */
+  --sidebar-rail-y: 11px;
   --sidebar-indent: 16px; /* one level of project nesting */
   --sidebar-eyebrow-top: 30px; /* the lead-in above the PROJECTS eyebrow */
   --sidebar-row-gap: 1px; /* between project rows: a seam, not a step */
