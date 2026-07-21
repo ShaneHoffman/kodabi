@@ -543,8 +543,10 @@ So they are a **fourth token layer** in `design/tokens.css`: `--sidebar-*`,
 `--gutter-view-y` / `--gutter-view-x`, `--measure-*`, `--lead-*`,
 `--palette-top`, and the radius ladder — plus the per-view row stances
 (`--row-*`, `--card-pad-*`, `--gap-row-columns`), the control insets
-(`--chip-pad-y`, `--tag-*`, `--toolbar-*`, `--token-pill-*`) and the summoned
-surfaces (`--palette-*`, `--menu-*`, `--capture-*`).
+(`--chip-pad-y`, `--btn-filled-x`, `--tag-*`, `--toolbar-*`, `--token-pill-*`,
+`--field-search-y`, `--mark-pad-*`), the Settings panel's own furniture
+(`--gap-tab`, `--tab-pad-*`, `--gap-setting`, `--sublabel-tuck`) and the
+summoned surfaces (`--palette-*`, `--menu-*`, `--capture-*`).
 
 **Off the step scale is not a licence to be a literal.** These are named
 precisely *because* they are off it: a number that no ladder explains is one
