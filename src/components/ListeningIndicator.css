@@ -1,0 +1,103 @@
+/* ============================================================
+   ListeningIndicator — the sidebar foot's on-air surface.
+
+   Only non-bridged tokens live here: the dot geometry, the breathing glow,
+   and the exact sidebar insets from the Layer-4 geometry family. Everything
+   bridged (colour, size, weight) stays a utility on the element.
+
+   The design's chosen variant is the GLOWING DOT resting on the page plane —
+   not the raised chip the standalone Inbox reference also showed. A chip
+   would make "nothing is happening" the second-heaviest object in the
+   sidebar; the point of this surface is that it is quiet until it is live,
+   and then it is the only thing in the window that moves.
+   ============================================================ */
+
+.listening {
+  /* Sits on the same left edge as the nav rows above it, so the foot reads as
+     one column rather than three. The bottom inset is what separates it from
+     the utility rows without a rule. */
+  padding: 0 var(--sidebar-row-x) 20px;
+}
+
+/* Live, the dot carries a glow that reaches well past its own 11px box, so
+   the row needs room above it that the quiet state does not. */
+.listening--live {
+  padding-top: var(--space-2xs);
+}
+
+/* ---------- the dot ----------
+   11px in both states, so the foot does not reflow when a capture starts.
+   Only what fills it changes: ink when nothing is being recorded, the one
+   reserved green plus a breathing glow when something is. */
+.listening__dot {
+  position: relative;
+  width: 11px;
+  height: 11px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Optically centred against the label, not geometrically. `align-items: center`
+   on the row lines up the two BOXES, but the quiet label is uppercase, and
+   uppercase has no descenders: its ink sits about 0.08em above the middle of
+   its own line box. Matching the boxes therefore leaves the dot sitting
+   visibly low against the caps. At the 12px cap step that is ~1px, and at this
+   size 1px is the whole of the effect. Transform, not margin, so the row's
+   height and the glow's 34px box are untouched.
+
+   Scoped to the quiet state on purpose: live, the label is the mixed-case
+   headline step, which has descenders and so needs no correction. */
+.listening:not(.listening--live) .listening__dot {
+  transform: translateY(-1px);
+}
+
+.listening__core {
+  position: relative;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: var(--text);
+}
+
+.listening__core--live {
+  background: var(--accent-dot);
+}
+
+/* The glow is three times the dot and fades to nothing well inside its own
+   box, so it reads as light coming off the dot rather than as a second ring.
+   It is `aria-hidden` in the markup: the state is already announced by the
+   label beside it. */
+.listening__glow {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--glow), var(--glow-out) 68%);
+  animation: listening-breathe var(--dur-glow) var(--ease-breath) infinite;
+}
+
+@keyframes listening-breathe {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.15);
+  }
+}
+
+/* Reduced motion settles the glow to a still, mid-strength halo rather than
+   removing it. The green carries the recording state, and a blank dot would
+   imply a privacy the user does not have — never let reduced motion remove
+   information (docs/DESIGN_SYSTEM.md §4). */
+@media (prefers-reduced-motion: reduce) {
+  .listening__glow {
+    animation: none;
+    opacity: 0.6;
+    transform: none;
+  }
+}

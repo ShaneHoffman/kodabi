@@ -1,12 +1,11 @@
 /* ============================================================
    Button — the one action control.
 
-   Only non-bridged tokens live here (the primary variant's hairline and
-   medium weight, plus the interaction states); control padding, rounding
-   and colour stay as Tailwind utilities on the component. The hairline is
-   an inset shadow, never a border, and the focus ring is the shared
-   .ui-focus-ring recipe from ui.css (docs/DESIGN_SYSTEM.md §2) — added as a
-   class on the element, never restated here.
+   Only non-bridged tokens live here (each variant's elevation and the
+   interaction states); text size and colour stay as Tailwind utilities on
+   the component. The ring is part of the --lift-chip recipe — an outset
+   shadow, never a border — and the focus ring is the shared .ui-focus-ring
+   from ui.css, added as a class on the element and never restated here.
 
    `:not(:disabled):not([aria-disabled="true"])` guards every interactive
    state: a button that is busy (Button.tsx's `loading`) carries aria-disabled
@@ -17,29 +16,75 @@
 .ui-btn {
   transition:
     background-color var(--dur-quick) var(--ease-standard),
-    color var(--dur-quick) var(--ease-standard);
+    box-shadow var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard),
+    opacity var(--dur-quick) var(--ease-standard);
 }
 
+/* ---------- primary: the raised control chip ----------
+   A value plane that LIFTS off the page: a lighter fill, a hairline ring and
+   a shallow shadow, all carried by one token so the ring and the shadow can
+   never drift apart. It never fills darker and never takes a border. */
 .ui-btn--primary {
-  box-shadow: var(--hairline);
+  box-shadow: var(--lift-chip);
   font-weight: var(--fw-medium);
 }
 
-/* Hover is a value step toward --text, not a new colour. */
+/* Hover lifts the chip a step further rather than repainting it — the plane
+   moves, the colour does not. */
 .ui-btn--primary:hover:not(:disabled):not([aria-disabled="true"]) {
-  background: color-mix(in srgb, var(--text) 6%, var(--surface));
+  box-shadow: var(--lift-chip-hover);
 }
 
-/* A press goes one step further and deliberately does NOT transition — a
-   press that eases in feels laggy, so this is the one state that lands
-   immediately (docs/DESIGN_SYSTEM.md §2). */
+/* A press settles the chip back onto the page and deliberately does NOT
+   transition: a press that eases in feels laggy, so this is the one state
+   that lands immediately (docs/DESIGN_SYSTEM.md §2). */
 .ui-btn--primary:active:not(:disabled):not([aria-disabled="true"]) {
-  background: color-mix(in srgb, var(--text) 12%, var(--surface));
+  box-shadow: var(--lift-chip);
+  background: color-mix(in srgb, var(--text) 6%, var(--surface));
   transition: none;
 }
 
-/* `quiet` inherits its colour, so its hover is a colour step rather than a
-   fill — a background here would fight the `bg-surface` a selected row adds. */
+/* ---------- filled: the committing action ----------
+   Ink fill, page-coloured label — the heaviest control in the app, and the
+   only one that inverts. Spent on the single action that ends a surface
+   ("Done" closes compose mode, "File it" files the capture), never on a
+   navigation or a preference. Its hover is opacity rather than a new fill,
+   because there is no value above ink to step to. */
+.ui-btn--filled {
+  background: var(--text);
+  color: var(--bg);
+  border-radius: var(--radius-control);
+  padding: 8px 18px;
+  font-weight: var(--fw-semibold);
+}
+
+.ui-btn--filled:hover:not(:disabled):not([aria-disabled="true"]) {
+  opacity: 0.85;
+}
+
+.ui-btn--filled:active:not(:disabled):not([aria-disabled="true"]) {
+  opacity: 0.75;
+  transition: none;
+}
+
+/* The focus ring is ink, and so is this button, so the ring needs the offset
+   to read as a ring rather than a thickening. It already has one; this only
+   makes the gap show against the fill. */
+.ui-btn--filled.ui-focus-ring:focus-visible {
+  outline-offset: calc(var(--focus-offset) + 1px);
+}
+
+/* ---------- quiet: the ghost ----------
+   Rests as text and inherits its colour, so its hover is a colour step
+   toward ink rather than a fill — a background here would fight the
+   `bg-surface` a selected row adds.
+
+   It carries NO padding of its own. A quiet button is whatever shape its
+   context needs (a sidebar nav row, a text action beside a title, a menu
+   item), and those shapes differ by more than a step; each consumer sets its
+   own in its co-located CSS. `primary` and `filled` are real control chips
+   and do own their padding. */
 .ui-btn--quiet:hover:not(:disabled):not([aria-disabled="true"]) {
   color: var(--text);
 }

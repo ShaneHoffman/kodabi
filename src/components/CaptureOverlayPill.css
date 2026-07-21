@@ -34,7 +34,7 @@ body,
 .capture-overlay-pill {
   /* The ring separates the pill from a light background; the lift separates it
      from a busy one. Together they keep it legible over arbitrary content. */
-  box-shadow: var(--hairline), var(--lift-soft);
+  box-shadow: var(--lift);
 }
 
 /* The pill is sized to the longest state text; nothing should reflow the

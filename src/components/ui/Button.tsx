@@ -2,7 +2,7 @@ import type { ComponentPropsWithRef, ReactNode } from "react";
 import "./Button.css";
 
 type Props = ComponentPropsWithRef<"button"> & {
-  variant?: "primary" | "quiet";
+  variant?: "primary" | "quiet" | "filled";
   /** Whether the action this button started is still running. */
   loading?: boolean;
   /** What to read while `loading`; falls back to the button's own children. */
@@ -10,19 +10,30 @@ type Props = ComponentPropsWithRef<"button"> & {
 };
 
 /**
- * The one action control — the single home for control padding
- * (px-xs py-2xs), the focus ring, and every interaction state, so screens
- * never restate them (docs/DESIGN_SYSTEM.md §2).
+ * The one action control — the single home for the focus ring and every
+ * interaction state, so screens never restate them (docs/DESIGN_SYSTEM.md §2).
  *
- * It owns structure only (padding, rounding, focus, hover, active, disabled)
- * plus each variant's emphasis; it deliberately sets no text size, and `quiet`
- * sets no background either, so a caller's own `text-*` / `bg-*` utilities
- * never collide with a baked-in one (two competing `bg-*` classes resolve by
- * Tailwind's emit order, not the caller's order). `primary` is a raised
- * value plane (surface fill, hairline, medium weight); `quiet` is a ghost
- * that stays transparent via Preflight's `button { background: transparent }`
- * and inherits its colour, so a selected row can add its own `bg-surface`.
- * Hierarchy is value and type — never the reserved green (docs/DESIGN.md).
+ * It owns structure only (rounding, focus, hover, active, disabled) plus each
+ * variant's emphasis; it deliberately sets no text size, so a caller's own
+ * `text-*` utilities never collide with a baked-in one. Three variants, and
+ * they are three weights of the same value ladder — never three hues
+ * (docs/DESIGN.md):
+ *
+ *   primary — the raised control chip: a lighter fill, a ring and a shallow
+ *             shadow, all in `--lift-chip`. Hover lifts it; it never fills
+ *             darker. This is the form a settings control takes.
+ *   filled  — ink fill, page-coloured label. The heaviest control in the app
+ *             and the only one that inverts, spent on the single action that
+ *             ends a surface ("Done", "File it") and nothing else.
+ *   quiet   — a ghost that stays transparent via Preflight's
+ *             `button { background: transparent }` and inherits its colour,
+ *             so a selected row can add its own `bg-surface`.
+ *
+ * Padding follows the variant rather than the component: `primary` and
+ * `filled` are real chips with a fixed size, but a `quiet` button is whatever
+ * shape its context needs — a sidebar nav row, a text action beside a title,
+ * a menu item — and those differ by more than a step, so each consumer sets
+ * its own in its co-located CSS.
  *
  * Hover is owned here rather than by callers. It used to be bolted on at each
  * site in two different destination colours; there is one hover step, and it
@@ -56,9 +67,17 @@ export function Button({
   // Busy, not disabled: an explicit `disabled` wins, since a caller asking for
   // a genuinely inert control means it.
   const busy = loading && !disabled;
-  const look = variant === "primary" ? "ui-btn--primary bg-surface text-text" : "ui-btn--quiet";
+  // Each variant brings its own shape. `primary` is the raised control chip
+  // and takes the app's control padding; `filled` and `quiet` own their
+  // geometry in Button.css (the filled chip is a size of its own, and a quiet
+  // ghost is whatever shape its context needs).
+  const look = {
+    primary: "ui-btn--primary rounded-md px-xs py-2xs bg-surface text-text",
+    filled: "ui-btn--filled",
+    quiet: "ui-btn--quiet",
+  }[variant];
   const classes = [
-    "ui-btn ui-focus-ring rounded-md px-xs py-2xs",
+    "ui-btn ui-focus-ring",
     "disabled:cursor-not-allowed disabled:text-text-faint",
     "aria-disabled:cursor-not-allowed aria-disabled:text-text-faint",
     look,

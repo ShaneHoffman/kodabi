@@ -1,23 +1,97 @@
 /* ============================================================
-   Inbox re-route rows.
+   Inbox — the working queue.
 
-   Only the exit transition lives here — the body-preview clamp moved to the
-   shared ListRow primitive, and the durations now come from tokens
-   (docs/DESIGN_SYSTEM.md §4) rather than the bare 0.2s this file used to
-   carry.
+   Only non-bridged tokens live here: the row geometry and its hover lift,
+   the progress instrument, and the exit transition.
 
-   A re-routed row collapses its height and fades as it leaves, covering the
-   gap until the vault-changed refetch drops it from the list. This is the
-   minimal form of the distill-and-route motion (FOUNDING_DOC §4 — "a note
-   drifting into its project"); the full "spirit settling into a tree"
-   transition is polished in Phase 4.
+   THIS IS THE ONLY LIST WHOSE ROWS LIFT, and that is the whole signal: these
+   are items you are meant to clear, so touching one raises it onto the raised
+   plane and says "this one is actionable". A project's index only tints (a
+   reading room), and a needs-attention card arrives already lifted (it was
+   flagged, not chosen). One affordance, three meanings, no colour spent.
+   ============================================================ */
+
+/* ---------- the progress instrument ----------
+   A 3px rule and a caption. Deliberately not a percentage, a ring, or a
+   number in a badge: it answers "how much of this have I cleared today" at a
+   glance, and it is not worth one pixel more than that. */
+/* The air between the progress instrument and the first row. Without it the
+   first row's hover plane rises into the caption above it, and the two read as
+   one object rather than as a reading and a list. */
+.inbox__list {
+  margin-top: var(--lead-queue);
+}
+
+.inbox__progress {
+  max-width: var(--measure-progress);
+}
+
+.inbox__track {
+  height: 3px;
+  border-radius: var(--radius-track);
+  background: var(--track);
+  overflow: hidden;
+}
+
+.inbox__fill {
+  height: 100%;
+  border-radius: var(--radius-track);
+  background: var(--text-faint);
+  transition: width var(--dur-settle) var(--ease-standard);
+}
+
+/* ---------- rows ----------
+   The negative inline margin lets the hover plane extend past the text column
+   into the gutter, so the lift reads as the whole row rising rather than as a
+   box drawn around the words; the matching padding puts the text back exactly
+   where it would have been. */
+.inbox__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: 28px;
+  align-items: center;
+  padding: 20px 16px;
+  margin: 0 -16px;
+  border-radius: var(--radius-row);
+  transition:
+    background-color var(--dur-plane) var(--ease-standard),
+    box-shadow var(--dur-plane) var(--ease-standard);
+}
+
+/* :focus-within as well as :hover — a keyboard user walking the queue has to
+   see the same row rise, or the lift is a pointer-only affordance
+   (docs/DESIGN_SYSTEM.md §2). And a row whose own picker is open stays
+   lifted, so the plane the menu hangs off does not drop away underneath it. */
+.inbox__row:hover,
+.inbox__row:focus-within,
+.inbox__row:has([aria-expanded="true"]) {
+  background: var(--surface);
+  box-shadow: var(--lift-row);
+}
+
+/* The title is the row's subject and its own click target, so it must not
+   draw a second box inside a row that already lifts as one. */
+.inbox__open {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+
+.inbox__snippet {
+  max-width: var(--measure-snippet);
+  text-wrap: pretty;
+}
+
+/* ---------- leaving ----------
+   A filed note collapses its height and fades as it goes, covering the gap
+   until the vault-changed refetch drops it from the list. This is the minimal
+   form of the distill-and-route motion (FOUNDING_DOC §4) and the only
+   animation in the view.
 
    Reduced motion is handled app-wide in src/index.css (transitions collapse
    to 1ms), so there is no media query here: the row simply disappears on
-   refetch, which is the correct fallback.
-   ============================================================ */
-
-.inbox-row {
+   refetch, which is the correct fallback. */
+.inbox__slot {
   display: grid;
   grid-template-rows: 1fr;
   transition:
@@ -25,15 +99,15 @@
     opacity var(--dur-settle) var(--ease-standard);
 }
 
-.inbox-row--leaving {
+.inbox__slot--leaving {
   grid-template-rows: 0fr;
   opacity: 0;
 }
 
-/* Clip the child only while collapsing on exit — the grid track needs an
-   overflow-hidden child to hide content as its height eases to zero. In the
-   resting state overflow stays visible so the re-route dropdown, which
-   overflows the row, isn't cut off. */
-.inbox-row--leaving > div {
+/* Clip the child only while collapsing — the grid track needs an
+   overflow-hidden child to hide content as its height eases to zero. At rest
+   overflow stays visible so the picker's menu, which overflows the row, is
+   not cut off. */
+.inbox__slot--leaving > * {
   overflow: hidden;
 }

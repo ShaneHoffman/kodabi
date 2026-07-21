@@ -28,11 +28,28 @@ export type OverlaySettings = {
   auto_captures: boolean;
 };
 
+/** Mirrors `Theme` in `crates/kodabi-core/src/settings.rs`. "system" defers to
+ * `prefers-color-scheme`, which is what `design/tokens.css` answers on its own. */
+export type Theme = "system" | "light" | "dark";
+
+/** Mirrors `AppearanceSettings` in `crates/kodabi-core/src/settings.rs`. */
+export type AppearanceSettings = {
+  theme: Theme;
+};
+
 export type Settings = {
   consent_acknowledged: boolean;
   retention: RetentionPolicy;
   overlay: OverlaySettings;
+  appearance: AppearanceSettings;
 };
+
+/** The theme choices, in the order they are offered. */
+export const THEME_OPTIONS: { value: Theme; label: string }[] = [
+  { value: "system", label: "Match the system" },
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+];
 
 /** Default day count seeded into the "keep for N days" control before the user
  * commits one (FOUNDING_DOC §7's lean is "keep transcript N days"). */
@@ -77,6 +94,13 @@ export function setRetentionPolicy(policy: RetentionPolicy): Promise<Settings> {
  * so a change during a running capture takes effect right away. */
 export function setCaptureOverlay(overlay: OverlaySettings): Promise<Settings> {
   return invoke<Settings>("set_capture_overlay", { overlay });
+}
+
+/** Sets the theme preference. The echoed result updates the calling window;
+ * the `settings:changed` event carries it to the other two webviews, which have
+ * no other way to hear about it (src/theme.ts). */
+export function setAppearance(appearance: AppearanceSettings): Promise<Settings> {
+  return invoke<Settings>("set_appearance", { appearance });
 }
 
 export function acknowledgeConsent(retention: RetentionPolicy): Promise<Settings> {

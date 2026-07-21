@@ -1,5 +1,6 @@
 import { useNavigation } from "../useNavigation";
 import { InboxView } from "./views/InboxView";
+import { NeedsAttentionView } from "./views/NeedsAttentionView";
 import { NoteEditorView } from "./views/NoteEditorView";
 import { ProjectView } from "./views/ProjectView";
 import { SearchView } from "./views/SearchView";
@@ -12,6 +13,8 @@ export function MainContent() {
   switch (view.kind) {
     case "inbox":
       return <InboxView />;
+    case "needsAttention":
+      return <NeedsAttentionView />;
     case "project":
       return <ProjectView slug={view.slug} />;
     case "noteEditor":
@@ -26,7 +29,10 @@ export function MainContent() {
         />
       );
     case "search":
-      return <SearchView query={view.query} />;
+      // Keyed for the same reason as noteEditor: SearchView seeds its editable
+      // draft from this prop once, so a second search (the palette's
+      // `Search for "…"` row) has to remount to be seen at all.
+      return <SearchView key={view.query} query={view.query} />;
     case "settings":
       return <SettingsView />;
     default: {

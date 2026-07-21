@@ -15,6 +15,16 @@ export type FailedSession = {
 };
 
 /**
+ * The empty list, once. `data ?? []` would mint a new array on every render
+ * before the first read lands, and callers compare this array by identity:
+ * NeedsAttentionView prunes its row errors when the list changes (React's
+ * adjust-state-during-render), and useCommands has it in a memo's deps. A fresh
+ * `[]` each render turns the first into an infinite render loop and the second
+ * into a memo that never hits.
+ */
+const NO_SESSIONS: FailedSession[] = [];
+
+/**
  * Captured sessions that never became a note: a distill that failed, or one the
  * app died in the middle of. Derived from disk on every read (no failure record
  * is persisted), so the list survives a restart and self-heals when a session is
@@ -29,7 +39,7 @@ export function useFailedSessions(): {
   const { data, loading, error } = useVaultQuery(
     useCallback(() => invoke<FailedSession[]>("list_failed_sessions"), []),
   );
-  return { sessions: data ?? [], loading, error };
+  return { sessions: data ?? NO_SESSIONS, loading, error };
 }
 
 /**

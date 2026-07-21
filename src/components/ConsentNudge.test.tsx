@@ -17,6 +17,7 @@ const ACKNOWLEDGED: Settings = {
   consent_acknowledged: true,
   retention: { policy: "keep_all" },
   overlay: { manual_captures: false, auto_captures: true },
+  appearance: { theme: "system" },
 };
 
 function primaryButton(): HTMLElement {

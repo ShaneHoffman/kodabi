@@ -39,18 +39,31 @@ drift starts (the same control turning up as `px-3 py-1`, then `py-2`, then `px-
 | Role | Step | Utility | px |
 | --- | --- | --- | --- |
 | Control padding (button / select / field) | xs / 2xs | `px-xs py-2xs` | 12 / 8 |
-| View gutter | xl | `p-xl` | 64 |
+| View gutter | (Layer 4) | `--gutter-view-y` / `--gutter-view-x` | 44 / 60 |
 | Field stack gap (vertical) | sm | `gap-sm` | 16 |
 | Section gap | lg | `gap-lg` | 40 |
 | Inline label ↔ control gap | 2xs | `gap-2xs` | 8 |
 | Panel / container padding | md | `p-md` | 24 |
-| Tight list gap (nav rows) | 3xs | `gap-3xs` | 4 |
-| List row vertical padding | 2xs | `py-2xs` | 8 |
-| Reading / writing column width | measure | `max-w-measure` | 33rem |
+| Tight list gap (sidebar nav rows) | 3xs | `gap-3xs` | 4 |
+| Content list rhythm | (Layer 4) | the view's own `*.css` | per view |
+| List row padding | (Layer 4) | the view's own row rule | per view |
+| Reading / writing column width | (Layer 4) | `--measure-doc` / `--measure-search` | 660 / 640 |
 
-The view gutter and the section gap are owned by [`ViewFrame`](../src/components/ui/ViewFrame.tsx), so
-a screen never spells them out. (This table previously claimed the gutter was `px-lg py-lg`; every view
-in the tree used `p-xl`. The component now settles it.)
+The view gutter is owned by [`ViewFrame`](../src/components/ui/ViewFrame.tsx), so a screen never spells
+it out. It is a Layer-4 value rather than a step on this scale (see *Layer 4* below), and it is the same
+on every view and on all four sides. The header lead-in is Layer 4 too, but it belongs to the view: each
+one applies its own `--lead-*` in its co-located CSS (`.inbox__list`, `.project__index`,
+`.attention__stack`).
+
+**A content list's rhythm is Layer-4 geometry, and it lives in the view's own `*.css`.** There is no
+shared list gap and no shared row padding: an Inbox row is `padding: 20px 16px` with a matching
+negative inline margin so its hover plane reaches into the gutter, a `.project__row` is `16px 14px`
+and only tints, and `.attention__stack` separates its already-lifted cards at `--gap-card` (14px).
+Those numbers are off the 4px step scale on purpose — what separates rows has to beat what a row
+stacks its own lines at, or the list stops reading as rows, and the Inbox once shipped three-line
+rows at `gap-3xs` and became one undifferentiated block. What the rule forbids is a fourth rhythm
+invented inline in a `className`: the numbers stay in the co-located CSS, where the three that exist
+can be read against each other.
 
 Control padding is **`px-xs py-2xs` (12 / 8)**. (The tokens are named by *step*, not by pixel: `--space-sm`
 is 16px and `--space-xs` is 12px — so 12px horizontal padding is `px-xs`, not `px-sm`.) The primitives
@@ -62,19 +75,27 @@ below bake this in, so most screens never spell control padding out at all.
 
 Most tokens are bridged into Tailwind utilities and are consumed **as utilities on the component**:
 
-- **Colours** → `bg-bg`, `bg-bg-sink`, `bg-surface`, `text-text`, `text-text-soft`, `text-text-faint`, `text-accent`…
-- **Type sizes** → `text-eyebrow`, `text-cap`, `text-body`, `text-read`, `text-h3`, `text-h2`, `text-display`
+- **Colours** → `bg-bg`, `bg-surface`, `bg-overlay`, `text-text`, `text-text-read`, `text-text-soft`,
+  `text-text-faint`, `bg-menu-hover`, `bg-token-active`, `bg-highlight`, `text-accent-dot`…
+- **Type sizes** → the fixed-px ramp in [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §1, from
+  `text-eyebrow` (11) up through the four view-title steps (`text-title-panel` … `text-title-doc`)
 - **Families** → `font-sans`, `font-serif`, `font-mono`
 - **Weights** → `font-medium`, `font-semibold`
 - **Tracking** → `tracking-eyebrow` (section eyebrows), `tracking-caps` (uppercase micro-text)
 - **Line-heights** → `leading-body`, `leading-read`
 - **Spacing steps** → `p-*`, `px-*`, `py-*`, `gap-*`, `m-*` with the named suffixes above
-- **Widths** → `max-w-measure`, `max-w-content`, `max-w-wide`
 - **Radii** → `rounded-sm`, `rounded-md` (tokens.css overrides Tailwind's defaults at `:root`)
 
-> **Never Tailwind's own `tracking-wide`.** It is 0.025em; the eyebrow token is 0.22em. The Sidebar used
+> **There are no bridged width utilities.** `max-w-measure`, `max-w-content` and `max-w-wide` were
+> real while `--container-measure` / `--container-content` / `--container-wide` were in the
+> `@theme inline` block; the redesign split that family into the un-bridged `--measure-*` set and
+> the bridge entries went with it. Tailwind emits nothing for an unknown utility and raises no
+> error, so those three class names now silently do nothing — a column cap is read from a
+> co-located `Component.css` instead (`PlaceholderView` carries the note about it).
+
+> **Never Tailwind's own `tracking-wide`.** It is 0.025em; the eyebrow token is 0.16em. The Sidebar used
 > the token through a CSS class while twelve other call sites used the Tailwind default, so the same role
-> rendered 8.8× apart. Bridging `tracking-eyebrow` / `tracking-caps` removed the choice.
+> rendered 6.4× apart. Bridging `tracking-eyebrow` / `tracking-caps` removed the choice.
 
 Some tokens are **not** bridged. These must live in a **co-located `Component.css`** imported by the
 component (the pattern established by `Sidebar.css`, `SpiritMark.css`, and each primitive's own
@@ -82,12 +103,13 @@ component (the pattern established by `Sidebar.css`, `SpiritMark.css`, and each 
 
 | Token family | Examples | Why it's in CSS |
 | --- | --- | --- |
-| Edges / hairlines | `--edge`, `--edge-faint`, `--hairline` | rendered as **inset shadows** |
-| Elevation | `--lift`, `--lift-soft` | rendered as `box-shadow` |
+| Edges / hairlines | the `--edge-*` ladder (`--edge-faint` … `--edge-dot`) | rendered as **inset shadows** |
+| Elevation | `--lift`, plus one recipe per plane role (`--lift-card`, `--lift-row`, `--lift-menu`, …) | rendered as `box-shadow` |
 | Motion | `--dur-*`, `--ease-*` | `transition` / `animation` shorthands |
 | Focus | `--focus-width`, `--focus-offset`, `--radius-focus` | rendered as `outline` |
-| Derived recipes | `--wash-active`, `--scrim`, `--scrollbar-*` | composed values |
-| Sheen / flow | `--sheen`, `--flow-*` | specialised |
+| Derived recipes | `--wash-active`, `--selection`, `--scrim`, `--scrollbar-*` | composed values |
+| Sheen | `--sheen` | specialised |
+| Layer-4 geometry | `--gutter-view-*`, `--measure-*`, `--sidebar-*`, `--lead-*` | per-view stance, off the step scale |
 
 **Enforced, not aspirational.** [`src/designTokens.test.ts`](../src/designTokens.test.ts) fails any literal
 colour, font-family or duration in a `src/**/*.css` file, and `eslint.config.js` fails numeric spacing
@@ -104,7 +126,7 @@ everything bridged stays a utility on the element. Keep that split.
 
 ```css
 box-shadow: inset 0 -1px 0 var(--edge-faint);   /* a single bottom edge */
-box-shadow: var(--hairline);                    /* the pre-composed inset ring */
+box-shadow: inset 0 0 0 1px var(--edge);        /* a full ring */
 ```
 
 **Focus is one shared class, never retyped.** It lived in eight places before the design-system pass
@@ -118,10 +140,14 @@ Add [`ui-focus-ring`](../src/components/ui/ui.css) to the element:
 ```css
 /* src/components/ui/ui.css — the only definition */
 .ui-focus-ring:focus-visible {
-  outline: var(--focus-width) solid var(--accent);
+  outline: var(--focus-width) solid var(--text);
   outline-offset: var(--focus-offset);
 }
 ```
+
+The ring is **ink, not a hue**. The old interactive-green accent is retired along with the `--accent`
+token: this palette has exactly one green and it means audio is being recorded, so a focused control
+wearing it would claim something false.
 
 There is exactly one sanctioned exception (the palette input, and nothing else), stated in
 [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §2.
@@ -150,13 +176,20 @@ The shared controls live in [`src/components/ui/`](../src/components/ui/). They 
 padding, the focus ring, and the hairline recipes, so screens compose them instead of restating utility
 strings. Named function exports, relative imports, one co-located `*.css` per component.
 
-### `Button` — `variant="primary" | "quiet"`
+### `Button` — `variant="primary" | "quiet" | "filled"`
 
-Owns **structure only** (padding `px-xs py-2xs`, `rounded-md`, and every interaction state: focus,
-hover, active, disabled) plus each variant's emphasis. It deliberately sets **no text size or colour**,
-so a caller's own `text-*` utilities never collide with a baked-in one. `primary` is a raised value
-plane (surface fill, `--hairline`, `--fw-medium`); `quiet` is a transparent ghost that inherits its
-colour — the low-emphasis and navigation form.
+Owns **structure only** (rounding and every interaction state: focus, hover, active, disabled) plus
+each variant's emphasis. It deliberately sets **no text size**, so a caller's own `text-*` utilities
+never collide with a baked-in one. `primary` is the raised control chip — `bg-surface`, `rounded-md`,
+the app's control padding `px-xs py-2xs`, `--fw-medium`, and the ring-plus-shadow of `--lift-chip` in
+one declaration; `filled` is an ink fill with a page-coloured label, the heaviest control in the app
+and the only one that inverts, spent on the single action that *ends* a surface; `quiet` is a
+transparent ghost that inherits its colour — the low-emphasis and navigation form.
+
+**Padding follows the variant, not the component.** `primary` and `filled` are real chips with a
+fixed size, but a `quiet` button is whatever shape its context needs (a sidebar nav row, a text
+action beside a title, a menu item), so it carries no padding of its own and each consumer sets it in
+its co-located CSS.
 
 **Hover belongs to the primitive.** Callers used to add their own, in two different destination colours;
 there is one hover step and it is toward `--text`.
@@ -186,6 +219,13 @@ Label stacked a `gap-2xs` above the input; bound by `id` (generated via `useId` 
 carries the control padding, a bottom hairline (inset shadow), and the focus ring. Optional `hint` renders
 below and is wired through `aria-describedby`.
 
+**No fill — the line is the whole affordance.** `.ui-field` sets `background: transparent`, and the input's
+className carries no `bg-*`. It used to carry `--surface` *as well as* the writing line, which made it a box
+wearing a line rather than a line; three of them stacked in a form out-weighed everything they labelled. The
+field now sits on whatever plane the form sits on, page or panel. Hover still firms the line
+(`--edge` → `--edge-strong`) rather than filling the field, `aria-invalid` carries a heavier line, and
+disabled drops it to `--edge-faint`.
+
 ```tsx
 import { TextField } from "./ui/TextField";
 
@@ -207,23 +247,35 @@ travel together, and every hand-rolled version in the app set one without the ot
 <TextField label="Days to keep" value={days} error={saveError} onChange={…} />
 ```
 
-### `Textarea` — labelled multi-line input
+### `Textarea` — labelled multi-line input *(currently unused)*
+
+> **Nothing composes this today.** Both writing surfaces in the app — the note editor's body and the
+> quick-capture box — are a raw `<textarea>` carrying an `aria-label`, the `ui-writing` caret class,
+> and their own class from a co-located `*.css` (`.note-edit__body`, `.capture__input`). Don't reach
+> for this primitive expecting the app's writing surfaces to match it; either match the raw pattern
+> those two use, or bring them onto this component in the same change. The description below records
+> what the component does, not what the app currently looks like.
 
 `TextField`'s shape for prose: the same control padding, writing-line hairline and focus ring, plus the
 body line-height (`--lh-body`). Height and resize behaviour are the caller's, since a capture box and a
 note body want very different room. `hideLabel` keeps the label as the accessible name only.
 
+It **carries no fill**, the same as `TextField`. It used to sit on a sunk `--bg-sink` plane; that
+token is gone, because a recessed plane is a fourth plane and the system has three. A writing area
+sits on whatever plane its surface sits on.
+
 ```tsx
 <Textarea label="Body" value={body} onChange={…} className="note-editor__body font-mono" />
 ```
 
-### `Select` — token-styled dropdown
+### `Select` — token-styled dropdown, `variant="boxed" | "token"`
 
 A hand-rolled collapsible listbox (WAI-ARIA active-descendant), **not** a headless dependency — the same
 combobox know-how the command palette proves, minus the dep, keeping the app's zero-UI-dependency posture.
 Focus stays on the trigger; ↑/↓ move a virtual highlight via `aria-activedescendant`, Enter/Space selects,
 Escape closes and returns focus to the trigger, click-outside closes, and typing jumps (typeahead). The
-open list sits on `--lift` elevation; the active row is the value wash (never the reserved green).
+open list sits on the **overlay** plane (`--overlay` + `--lift-menu`, at `--layer-dropdown`); the active
+row is the value wash (never the reserved green).
 
 ```tsx
 import { Select } from "./ui/Select";
@@ -247,10 +299,43 @@ Pass `disabled` while a write is in flight, and `emptyLabel` for what the list s
 options — it opens and explains rather than refusing to open, which used to leave a trigger that
 swallowed every click.
 
+**`variant` fixes how much the *resting* trigger weighs; nothing else changes.** The dropdown list, the
+focus ring, and every keyboard behaviour are identical across both. **The box exists only while
+choosing** — that is the idea the two triggers split on.
+
+- **`boxed`** (the default) is the form field and reads like one: `--surface` fill, `--radius-md`, the
+  ring-and-shadow of `--lift-chip`, its value at `text-label text-text`, and a chevron. Elevation carries
+  all three states and the fill never moves: `--lift-chip-hover` under the pointer, `--lift-chip-open`
+  while its menu is down, a bare `--edge-faint` ring when disabled.
+- **`token`** rests as quiet mono text with **no box at all** — transparent, `font-mono text-cap
+  tracking-token text-text-faint`, and no chevron. It takes a soft `--token-active` pill (at
+  `--radius-item`) under the pointer and holds it while open, stepping its colour to `--text`; the pill
+  bleeds past the text on a negative margin so nothing in the row shifts when it appears. Its arrow *is*
+  the state — `→` at rest, `↓` the moment the menu is under it — and its menu rows render mono, because
+  what they list are paths.
+
+```tsx
+<Select hideLabel variant="token" label={`File "${note.title}" to project`} … />
+```
+
+**`token` is for an in-content affordance sitting beside content it must not out-weigh — never in a form.**
+A field that doesn't look like a field is a field people don't fill in. Its only consumer is the Inbox's
+per-row *File to…* picker, where boxed made the control the heaviest object on the screen while the note
+title was the subject of the row (against DESIGN.md's *space instead of borders and boxes* and *typography
+carries the hierarchy*). Settings' two pickers and `ConsentNudge`'s stay `boxed`.
+
 **Never a raw `<select>`.** The native control ignores the token theme entirely (system chrome, no focus
 ring, no value wash), so this primitive is the only dropdown.
 
-### `Checkbox` — labelled boolean
+### `Checkbox` — labelled boolean *(currently unused)*
+
+> **Nothing composes this today.** Every boolean in the app is a setting that takes effect the moment
+> it moves, so `SettingsView` carries its own local `Toggle`: a `<button role="switch">` with
+> `aria-checked` and a knob, styled by `.settings__toggle` / `.settings__knob` in `SettingsView.css`.
+> The platform semantics for "this applies immediately" and "this is one of several things you are
+> about to submit" differ, and the switch is the first of those. Reach for this component only for the
+> second kind, and expect to be its first caller. The description below records what it does, not what
+> the app currently looks like.
 
 A real `<input type="checkbox">` under a token skin (`appearance: none`), so keyboard behaviour, form
 semantics, and screen-reader state come from the platform rather than re-implemented ARIA — the opposite
@@ -273,17 +358,57 @@ import { Checkbox } from "./ui/Checkbox";
 The checked state is ink on surface — **value, not hue**. The reserved green is never used here: it means
 audio is actually being recorded, and a settings control wearing it would be claiming something false.
 
-### `ViewFrame` — the page scaffold
+### `ViewFrame` — the page scaffold, `variant="queue" | "library" | "panel" | "health" | "doc" | "search"`
 
-The view gutter, the centred content column, the section rhythm, and the eyebrow/title header. Every
-full view sits in one. Omit `eyebrow` and `title` for the bare scaffold when a view's header is a
-genuinely different shape (the note editor's carries a back link and its own actions).
+The view gutter, the content column, and the eyebrow/title header. Every full view sits in one. The
+gutter (`--gutter-view-y` / `--gutter-view-x`) is the same on every variant and on all four sides; see
+*Layer 4* below for why that is not negotiable per view.
+
+**`variant` answers "what am I looking at" before the heading is read.** It is not decoration — it is
+the one place a view declares its kind, so two views of the same kind can't drift apart. **It is a
+required prop.** There is no default and no bare scaffold: a new view has to say what kind of place it
+is. The six, with what each fixes:
+
+| `variant` | The view is | Column cap | Title step | `summary` renders as |
+| --- | --- | --- | --- | --- |
+| `queue` | work to get through | none | none — a one-line masthead | `· 4 to file`, inside the masthead at `text-text-faint` |
+| `library` | a place to browse | none | `text-title-library` (34) | `text-label text-text-faint` — a quiet count ("12 notes") |
+| `panel` | configuration | none (its rows cap themselves) | `text-title-panel` (26) | not rendered |
+| `health` | system state to recover from | none | `text-title-health` (28) | `text-label text-text-faint` |
+| `doc` | a note | `--measure-doc` (660) | header supplied by the view | not rendered |
+| `search` | results under a pinned query | `--measure-search` (640) | header supplied by the view | not rendered |
 
 ```tsx
-<ViewFrame eyebrow="Project" title={formatSlug(slug)} action={<Button …>New note</Button>}>
+<ViewFrame variant="library" eyebrow="Project" title={formatSlug(slug)}
+           summary={`${notes.length} notes`} action={<Button …>New note</Button>}>
   {…}
 </ViewFrame>
 ```
+
+**A queue's masthead is one line, not a stack.** `queue` is the one variant that does not render a
+serif title: the view's name and the amount of work in it belong to the same sentence
+("Inbox · 4 to file"), and splitting them across a title and a subtitle made a short list of chores
+look like a chapter opening.
+
+**`doc` and `search` render no header of their own.** Their headers are a genuinely different shape (a
+back link and its own actions; a query field), so they arrive as children. Passing `eyebrow`/`title` to
+either is not an error and not a look anyone has designed — pass the header as a child instead.
+
+**`summary` is not a free styling slot.** The variant fixes its typographic role, so a workload sentence
+can never render at a count's weight in one view and a heading's in another. Call sites pass the content,
+never a class — there is no `className` on it to reach for.
+
+**Omit `summary` at zero.** The empty `StatusMessage` in the body already says there's nothing here, and
+two "nothing here" voices in one header is one too many. Every call site does this with a conditional
+(`notes.length > 0 ? … : undefined`).
+
+**Only `doc` and `search` cap their column at all.** `queue`, `library`, `panel` and `health` cap
+nothing: their content is rows, not prose, so it takes the width the gutter leaves it — the same width
+on every one of those views. Where a line length genuinely hurts, the cap goes on the thing that needs
+it rather than on the frame: a queue row's serif snippet stops at `--measure-snippet`, and Settings caps
+the block holding its rows at `--measure-setting` (`.settings__rows`, 520) so the tab rail above it can
+still run the pane's full width. A panel view therefore does **not** wrap its own blocks in a width
+utility — the cap sits on the one block that needs it, in the view's own CSS.
 
 ### `StatusMessage` — `variant="empty" | "error" | "status"`
 
@@ -296,7 +421,15 @@ before it, `role="alert"` was on some async failures and not others. `compact` s
 <StatusMessage variant="error">Couldn&apos;t load notes: {error}</StatusMessage>
 ```
 
-### `ListRow` — one row in a list
+### `ListRow` — one row in a list *(currently unused)*
+
+> **Nothing composes this today.** Each list-bearing view now draws its own row from a co-located
+> `*.css`, because the row *is* the view's stance: `.inbox__row` lifts onto the raised plane when you
+> touch it (these are items you clear), `.project__row` only tints (a reading room, nothing is waiting
+> on you), and `.attention__card` arrives already lifted with no hover at all (it flagged itself). One
+> affordance, three meanings — which is exactly the difference a single shared row was flattening. Its
+> one still-live rule is the one below about hover and focus. The description below records what the
+> component does, not what the app currently looks like.
 
 Title, meta, optional two-line snippet, optional trailing control in a fixed column. `layout="inline"`
 keeps title and meta on one baseline; `"stacked"` (the default) puts meta underneath. **Hover and the
@@ -343,28 +476,43 @@ Beyond spacing and primitives, a few consistency rules for any screen:
 
 ## What consumes these today
 
-Every shipped surface composes the primitives. The table is the inventory the design-system pass left
-behind; a new screen should find its shape here rather than inventing one.
+Every shipped surface composes the primitives for its controls and its frame, and several draw their own
+row or writing surface on top. The table is the live inventory: the middle column is what a surface
+imports from `src/components/ui/`, the right-hand one is what it draws itself in a co-located `*.css`. A
+new screen should find its shape here rather than inventing one.
 
-| Surface | Composes |
-| --- | --- |
-| `Sidebar` | `Button variant="quiet"` rows, `StatusMessage` |
-| `InboxView` | `ViewFrame`, `ListRow`, `Select`, `StatusMessage` |
-| `NeedsAttentionSection` | `ListRow`, `Button` (with `loading`), `StatusMessage` |
-| `ProjectView` | `ViewFrame`, `ListRow layout="inline"`, `Button`, `StatusMessage` |
-| `NoteEditorView` | `ViewFrame`, `TextField`, `Textarea`, `Select`, `Button`, `StatusMessage` |
-| `SettingsView` | `ViewFrame`, `Select`, `TextField`, `Checkbox`, `Button`, `StatusMessage` |
-| `PlaceholderView` / `SearchView` | `ViewFrame`, `StatusMessage` |
-| `CommandPalette` | `Overlay` (+ its own combobox input) |
-| `ConsentNudge` | `Overlay`, `Select`, `TextField`, `Button`, `StatusMessage` |
-| `QuickCapture` | `Textarea`, `Button`, `StatusMessage` |
-| `ListeningIndicator` / `CaptureOverlayPill` | `CaptureStatusLine`, `SpiritMark` |
+| Surface | Composes | Draws itself |
+| --- | --- | --- |
+| `Sidebar` | `Button variant="quiet"` rows (including the needs-attention row), `StatusMessage` | the nav rows' geometry (`Sidebar.css`) |
+| `InboxView` | `ViewFrame variant="queue"`, `Select variant="token"`, `StatusMessage` | `.inbox__row` and the progress instrument |
+| `NeedsAttentionView` | `ViewFrame variant="health"`, `Button` (with `loading`), `StatusMessage` | `.attention__card`, pre-lifted |
+| `ProjectView` | `ViewFrame variant="library"`, `Button`, `StatusMessage` | `.project__row`, a hand-rolled index row |
+| `NoteEditorView` | `ViewFrame variant="doc"`, `Button`, `StatusMessage` | its own header, and raw `<textarea>` / `<input>` elements with `aria-label` + `ui-writing` |
+| `SettingsView` | `ViewFrame variant="panel"`, `Select`, `Button`, `StatusMessage` | a local `role="switch"` `Toggle`, and a raw number `<input>` (`.settings__chip`) |
+| `SearchView` | `ViewFrame variant="search"`, `StatusMessage` | its own query field |
+| `PlaceholderView` | `ViewFrame variant="panel"`, `StatusMessage` | — |
+| `AppErrorBoundary` | `ViewFrame variant="health"`, `StatusMessage` | — |
+| `CommandPalette` | `Overlay` | its own combobox input and rows |
+| `ConsentNudge` | `Overlay`, `Select`, `TextField`, `Button`, `StatusMessage` | — |
+| `QuickCapture` | `Button`, `StatusMessage` | a raw `<textarea>` (`.capture__input ui-writing`) |
+| `ListeningIndicator` | `CaptureStatusLine` | its own dot and waveform |
+| `CaptureOverlayPill` | `CaptureStatusLine`, `SpiritMark` | the pill window |
+| `CaptureToast` | — | the overlay plane directly (it is not a modal, so not `Overlay`) |
+
+The right-hand column is not an accusation. A view drawing its own row is the redesign working as
+intended (see `ListRow` above): the row is where a queue, a library and a health view differ most, so
+each one states that difference in its own CSS. What it does mean is that **`ListRow`, `Checkbox` and
+`Textarea` have no call sites at all** — check this table before assuming a primitive is the shape the
+app actually wears.
 
 Three surfaces keep a documented departure, each forced by what the window is rather than by preference:
 
 - **`CommandPalette`** — its input keeps a bespoke treatment (no focus ring, its own inset hairline,
   `role="combobox"`). It is a search-combobox, not a generic form field. The shell around it is `Overlay`
-  like any other modal.
+  like any other modal. Its own rhythm is the modal's, not a control's: the input is `px-md py-sm` and the
+  rows (and the no-commands row) are `px-md`, with `gap-md` between a row's title and its hint — a panel
+  people read a list in, indented off its own edge rather than padded like a button. Row vertical padding
+  stays `py-2xs`, the app's list-row step.
 - **`QuickCapture`** — a hotkey-first window that now also carries a visible **File it** button, because a
   pointer-only user cannot press Enter into a window they never focused. Adding it is why the textarea
   regained its focus ring: Tab finally has somewhere to go.
@@ -374,3 +522,103 @@ Three surfaces keep a documented departure, each forced by what the window is ra
   appearing over a full-screen app never steals focus, which also puts it out of the tab order. The
   keyboard paths that matter remain — the capture hotkey stops the capture and the pill with it, and the
   Settings toggle turns it off for good.
+
+
+---
+
+## Layer 4 — the per-view geometry
+
+The redesign gives each **view type** its own stance: how dense it is, what its
+header looks like, and where the weight falls, so a queue and a library are
+told apart before any heading is read. Those measurements do not land on the
+4px step scale, and they must not.
+
+So they are a **fourth token layer** in `design/tokens.css`: `--sidebar-*`,
+`--gutter-view-y` / `--gutter-view-x`, `--measure-*`, `--lead-*`,
+`--palette-top`, and the radius ladder.
+
+**The gutter is not part of the stance.** Each view type used to set its own
+padding and its own column alignment — the Inbox pinned left at 44/60, the
+Project view centring a 640px measure at 52/60 — on the theory that where the
+content sat was itself a signal. It reads that way in a static comp and not at
+all in the running app, where clicking between two sidebar rows moved the left
+edge of the page and registered as the layout being unstable, not as the two
+places being different kinds of place. There is now **one gutter, on all four
+sides, on every view**, and identity is carried by the header, the density and
+the weight instead. `--measure-*` still varies, but only to stop a long line of
+prose running too far right; nothing centres, so every view starts at the same
+left edge.
+
+The `--lead-*` family is the gap between a view's header and the thing it
+heads, and it *is* per view — that is a density decision, which is stance:
+
+| Token | px | Where |
+| --- | --- | --- |
+| `--lead-queue` | 22 | Inbox: the progress instrument to the first row |
+| `--lead-panel` | 22 | Settings: the title to the tab rail |
+| `--lead-library` | 30 | Project: the header to the index |
+| `--lead-health` | 30 | Needs attention: the header to the cards |
+| `--lead-doc` | 30 | Note: the meta line to the body |
+| `--lead-search` | 2 | Search: the scope line to the results |
+
+A queue leads tightest — you are meant to get straight into the list — and
+anything you read rather than work through leads at 30. Rounding these onto the
+nearest named step is what let a lifted Inbox row rise into the progress caption
+above it, which is the exact failure this layer exists to prevent.
+
+**They are consumed from a co-located `Component.css`, never from `className`.**
+That is what keeps both guards armed: eslint still fails every arbitrary value
+and numeric spacing utility in a class string, and the values still live in one
+file rather than scattered through TSX.
+
+```css
+/* src/components/views/InboxView.css */
+.inbox__row {
+  padding: 20px 16px;
+  margin: 0 -16px;              /* the lift reaches into the gutter */
+  border-radius: var(--radius-row);
+}
+```
+
+The named `--space-*` steps are unchanged and still govern everything *inside* a
+component — gaps between elements, control padding, list rhythm. Layer 4 governs
+the frame around them.
+
+### `ViewFrame` variants are the stance
+
+The gutter is not part of it, and neither is the alignment: every variant takes
+`--gutter-view-y` / `--gutter-view-x` (44 / 60) on all four sides, and every
+column is pinned to the same left edge. What still varies is the title step, the
+header's shape, and whether the column is capped at all.
+
+| `variant` | Column | Title step |
+| --- | --- | --- |
+| `queue` | uncapped | none — a one-line masthead |
+| `library` | uncapped | `text-title-library` (34) |
+| `panel` | uncapped (rows cap themselves at `--measure-setting`, 520) | `text-title-panel` (26) |
+| `health` | uncapped | `text-title-health` (28) |
+| `doc` | `--measure-doc` (660) | supplied by the view |
+| `search` | `--measure-search` (640) | supplied by the view |
+
+A measure is set only where line length actually hurts reading, and left unset
+where the content is a list of rows that should use the width it has. That is
+why four of the six cap nothing: their rows are rows, not prose. Where a single
+element inside one of those views *is* prose, the cap goes on that element (a
+queue row's serif snippet at `--measure-snippet`) rather than on the frame.
+
+There is no default and no bare scaffold: `variant` is required, so a new view
+has to say what kind of place it is.
+
+### The primitives grew variants to match
+
+- **`Button`** — `primary` (the raised control chip), `filled` (ink fill,
+  page-coloured label; the one action that *ends* a surface), `quiet` (a ghost
+  that carries no padding of its own, because a nav row and a text action are
+  not the same shape).
+- **`Select`** — `boxed` (a control chip with a chevron) and `token` (quiet mono
+  text that takes a pill only while choosing, for a picker beside content it
+  must not out-weigh). Both open the same overlay-plane menu.
+- **`Checkbox`** — unchecked is a ring and nothing else; checked is an ink
+  square with a page-coloured check. Nothing composes it today: every boolean
+  the app ships is an applies-immediately setting, and `SettingsView` draws its
+  own `role="switch"` toggle for those.

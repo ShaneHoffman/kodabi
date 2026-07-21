@@ -47,7 +47,7 @@ export function TextField({
         // the hint that the value just contradicted.
         aria-describedby={[errorId, hintId].filter(Boolean).join(" ") || undefined}
         aria-invalid={error ? true : undefined}
-        className={`ui-field ui-focus-ring rounded-md bg-surface px-xs py-2xs text-body text-text placeholder:text-text-faint${
+        className={`ui-field ui-focus-ring rounded-md px-xs py-2xs text-body text-text placeholder:text-text-faint${
           className ? ` ${className}` : ""
         }`}
         {...rest}

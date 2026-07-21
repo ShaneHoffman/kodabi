@@ -1,274 +1,590 @@
 /* ============================================================
-   Kodabi — design tokens  (P0-4, Phase 0)
+   Kodabi — design tokens
 
-   The locked, machine-consumable source of truth for the whole
-   app. Promoted from the INDICATIVE values in design/moodboard.html
-   (P0-3) into final tokens. Read docs/DESIGN.md for the intent;
-   this file is the material.
+   The locked, machine-consumable source of truth for the whole app. Read
+   docs/DESIGN.md for the intent; this file is the material.
 
-   Discipline (docs/DESIGN.md): value carries the hierarchy, hue stays
-   almost silent. Space instead of borders/boxes. One deliberate
-   motion. The palette is one desaturated grey-green value ladder;
-   there are two greens and both are quiet — a soft interactive
-   accent, and the brighter one reserved for the listening state.
+   Re-tuned on feat/screen-overhaul to the per-view-type identity redesign
+   ("Stance"). The four principles are unchanged — value carries the
+   hierarchy, hue stays almost silent, space instead of borders and boxes,
+   one deliberate motion — but three things about the material changed:
+
+     1. THREE PLANES, NOT TWO-AND-A-SINK. `page`, `raised`, `overlay`, and
+        nothing invents a fourth. A raised plane lifts LIGHTER than its
+        ground (hairline ring + soft shadow); it never fills darker and
+        never takes a visible border. The old recessed `--bg-sink` is gone:
+        a sunk plane is a fourth plane, and the sidebar (its main consumer)
+        now shares the page.
+     2. ONE GREEN. The old interactive accent is retired as a hue. The
+        single reserved green is spent on the listening/recording state and
+        the editing caret, and on nothing else — not selection, not rank,
+        not body text, not links, not the focus ring (which is now ink).
+     3. GEOMETRY IS NAMED. The per-view stance lives in pixels — the sidebar's
+        boxes, the measures a column may run to, the lead-in above each view's
+        content. Those numbers are tokens (Layer 4) rather than one shared
+        step, because they do not land on a 4px scale and should not be made
+        to. The gutter is the one thing NOT per view: it is 44/60 everywhere,
+        on all four sides (see Layer 4 below).
 
    Layers
-     1. pigments  (--k-*, --lift-*)  forest neutrals, the green, the tuned day/night shades and
-                                     elevation — every literal is defined here EXACTLY ONCE
-     2. semantic  (--bg, --text …)   remapped per theme (references only, never new literals);
-                                     what components actually consume
-     3. scales    (--fs-/--fw-/--lh-/--ls-/--space-/--flow-/--radius-/--edge-/--focus-/--dur-/
-                   --ease-/--layer-) theme-independent
-        …plus a few DERIVED values (--wash-active, --scrim, --scrollbar-*) that live in layer 3 but
-        reference layer 2, so they re-theme with it. They are recipes, not new literals.
+     1. pigments  (--k-*)            every literal is defined here EXACTLY ONCE
+     2. semantic  (--bg, --text …)   remapped per theme (references only, never
+                                     new literals); what components consume
+     3. scales    (--fs-/--fw-/--lh-/--ls-/--space-/--radius-/--dur-/--ease-/
+                   --layer-)         theme-independent
+     4. geometry  (--sidebar-*, --gutter-*, --measure-*)  the per-view stance
+        …plus a few DERIVED values (--wash-active, --selection, --scrollbar-*)
+        that reference Layer 2, so they re-theme with it. Recipes, not literals.
 
-   Theming — same triple-selector mechanism as the moodboard. The dark mapping is stated twice
-   (a media query cannot be merged with a plain selector), but both copies only *reference* the
-   Layer-1 primitives, so no value can drift between the OS-dark and forced-dark paths:
-     :root                                                  → light (washi day), the default
+   A NOTE ON THE ALPHA LADDERS. The translucent inks and shadows below are
+   named by their alpha (`--k-ink-07-day`), not by a role. That reads
+   mechanical, and it is deliberate: this is a value-first palette, so the
+   same alpha genuinely serves several roles (0.07 is both a control chip's
+   resting ring and a panel's divider), and naming by role would either
+   duplicate a literal or force a false distinction. Layer 2 is where the
+   roles get their names.
+
+   Theming — four blocks. The dark mapping is stated twice (a media query
+   cannot be merged with a plain selector), but both copies only *reference*
+   Layer 1, so no value can drift between the OS-dark and forced-dark paths:
+     :root                                                  → light (day washi)
      @media (prefers-color-scheme: dark) :root:not([data-theme="light"]) → dark when the OS asks
      :root[data-theme="dark"]                               → dark, forced
      :root[data-theme="light"]                              → light, forced (wins over OS dark)
-
-   Consuming in Tailwind v4 later: see design/tailwind-theme.example.css.
    ============================================================ */
 
 :root {
-  /* ---------- Layer 1 — pigments (the "paints"; same in both themes) ---------- */
-  --k-washi: #F1EFE6;   /* paper ground      */
-  --k-mist:  #DCE1D8;   /* recessive tone    */
-  --k-stone: #8B8F86;   /* quiet, secondary  */
-  --k-moss:  #59654F;   /* grounded mid      */
-  --k-fern:  #3B4636;   /* deep neutral      */
-  --k-sumi:  #23261F;   /* ink / primary text */
-  --k-green: #5F7E5A;   /* the one living green — listening */
+  /* ---------- Layer 1 — pigments: day washi ----------
+     A warm near-neutral ladder. Hue is almost silent; the three planes are
+     told apart by value alone, each one LIGHTER than the last. */
+  --k-washi: #F2F0E9; /* page plane — window background, sidebar and content alike */
+  --k-washi-raised: #FBFAF6; /* raised plane — active nav pill, hover rows, cards, chips */
+  --k-washi-over: #FEFDFB; /* overlay plane — menus, command palette, capture window */
+  --k-sumi: #211F17; /* ink — primary text, titles */
+  --k-sumi-body: #2E2C24; /* ink-body — long-form reading body (note editor) */
+  --k-stone-ink: #55524A; /* ink-2 — secondary text, nav labels, control values */
+  --k-stone: #8B8879; /* ink-3 — muted: metadata, counts, eyebrows, placeholders */
+  --k-menu-day: #F0EEE6; /* hovered menu item / active-control fill */
+  --k-token-day: #EBE9E1; /* open file-token & stop-button fill */
+  --k-token-hover-day: #E1DED3; /* that fill under the pointer */
+  --k-toggle-on-day: #DFDCCF; /* a pill toggle's track once it is on */
+  --k-green: #5F7D4F; /* THE reserved green — listening state and the edit caret */
 
-  /* ---------- Layer 1 — tuned functional shades & elevation ----------
-     Values that aren't one of the six pigments, defined ONCE here. The theme
-     blocks at the bottom only reference these, so an edit lands in one place. */
+  /* ---------- Layer 1 — pigments: night sumi ----------
+     A deep warm black, not a blue-grey charcoal. Same three-plane ladder,
+     same direction: each plane lighter than its ground. */
+  --k-night: #17160F; /* page plane */
+  --k-night-raised: #221F16; /* raised plane */
+  --k-night-over: #2A2618; /* overlay plane */
+  --k-paper: #EFEDE3; /* ink */
+  --k-paper-body: #DCD8CC; /* ink-body */
+  --k-paper-soft: #B3AFA1; /* ink-2 */
+  --k-paper-faint: #7B7768; /* ink-3 */
+  --k-menu-night: #37331F; /* hovered menu item / active-control fill; toggle-on track */
+  --k-token-night: #26231A; /* open file-token fill */
+  --k-token-hover-night: #43401F; /* the stop button under the pointer */
+  --k-green-night: #86AE6B; /* THE reserved green, night value */
 
-  /* light-side shades (the ones that aren't a raw pigment) */
-  --k-washi-sink: #EAE8DD;   /* recessed washi (light bg-sink) */
-  --k-stone-ink:  #60645C;   /* darkened stone — a11y-tuned faint text */
-  --k-accent:     #50694B;   /* desaturated green — interactive accent */
+  /* ---------- Layer 1 — translucent inks (day) ----------
+     Hairlines, washes and tints are the ink itself at low alpha, so one
+     recipe reads on a near-white card and a near-black one alike. Day mixes
+     from the sumi base (30,28,20); night from a warm paper (255,250,235). */
+  --k-ink-035-day: rgba(30, 28, 20, 0.035); /* a library row's hover tint */
+  --k-ink-05-day: rgba(30, 28, 20, 0.05); /* ring on a raised plane */
+  --k-ink-06-day: rgba(30, 28, 20, 0.06); /* ring on an overlay plane; the sidebar rail; a tag chip */
+  --k-ink-07-day: rgba(30, 28, 20, 0.07); /* a control chip at rest */
+  --k-ink-08-day: rgba(30, 28, 20, 0.08); /* a divider rule */
+  --k-ink-09-day: rgba(30, 28, 20, 0.09); /* a control under the pointer; a toggle track's inset */
+  --k-ink-10-day: rgba(30, 28, 20, 0.1); /* the progress track */
+  --k-ink-11-day: rgba(30, 28, 20, 0.11); /* a search match / a text selection */
+  --k-ink-14-day: rgba(30, 28, 20, 0.14); /* a control with its menu open; the "+ tag" ghost */
+  --k-ink-28-day: rgba(30, 28, 20, 0.28); /* an unchecked checkbox's ring */
+  --k-ink-40-day: rgba(30, 28, 20, 0.4); /* the neutral record ring-dot */
+  --k-scrim-day: rgba(28, 25, 16, 0.34); /* the dimmed backdrop behind an overlay */
 
-  /* Both values above were re-tuned by 2/255 per channel (from #62665E and
-     #526B4D) during the design-system pass. They cleared 4.5:1 on --bg and
-     --bg-sink but landed at 4.41 and 4.43 on --surface, the lightest raised
-     plane (mist) — and both are used there: the palette's hint text and the
-     Select caret are faint-on-surface, and --accent is the focus ring drawn
-     against it. The correction is below the perceptual threshold and takes
-     every light-theme text pair over AA. Full matrix: docs/DESIGN_SYSTEM.md. */
+  /* ---------- Layer 1 — translucent inks (night) ---------- */
+  --k-paper-045-night: rgba(255, 250, 235, 0.045);
+  --k-paper-06-night: rgba(255, 250, 235, 0.06);
+  --k-paper-08-night: rgba(255, 250, 235, 0.08);
+  --k-paper-10-night: rgba(255, 250, 235, 0.1);
+  --k-paper-12-night: rgba(255, 250, 235, 0.12);
+  --k-paper-15-night: rgba(255, 250, 235, 0.15);
+  --k-paper-18-night: rgba(255, 250, 235, 0.18);
+  --k-paper-32-night: rgba(255, 250, 235, 0.32);
+  --k-paper-45-night: rgba(255, 250, 235, 0.45);
+  --k-scrim-night: rgba(0, 0, 0, 0.5);
 
-  /* night palette */
-  --k-night:         #191B16;   /* night ground (deep sumi) */
-  --k-night-sink:    #131510;
-  --k-night-surface: #212419;   /* barely-there raised plane */
-  --k-paper:         #E9E8DE;   /* warm paper (dark text) */
-  --k-paper-soft:    #AEB3A7;
-  --k-paper-faint:   #868B81;   /* ≈ stone */
-  --k-accent-night:  #93B389;
-  --k-green-night:   #86A67E;
+  /* the reserved green as a glow — the breathing radial behind the listening
+     dot. Two stops each so the gradient fades to nothing without the browser
+     interpolating through grey. */
+  --k-glow-day: rgba(95, 125, 79, 0.6);
+  --k-glow-day-out: rgba(95, 125, 79, 0);
+  --k-glow-night: rgba(134, 174, 107, 0.55);
+  --k-glow-night-out: rgba(134, 174, 107, 0);
 
-  /* elevation — geometry differs per theme, so two full sets (each defined once) */
-  --lift-day:        0 1px 2px rgba(35,38,31,.06), 0 8px 24px rgba(35,38,31,.05);
-  --lift-soft-day:   0 1px 1px rgba(35,38,31,.05), 0 4px 14px rgba(35,38,31,.04);
-  --lift-night:      0 1px 2px rgba(0,0,0,.35), 0 10px 30px rgba(0,0,0,.30);
-  --lift-soft-night: 0 1px 1px rgba(0,0,0,.30), 0 5px 16px rgba(0,0,0,.22);
+  /* ---------- Layer 1 — shadow inks ----------
+     A shadow is a shadow in both themes: warm and shallow on paper, near
+     black and thrown much further on night, because a shadow on a near-black
+     ground has less value to work with. The `deep` set is the one reserved
+     for windows, which need a colder, heavier ink than a card does. */
+  --k-shade-05-day: rgba(40, 36, 24, 0.05);
+  --k-shade-08-day: rgba(40, 36, 24, 0.08);
+  --k-shade-09-day: rgba(40, 36, 24, 0.09);
+  --k-shade-10-day: rgba(40, 36, 24, 0.1);
+  --k-shade-12-day: rgba(40, 36, 24, 0.12);
+  --k-shade-18-day: rgba(40, 36, 24, 0.18);
+  --k-shade-22-day: rgba(40, 36, 24, 0.22);
+  --k-deep-22-day: rgba(20, 16, 8, 0.22);
+  --k-deep-28-day: rgba(20, 16, 8, 0.28);
+  --k-deep-50-day: rgba(20, 16, 8, 0.5);
+  --k-deep-55-day: rgba(20, 16, 8, 0.55);
+  --k-shade-30-night: rgba(0, 0, 0, 0.3);
+  --k-shade-40-night: rgba(0, 0, 0, 0.4);
+  --k-shade-45-night: rgba(0, 0, 0, 0.45);
+  --k-shade-50-night: rgba(0, 0, 0, 0.5);
+  --k-shade-60-night: rgba(0, 0, 0, 0.6);
+  --k-shade-70-night: rgba(0, 0, 0, 0.7);
+  --k-shade-75-night: rgba(0, 0, 0, 0.75);
+
+  /* ---------- Layer 1 — elevation ----------
+     Every plane above the page is RING + SHADOW in one declaration, never a
+     border. The ring makes the edge read crisp; the shadow says how far off
+     the page it sits. One recipe per plane role — a card, a row lifting
+     under the pointer, a control chip in its three states, a dropdown, the
+     floating format toolbar, and the two window classes.
+
+     Note that three of these change GEOMETRY between themes, not just alpha
+     (the card, the dropdown, the toolbar): a night shadow has to throw
+     further to register at all. That is why there are two full sets rather
+     than one recipe with a swapped colour. */
+  --lift-day: 0 0 0 1px var(--k-ink-05-day), 0 4px 14px var(--k-shade-08-day);
+  --lift-card-day: 0 0 0 1px var(--k-ink-05-day), 0 6px 18px var(--k-shade-09-day);
+  --lift-row-day: 0 0 0 1px var(--k-ink-05-day), 0 8px 22px var(--k-shade-10-day);
+  --lift-chip-day: 0 0 0 1px var(--k-ink-07-day), 0 1px 2px var(--k-shade-05-day);
+  --lift-chip-hover-day: 0 0 0 1px var(--k-ink-09-day), 0 4px 12px var(--k-shade-10-day);
+  --lift-chip-open-day: 0 0 0 1px var(--k-ink-14-day), 0 4px 12px var(--k-shade-12-day);
+  --lift-menu-day: 0 0 0 1px var(--k-ink-06-day), 0 16px 44px var(--k-shade-18-day);
+  --lift-toolbar-day: 0 0 0 1px var(--k-ink-06-day), 0 12px 30px var(--k-shade-22-day);
+  --lift-palette-day: 0 0 0 1px var(--k-ink-05-day), 0 40px 90px -20px var(--k-deep-55-day), 0 12px 30px var(--k-deep-28-day);
+  --lift-capture-day: 0 0 0 1px var(--k-ink-05-day), 0 30px 70px -18px var(--k-deep-50-day), 0 10px 24px var(--k-deep-22-day);
+
+  --lift-night: 0 0 0 1px var(--k-paper-06-night), 0 4px 14px var(--k-shade-45-night);
+  --lift-card-night: 0 0 0 1px var(--k-paper-06-night), 0 8px 22px var(--k-shade-45-night);
+  --lift-row-night: 0 0 0 1px var(--k-paper-06-night), 0 10px 26px var(--k-shade-50-night);
+  --lift-chip-night: 0 0 0 1px var(--k-paper-08-night), 0 1px 2px var(--k-shade-30-night);
+  --lift-chip-hover-night: 0 0 0 1px var(--k-paper-12-night), 0 4px 12px var(--k-shade-40-night);
+  --lift-chip-open-night: 0 0 0 1px var(--k-paper-18-night), 0 4px 12px var(--k-shade-45-night);
+  --lift-menu-night: 0 0 0 1px var(--k-paper-08-night), 0 18px 46px var(--k-shade-60-night);
+  --lift-toolbar-night: 0 0 0 1px var(--k-paper-08-night), 0 14px 34px var(--k-shade-60-night);
+  --lift-palette-night: 0 0 0 1px var(--k-paper-08-night), 0 40px 90px -20px var(--k-shade-75-night), 0 12px 30px var(--k-shade-50-night);
+  --lift-capture-night: 0 0 0 1px var(--k-paper-08-night), 0 30px 70px -18px var(--k-shade-70-night), 0 10px 24px var(--k-shade-45-night);
 
   /* ---------- Layer 3 — type ---------- */
 
   /* families — chosen faces first, system stand-ins retained as fallback.
-     The Source trio is self-hosted (src/fonts.ts, feat/scaffold-tauri-app)
-     so these render offline; the fallbacks below only apply if that import
-     is ever removed. */
-  --sans:  "Source Sans 3","Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,"Helvetica Neue",Arial,sans-serif;
-  --serif: "Source Serif 4","Iowan Old Style","Palatino Linotype",Palatino,Georgia,"Times New Roman",serif;
-  --mono:  "Source Code Pro","Cascadia Mono",ui-monospace,"SF Mono",Consolas,"Liberation Mono",monospace;
+     The Source trio is self-hosted (src/fonts.ts) so these render offline;
+     the fallbacks below only apply if that import is ever removed.
+       sans  — interface: nav items, list titles, labels, buttons, tabs
+       serif — reading: wordmark, view titles, note body, snippets
+       mono  — metadata, counts, uppercase eyebrows, key hints, timers, paths */
+  --sans: "Source Sans 3", "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, "Helvetica Neue", Arial, sans-serif;
+  --serif: "Source Serif 4", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+  --mono: "Source Code Pro", "Cascadia Mono", ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace;
 
-  /* size scale (rem; the big two are fluid) */
-  --fs-eyebrow: .72rem;
-  --fs-cap:     .8rem;
-  --fs-body:    1.06rem;
-  --fs-read:    1.18rem;
-  --fs-h3:      1.35rem;
-  --fs-h2:      clamp(1.55rem, 1.2rem + 1.4vw, 2.05rem);
-  --fs-display: clamp(2.35rem, 1.6rem + 3.6vw, 3.9rem);
+  /* size scale — px, not rem, and fixed rather than fluid. The window is
+     960x640 and does not reflow into a phone; a clamp() here only made the
+     same role render at two sizes for no reader's benefit.
+
+     Two voices, deliberately diverging: the INTERFACE ramp (eyebrow → lead)
+     is compact so lists and controls read at product density, while the
+     READING ramp (--fs-read, --fs-capture, the four title steps) is
+     generous so a note opens like a page. Don't close the gap: the
+     interface answer to "this feels cramped" is space, not a larger size. */
+  --fs-eyebrow: 11px; /* mono UPPERCASE section label */
+  --fs-micro: 11.5px; /* dense mono: capture footer, progress caption, search crumb */
+  --fs-cap: 12px; /* mono count / meta / hint */
+  --fs-meta: 12.5px; /* mono meta on a reading surface (a note, a library row) */
+  --fs-action: 13px; /* a compact action inside an overlay window */
+  --fs-label: 14px; /* sans control label, settings value, view action */
+  --fs-body: 15px; /* sans nav item and interface body; mono menu item */
+  --fs-snippet: 15px; /* serif note / project snippet */
+  --fs-snippet-sm: 14.5px; /* serif snippet, search density */
+  --fs-lead: 16px; /* sans masthead; sans search-result title */
+  --fs-input: 17px; /* a query field (palette, search) */
+  --fs-row: 18px; /* sans working-list row title (Inbox) */
+  --fs-read: 18px; /* serif note body paragraph */
+  --fs-h3: 19px; /* serif note section header; serif project-index row */
+  --fs-capture: 21px; /* serif captured thought */
+  --fs-wordmark: 22px; /* serif sidebar wordmark */
+
+  /* the big view title — one step per view type. This is where the redesign
+     is loudest: a config panel and a note must not open at the same size. */
+  --fs-title-panel: 26px; /* Settings */
+  --fs-title-health: 28px; /* Needs attention */
+  --fs-title-library: 34px; /* Project */
+  --fs-title-doc: 36px; /* Note */
 
   /* weights */
-  --fw-light:    300;
-  --fw-regular:  400;
-  --fw-medium:   500;
+  --fw-regular: 400;
+  --fw-medium: 500;
   --fw-semibold: 600;
+  --fw-bold: 700; /* the format toolbar's B, and nothing else */
 
   /* line-heights (per role) */
-  --lh-display: 1.04;
-  --lh-h2:      1.12;
-  --lh-h3:      1.2;
-  --lh-body:    1.72;
-  --lh-read:    1.6;
+  --lh-tight: 1.15; /* a two-line status block (the listening label) */
+  --lh-title: 1.05; /* a big serif view title */
+  --lh-title-doc: 1.08; /* the note title, which is bigger again */
+  --lh-heading: 1.2;
+  --lh-body: 1.5; /* interface body */
+  --lh-snippet: 1.5; /* serif snippet, captured thought, an action-item label */
+  --lh-list: 1.6; /* a serif bullet list */
+  --lh-transcript: 1.55; /* a live transcript */
+  --lh-read: 1.62; /* a note body paragraph */
 
   /* letter-spacing (per role) */
-  --ls-display: -0.022em;
-  --ls-h2:      -0.01em;
-  --ls-h3:      -0.005em;
-  --ls-eyebrow: 0.22em;
-  /* Uppercase micro-text that is NOT a section eyebrow — the capture status
-     lines. Caps need opening up to stay readable, but nowhere near an
-     eyebrow's 0.22em, which would read as a heading. Before this token the
-     role reached for Tailwind's own `tracking-wide` (0.025em), which is both
-     off-system and too tight for caps. */
-  --ls-caps:    0.08em;
+  --ls-eyebrow: 0.16em; /* a content eyebrow: UNFILED, SYSTEM, PROJECT */
+  --ls-eyebrow-menu: 0.14em; /* a section eyebrow inside an overlay (JUMP TO, ACTIONS) */
+  --ls-rail: 0.12em; /* the sidebar's PROJECTS eyebrow, one step tighter again */
+  --ls-caps: 0.1em; /* uppercase micro-text that is not a section eyebrow (IDLE) */
+  --ls-token: 0.03em; /* the mono file token */
+  --ls-wordmark: 0.02em;
+  --ls-title: -0.01em; /* the note title */
+  --ls-row: -0.005em; /* a working-list row title */
 
-  /* ---------- Layer 3 — spacing ---------- */
+  /* ---------- Layer 3 — spacing ----------
+     A 4px step scale for component-internal spacing. Per-view geometry does
+     NOT live here — see Layer 4, where each view type states its own stance. */
+  --space-3xs: 0.25rem; /*  4px */
+  --space-2xs: 0.5rem; /*  8px */
+  --space-xs: 0.75rem; /* 12px */
+  --space-sm: 1rem; /* 16px */
+  --space-md: 1.5rem; /* 24px */
+  --space-lg: 2.5rem; /* 40px */
+  --space-xl: 4rem; /* 64px */
+  --space-2xl: 6rem; /* 96px */
+  --space-3xl: 9rem; /* 144px */
 
-  /* numeric step scale on a 4px (0.25rem) base; top-accelerating so the
-     bigger gap is the path of least resistance (Ma). Component-internal spacing. */
-  --space-3xs: 0.25rem;  /*  4px */
-  --space-2xs: 0.5rem;   /*  8px */
-  --space-xs:  0.75rem;  /* 12px */
-  --space-sm:  1rem;     /* 16px */
-  --space-md:  1.5rem;   /* 24px */
-  --space-lg:  2.5rem;   /* 40px */
-  --space-xl:  4rem;     /* 64px */
-  --space-2xl: 6rem;     /* 96px */
-  --space-3xl: 9rem;     /* 144px */
-
-  /* fluid page-rhythm ("flow") — responsive, for page-level vertical rhythm and gutters */
-  --flow-section: clamp(4.5rem, 9vw, 8.5rem);
-  --flow-hero:    clamp(3rem, 7vw, 6rem);
-  --flow-gutter:  clamp(1.5rem, 5vw, 4rem);
-
-  /* ---------- Layer 3 — layout widths ---------- */
-  --measure: 33rem;   /* prose reading measure */
-  --content: 46rem;   /* content column        */
-  --wide:    62rem;   /* max page width        */
-
-  /* ---------- Layer 3 — radii & edges ---------- */
+  /* ---------- Layer 3 — radii ----------
+     Rounder as it lifts: a checkbox is barely eased, a window is a
+     soft-cornered object sitting on top of everything. */
   --radius-focus: 2px;
-  --radius-sm:    5px;
-  --radius-md:    8px;
-
-  /* hairlines are translucent inset shadows, never borders (docs/DESIGN.md) */
-  --edge-faint:  rgba(128, 128, 120, 0.12);
-  --edge:        rgba(128, 128, 120, 0.20);
-  --edge-strong: rgba(128, 128, 120, 0.28);
-  --hairline:    inset 0 0 0 1px var(--edge);
+  --radius-track: 2px; /* the progress instrument; a waveform bar */
+  --radius-match: 3px; /* a highlighted search term */
+  --radius-check: 4px; /* a checkbox */
+  --radius-sm: 5px;
+  --radius-toolbar: 6px; /* an item in the floating format toolbar */
+  --radius-item: 7px; /* a menu item; a tag chip; the file token's hover pill */
+  --radius-md: 8px; /* a control chip; a library row */
+  --radius-control: 9px; /* a filled button; a search row; a focused palette row */
+  --radius-row: 10px; /* a queue row */
+  --radius-pill: 11px; /* the active nav pill; an overlay menu */
+  --radius-card: 12px; /* a pre-lifted card; a toggle track; the search query field */
+  --radius-window: 16px; /* the palette and capture windows */
 
   /* ---------- Layer 3 — focus ----------
-     The one focus treatment: a 2px accent outline held off the control by its
-     own width (docs/DESIGN_SYSTEM.md). Width matches --radius-focus above. */
-  --focus-width:  2px;
+     One focus treatment: a 2px outline held off the control by its own
+     width. It is INK, not a hue: the one green in this palette means audio
+     is being recorded, and a focused button must never claim that. */
+  --focus-width: 2px;
   --focus-offset: 2px;
 
   /* ---------- Layer 3 — motion ----------
-     Durations are the values the app already shipped, named rather than
-     restated: --settle was InboxView's row exit, --wake/--breath/--pulse and
-     the two drifts were SpiritMark's. --quick is the only new one, for the
-     control state changes the primitives previously left unanimated.
-
-     FOUNDING_DOC §4 reserves "one deliberate motion" for distill-and-route and
-     keeps everything else near-instant, so this scale stays deliberately short
-     at the top and is spent only where docs/DESIGN_SYSTEM.md says it may be. */
-  --dur-quick:      120ms;   /* hover/active on a control      */
-  --dur-settle:     200ms;   /* a row leaving a list           */
-  --dur-wake:       450ms;   /* the mark waking / settling     */
-  --dur-pulse:     1600ms;   /* starting + reconnecting pulse  */
-  --dur-breath:    4200ms;   /* the listening breath cycle     */
-  --dur-drift:    15000ms;   /* aura blob A                    */
+     FOUNDING_DOC §4 reserves "one deliberate motion" for distill-and-route
+     and keeps everything else near-instant, so this scale stays short at the
+     top and is spent only where docs/DESIGN_SYSTEM.md says it may be. The
+     long durations all belong to the listening state, which is the one thing
+     in the app that is genuinely still happening while you look at it. */
+  --dur-quick: 150ms; /* a control's own colour / fill change */
+  --dur-plane: 180ms; /* a row rising onto the raised plane; a toggle knob */
+  --dur-settle: 200ms; /* a row leaving a list */
+  --dur-wake: 450ms; /* the capture mark waking / settling */
+  --dur-wave: 1000ms; /* one waveform bar's rise and fall */
+  --dur-caret: 1100ms; /* the caret blink */
+  --dur-pulse: 1600ms; /* starting + reconnecting pulse */
+  --dur-glow: 2600ms; /* the listening dot's breath */
+  --dur-breath: 4200ms; /* the capture mark's breath cycle */
+  --dur-drift: 15000ms; /* aura blob A */
   --dur-drift-slow: 21000ms; /* aura blob B (counter-rotating) */
 
-  --ease-standard: ease;          /* entrances, exits, state changes */
-  --ease-breath:   ease-in-out;   /* the continuous listening motion */
-  --ease-drift:    linear;        /* constant-rate rotation          */
+  /* the waveform's four bars are one animation started at four offsets, so
+     the group reads as a voice rather than a metronome. The order is
+     deliberately not monotonic. */
+  --delay-wave-1: 0ms;
+  --delay-wave-2: 220ms;
+  --delay-wave-3: 420ms;
+  --delay-wave-4: 140ms;
+
+  --ease-standard: ease; /* entrances, exits, state changes */
+  --ease-breath: ease-in-out; /* the continuous listening motion */
+  --ease-step: step-end; /* the caret: a blink has no in-between */
+  --ease-out: ease-out;
+  --ease-drift: linear; /* constant-rate rotation */
 
   /* ---------- Layer 3 — stacking ----------
      Two layers above the page, so overlay surfaces stop agreeing by accident. */
-  --layer-dropdown: 10;   /* a list opened by a control (Select) */
-  --layer-overlay:  50;   /* modal surfaces (palette, nudge)     */
+  --layer-dropdown: 10; /* a list opened by a control (Select, the file picker) */
+  --layer-overlay: 50; /* modal surfaces (palette, nudge, capture) */
+
+  /* ---------- Layer 4 — geometry: the per-view stance ----------
+     Each view type is told apart BEFORE any heading is read, by how dense it
+     is and where its weight falls. That is what these numbers encode, and
+     they are named rather than folded into one shared step because they do
+     not land on the 4px scale — rounding a lead-in onto the nearest step is
+     what once let a lifted Inbox row rise into the caption above it.
+
+     Where the content SITS is not part of it: the gutter below is one pair
+     for every view. See its own note for what happened when it wasn't.
+
+     Consumed from co-located Component.css (docs/UI_CONVENTIONS.md), never
+     as an arbitrary Tailwind value. */
+
+  /* the shell */
+  --sidebar-w: 232px;
+  --sidebar-pad-top: 30px;
+  --sidebar-pad-x: 22px;
+  --sidebar-pad-bottom: 24px;
+  /* A nav row's box, and it is ONE box per group whatever the row's state.
+     The reference draws the active pill larger than the row beside it (12/16
+     against 7/8), which is invisible in a static mock and awful in a live
+     one: selecting a project slid its label 8px right and grew the row 10px,
+     shoving every row below it down. Selection changes the FILL, the
+     ELEVATION and the WEIGHT. It never changes the box. */
+  --sidebar-row-x: 12px; /* the project list and the footer */
+  --sidebar-row-y: 9px;
+  --sidebar-rail-x: 16px; /* the system rail, which carries more weight */
+  --sidebar-rail-y: 11px;
+  --sidebar-indent: 16px; /* one level of project nesting */
+  --sidebar-eyebrow-top: 30px; /* the lead-in above the PROJECTS eyebrow */
+  --sidebar-row-gap: 1px; /* between project rows: a seam, not a step */
+
+  /* The view gutter — vertical, then horizontal. ONE pair, for every view.
+     Each view type used to state its own (44/60, 52/60, 46/56, 52/60, 40/64,
+     40/56) on the theory that where the content sat was part of what told a
+     queue from a library. In the running app it did not read as intent: it read
+     as the content moving every time you clicked something in the sidebar. View
+     identity is carried by the header, the density and the weight, which stay
+     per-variant; the frame around them holds still. */
+  --gutter-view-y: 44px;
+  --gutter-view-x: 60px;
+
+  /* content measures */
+  --measure-capture: 500px; /* the quick-capture window */
+  --measure-setting: 520px; /* a settings row: label left, control right */
+  --measure-snippet: 500px; /* how far a queue row's serif snippet may run */
+  --measure-palette: 560px;
+  --measure-search: 640px;
+  --measure-doc: 660px;
+  --measure-progress: 340px; /* the Inbox progress instrument */
+  --measure-menu: 236px; /* an overlay menu's floor */
+
+  /* the lead-in between a view's header and the thing it heads.
+
+     These are per view for the same reason the gutters are: how much air sits
+     under a masthead is part of how dense the view reads, and rounding them
+     all onto the nearest 4px step is what made a lifted Inbox row collide
+     with the progress caption above it. A queue leads tightest — you are
+     meant to get straight into the list — and everything you read rather
+     than work through leads at 30. */
+  --lead-queue: 22px; /* Inbox: the progress instrument to the first row */
+  --lead-panel: 22px; /* Settings: the title to the tab rail */
+  --lead-library: 30px; /* Project: the header to the index */
+  --lead-health: 30px; /* Needs attention: the header to the cards */
+  --lead-doc: 30px; /* Note: the meta line to the body */
+  --lead-doc-title: 18px; /* Note: the back link to the title */
+  --lead-search: 2px; /* Search: the scope line to the results */
+  --lead-footnote: 22px; /* Needs attention: the cards to the reassurance */
+  --gap-card: 14px; /* between two pre-lifted cards */
+
+  /* where a summoned overlay sits */
+  --palette-top: 96px;
 
   /* ---------- Layer 3 — derived values ----------
      These reference Layer 2, so they re-theme with it: a custom property
      substitutes at computed-value time, and both live on :root, so a theme
-     block that rewrites --text or --bg-sink rewrites these too. Defining them
-     once here is what keeps the recipe from being retyped per component. */
+     block that rewrites --text rewrites these too. Defining them once here
+     is what keeps the recipe from being retyped per component. */
 
-  /* selected / highlighted rows read through VALUE, never hue — an ink wash of
-     the text colour, identical logic in both themes, and never the reserved
-     green (docs/DESIGN.md). */
-  --wash-active: color-mix(in srgb, var(--text) 8%, transparent);
+  /* the focused row in a menu or listbox. Value, never hue, and never the
+     reserved green: a selected row wearing it would claim a recording. */
+  --wash-active: var(--menu-hover);
 
-  /* the dimming behind a modal surface */
-  --scrim: color-mix(in srgb, var(--bg-sink) 60%, transparent);
+  /* selected text is the same ink wash a search match uses, so dragging
+     across a note and finding a term read as the same act of marking. */
+  --selection: var(--highlight);
 
   /* scrollbars are chrome, so they sit at the quiet end of the value ladder
-     rather than wearing the platform default (which reads light-on-dark in the
-     night theme). */
+     rather than wearing the platform default (which reads light-on-dark in
+     the night theme). */
   --scrollbar-thumb: color-mix(in srgb, var(--text) 22%, transparent);
   --scrollbar-track: transparent;
 
   /* a disabled control that has no text to fade (the checkbox box) */
   --disabled-opacity: 0.5;
 
-  /* caught-light sheen — a faint white specular highlight for glossy marks.
-     Off the pigment ladder by design (like the edges above): white, not a hue,
-     and identical in both themes, so it lives here once rather than per-theme. */
+  /* caught-light sheen — a faint white specular highlight for the capture
+     mark. Off the pigment ladder by design (like the scrim, which is dark in
+     both themes): white, not a hue, and identical in both themes, so it lives
+     here once rather than per-theme. */
   --sheen: rgba(255, 255, 255, 0.16);
 
-  /* ---------- Layer 2 — semantic tokens: light (washi day) is the default ----------
-     All four theme blocks below are pure references to Layer 1 — no literals here. */
-  --bg:         var(--k-washi);
-  --bg-sink:    var(--k-washi-sink);
-  --surface:    var(--k-mist);       /* one raised plane above bg */
-  --text:       var(--k-sumi);
-  --text-soft:  var(--k-moss);
-  --text-faint: var(--k-stone-ink);  /* a11y-tuned; micro-text only */
-  --accent:     var(--k-accent);     /* interactive (links/focus) */
-  --accent-dot: var(--k-green);      /* listening state only */
-  --lift:       var(--lift-day);
-  --lift-soft:  var(--lift-soft-day);
+  /* ---------- Layer 2 — semantic tokens: light (day washi) is the default ----------
+     All four theme blocks below are pure references to Layer 1 — no literals. */
+  --bg: var(--k-washi);
+  --surface: var(--k-washi-raised);
+  --overlay: var(--k-washi-over);
+  --text: var(--k-sumi);
+  --text-read: var(--k-sumi-body);
+  --text-soft: var(--k-stone-ink);
+  --text-faint: var(--k-stone);
+  --accent-dot: var(--k-green);
+  --glow: var(--k-glow-day);
+  --glow-out: var(--k-glow-day-out);
+  --edge-faint: var(--k-ink-05-day);
+  --edge: var(--k-ink-06-day);
+  --edge-chip: var(--k-ink-07-day);
+  --edge-rule: var(--k-ink-08-day);
+  --edge-strong: var(--k-ink-09-day);
+  --edge-open: var(--k-ink-14-day);
+  --edge-check: var(--k-ink-28-day);
+  --edge-dot: var(--k-ink-40-day);
+  --tint: var(--k-ink-035-day);
+  --track: var(--k-ink-10-day);
+  --highlight: var(--k-ink-11-day);
+  --menu-hover: var(--k-menu-day);
+  --token-active: var(--k-token-day);
+  --token-hover: var(--k-token-hover-day);
+  --toggle-on: var(--k-toggle-on-day);
+  --scrim: var(--k-scrim-day);
+  --lift: var(--lift-day);
+  --lift-card: var(--lift-card-day);
+  --lift-row: var(--lift-row-day);
+  --lift-chip: var(--lift-chip-day);
+  --lift-chip-hover: var(--lift-chip-hover-day);
+  --lift-chip-open: var(--lift-chip-open-day);
+  --lift-menu: var(--lift-menu-day);
+  --lift-toolbar: var(--lift-toolbar-day);
+  --lift-palette: var(--lift-palette-day);
+  --lift-capture: var(--lift-capture-day);
 }
 
-/* ---------- Layer 2 — dark (night): auto when the OS asks and not forced light ---------- */
+/* ---------- Layer 2 — dark (night sumi): auto when the OS asks and not forced light ---------- */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg:         var(--k-night);
-    --bg-sink:    var(--k-night-sink);
-    --surface:    var(--k-night-surface);
-    --text:       var(--k-paper);
-    --text-soft:  var(--k-paper-soft);
+    --bg: var(--k-night);
+    --surface: var(--k-night-raised);
+    --overlay: var(--k-night-over);
+    --text: var(--k-paper);
+    --text-read: var(--k-paper-body);
+    --text-soft: var(--k-paper-soft);
     --text-faint: var(--k-paper-faint);
-    --accent:     var(--k-accent-night);
     --accent-dot: var(--k-green-night);
-    --lift:       var(--lift-night);
-    --lift-soft:  var(--lift-soft-night);
+    --glow: var(--k-glow-night);
+    --glow-out: var(--k-glow-night-out);
+    --edge-faint: var(--k-paper-06-night);
+    --edge: var(--k-paper-08-night);
+    --edge-chip: var(--k-paper-08-night);
+    --edge-rule: var(--k-paper-08-night);
+    --edge-strong: var(--k-paper-12-night);
+    --edge-open: var(--k-paper-18-night);
+    --edge-check: var(--k-paper-32-night);
+    --edge-dot: var(--k-paper-45-night);
+    --tint: var(--k-paper-045-night);
+    --track: var(--k-paper-10-night);
+    --highlight: var(--k-paper-15-night);
+    --menu-hover: var(--k-menu-night);
+    --token-active: var(--k-token-night);
+    --token-hover: var(--k-token-hover-night);
+    --toggle-on: var(--k-menu-night);
+    --scrim: var(--k-scrim-night);
+    --lift: var(--lift-night);
+    --lift-card: var(--lift-card-night);
+    --lift-row: var(--lift-row-night);
+    --lift-chip: var(--lift-chip-night);
+    --lift-chip-hover: var(--lift-chip-hover-night);
+    --lift-chip-open: var(--lift-chip-open-night);
+    --lift-menu: var(--lift-menu-night);
+    --lift-toolbar: var(--lift-toolbar-night);
+    --lift-palette: var(--lift-palette-night);
+    --lift-capture: var(--lift-capture-night);
   }
 }
 
-/* ---------- Layer 2 — dark (night): forced (same references as the media block above) ---------- */
+/* ---------- Layer 2 — dark (night sumi): forced (same references as the media block above) ---------- */
 :root[data-theme="dark"] {
-  --bg:         var(--k-night);
-  --bg-sink:    var(--k-night-sink);
-  --surface:    var(--k-night-surface);
-  --text:       var(--k-paper);
-  --text-soft:  var(--k-paper-soft);
+  --bg: var(--k-night);
+  --surface: var(--k-night-raised);
+  --overlay: var(--k-night-over);
+  --text: var(--k-paper);
+  --text-read: var(--k-paper-body);
+  --text-soft: var(--k-paper-soft);
   --text-faint: var(--k-paper-faint);
-  --accent:     var(--k-accent-night);
   --accent-dot: var(--k-green-night);
-  --lift:       var(--lift-night);
-  --lift-soft:  var(--lift-soft-night);
+  --glow: var(--k-glow-night);
+  --glow-out: var(--k-glow-night-out);
+  --edge-faint: var(--k-paper-06-night);
+  --edge: var(--k-paper-08-night);
+  --edge-chip: var(--k-paper-08-night);
+  --edge-rule: var(--k-paper-08-night);
+  --edge-strong: var(--k-paper-12-night);
+  --edge-open: var(--k-paper-18-night);
+  --edge-check: var(--k-paper-32-night);
+  --edge-dot: var(--k-paper-45-night);
+  --tint: var(--k-paper-045-night);
+  --track: var(--k-paper-10-night);
+  --highlight: var(--k-paper-15-night);
+  --menu-hover: var(--k-menu-night);
+  --token-active: var(--k-token-night);
+  --token-hover: var(--k-token-hover-night);
+  --toggle-on: var(--k-menu-night);
+  --scrim: var(--k-scrim-night);
+  --lift: var(--lift-night);
+  --lift-card: var(--lift-card-night);
+  --lift-row: var(--lift-row-night);
+  --lift-chip: var(--lift-chip-night);
+  --lift-chip-hover: var(--lift-chip-hover-night);
+  --lift-chip-open: var(--lift-chip-open-night);
+  --lift-menu: var(--lift-menu-night);
+  --lift-toolbar: var(--lift-toolbar-night);
+  --lift-palette: var(--lift-palette-night);
+  --lift-capture: var(--lift-capture-night);
 }
 
-/* ---------- Layer 2 — light (washi day): forced (wins over OS dark) ---------- */
+/* ---------- Layer 2 — light (day washi): forced (wins over OS dark) ---------- */
 :root[data-theme="light"] {
-  --bg:         var(--k-washi);
-  --bg-sink:    var(--k-washi-sink);
-  --surface:    var(--k-mist);
-  --text:       var(--k-sumi);
-  --text-soft:  var(--k-moss);
-  --text-faint: var(--k-stone-ink);
-  --accent:     var(--k-accent);
+  --bg: var(--k-washi);
+  --surface: var(--k-washi-raised);
+  --overlay: var(--k-washi-over);
+  --text: var(--k-sumi);
+  --text-read: var(--k-sumi-body);
+  --text-soft: var(--k-stone-ink);
+  --text-faint: var(--k-stone);
   --accent-dot: var(--k-green);
-  --lift:       var(--lift-day);
-  --lift-soft:  var(--lift-soft-day);
+  --glow: var(--k-glow-day);
+  --glow-out: var(--k-glow-day-out);
+  --edge-faint: var(--k-ink-05-day);
+  --edge: var(--k-ink-06-day);
+  --edge-chip: var(--k-ink-07-day);
+  --edge-rule: var(--k-ink-08-day);
+  --edge-strong: var(--k-ink-09-day);
+  --edge-open: var(--k-ink-14-day);
+  --edge-check: var(--k-ink-28-day);
+  --edge-dot: var(--k-ink-40-day);
+  --tint: var(--k-ink-035-day);
+  --track: var(--k-ink-10-day);
+  --highlight: var(--k-ink-11-day);
+  --menu-hover: var(--k-menu-day);
+  --token-active: var(--k-token-day);
+  --token-hover: var(--k-token-hover-day);
+  --toggle-on: var(--k-toggle-on-day);
+  --scrim: var(--k-scrim-day);
+  --lift: var(--lift-day);
+  --lift-card: var(--lift-card-day);
+  --lift-row: var(--lift-row-day);
+  --lift-chip: var(--lift-chip-day);
+  --lift-chip-hover: var(--lift-chip-hover-day);
+  --lift-chip-open: var(--lift-chip-open-day);
+  --lift-menu: var(--lift-menu-day);
+  --lift-toolbar: var(--lift-toolbar-day);
+  --lift-palette: var(--lift-palette-day);
+  --lift-capture: var(--lift-capture-day);
 }

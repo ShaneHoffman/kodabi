@@ -55,6 +55,16 @@ async function reshow(): Promise<void> {
   });
 }
 
+/** Put the box into its recording state, the way `audio_cmds` does. */
+async function goLive(): Promise<void> {
+  await act(async () => {
+    emitFromBackend("capture:state", {
+      phase: "listening",
+      sources: { loopback: "live", microphone: "live" },
+    });
+  });
+}
+
 describe("QuickCapture", () => {
   beforeEach(() => {
     resetTauriMocks();
@@ -255,5 +265,41 @@ describe("QuickCapture", () => {
     expect(
       screen.queryByText(/the vault is not writable/),
     ).not.toBeInTheDocument();
+  });
+
+  it("files the note typed alongside a recording when the recording is stopped", async () => {
+    // The box invites one ("Add a note alongside the recording…") and it is a
+    // separate note, not part of the transcript, so nothing downstream would
+    // ever pick it up. Stopping without filing it simply lost the thought.
+    const user = userEvent.setup();
+    onCommand("start_capture", () => null);
+    onCommand("stop_capture", () => null);
+    onCommand("quick_capture_submit", () => outcome("briarwood-golf"));
+    render(<QuickCapture />);
+
+    await goLive();
+    await user.type(box(), "ask about the invoice{Enter}");
+
+    expect(invokedCommands()).toContain("stop_capture");
+    expect(invoke).toHaveBeenCalledWith("quick_capture_submit", {
+      text: "ask about the invoice",
+    });
+  });
+
+  it("tells the truth about what Escape does to a recording", async () => {
+    // There is no cancel: Escape runs the same stop-and-file path Enter does,
+    // and a hint promising otherwise would be a lie about a recording the user
+    // is trying to abandon.
+    onCommand("start_capture", () => null);
+    onCommand("stop_capture", () => null);
+    render(<QuickCapture />);
+
+    await goLive();
+
+    expect(screen.getByText(/stops and files/)).toBeInTheDocument();
+    expect(screen.queryByText(/Esc cancels/)).not.toBeInTheDocument();
+
+    fireEvent.keyDown(box(), { key: "Escape" });
+    expect(invokedCommands()).toContain("stop_capture");
   });
 });

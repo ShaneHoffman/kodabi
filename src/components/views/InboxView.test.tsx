@@ -5,7 +5,6 @@ import { InboxView } from "./InboxView";
 import { NavigationProvider } from "../NavigationProvider";
 import type { NoteSummary } from "../../useNotes";
 import type { Project } from "../../useProjects";
-import type { FailedSession } from "../../useSessions";
 import { notifyVaultChanged } from "../../useVaultQuery";
 import { invoke, onCommand, resetTauriMocks } from "../../test/tauri";
 
@@ -37,32 +36,21 @@ function makeProject(slug: string): Project {
   };
 }
 
-function makeSession(slug: string): FailedSession {
-  return {
-    path: `sessions/2026-07-01T10-00-00Z-${slug}.jsonl`,
-    file_name: `2026-07-01T10-00-00Z-${slug}.jsonl`,
-    slug,
-    captured_at: "2026-07-01T10:00:00Z",
-  };
-}
-
 const PLANNING = makeNote({ id: "n_a1b2c3", title: "Quarterly planning" });
 const VENDOR = makeNote({ id: "n_d4e5f6", title: "Vendor follow-up" });
 
-/** Serve the three reads the view makes. `sessions` defaults to empty — a
- * meeting that never became a note is the exception, not the norm — but the
- * empty state depends on it, so it is a parameter rather than a constant. */
+/** Serve the two reads the view makes. Failed captures are deliberately not
+ * among them: they moved to NeedsAttentionView, and this view's empty state no
+ * longer depends on anything but its own list. */
 function serveVault(
   notes: NoteSummary[],
   projects = ["briarwood-golf", "kodabi"],
-  sessions: FailedSession[] = [],
 ): void {
   onCommand("list_notes", (args) => (args?.project === "Inbox" ? notes : []));
   onCommand("list_projects", () => ({
     inbox_note_count: notes.length,
     projects: projects.map(makeProject),
   }));
-  onCommand("list_failed_sessions", () => sessions);
 }
 
 function renderInbox() {
@@ -179,60 +167,45 @@ describe("InboxView", () => {
     expect(await screen.findByText(/Nothing waiting/)).toBeInTheDocument();
   });
 
-  it("never claims nothing is waiting above a meeting that needs a retry", async () => {
-    // No unfiled notes, but a captured meeting that never became a note. The
-    // empty state speaks for the whole view, so "Nothing waiting" here would
-    // tell the user there is nothing to do while showing them a Retry button.
-    serveVault([], ["briarwood-golf"], [makeSession("team-sync")]);
+  it("states the workload in the header, and only when there is one", async () => {
+    // The header says what the view is FOR before the list is read. At zero it
+    // says nothing: the empty state below is already that sentence, and a
+    // header that also says "nothing" says it worse.
+    serveVault([PLANNING, VENDOR]);
 
+    const { unmount } = renderInbox();
+
+    // The count folds into the masthead sentence ("Inbox · 2 to file"), so the
+    // noun lives in the view's name rather than being repeated in the count.
+    expect(await screen.findByText("· 2 to file")).toBeInTheDocument();
+    unmount();
+
+    resetTauriMocks();
+    serveVault([PLANNING]);
     renderInbox();
 
-    expect(await screen.findByTestId("needs-attention")).toBeInTheDocument();
-    expect(screen.queryByText(/Nothing waiting/)).not.toBeInTheDocument();
+    expect(await screen.findByText("· 1 to file")).toBeInTheDocument();
   });
 
-  it("caps the needs-attention list so it cannot bury the notes below it", async () => {
-    // The section is an exception list inside a view named for something else;
-    // unbounded it pushes the Inbox's own subject off the screen
-    // (docs/DESIGN_SYSTEM.md §1). It caps, and says how much it is holding back.
-    const user = userEvent.setup();
-    serveVault(
-      [PLANNING],
-      ["briarwood-golf"],
-      ["team-sync", "vendor-call", "board-prep", "retro"].map(makeSession),
-    );
+  it("holds no needs-attention queue of its own", async () => {
+    // The Inbox has one job. Failed captures are a different job with a
+    // different verb, and they now live in their own view; even served one,
+    // this view must not grow a second queue back.
+    serveVault([PLANNING]);
+    onCommand("list_failed_sessions", () => [
+      {
+        path: "sessions/2026-07-01T10-00-00Z-team-sync.jsonl",
+        file_name: "2026-07-01T10-00-00Z-team-sync.jsonl",
+        slug: "team-sync",
+        captured_at: "2026-07-01T10:00:00Z",
+      },
+    ]);
 
     renderInbox();
+    await screen.findByText("Quarterly planning");
 
-    expect(await screen.findByTestId("needs-attention")).toBeInTheDocument();
-    expect(screen.getAllByTestId("retry-distill")).toHaveLength(3);
-    expect(screen.queryByText("retro")).not.toBeInTheDocument();
-    // The note the view is actually named for is still on screen.
-    expect(screen.getByText("Quarterly planning")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Show 1 more" }));
-
-    expect(screen.getAllByTestId("retry-distill")).toHaveLength(4);
-    expect(screen.getByText("retro")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Show fewer" }));
-
-    expect(screen.getAllByTestId("retry-distill")).toHaveLength(3);
-  });
-
-  it("never claims nothing is waiting when the session listing failed", async () => {
-    // Same rule for the other unknown: a failed read is not an empty list.
-    serveVault([], ["briarwood-golf"]);
-    onCommand("list_failed_sessions", () => {
-      throw "the sessions folder is unreadable";
-    });
-
-    renderInbox();
-
-    expect(
-      await screen.findByText(/the sessions folder is unreadable/),
-    ).toBeInTheDocument();
-    expect(screen.queryByText(/Nothing waiting/)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("needs-attention")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("retry-distill")).not.toBeInTheDocument();
   });
 
   it("surfaces a failed listing instead of claiming an empty inbox", async () => {
@@ -240,7 +213,6 @@ describe("InboxView", () => {
       throw "the vault is unreadable";
     });
     onCommand("list_projects", () => ({ inbox_note_count: 0, projects: [] }));
-    onCommand("list_failed_sessions", () => []);
 
     renderInbox();
 

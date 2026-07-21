@@ -1,0 +1,115 @@
+/* ============================================================
+   Settings — the config panel.
+
+   Only non-bridged tokens live here: the tab rail, the setting row grid, the
+   read-only chips, and the pill toggle.
+
+   THE TAB RAIL IS HORIZONTAL ON PURPOSE. A vertical category list here would
+   sit directly beside the sidebar and read as a second nav rail — two columns
+   of destinations, and the user having to work out which one they are in.
+   Laid across the top it is unmistakably a filter on the content below it.
+   ============================================================ */
+
+.settings__rail {
+  margin-top: var(--lead-panel);
+}
+
+.settings__tabs {
+  display: flex;
+  gap: 26px;
+}
+
+/* The active tab carries full ink and a 2px underline drawn as a shadow, so
+   it adds no layout box and the inactive tabs do not shift when it moves. */
+.settings__tab {
+  padding: 0 1px 9px;
+  transition: color var(--dur-quick) var(--ease-standard);
+}
+
+.settings__tab[aria-selected="true"] {
+  box-shadow: 0 2px 0 var(--text);
+}
+
+/* The rule the tabs sit on. It runs the full pane rather than stopping at the
+   settings column: it is the seat for the rail above it, not a divider for
+   the rows below. */
+.settings__rule {
+  height: 1px;
+  background: var(--edge-rule);
+}
+
+/* ---------- rows ----------
+   Label left, control right, on one grid so every control in the tab lines up
+   into a single scannable column whatever its width. */
+.settings__rows {
+  max-width: var(--measure-setting);
+}
+
+.settings__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  column-gap: 20px;
+  padding: 13px 0;
+}
+
+.settings__control {
+  justify-self: end;
+  position: relative;
+}
+
+/* A sub-label is one short muted line, never a serif paragraph: it belongs to
+   the row above it, so it is pulled up tight against it and given room below
+   instead. */
+.settings__sublabel {
+  margin-top: -3px;
+  padding-bottom: 4px;
+}
+
+/* ---------- read-only chips ----------
+   A value you cannot change still sits on the same raised plane as one you
+   can, because it is still the row's value. What tells them apart is that
+   this one has no chevron and does not lift under the pointer. */
+.settings__chip {
+  display: inline-block;
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  padding: 7px 12px;
+  box-shadow: var(--lift-chip);
+}
+
+/* ---------- the pill toggle ----------
+   The one control in the app whose state is its geometry rather than its
+   value: the knob is ink and it moves. The track lightens when on, but the
+   track alone would be a very quiet signal, which is why the travel carries
+   it (docs/DESIGN_SYSTEM.md §2). */
+.settings__toggle {
+  position: relative;
+  width: 42px;
+  height: 24px;
+  padding: 0;
+  flex: none;
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: inset 0 0 0 1px var(--edge-strong);
+  transition: background-color var(--dur-plane) var(--ease-standard);
+}
+
+.settings__toggle[aria-checked="true"] {
+  background: var(--toggle-on);
+}
+
+.settings__knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--text);
+  transition: transform var(--dur-plane) var(--ease-standard);
+}
+
+.settings__toggle[aria-checked="true"] .settings__knob {
+  transform: translateX(18px);
+}

@@ -45,7 +45,7 @@ export function Textarea({
       <textarea
         id={fieldId}
         aria-describedby={hintId}
-        className={`ui-textarea ui-focus-ring rounded-md bg-bg-sink px-xs py-2xs text-body text-text placeholder:text-text-faint${
+        className={`ui-textarea ui-focus-ring rounded-md px-xs py-2xs text-body text-text placeholder:text-text-faint${
           className ? ` ${className}` : ""
         }`}
         {...rest}
