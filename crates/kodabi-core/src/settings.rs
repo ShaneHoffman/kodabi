@@ -1,5 +1,6 @@
 //! Machine-local app settings: the recording-consent acknowledgement, the
-//! raw-transcript retention policy, and the capture-overlay visibility flags.
+//! raw-transcript retention policy, the capture-overlay visibility flags, and
+//! the theme preference.
 //!
 //! Like [`crate::device`], this lives in local, per-machine app config rather
 //! than inside the synced knowledge-base folder — consent and retention are a
@@ -71,6 +72,30 @@ impl Default for OverlaySettings {
     }
 }
 
+/// Which theme the window wears.
+///
+/// `System` is the default and the honest one: the app has no opinion until the
+/// user states one, and `design/tokens.css` already answers `prefers-color-scheme`
+/// on its own. The other two are an override for a machine whose OS setting
+/// doesn't match where the user actually works.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum Theme {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+/// How the app looks. A nested struct for one field because appearance is a
+/// category rather than a flag, and the next thing that belongs here (a density
+/// or a font-size preference) should not have to move this one to arrive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct AppearanceSettings {
+    pub theme: Theme,
+}
+
 /// The persisted app settings. `#[serde(default)]` makes every field optional
 /// on load, so an older file missing a field (or a future file with an extra
 /// one) still deserializes — forward/backward compatibility for a config the
@@ -84,10 +109,12 @@ pub struct Settings {
     pub consent_acknowledged: bool,
     /// The raw-transcript retention policy.
     pub retention: RetentionPolicy,
-    /// Capture-overlay visibility. Last field deliberately: serde emits fields
-    /// in declaration order, so appending leaves the existing JSON/TOML prefix
-    /// byte-identical for anything mirroring the older shape.
+    /// Capture-overlay visibility.
     pub overlay: OverlaySettings,
+    /// Theme choice. Last field deliberately: serde emits fields in declaration
+    /// order, so appending leaves the existing JSON/TOML prefix byte-identical
+    /// for anything mirroring the older shape.
+    pub appearance: AppearanceSettings,
 }
 
 /// Loads the settings stored at `config_path`, writing defaults on first run.
@@ -225,6 +252,7 @@ mod tests {
                 consent_acknowledged: true,
                 retention: policy,
                 overlay: OverlaySettings::default(),
+                appearance: AppearanceSettings::default(),
             };
             save(&path, &settings).unwrap();
             assert_eq!(load_or_create(&path).unwrap(), settings);
@@ -247,6 +275,7 @@ mod tests {
                 manual_captures: true,
                 auto_captures: false,
             },
+            appearance: AppearanceSettings::default(),
         };
         save(&path, &settings).unwrap();
         assert_eq!(load_or_create(&path).unwrap(), settings);
@@ -262,6 +291,7 @@ mod tests {
             consent_acknowledged: true,
             retention: keep_days(14),
             overlay: OverlaySettings::default(),
+            appearance: AppearanceSettings::default(),
         })
         .unwrap();
         assert!(toml.contains("consent_acknowledged = true"), "{toml}");
@@ -271,6 +301,15 @@ mod tests {
         assert!(toml.contains("[overlay]"), "{toml}");
         assert!(toml.contains("manual_captures = false"), "{toml}");
         assert!(toml.contains("auto_captures = true"), "{toml}");
+        assert!(toml.contains("[appearance]"), "{toml}");
+        assert!(toml.contains(r#"theme = "system""#), "{toml}");
+        // The scalar fields must precede the tables. TOML puts everything after
+        // a table header inside it, so moving `consent_acknowledged` below
+        // `[overlay]` would silently make it an overlay key.
+        assert!(
+            toml.find("consent_acknowledged").unwrap() < toml.find("[retention]").unwrap(),
+            "{toml}"
+        );
     }
 
     #[test]
@@ -370,7 +409,7 @@ mod tests {
         let json = serde_json::to_string(&Settings::default()).unwrap();
         assert_eq!(
             json,
-            r#"{"consent_acknowledged":false,"retention":{"policy":"keep_all"},"overlay":{"manual_captures":false,"auto_captures":true}}"#
+            r#"{"consent_acknowledged":false,"retention":{"policy":"keep_all"},"overlay":{"manual_captures":false,"auto_captures":true},"appearance":{"theme":"system"}}"#
         );
 
         let keep = serde_json::to_string(&Settings {
@@ -380,11 +419,53 @@ mod tests {
                 manual_captures: true,
                 auto_captures: false,
             },
+            appearance: AppearanceSettings { theme: Theme::Dark },
         })
         .unwrap();
         assert_eq!(
             keep,
-            r#"{"consent_acknowledged":true,"retention":{"policy":"keep_days","days":30},"overlay":{"manual_captures":true,"auto_captures":false}}"#
+            r#"{"consent_acknowledged":true,"retention":{"policy":"keep_days","days":30},"overlay":{"manual_captures":true,"auto_captures":false},"appearance":{"theme":"dark"}}"#
         );
+    }
+
+    #[test]
+    fn a_file_written_before_the_appearance_setting_existed_loads_with_defaults() {
+        let dir = temp_dir("appearance-backcompat");
+        let path = dir.join("settings.toml");
+        // Verbatim shape of an install from before this field. It must load
+        // without a migration and land on System, which is the only default
+        // that cannot be wrong: it defers to the OS the way the app always did.
+        fs::write(
+            &path,
+            "consent_acknowledged = true\n\n[retention]\npolicy = \"keep_all\"\n\n[overlay]\nmanual_captures = true\nauto_captures = false\n",
+        )
+        .unwrap();
+
+        let settings = load_or_create(&path).unwrap();
+
+        assert_eq!(settings.appearance.theme, Theme::System);
+        // The fields that were already there are untouched by the addition.
+        assert!(settings.consent_acknowledged);
+        assert!(settings.overlay.manual_captures);
+        assert!(!settings.overlay.auto_captures);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn every_theme_round_trips_through_toml() {
+        let dir = temp_dir("theme-roundtrip");
+        let path = dir.join("settings.toml");
+
+        for theme in [Theme::System, Theme::Light, Theme::Dark] {
+            let settings = Settings {
+                appearance: AppearanceSettings { theme },
+                ..Settings::default()
+            };
+            save(&path, &settings).unwrap();
+            assert_eq!(load_or_create(&path).unwrap(), settings);
+        }
+
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -10,6 +10,7 @@ import { createContext, useContext } from "react";
  */
 export type View =
   | { kind: "inbox" }
+  | { kind: "needsAttention" }
   | { kind: "project"; slug: string }
   | { kind: "noteEditor"; noteId: string | null; project: string | null }
   | { kind: "search"; query: string }
@@ -17,6 +18,28 @@ export type View =
 
 /** Inbox is home: the unrouted bucket is the first thing worth seeing. */
 export const INITIAL_VIEW: View = { kind: "inbox" };
+
+/**
+ * A destination's full identity as one string, for anything that has to tell
+ * two views of the same kind apart.
+ *
+ * `view.kind` alone is not that: three of the six kinds carry a payload, so
+ * "project" names every project there is. The error boundary keys on this,
+ * because its fallback tells the user to pick another screen — and picking a
+ * second project has to actually clear it.
+ */
+export function viewKey(view: View): string {
+  switch (view.kind) {
+    case "project":
+      return `project:${view.slug}`;
+    case "noteEditor":
+      return `noteEditor:${view.noteId ?? "new"}:${view.project ?? ""}`;
+    case "search":
+      return `search:${view.query}`;
+    default:
+      return view.kind;
+  }
+}
 
 /**
  * Call sites see only this shape, so a future history stack (back/forward)

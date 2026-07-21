@@ -54,7 +54,7 @@ export function Overlay({
     // would also press the controls behind it. The opening gesture predates the
     // overlay, so it can never self-close.
     <div
-      className="ui-overlay fixed inset-0 flex items-start justify-center px-md pt-2xl"
+      className="ui-overlay fixed inset-0 flex items-start justify-center px-md"
       onPointerDown={(event) => {
         backdropPressed.current = event.target === event.currentTarget;
       }}
@@ -71,7 +71,7 @@ export function Overlay({
         aria-label={label}
         aria-labelledby={labelledBy}
         onKeyDown={onKeyDown}
-        className={`ui-overlay__panel w-full max-w-measure rounded-md bg-surface${
+        className={`ui-overlay__panel w-full${
           className ? ` ${className}` : ""
         }`}
       >

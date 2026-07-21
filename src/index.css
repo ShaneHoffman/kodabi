@@ -2,13 +2,20 @@
    Kodabi — Tailwind v4 bridge
 
    Imports the canonical tokens and re-exposes them as Tailwind theme
-   variables so utilities (bg-bg, text-text, font-serif, p-4 …) map onto
+   variables so utilities (bg-bg, text-text, font-serif, gap-sm …) map onto
    our tokens.
 
    Nothing here redefines a value — design/tokens.css stays the single
    source of truth. This file documents the mapping, pulls in the shared
-   primitive recipes, and applies the two bits of global chrome (scrollbars,
-   reduced motion) that belong to no single component.
+   primitive recipes, and applies the three bits of global chrome
+   (scrollbars, text selection, reduced motion) that belong to no single
+   component.
+
+   What is deliberately NOT bridged: the Layer-4 geometry family
+   (--gutter-*, --measure-*, --sidebar-*) and every elevation, edge and
+   motion token. Those are consumed from a co-located Component.css, which
+   is where a box-shadow or an exact per-view gutter belongs
+   (docs/UI_CONVENTIONS.md).
    ============================================================ */
 
 @import "tailwindcss";
@@ -20,69 +27,112 @@
    build time — so :root[data-theme="dark"] keeps re-theming every utility live.
    Plain `@theme` would freeze the light values and break theme switching. */
 @theme inline {
-  /* color — semantic tokens (theme-reactive) */
-  --color-bg:         var(--bg);
-  --color-bg-sink:    var(--bg-sink);
-  --color-surface:    var(--surface);
-  --color-text:       var(--text);
-  --color-text-soft:  var(--text-soft);
+  /* ---------- colour — the three planes ---------- */
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-overlay: var(--overlay);
+
+  /* ---------- colour — the ink ladder ---------- */
+  --color-text: var(--text);
+  --color-text-read: var(--text-read);
+  --color-text-soft: var(--text-soft);
   --color-text-faint: var(--text-faint);
-  --color-accent:     var(--accent);
+
+  /* ---------- colour — fills that are not planes ----------
+     A menu row under the pointer, an open control's token, a highlighted
+     search term. All value, no hue. */
+  --color-menu-hover: var(--menu-hover);
+  --color-token-active: var(--token-active);
+  --color-highlight: var(--highlight);
+
+  /* The one reserved green. Bridged so the listening dot, the waveform and
+     the caret can spell it as a utility — and nothing else may. */
   --color-accent-dot: var(--accent-dot);
 
-  /* type — families */
-  --font-sans:  var(--sans);
+  /* ---------- type — families ---------- */
+  --font-sans: var(--sans);
   --font-serif: var(--serif);
-  --font-mono:  var(--mono);
+  --font-mono: var(--mono);
 
-  /* type — tracking. Bridged because the eyebrow role was otherwise reaching
-     for Tailwind's own `tracking-wide` (0.025em) at most call sites while the
-     Sidebar used --ls-eyebrow (0.22em) through a CSS class — the same role
-     rendering 8.8x apart. `tracking-eyebrow` is now the only spelling. */
-  --tracking-eyebrow: var(--ls-eyebrow);
-  --tracking-caps:    var(--ls-caps);
+  /* ---------- type — the size scale ----------
+     Fixed px. The window is 960x640 and does not reflow, so a fluid step
+     only made the same role render at two sizes for no reader's benefit. */
+  --text-eyebrow: var(--fs-eyebrow);
+  --text-micro: var(--fs-micro);
+  --text-cap: var(--fs-cap);
+  --text-meta: var(--fs-meta);
+  --text-action: var(--fs-action);
+  --text-label: var(--fs-label);
+  --text-body: var(--fs-body);
+  --text-snippet: var(--fs-snippet);
+  --text-snippet-sm: var(--fs-snippet-sm);
+  --text-lead: var(--fs-lead);
+  --text-input: var(--fs-input);
+  --text-row: var(--fs-row);
+  --text-read: var(--fs-read);
+  --text-h3: var(--fs-h3);
+  --text-capture: var(--fs-capture);
+  --text-wordmark: var(--fs-wordmark);
 
-  /* type — weights. Tailwind's own font-medium/semibold happen to match, but
-     bridging makes the token the source rather than the coincidence. */
-  --font-weight-medium:   var(--fw-medium);
+  /* the big view title — one step per view type, because a config panel and
+     a note must not open at the same size (docs/DESIGN_SYSTEM.md §1). */
+  --text-title-panel: var(--fs-title-panel);
+  --text-title-health: var(--fs-title-health);
+  --text-title-library: var(--fs-title-library);
+  --text-title-doc: var(--fs-title-doc);
+
+  /* ---------- type — weights ---------- */
+  --font-weight-medium: var(--fw-medium);
   --font-weight-semibold: var(--fw-semibold);
+  --font-weight-bold: var(--fw-bold);
 
-  /* type — line-heights (leading-* utilities), so a reading column no longer
-     needs a co-located CSS file just to set its line-height. */
+  /* ---------- type — tracking ----------
+     Three eyebrow steps, not one, and the difference is deliberate: a view
+     eyebrow opens widest, a section eyebrow inside an overlay sits one step
+     tighter, and the sidebar rail tighter again, so nesting reads through
+     the letter-spacing before the size. Never Tailwind's own
+     `tracking-wide` (0.025em) for any of them. */
+  --tracking-eyebrow: var(--ls-eyebrow);
+  --tracking-eyebrow-menu: var(--ls-eyebrow-menu);
+  --tracking-rail: var(--ls-rail);
+  --tracking-caps: var(--ls-caps);
+  --tracking-token: var(--ls-token);
+  --tracking-wordmark: var(--ls-wordmark);
+  --tracking-title: var(--ls-title);
+  --tracking-row: var(--ls-row);
+
+  /* ---------- type — line-heights ---------- */
+  --leading-tight: var(--lh-tight);
+  --leading-title: var(--lh-title);
+  --leading-title-doc: var(--lh-title-doc);
+  --leading-heading: var(--lh-heading);
   --leading-body: var(--lh-body);
+  --leading-snippet: var(--lh-snippet);
+  --leading-list: var(--lh-list);
+  --leading-transcript: var(--lh-transcript);
   --leading-read: var(--lh-read);
 
-  /* type — size scale (exposed as text-* utilities) */
-  --text-eyebrow: var(--fs-eyebrow);
-  --text-cap:     var(--fs-cap);
-  --text-body:    var(--fs-body);
-  --text-read:    var(--fs-read);
-  --text-h3:      var(--fs-h3);
-  --text-h2:      var(--fs-h2);
-  --text-display: var(--fs-display);
+  /* ---------- spacing ----------
+     Align Tailwind's numeric grid to the same 4px base as --space-*, and
+     expose the named steps as semantic aliases. The named form is the only
+     sanctioned spelling (docs/UI_CONVENTIONS.md); eslint fails the numeric
+     one. Per-view geometry is not here — it is Layer 4, read from CSS. */
+  --spacing: 0.25rem;
+  --spacing-3xs: var(--space-3xs);
+  --spacing-2xs: var(--space-2xs);
+  --spacing-xs: var(--space-xs);
+  --spacing-sm: var(--space-sm);
+  --spacing-md: var(--space-md);
+  --spacing-lg: var(--space-lg);
+  --spacing-xl: var(--space-xl);
+  --spacing-2xl: var(--space-2xl);
+  --spacing-3xl: var(--space-3xl);
 
-  /* spacing — align the numeric grid so p-4 / gap-6 land on the same 4px base
-     as --space-*, and expose the named steps as semantic aliases */
-  --spacing:       0.25rem;
-  --spacing-3xs:   var(--space-3xs);
-  --spacing-2xs:   var(--space-2xs);
-  --spacing-xs:    var(--space-xs);
-  --spacing-sm:    var(--space-sm);
-  --spacing-md:    var(--space-md);
-  --spacing-lg:    var(--space-lg);
-  --spacing-xl:    var(--space-xl);
-  --spacing-2xl:   var(--space-2xl);
-  --spacing-3xl:   var(--space-3xl);
-
-  /* layout widths (max-w-* utilities) */
-  --container-measure: var(--measure);
-  --container-content: var(--content);
-  --container-wide:    var(--wide);
-
-  /* radii — intentionally NOT re-mapped. tokens.css defines --radius-sm /
-     --radius-md at :root (unlayered), overriding Tailwind's same-named theme
-     defaults, so `rounded-sm` / `rounded-md` already resolve to our tokens.
-     Re-declaring `--radius-sm: var(--radius-sm)` here would be a self-cycle. */
+  /* ---------- radii ----------
+     tokens.css defines --radius-sm / --radius-md at :root (unlayered), so
+     `rounded-sm` / `rounded-md` already resolve to our tokens and must not
+     be re-declared here (it would be a self-cycle). The rest of the ladder
+     is consumed from CSS, where the shapes that need it already live. */
 }
 
 /* ---------- global chrome ----------
@@ -94,6 +144,13 @@
 * {
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   scrollbar-width: thin;
+}
+
+/* Selected text is the same ink wash a search match wears, so dragging across
+   a note and finding a term read as the same act of marking. It is never the
+   reserved green: that means audio is being recorded. */
+::selection {
+  background: var(--selection);
 }
 
 ::-webkit-scrollbar {
@@ -114,8 +171,10 @@
 
 /* Accessibility floor, app-wide: when the OS asks for reduced motion, nothing
    animates or transitions by default. Components that need a *different*
-   reduced-motion resting state (SpiritMark keeps a still green mark rather
-   than a blank one) override this in their own CSS. */
+   reduced-motion resting state override this in their own CSS — the listening
+   dot keeps a still green dot rather than a blank one, because the green
+   carries the recording state and removing it would imply privacy that does
+   not exist. Never let reduced motion remove information. */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -130,4 +189,21 @@
     transition-duration: 1ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* The same floor, reached from inside the app. Windows buries the OS setting
+   three levels into Accessibility, so Settings → Appearance offers its own
+   switch (src/reduceMotion.ts) and it lands here. Stated separately rather
+   than merged into the media query above: a plain selector and an @media
+   block cannot share a rule, and duplicating four declarations is cheaper
+   than making either one conditional. */
+:root[data-reduce-motion="on"] *,
+:root[data-reduce-motion="on"] *::before,
+:root[data-reduce-motion="on"] *::after {
+  /* token-guard-allow: the 1ms reduced-motion idiom, as above. */
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
+  /* token-guard-allow: as above. */
+  transition-duration: 1ms !important;
+  scroll-behavior: auto !important;
 }

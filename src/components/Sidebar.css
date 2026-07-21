@@ -1,34 +1,100 @@
 /* ============================================================
-   Sidebar — the quiet project switcher.
+   Sidebar — the shell's left rail.
 
-   Only non-bridged tokens live here (the two hairlines and the selected-row
-   weight); control padding, rounding, the focus ring and hover now come from
-   the shared Button primitive (src/components/ui/Button.tsx).
-   Separation from the main region is a value shift (bg-bg-sink vs bg-bg)
-   plus this hairline — an inset shadow, never a border (docs/DESIGN.md).
+   Only non-bridged tokens live here: the Layer-4 sidebar geometry, the two
+   hairlines, and the raised pill. Colour, type and weight stay as Tailwind
+   utilities on the elements.
 
-   The old `.sidebar__eyebrow` rule is gone: --ls-eyebrow is bridged as the
-   `tracking-eyebrow` utility now, so the eyebrow is spelled the same way here
-   as in every other view instead of being the one place that used the token
-   while everywhere else used Tailwind's `tracking-wide`.
+   IT SHARES THE PAGE PLANE. The sidebar used to sit on a recessed `bg-sink`
+   fill, which made it a second, darker box beside the content rather than
+   part of the same sheet of paper. There are three planes now and none of
+   them is below the page (docs/DESIGN.md), so the rail is the page, and the
+   only thing separating it from the content is one hairline.
    ============================================================ */
 
 .sidebar {
-  box-shadow: inset -1px 0 0 var(--edge-faint);
+  width: var(--sidebar-w);
+  padding: var(--sidebar-pad-top) var(--sidebar-pad-x) var(--sidebar-pad-bottom);
+  /* An OUTSET hairline on the trailing edge, not a border and not an inset
+     ring: it has to sit in the seam between the two panes, and an inset would
+     draw it inside the sidebar's own padding box. */
+  box-shadow: 1px 0 0 var(--edge);
 }
 
-/* Divides the Inbox (unfiled) from the projects: a hairline at the top of the
-   projects group — an inset shadow, never a border (docs/DESIGN.md). The
-   group's pt-md gives the line room above the "Projects" eyebrow. */
-.sidebar__group {
-  box-shadow: inset 0 1px 0 var(--edge-faint);
+/* The rule under the wordmark. It is one of only two in the whole rail, and
+   it earns its place: it separates what the app is called from what you can
+   go to, which space alone kept reading as a fourth nav row. */
+.sidebar__wordmark {
+  padding: 0 var(--sidebar-row-x) 20px;
 }
 
-/* A selected row reads through weight (value, not hue). Its surface fill
-   and text colour are Tailwind utilities on the row; the nested-project
-   indent is applied inline (paddingInlineStart) so it cleanly overrides the
-   leading half of the primitive's symmetric control padding (px-xs compiles
-   to logical padding-inline in Tailwind v4). */
+.sidebar__divider {
+  height: 1px;
+  background: var(--edge-rule);
+  margin: 0 var(--sidebar-row-x) 20px;
+}
+
+/* ---------- rows ----------
+   Two densities, and the difference is the point. The SYSTEM RAIL (Inbox,
+   Needs attention) sits at the heavier inset: those are the two places work
+   waits. The PROJECT rows and the footer sit tighter — they are a list you
+   scan, not a pair of destinations you choose between.
+
+   EACH GROUP HAS EXACTLY ONE BOX, in every state. The design reference draws
+   the active pill bigger than the row beside it, which no static mock ever
+   has to transition between; live, it meant selecting a project slid its
+   label 8px right, grew the row 10px, and shoved the whole list down. A
+   selected row is not a different size of row.
+
+   The nested indent is added to the row's own inset rather than replacing
+   it, and the depth arrives as a custom property because only the component
+   knows it. */
+.sidebar__row {
+  border-radius: var(--radius-pill);
+  padding-block: var(--sidebar-row-y);
+  padding-inline: calc(
+      var(--sidebar-row-x) + var(--row-depth, 0) * var(--sidebar-indent)
+    )
+    var(--sidebar-row-x);
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    box-shadow var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard);
+}
+
+.sidebar__row--rail {
+  padding-block: var(--sidebar-rail-y);
+  padding-inline: calc(
+      var(--sidebar-rail-x) + var(--row-depth, 0) * var(--sidebar-indent)
+    )
+    var(--sidebar-rail-x);
+}
+
+/* ---------- the active pill ----------
+   The one raised plane in the sidebar: a value shift, a ring and a shadow,
+   all carried by `--lift` — never a border, never a darker fill, and never
+   the reserved green. Plus the weight step, which is the only thing here
+   that touches the text at all.
+
+   Note what is NOT in this rule: padding. */
 .sidebar__row.is-selected {
-  font-weight: var(--fw-medium);
+  background: var(--surface);
+  box-shadow: var(--lift);
+  font-weight: var(--fw-semibold);
+}
+
+/* The lead-in above the projects eyebrow is its own measurement, not a step
+   off the spacing scale: it has to read as a section break without a rule,
+   and the nearest step (40px) pushed the list far enough down that the rail
+   above it started to look like the whole nav. */
+.sidebar__eyebrow {
+  padding-top: var(--sidebar-eyebrow-top);
+}
+
+/* A hair of daylight between project rows — enough that a long list reads as
+   rows rather than a block, not enough to become a gap. */
+.sidebar__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sidebar-row-gap);
 }

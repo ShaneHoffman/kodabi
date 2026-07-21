@@ -1,34 +1,77 @@
 /* ============================================================
    Select — a token-styled dropdown (collapsible listbox).
 
-   Only non-bridged tokens live here: the trigger hairline and its
-   interaction states, the open list's elevation and stacking layer, and
-   the caret sizing. Focus comes from the shared .ui-focus-ring recipe and
-   the active row from .ui-wash, both in ui.css — the wash is an ink-mix of
-   the text colour, value not hue, and never the reserved green
-   (docs/DESIGN.md, docs/DESIGN_SYSTEM.md §2).
+   Only non-bridged tokens live here: each trigger variant's elevation, the
+   open list's overlay plane and stacking layer, and the caret sizing. Focus
+   comes from the shared .ui-focus-ring recipe and the active row from
+   .ui-wash, both in ui.css — the wash is the menu-hover fill, value not hue,
+   and never the reserved green (docs/DESIGN.md, docs/DESIGN_SYSTEM.md §2).
+
+   THE BOX EXISTS ONLY WHILE CHOOSING. That idea is what separates the two
+   triggers. `boxed` earns a chip permanently because it sits in a form,
+   where a field that does not look like a field is a field people do not
+   fill in. `token` earns nothing at all until you touch it, because it sits
+   in a list row whose subject is the note, not the control.
    ============================================================ */
 
-.ui-select__trigger {
-  box-shadow: var(--hairline);
-  transition: background-color var(--dur-quick) var(--ease-standard);
+/* ---------- boxed: the control chip ----------
+   Value plus a chevron on a raised plane. It lifts a step under the pointer
+   and a step further again while its menu is open, so the trigger visibly
+   becomes the thing the list is hanging off. Elevation carries all three
+   states; the fill never changes. */
+.ui-select__trigger--boxed {
+  background: var(--surface);
+  box-shadow: var(--lift-chip);
+  border-radius: var(--radius-md);
+  padding: 7px 12px;
+  transition: box-shadow var(--dur-quick) var(--ease-standard);
 }
 
-.ui-select__trigger:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--text) 6%, var(--surface));
+.ui-select__trigger--boxed:hover:not(:disabled) {
+  box-shadow: var(--lift-chip-hover);
 }
 
-.ui-select__trigger:active:not(:disabled) {
-  background: color-mix(in srgb, var(--text) 12%, var(--surface));
-  transition: none;
+.ui-select__trigger--boxed[aria-expanded="true"] {
+  box-shadow: var(--lift-chip-open);
 }
 
-.ui-select__trigger:disabled {
-  box-shadow: inset 0 0 0 1px var(--edge-faint);
+.ui-select__trigger--boxed:disabled {
+  box-shadow: 0 0 0 1px var(--edge-faint);
 }
 
-/* Functional affordance, not decoration: a caret that scales with the
-   type and inherits a faint value. */
+/* ---------- token: the demoted picker ----------
+   Boxed, this was the heaviest object on the Inbox: a filled, ringed field
+   shouting beside the note title it belongs to. So it rests as quiet mono
+   text with no box at all, takes a soft pill under the pointer, and holds
+   that pill while its menu is open.
+
+   The negative margin lets the pill bleed past the text's own box without
+   moving the text, so nothing in the row shifts when it appears. */
+.ui-select__trigger--token {
+  background: transparent;
+  border-radius: var(--radius-item);
+  padding: 5px 10px;
+  margin: -5px -10px;
+  white-space: nowrap;
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard);
+}
+
+.ui-select__trigger--token:hover:not(:disabled),
+.ui-select__trigger--token[aria-expanded="true"] {
+  background: var(--token-active);
+  color: var(--text);
+}
+
+.ui-select__trigger--token:disabled {
+  background: transparent;
+}
+
+/* ---------- the caret ----------
+   Functional affordance, not decoration: it scales with the type and
+   inherits a faint value. `token` draws its own arrow as a glyph instead
+   (→ becoming ↓ at the moment of choice), so it renders none. */
 .ui-select__caret {
   width: 0.7em;
   height: 0.7em;
@@ -36,12 +79,29 @@
   color: var(--text-faint);
 }
 
+/* ---------- the open list ----------
+   The OVERLAY plane — the third and highest of the three — because a menu is
+   in front of the whole view, not lifted within it. Lighter fill, hairline
+   ring and a big soft shadow, all carried by --lift-menu.
+
+   Right-aligned: every trigger that opens one sits at the right edge of its
+   row (a settings control, a queue row's file token), and a menu that grew
+   rightward from a right-aligned anchor would run off the pane. */
 .ui-select__list {
-  box-shadow: var(--lift);
+  background: var(--overlay);
+  box-shadow: var(--lift-menu);
+  border-radius: var(--radius-pill);
+  padding: 7px;
+  min-width: var(--measure-menu);
   z-index: var(--layer-dropdown);
 }
 
-/* The chosen value reads through weight (value, not hue). */
+.ui-select__option {
+  border-radius: var(--radius-item);
+  padding: 10px 13px;
+}
+
+/* The chosen value reads through weight and a check — value, never hue. */
 .ui-select__option.is-selected {
   font-weight: var(--fw-medium);
 }

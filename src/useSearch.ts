@@ -1,0 +1,65 @@
+import { useCallback } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import { INBOX_PROJECT, type NoteSummary } from "./useNotes";
+import { useProjects } from "./useProjects";
+import { useVaultQuery } from "./useVaultQuery";
+
+/** Joins the slug list into one dependency string. NUL because a slug is a
+ * folder path and can hold any separator a reader would reach for first ("/",
+ * ",", "|") but never this one. Written as the escape, never as a literal
+ * control character: a raw NUL in the source makes git treat the whole file as
+ * binary, which costs it its diff, its blame and its ability to merge. */
+const SLUG_SEPARATOR = "\0";
+
+/**
+ * Every note in the vault, for Search to match against.
+ *
+ * This is the SEAM, and it is the reason it is a hook of its own rather than
+ * a `list_notes` call inside the view. The note index already carries an FTS5
+ * table and a vector table (`crates/kodabi-core/src/index`), but no command
+ * queries them yet. So today "search" is: list every project's notes and match
+ * in the frontend. That is honest for a local vault of a few hundred notes and
+ * it makes the view real rather than a placeholder.
+ *
+ * When a `search_notes` command lands, this file changes and `SearchView` does
+ * not: it becomes one invoke returning ranked hits, and the frontend matching
+ * in the view collapses into whatever the backend hands back.
+ *
+ * Fetched through `useVaultQuery`, so results refetch on every vault change
+ * exactly like every other list in the app.
+ */
+export function useSearchCorpus(): {
+  notes: NoteSummary[];
+  loading: boolean;
+  error: string | null;
+} {
+  const { entries } = useProjects();
+  // The Inbox is a real place to find a note, so the corpus is every project
+  // plus the unfiled bucket. Derived from the sidebar's own listing so a
+  // brand-new project is searchable without a second source of truth.
+  const slugs = entries.flatMap((entry) =>
+    entry.kind === "project" ? [entry.project.slug] : [INBOX_PROJECT],
+  );
+  const key = slugs.join(SLUG_SEPARATOR);
+
+  const { data, loading, error } = useVaultQuery(
+    useCallback(
+      async () => {
+        const perProject = await Promise.all(
+          key
+            .split(SLUG_SEPARATOR)
+            .filter(Boolean)
+            .map((slug) => invoke<NoteSummary[]>("list_notes", { project: slug })),
+        );
+        // Newest first, so an unranked match list still opens with the note
+        // most likely to be the one you meant.
+        return perProject.flat().sort((a, b) => b.date.localeCompare(a.date));
+      },
+      // Keyed by the joined slugs rather than the array, which is a fresh
+      // reference every render and would refetch forever.
+      [key],
+    ),
+  );
+
+  return { notes: data ?? [], loading, error };
+}

@@ -110,6 +110,7 @@ export default tseslint.config(
       "src/useDebouncedValue.ts",
       "src/useDialogFocus.ts",
       "src/useDistillState.ts",
+      "src/useElapsed.ts",
       "src/useOutsidePointerDown.ts",
       "src/useScrollIntoView.ts",
       "src/useSettings.ts",

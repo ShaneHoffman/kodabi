@@ -10,7 +10,7 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use kodabi_core::settings::{self, OverlaySettings, RetentionPolicy, Settings};
+use kodabi_core::settings::{self, AppearanceSettings, OverlaySettings, RetentionPolicy, Settings};
 use tauri::{AppHandle, Emitter, State};
 
 /// Event emitted after settings change over IPC, carrying the new [`Settings`].
@@ -105,6 +105,23 @@ pub fn set_capture_overlay(
     Ok(settings)
 }
 
+/// Sets the theme preference.
+///
+/// No side effect beyond the event, unlike its neighbours: the frontend applies
+/// the theme itself (`src/theme.ts`), and the event is what carries the change
+/// to the quick-capture and overlay windows, which are separate webviews with
+/// no other way to hear about it.
+#[tauri::command]
+pub fn set_appearance(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+    appearance: AppearanceSettings,
+) -> Result<Settings, String> {
+    let settings = state.update(|s| s.appearance = appearance)?;
+    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
+    Ok(settings)
+}
+
 /// Records that the user acknowledged the recording-consent nudge and stores
 /// the retention policy they chose in the same write. After this, the capture
 /// gate lets recording proceed.
@@ -128,6 +145,9 @@ pub fn acknowledge_consent(
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Only the tests name a concrete theme; the command signature takes the
+    // whole AppearanceSettings, so this would be unused in a normal build.
+    use kodabi_core::settings::Theme;
 
     fn temp_settings_state(tag: &str) -> (SettingsState, PathBuf) {
         use std::sync::atomic::{AtomicU32, Ordering};
@@ -182,6 +202,23 @@ mod tests {
         let reloaded = settings::load_or_create(&path).unwrap();
         assert!(reloaded.overlay.manual_captures);
         assert!(!reloaded.overlay.auto_captures);
+
+        std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
+    }
+
+    #[test]
+    fn appearance_persists_through_update() {
+        let (state, path) = temp_settings_state("appearance");
+        assert_eq!(state.snapshot().appearance.theme, Theme::System);
+
+        let updated = state
+            .update(|s| s.appearance = AppearanceSettings { theme: Theme::Dark })
+            .unwrap();
+        assert_eq!(updated.appearance.theme, Theme::Dark);
+
+        // Persisted: the window must not open in the wrong theme after a restart.
+        let reloaded = settings::load_or_create(&path).unwrap();
+        assert_eq!(reloaded.appearance.theme, Theme::Dark);
 
         std::fs::remove_dir_all(path.parent().unwrap()).unwrap();
     }

@@ -1,19 +1,37 @@
 /* ============================================================
    Overlay — the modal shell.
 
-   Only non-bridged tokens live here: the scrim, the stacking layer, and the
-   panel's elevation. No entrance animation, and nothing for
-   prefers-reduced-motion to disable: FOUNDING_DOC §4 reserves "one deliberate
-   motion" for the distill-and-route moment and keeps everything else
-   near-instant. Showing the surface IS the transition, and a hotkey surface
-   that fades in feels slow (docs/DESIGN_SYSTEM.md §4).
+   Only non-bridged tokens live here: the scrim, the stacking layer, the
+   overlay plane and its elevation.
+
+   THE SCRIM IS DARK IN BOTH THEMES, and it earns a blur. A scrim is a shadow,
+   and a shadow does not re-theme — dimming washi with washi in the day theme
+   left a palette that barely registered as being in front of the app. The
+   1.5px blur is what turns "dimmed" into "out of focus", so the eye stops
+   trying to read the view behind the panel.
+
+   No entrance animation, and nothing for prefers-reduced-motion to disable:
+   FOUNDING_DOC §4 reserves "one deliberate motion" for the distill-and-route
+   moment and keeps everything else near-instant. Showing the surface IS the
+   transition, and a hotkey surface that fades in feels slow.
    ============================================================ */
 
 .ui-overlay {
   background: var(--scrim);
+  backdrop-filter: blur(1.5px);
   z-index: var(--layer-overlay);
+  /* Summoned surfaces sit high in the window rather than centred: you are
+     going to type into this, and a box that opens under your eyeline is a box
+     you have to look down at. */
+  padding-top: var(--palette-top);
 }
 
+/* The third and highest plane. Lighter fill than raised, a hairline ring, and
+   the biggest shadow in the app — this is the only thing in front of
+   everything else, so it is allowed to say so. */
 .ui-overlay__panel {
-  box-shadow: var(--lift);
+  max-width: var(--measure-palette);
+  background: var(--overlay);
+  border-radius: var(--radius-window);
+  box-shadow: var(--lift-palette);
 }

@@ -1,0 +1,38 @@
+/* ============================================================
+   Project — the library.
+
+   Only non-bridged tokens live here: the flat index row and its hover tint.
+
+   THE ROWS DO NOT LIFT. A project's index is a reading room, not a queue:
+   nothing in it is waiting on you, so touching a row must not promise an
+   action. It gets a whisper of tint and nothing else — no plane, no ring, no
+   shadow. That difference from the Inbox is the point of the two views
+   looking different at all.
+   ============================================================ */
+
+/* A library leads wider than a queue: you are here to read down the index,
+   not to get straight into it. */
+.project__index {
+  margin-top: var(--lead-library);
+}
+
+.project__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 28px;
+  width: 100%;
+  text-align: left;
+  padding: 16px 14px;
+  margin: 0 -14px;
+  border-radius: var(--radius-md);
+  transition: background-color var(--dur-quick) var(--ease-standard);
+}
+
+/* A tint, not a fill: it is mixed from the ink at 3.5% so it reads as the
+   page darkening very slightly under the pointer rather than as a new
+   surface appearing. */
+.project__row:hover,
+.project__row:focus-visible {
+  background: var(--tint);
+}

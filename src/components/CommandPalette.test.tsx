@@ -1,0 +1,112 @@
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CommandPalette } from "./CommandPalette";
+import { NavigationProvider } from "./NavigationProvider";
+import { onCommand, resetTauriMocks } from "../test/tauri";
+
+vi.mock("@tauri-apps/api/core", () => import("../test/tauri"));
+vi.mock("@tauri-apps/api/event", () => import("../test/tauri"));
+
+function serveVault(): void {
+  onCommand("list_projects", () => ({
+    inbox_note_count: 0,
+    projects: [
+      {
+        id: "paradise-golf",
+        slug: "paradise-golf",
+        display_name: "Paradise Golf",
+        parent: null,
+        note_count: 2,
+        meeting_count: 0,
+      },
+    ],
+  }));
+  onCommand("list_failed_sessions", () => []);
+}
+
+async function renderPalette() {
+  const result = render(
+    <NavigationProvider>
+      <CommandPalette onClose={() => {}} />
+    </NavigationProvider>,
+  );
+  await screen.findByRole("option", { name: "paradise-golf" });
+  return result;
+}
+
+function input(): HTMLElement {
+  return screen.getByRole("combobox");
+}
+
+describe("CommandPalette sections", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+    serveVault();
+  });
+
+  it("heads the two halves of an unfiltered list", async () => {
+    // Somewhere to go and something to do are different questions; flat, the
+    // only thing marking the boundary was a hint repeated on every row.
+    await renderPalette();
+
+    expect(screen.getByRole("group", { name: "Jump to" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Actions" })).toBeInTheDocument();
+  });
+
+  it("says nothing per row that its own heading already says", async () => {
+    await renderPalette();
+
+    expect(
+      screen.getByRole("option", { name: "paradise-golf" }),
+    ).toBeInTheDocument();
+  });
+
+  it("drops the headings when filtering and marks the row Enter would run", async () => {
+    // A filtered list is a set of matches, not a table of contents. What
+    // replaces the heading is not a restatement of it — it is the one thing
+    // worth saying about the top row, which is that Enter runs it.
+    const user = userEvent.setup();
+    await renderPalette();
+
+    await user.type(input(), "paradise");
+
+    expect(screen.queryByRole("group", { name: "Jump to" })).not.toBeInTheDocument();
+    const [match] = screen.getAllByRole("option");
+    expect(match).toHaveTextContent("paradise-golf");
+    expect(match).toHaveTextContent("↵");
+  });
+
+  it("teaches the global shortcut of a command that has one, and invents none", async () => {
+    // The palette is where people learn the bindings, so a hint here has to be
+    // a real accelerator the backend registered. Every other row shows nothing
+    // rather than a label dressed up as a key.
+    await renderPalette();
+
+    expect(screen.getByRole("option", { name: /Quick capture/ })).toHaveTextContent(
+      "Ctrl+Alt+Space",
+    );
+    expect(screen.getByRole("option", { name: /New note/ })).not.toHaveTextContent(
+      "Ctrl",
+    );
+  });
+
+  it("walks the arrow keys straight across the section boundary", async () => {
+    // The sections are visual only: the option ids stay one sequence over the
+    // whole list, so the highlight must not stall or skip where they meet.
+    const user = userEvent.setup();
+    await renderPalette();
+    const options = screen.getAllByRole("option");
+    // Inbox, paradise-golf | New note, Quick capture, Search notes, Settings
+    expect(options).toHaveLength(6);
+    expect(input()).toHaveAttribute("aria-activedescendant", options[0].id);
+
+    await user.keyboard("{ArrowDown}{ArrowDown}");
+
+    // The third row is the first of the next section, reached with no extra
+    // keypress for the heading in between.
+    expect(input()).toHaveAttribute("aria-activedescendant", options[2].id);
+    expect(options[2]).toHaveTextContent("New note");
+    expect(options[2]).toHaveAttribute("aria-selected", "true");
+  });
+});
