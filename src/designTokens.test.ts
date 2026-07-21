@@ -5,11 +5,13 @@ import { describe, expect, it } from "vitest";
 /*
  * The token guard.
  *
- * `design/tokens.css` is the single source of truth for every colour, font and
- * duration in the app (CLAUDE.md). That has always been a review-enforced rule;
- * this makes it a gate. It runs in `pnpm test`, which CI already runs, and adds
- * no dependency — the companion half (numeric spacing and arbitrary values in
- * `className`) is an eslint rule, because those live in TSX rather than CSS.
+ * `design/tokens.css` is the single source of truth for every colour, font,
+ * duration and spacing value in the app (CLAUDE.md). That has always been a
+ * review-enforced rule; this makes it a gate. It runs in `pnpm test`, which CI
+ * already runs, and adds no dependency — the companion half (numeric spacing
+ * and arbitrary values in `className`) is an eslint rule, because those live in
+ * TSX rather than CSS. Spacing is checked on both sides: eslint owns the class
+ * strings it can parse, this owns the stylesheets it cannot.
  *
  * Escape hatch: put `token-guard-allow` in a comment on the offending line or
  * the line above it. It is deliberately noisy to type and greppable, so the
@@ -170,6 +172,26 @@ describe("design tokens are the single source of truth", () => {
     // is how the two surfaces that animate drifted apart before.
     const duration = /(?<![\w-])\d*\.?\d+m?s(?![\w-])/;
     expect(scan(sheets, duration)).toEqual([]);
+  });
+
+  it("declares no literal spacing outside design/tokens.css", () => {
+    // Padding, margin and gap only, and PROPERTY-SCOPED on purpose: sizing
+    // (`width: 17px`), edges (`border: 3px`), radii and offsets
+    // (`outline-offset: calc(var(--focus-offset) + 1px)`) are not spacing
+    // roles, and a bare length check would fail all of them. A value on the
+    // 4px ladder comes from --space-*; per-view stance is named in Layer 4.
+    //
+    // Two things it deliberately cannot see. `scan` tests one line at a time,
+    // so a literal on the continuation line of a wrapped declaration has no
+    // property in front of it — only vars are long enough to wrap, so nothing
+    // in the tree hits that today. And the leading lookbehind means a custom
+    // property named for a spacing role (`--card-gap: 20px`) reads as a
+    // declaration of its own rather than a use of one; that is what keeps the
+    // `--spacing` bridge in index.css legal, and it is why Layer 4 belongs in
+    // tokens.css, which this never scans.
+    const spacing =
+      /(?<![\w-])(?:(?:padding|margin)(?:-(?:top|right|bottom|left|inline|block)(?:-(?:start|end))?)?|(?:row|column)-gap|gap)\s*:[^;{]*\d[\d.]*(?:px|r?em)(?![\w-])/;
+    expect(scan(sheets, spacing)).toEqual([]);
   });
 
   it("declares no literal font-family outside design/tokens.css", () => {
