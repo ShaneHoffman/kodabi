@@ -67,16 +67,29 @@ describe("ViewFrame", () => {
     }
   });
 
-  it("renders no summary line for a variant that has no role for one", () => {
-    // `doc` and `search` supply their own header shape as children (a back
-    // link and its actions; a query field), so a summary passed here has
-    // nowhere to sit and is dropped rather than styled arbitrarily.
-    render(
+  it("refuses a summary on a variant that has no role for one", () => {
+    // `panel`, `doc` and `search` supply their own header shape or have no
+    // typographic role for a summary, so one passed there has nowhere to sit.
+    // It used to be accepted and silently dropped at render; it is now a type
+    // error, which is the only version of this that a caller finds out about.
+    // Children are supplied so that `summary` is the ONLY thing wrong here —
+    // otherwise the expect-error would be satisfied by the missing prop and
+    // stop proving anything.
+    const rejected = (
+      // @ts-expect-error `summary` is not part of the `doc` variant's props.
       <ViewFrame variant="doc" title="New note" summary="ignored">
+        <p>form</p>
+      </ViewFrame>
+    );
+    expect(rejected).toBeTruthy();
+
+    // And the runtime still draws nothing for it, so an untyped caller (a
+    // spread, a JS consumer) cannot get an unstyled line either.
+    render(
+      <ViewFrame variant="doc" title="New note">
         <p>form</p>
       </ViewFrame>,
     );
-
     expect(screen.queryByText("ignored")).not.toBeInTheDocument();
   });
 });

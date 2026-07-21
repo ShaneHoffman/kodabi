@@ -175,7 +175,7 @@ describe("NeedsAttentionView", () => {
   });
 
   it("will not let the running row be discarded out from under its own retry", async () => {
-    // Discard is view-local, so dismissing the row that owns `pendingPath`
+    // Dismiss is view-local, so dismissing the row that owns `pendingPath`
     // would strand it: every other Retry stays disabled, with nothing left on
     // screen saying why, until a terminal event that may be minutes away.
     const user = userEvent.setup();
@@ -185,16 +185,16 @@ describe("NeedsAttentionView", () => {
     await screen.findByText("team sync");
 
     const [firstRetry] = screen.getAllByTestId("retry-distill");
-    const [firstDiscard] = screen.getAllByRole("button", { name: "Discard" });
+    const [firstDismiss] = screen.getAllByRole("button", { name: "Dismiss" });
     await user.click(firstRetry);
 
-    expect(firstDiscard).toBeDisabled();
+    expect(firstDismiss).toBeDisabled();
     // Its neighbour is still discardable: only the running row is held.
-    expect(screen.getAllByRole("button", { name: "Discard" })[1]).not.toBeDisabled();
+    expect(screen.getAllByRole("button", { name: "Dismiss" })[1]).not.toBeDisabled();
   });
 
   it("brings a discarded card back on the next listing, so the sidebar cannot disagree", async () => {
-    // Discard clears the flag, not the data. Held any longer than the current
+    // Dismiss clears the flag, not the data. Held any longer than the current
     // listing it would let this view say "All clear" while the sidebar row
     // beside it still counted the very same sessions.
     const user = userEvent.setup();
@@ -202,11 +202,11 @@ describe("NeedsAttentionView", () => {
     renderView();
     await screen.findByText("team sync");
 
-    await user.click(screen.getByRole("button", { name: "Discard" }));
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
     expect(await screen.findByText(/All clear/)).toBeInTheDocument();
 
     // The same session, listed again — the backend never stopped reporting it,
-    // because Discard touched nothing on disk.
+    // because Dismiss touched nothing on disk.
     serveSessions([makeSession("team-sync")]);
     await act(async () => {
       notifyVaultChanged();

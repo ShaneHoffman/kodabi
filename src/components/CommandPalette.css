@@ -36,7 +36,10 @@
 
 /* The one rule on the surface, and it is functional: it separates what you
    are typing from what you are choosing between. */
+/* An <hr>; `border: none` clears preflight's 1px currentColor top border so
+   the line is only the translucent background box (see QuickCapture.css). */
 .command-palette__rule {
+  border: none;
   height: 1px;
   background: var(--edge-rule);
 }

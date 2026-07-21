@@ -1,4 +1,5 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
+import { Button } from "./ui/Button";
 import { ViewFrame } from "./ui/ViewFrame";
 import { StatusMessage } from "./ui/StatusMessage";
 
@@ -48,16 +49,32 @@ export class AppErrorBoundary extends Component<Props, State> {
     if (this.state.message === null) return this.props.children;
     return (
       <ViewFrame variant="health" eyebrow="System" title="This screen stopped">
-        <div className="flex flex-col gap-sm">
+        <div className="flex flex-col items-start gap-sm">
           <StatusMessage variant="error">
-            Something went wrong drawing this screen. Your notes are files on
+            This screen stopped while drawing itself. Your notes are files on
             disk and were not touched.
           </StatusMessage>
+          {/* A way out that is not "go somewhere else". Clearing the message
+              remounts the view, which is all a transient render failure needs,
+              and it costs nothing when the failure is not transient — the
+              boundary simply catches it again. Before this the only recovery
+              was navigating away, i.e. the user had to know that `resetKey`
+              existed. */}
+          <Button onClick={() => this.setState({ message: null })}>
+            Try this screen again
+          </Button>
           <p className="text-body text-text-soft">
-            Pick another screen in the sidebar to carry on. If it keeps
-            happening, restarting Kodabi is safe.
+            If it keeps happening, pick another screen in the sidebar. Closing
+            and reopening Kodabi is safe.
           </p>
-          <p className="text-cap text-text-faint">{this.state.message}</p>
+          {/* --text-soft, and prefixed. This is the raw exception, and it is
+              the one string on this screen a user might have to read back to
+              somebody: it used to render bare (docs/DESIGN_SYSTEM.md §3 —
+              "never leak an exception") at --text-faint, which §6 records as
+              failing the 4.5:1 floor. Mono because it is machine text. */}
+          <p className="font-mono text-cap text-text-soft">
+            Reported by the app: {this.state.message}
+          </p>
         </div>
       </ViewFrame>
     );

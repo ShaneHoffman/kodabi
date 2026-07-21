@@ -25,7 +25,13 @@ export function StatusMessage({ variant, compact = false, children, className = 
   // An error is assertive because the user did not ask for it and may not be
   // looking; a status is polite because it accompanies something they started.
   const role = variant === "error" ? "alert" : variant === "status" ? "status" : undefined;
-  const tone = variant === "status" ? "text-text-faint" : "text-text-soft";
+  // All three variants read at --text-soft. `status` used to sit at
+  // --text-faint, which is the metadata register (3.12:1 day, 3.37:1 night —
+  // under the 4.5:1 floor, docs/DESIGN_SYSTEM.md §6). A status line is a
+  // sentence the app is deliberately announcing, often through a live region:
+  // it is the last thing that should be the hardest to read. Hierarchy between
+  // the three comes from the role and from `compact`, not from fading one.
+  const tone = "text-text-soft";
   const size = compact ? "text-cap" : "text-body";
 
   return (

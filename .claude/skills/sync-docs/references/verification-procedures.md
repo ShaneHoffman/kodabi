@@ -55,15 +55,24 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 
 - **Source of truth:** `src/components/ui/` (the exported primitives and their props).
 - **Mirror:** the "Primitives" section of `docs/UI_CONVENTIONS.md` — `Button` (variants,
-  `loading`), `TextField` (`error`, `hint`), `Textarea`, `Select` (`disabled`,
-  `emptyLabel`, keyboard behavior), `Checkbox`, `ViewFrame`, `StatusMessage`
-  (variant → ARIA role), `ListRow` (`layout`), `Overlay` — plus the
-  "What consumes these today" table.
+  `loading`), `TextField` (`error`, `hint`), `Select` (`disabled` vs **`busy`**,
+  `emptyLabel`, keyboard behavior), `Checkbox` (and its `--check-*` coupling to the
+  note editor's task list), `ViewFrame` (six variants; `summary` is a **type error**
+  on `panel`/`doc`/`search`, not a silent no-op), `StatusMessage` (variant → ARIA
+  role), `Overlay` — plus the "What consumes these today" table.
+- **Do not look for `Textarea`, `ListRow` or `PlaceholderView`.** All three were
+  deleted (they had no call sites); `UI_CONVENTIONS.md` keeps a "there is no X
+  primitive" note for the first two saying what to copy instead. A live reference to
+  any of them anywhere is itself a failure.
 - **Verify:** read each primitive's exported prop types and compare against the
   documented variants/props/behavior claims. Also confirm the consumers table names
   the primitives each surface actually imports.
 - **Failure:** a documented variant or prop the component no longer has, a new
   primitive the doc omits, or a surface whose imports contradict the table.
+
+> This list is the thing an auditor works from, so **it goes stale the moment a
+> primitive is added or removed** and nothing else will catch that. Updating it is
+> part of the same change, exactly like updating the doc it points at.
 
 ## Anchor 5 — Feature legs ↔ Cargo features
 

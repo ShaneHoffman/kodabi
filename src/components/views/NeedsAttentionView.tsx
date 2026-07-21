@@ -187,7 +187,8 @@ export function NeedsAttentionView() {
                     {sessionTitle(session)}
                   </p>
                   <p className="mt-3xs font-mono text-cap text-text-faint">
-                    {formatCaptureTime(session.captured_at)} · no note was created
+                    {formatCaptureTime(session.captured_at)} · Kodabi made no note
+                    from it
                   </p>
                   {rowErrors[session.path] && (
                     <StatusMessage variant="error" compact>
@@ -228,9 +229,15 @@ export function NeedsAttentionView() {
                         new Set(current).add(session.path),
                       )
                     }
-                    className="py-3xs text-label text-text-faint"
+                    className="py-3xs text-label text-text-soft"
                   >
-                    Discard
+                    {/* "Dismiss", not "Discard". The handler adds the path to
+                        a component-local Set — it hides the row for this
+                        session and touches nothing on disk. "Discard" named a
+                        deletion the code does not perform, on the one screen
+                        whose whole job is to reassure you that a failed
+                        capture still exists. */}
+                    Dismiss
                   </Button>
                 </div>
               </li>
@@ -240,8 +247,8 @@ export function NeedsAttentionView() {
               rather than in a tooltip: the whole reason Discard needs no
               confirmation is that nothing it touches is destroyed. */}
           <p className="attention__footnote text-cap text-text-faint">
-            Retrying re-runs distillation on the original recording. Nothing was
-            deleted.
+            Retrying re-runs distillation on the original recording. Dismissing
+            hides a row until you restart Kodabi. Neither one deletes anything.
           </p>
         </>
       )}

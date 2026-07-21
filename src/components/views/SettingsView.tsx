@@ -16,6 +16,7 @@ import {
 import { applyReduceMotion, readReduceMotion } from "../../reduceMotion";
 import { INDEX_STATE_EVENT } from "../../events";
 import { useTauriEvent } from "../../useTauriEvent";
+import { useTimeout } from "../../useTimeout";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
 import { StatusMessage } from "../ui/StatusMessage";
@@ -31,6 +32,21 @@ const CAPTURE_SHORTCUT = "Ctrl + Shift + K";
 
 const TABS = ["Privacy", "Appearance", "Capture"] as const;
 type Tab = (typeof TABS)[number];
+
+/** How long a "that worked" line stays on screen.
+ *
+ * Successes are announcements, not state: they report something that has just
+ * happened, and a report that never clears reads as a label describing how
+ * things are. Long enough to be read without hunting for it, short enough
+ * that coming back to the tab later shows the panel rather than the news.
+ * Failures are never on this timer — see the note at its call site. */
+const CONFIRMATION_MS = 4000;
+
+/** Ids wiring the tab rail to the pane it filters. Module-level constants
+ * rather than `useId`: there is exactly one Settings view mounted at a time,
+ * and a stable id is what lets the arrow-key handler focus a tab by name. */
+const PANEL_ID = "settings-panel";
+const tabId = (name: Tab) => `settings-tab-${name.toLowerCase()}`;
 
 /** The `index:state` payload, mirroring the Rust `IndexStateEvent` tagged enum
  * in `src-tauri/src/index_state.rs`. */
@@ -69,12 +85,22 @@ function Toggle({
   label,
   checked,
   onChange,
-  disabled,
+  busy = false,
 }: {
   label: string;
   checked: boolean;
   onChange: (next: boolean) => void;
-  disabled?: boolean;
+  /**
+   * A write is in flight. `aria-disabled` + `aria-busy`, never the native
+   * `disabled` attribute: this control is the thing the user just pressed, so
+   * it is the thing that holds focus, and `disabled` would blur it and reset
+   * focus to <body> for the length of every save (docs/DESIGN_SYSTEM.md §6).
+   * It stays focusable and declines its own activation instead.
+   *
+   * There is no genuine-disable case for a toggle here — every switch in
+   * Settings is always meaningful — so `busy` is the only inert form it takes.
+   */
+  busy?: boolean;
 }) {
   return (
     <button
@@ -82,9 +108,13 @@ function Toggle({
       role="switch"
       aria-checked={checked}
       aria-label={label}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className="settings__toggle ui-focus-ring disabled:cursor-not-allowed"
+      aria-disabled={busy || undefined}
+      aria-busy={busy || undefined}
+      onClick={() => {
+        if (busy) return;
+        onChange(!checked);
+      }}
+      className="settings__toggle ui-focus-ring aria-disabled:cursor-not-allowed"
     >
       <span className="settings__knob" />
     </button>
@@ -100,6 +130,17 @@ function Toggle({
 function RebuildIndexControl() {
   const [state, setState] = useState<RebuildStatus>({ status: "idle" });
   useTauriEvent<IndexStateEvent>(INDEX_STATE_EVENT, (payload) => setState(payload));
+
+  // A success that never clears stops being a report and becomes a label: the
+  // old "Index rebuilt." sat under the button for the rest of the session, so
+  // a user coming back to this tab an hour later read it as the current state
+  // rather than as something that had just happened. The failure below is
+  // deliberately NOT on a timer — an error the user may not have been looking
+  // at has to stay until it is read (docs/DESIGN_SYSTEM.md §3).
+  useTimeout(
+    () => setState({ status: "idle" }),
+    state.status === "ready" ? CONFIRMATION_MS : null,
+  );
 
   const rebuild = async () => {
     setState({ status: "rebuilding" });
@@ -124,7 +165,10 @@ function RebuildIndexControl() {
           Rebuild
         </Button>
       </Row>
-      <SubLabel>Reconstructs the index from your note files. Safe to run anytime.</SubLabel>
+      <SubLabel>
+        Reconstructs the index from your note files. It reads them and writes
+        nothing back, so nothing you have written can be lost.
+      </SubLabel>
       {state.status === "ready" && (
         <StatusMessage variant="status" compact>
           Index rebuilt. {state.notes} {state.notes === 1 ? "note" : "notes"} indexed.
@@ -184,6 +228,12 @@ export function SettingsView() {
     setDays(String(settings.retention.days));
   }
 
+  // Clears the day field's acknowledgement after a beat, for the same reason
+  // the index rebuild's does: "Saved." that stays put has stopped reporting an
+  // event and started describing a state. The three error lines on this screen
+  // are deliberately not on a timer.
+  useTimeout(() => setDaysSaved(false), daysSaved ? CONFIRMATION_MS : null);
+
   const kind: RetentionKind = settings?.retention.policy ?? "keep_all";
 
   const apply = async (nextKind: RetentionKind, nextDays: number) => {
@@ -238,25 +288,58 @@ export function SettingsView() {
     <ViewFrame variant="panel" eyebrow="System" title="Settings">
       {/* The rail filters; it does not navigate. Real tab semantics, so a
           screen reader announces it as a filter rather than as a second set
-          of destinations competing with the sidebar. */}
+          of destinations competing with the sidebar.
+
+          "Real" now means the whole contract, not half of it. Before this the
+          rail had role=tablist and role=tab and nothing else: no ids, no
+          aria-controls, no tabpanel under it, and every tab its own tab stop
+          with the arrow keys doing nothing. A tablist that Tab walks through
+          one tab at a time is a tablist in name only — the pattern is a SINGLE
+          tab stop that Arrow keys move within, which is also what makes it
+          faster than the thing it was imitating. */}
       <div className="settings__rail">
-        <div className="settings__tabs" role="tablist" aria-label="Settings categories">
+        <div
+          className="settings__tabs"
+          role="tablist"
+          aria-label="Settings categories"
+          onKeyDown={(event) => {
+            const step =
+              event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+            let next: Tab | null = null;
+            if (step !== 0) {
+              // Wraps: a rail of three is short enough that running off the
+              // end and stopping feels like a bug rather than a boundary.
+              const at = TABS.indexOf(tab);
+              next = TABS[(at + step + TABS.length) % TABS.length];
+            } else if (event.key === "Home") next = TABS[0];
+            else if (event.key === "End") next = TABS[TABS.length - 1];
+            if (!next) return;
+            event.preventDefault();
+            setTab(next);
+            document.getElementById(tabId(next))?.focus();
+          }}
+        >
           {TABS.map((name) => (
             <button
               key={name}
+              id={tabId(name)}
               type="button"
               role="tab"
               aria-selected={tab === name}
+              aria-controls={PANEL_ID}
+              // Roving tabindex: the rail is one stop in the page's tab order
+              // and the arrow keys move inside it.
+              tabIndex={tab === name ? 0 : -1}
               onClick={() => setTab(name)}
               className={`settings__tab ui-focus-ring text-label font-semibold ${
-                tab === name ? "text-text" : "text-text-faint"
+                tab === name ? "text-text" : "text-text-soft"
               }`}
             >
               {name}
             </button>
           ))}
         </div>
-        <div className="settings__rule" />
+        <hr className="settings__rule" />
       </div>
 
       {error && (
@@ -264,23 +347,40 @@ export function SettingsView() {
       )}
 
       {settings && (
-        <div className="settings__rows mt-sm">
+        <div
+          id={PANEL_ID}
+          role="tabpanel"
+          aria-labelledby={tabId(tab)}
+          className="settings__rows mt-sm"
+        >
           {tab === "Privacy" && (
             <>
               <Row label="Recording consent">
                 {/* Read-only, so it stays plain text with a check glyph — no
-                    chip, no chevron, nothing that invites a click. */}
-                <span className="inline-flex items-center gap-2xs text-label text-text-faint">
-                  <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                    <path
-                      d="M2.5 7.5l3 3 6-7"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    />
-                  </svg>
-                  {settings.consent_acknowledged ? "Acknowledged" : "Not yet shown"}
+                    chip, no chevron, nothing that invites a click.
+
+                    THE CHECK IS GATED ON THE VALUE. It used to render
+                    unconditionally, so a profile that had never been shown the
+                    consent nudge got a tick beside the words "Not yet shown" —
+                    a false affirmative on the one row in the app that reports
+                    a privacy state. --text-soft rather than --text-faint for
+                    the same reason: this is a fact the user may need to read,
+                    not a caption (docs/DESIGN_SYSTEM.md §6). */}
+                <span className="inline-flex items-center gap-2xs text-label text-text-soft">
+                  {settings.consent_acknowledged && (
+                    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                      <path
+                        d="M2.5 7.5l3 3 6-7"
+                        stroke="currentColor"
+                        strokeWidth="1.5"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  )}
+                  {settings.consent_acknowledged
+                    ? "Acknowledged"
+                    : "Not shown yet. It appears before your first capture."}
                 </span>
               </Row>
 
@@ -291,10 +391,13 @@ export function SettingsView() {
                   value={kind}
                   onChange={(value) => apply(value as RetentionKind, Number(days))}
                   options={RETENTION_OPTIONS}
-                  disabled={savingRetention}
+                  busy={savingRetention}
                 />
               </Row>
-              <SubLabel>Older captures are removed automatically.</SubLabel>
+              <SubLabel>
+                Kodabi deletes raw transcripts past this age. Your notes are
+                never removed.
+              </SubLabel>
 
               {kind === "keep_days" && (
                 <Row label="Days to keep">
@@ -329,7 +432,7 @@ export function SettingsView() {
               )}
               {saveError && (
                 <StatusMessage variant="error" compact>
-                  Couldn&apos;t save: {saveError}
+                  Couldn&apos;t save the retention policy: {saveError}
                 </StatusMessage>
               )}
             </>
@@ -344,10 +447,15 @@ export function SettingsView() {
                   value={settings.appearance.theme}
                   onChange={(value) => applyAppearanceTheme(value as Theme)}
                   options={THEME_OPTIONS}
-                  disabled={savingAppearance}
+                  busy={savingAppearance}
                 />
               </Row>
-              <SubLabel>Follows your OS light and dark setting.</SubLabel>
+              {/* Only true on `system`, so only said there. It used to render
+                  under every choice, telling a user who had just picked Light
+                  that the app follows their OS. */}
+              {settings.appearance.theme === "system" && (
+                <SubLabel>Follows your OS light and dark setting.</SubLabel>
+              )}
 
               <Row label="Reduce motion">
                 <Toggle
@@ -369,7 +477,7 @@ export function SettingsView() {
 
               {appearanceError && (
                 <StatusMessage variant="error" compact>
-                  Couldn&apos;t save: {appearanceError}
+                  Couldn&apos;t save the theme: {appearanceError}
                 </StatusMessage>
               )}
             </>
@@ -390,7 +498,7 @@ export function SettingsView() {
                 <Toggle
                   label="Show the capture pill during captures you start"
                   checked={settings.overlay.manual_captures}
-                  disabled={savingOverlay}
+                  busy={savingOverlay}
                   onChange={(checked) => applyOverlay({ manual_captures: checked })}
                 />
               </Row>
@@ -402,7 +510,7 @@ export function SettingsView() {
                 <Toggle
                   label="Show the capture pill for auto detected captures"
                   checked={settings.overlay.auto_captures}
-                  disabled={savingOverlay}
+                  busy={savingOverlay}
                   onChange={(checked) => applyOverlay({ auto_captures: checked })}
                 />
               </Row>
@@ -415,7 +523,7 @@ export function SettingsView() {
 
               {overlayError && (
                 <StatusMessage variant="error" compact>
-                  Couldn&apos;t save: {overlayError}
+                  Couldn&apos;t save the capture pill setting: {overlayError}
                 </StatusMessage>
               )}
             </>

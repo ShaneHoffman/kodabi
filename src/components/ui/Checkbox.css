@@ -16,16 +16,23 @@
    hue. The reserved green (--accent-dot) is never used here: it means audio
    is actually being recorded (docs/UI_CONVENTIONS.md), and a checked task
    claiming that would be a lie.
+
+   THE GEOMETRY IS THE --check-* TOKENS, not literals. A note's GFM task list
+   (.note-reading input[type="checkbox"] in NoteEditorView.css) draws the same
+   skin, and the two used to be the same five numbers typed out twice in two
+   files with nothing able to catch a drift between them: the token guard
+   scopes its spacing check to padding/margin/gap, so a width or a ring
+   thickness was structurally invisible to it.
    ============================================================ */
 
 .ui-checkbox {
   appearance: none;
   flex: none;
-  width: 17px;
-  height: 17px;
+  width: var(--check-box);
+  height: var(--check-box);
   border-radius: var(--radius-check);
   background: transparent;
-  box-shadow: 0 0 0 1.4px var(--edge-check);
+  box-shadow: 0 0 0 var(--check-ring) var(--edge-check);
   cursor: pointer;
   display: grid;
   place-content: center;
@@ -37,21 +44,30 @@
 /* Hover firms the ring on an unchecked box — the same "step toward --text"
    the other controls use, spent on the only mark the control has. */
 .ui-checkbox:hover:not(:disabled):not(:checked) {
-  box-shadow: 0 0 0 1.4px var(--text-faint);
+  box-shadow: 0 0 0 var(--check-ring) var(--text-faint);
 }
 
+/* A press deepens the ring and the fill. It deliberately does NOT scale:
+   "a state change never changes the box … not the padding, the size, or the
+   position of anything" (docs/DESIGN_SYSTEM.md §2), and a 0.92 scale made
+   this the only control in the app that shrank under the pointer. */
 .ui-checkbox:active:not(:disabled) {
   transition: none;
-  transform: scale(0.92);
+  box-shadow: 0 0 0 var(--check-ring) var(--text-soft);
+}
+
+.ui-checkbox:checked:active:not(:disabled) {
+  background: var(--text-soft);
+  box-shadow: none;
 }
 
 .ui-checkbox::before {
   content: "";
-  width: 0.55rem;
-  height: 0.3rem;
+  width: var(--check-mark-w);
+  height: var(--check-mark-h);
   /* A check drawn from two borders, rotated — no icon font, no SVG asset. */
-  border-left: 2px solid var(--bg);
-  border-bottom: 2px solid var(--bg);
+  border-left: var(--check-mark-stroke) solid var(--bg);
+  border-bottom: var(--check-mark-stroke) solid var(--bg);
   transform: rotate(-45deg) translate(1px, -1px);
   opacity: 0;
 }
@@ -75,7 +91,12 @@
 /* Indent the hint under the label rather than the box, so the text column
    reads as one block (control width + the inline gap-2xs beside it). */
 .ui-checkbox__hint {
-  /* token-guard-allow: the 1rem is not a spacing step. It restates the box's
-     own 1rem width, so it has to track the box rather than the rhythm. */
-  padding-left: calc(1rem + var(--space-2xs));
+  /* Not a spacing step: it restates the box's own width, so it tracks the box
+     rather than the rhythm. Written off --check-box so it provably cannot
+     drift — it used to be a literal `1rem` under a token-guard-allow comment
+     claiming to "restate the box's own 1rem width", which was wrong twice
+     over: the box is --check-box (17px, not 16), so the hint sat a pixel
+     short of the label it was supposed to line up under, and the escape
+     hatch was justified by a fact that was not true. */
+  padding-left: calc(var(--check-box) + var(--space-2xs));
 }

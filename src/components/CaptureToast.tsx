@@ -120,19 +120,24 @@ export function CaptureToast() {
 
   if (!showing) return null;
 
+  // KEYED ON THE ROLE, so React tears the node down and builds a new one when
+  // the role changes rather than mutating `role` on a live element. A screen
+  // reader registers a live region when it is added to the accessibility tree;
+  // flipping an existing region's role between `status` and `alert` in place is
+  // not reliably re-registered, and the announcement that mattered most — the
+  // failure — was the one arriving on a node that had been introduced as a
+  // polite region (docs/DESIGN_SYSTEM.md §6).
+  const role = showing.failed ? "alert" : "status";
+
   return (
-    <div
-      className="toast"
-      role={showing.failed ? "alert" : "status"}
-      data-testid="capture-toast"
-    >
+    <div key={role} className="toast" role={role} data-testid="capture-toast">
       <p className="text-label text-text">{showing.text}</p>
       {showing.failed && (
         <button
           type="button"
           aria-label="Dismiss"
           onClick={() => setDismissedId(showing.id)}
-          className="toast__dismiss ui-focus-ring text-label text-text-faint"
+          className="toast__dismiss ui-focus-ring text-label text-text-soft"
         >
           ×
         </button>

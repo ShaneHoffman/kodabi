@@ -76,10 +76,15 @@ export function Button({
     filled: "ui-btn--filled",
     quiet: "ui-btn--quiet",
   }[variant];
+  // The disabled LOOK lives in Button.css, not here, because it is per
+  // variant: `primary` and `quiet` recede to --text-faint, but `filled` is an
+  // ink fill with a page-coloured label, and fading the label against it
+  // produced --text-faint on --text — about 3.6:1 in the dark theme, i.e. an
+  // unreadable label on the app's most emphatic control. Only the cursor is
+  // variant-independent and stays a utility.
   const classes = [
     "ui-btn ui-focus-ring",
-    "disabled:cursor-not-allowed disabled:text-text-faint",
-    "aria-disabled:cursor-not-allowed aria-disabled:text-text-faint",
+    "disabled:cursor-not-allowed aria-disabled:cursor-not-allowed",
     look,
     className,
   ]

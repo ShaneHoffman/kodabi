@@ -26,8 +26,30 @@ type Props = {
   /** Hide the label visually (still an accessible name) — for a control whose
    * purpose is clear from context, e.g. a per-row picker in a list. */
   hideLabel?: boolean;
-  /** Inert while a write is in flight, or when there is nothing to choose. */
+  /**
+   * A genuine disable: there is nothing here to choose. Uses the native
+   * attribute, which takes the control out of the tab order.
+   *
+   * NOT for a write in flight — that is `busy`. See below.
+   */
   disabled?: boolean;
+  /**
+   * Inert because a write is in flight.
+   *
+   * The same contract as `Button`'s `loading`, and it exists for the same
+   * reason: the native `disabled` attribute blurs an element that is focused
+   * when it becomes disabled, and focus resets to <body> (the HTML focus
+   * fixup rule). A user who changes a setting with the keyboard therefore
+   * loses their place in the page every time the save round-trips — and
+   * inside a modal it is worse, because the dialog's Escape and Tab handling
+   * lives on an ancestor the focus has just left.
+   *
+   * So a busy trigger takes `aria-disabled` + `aria-busy`, stays focusable,
+   * and swallows its own activation here. `disabled` wins if both are passed,
+   * because a caller asking for a genuinely inert control means it — and the
+   * focus goes with it (docs/DESIGN_SYSTEM.md §6).
+   */
+  busy?: boolean;
   /** What the list says when there are no options. It opens and says this
    * rather than refusing to open, so the control never looks broken. */
   emptyLabel?: string;
@@ -67,6 +89,7 @@ export function Select({
   placeholder = "Select…",
   hideLabel = false,
   disabled = false,
+  busy = false,
   emptyLabel = "Nothing to choose yet.",
   variant = "boxed",
 }: Props) {
@@ -94,6 +117,8 @@ export function Select({
 
   const active = options.length > 0 ? Math.min(activeIndex, options.length - 1) : 0;
   const token = variant === "token";
+  // Busy, not disabled — an explicit `disabled` wins. Mirrors Button.tsx.
+  const isBusy = busy && !disabled;
 
   // Opens even with no options: the list then says so. Refusing to open left a
   // trigger that swallowed every click and looked broken.
@@ -139,6 +164,14 @@ export function Select({
   const onKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
     // Keys pressed mid-IME-composition belong to the composition.
     if (event.nativeEvent.isComposing) return;
+    // A busy trigger keeps focus and the tab order, so it still receives keys
+    // and has to decline them itself. Tab is deliberately not swallowed: the
+    // whole point of staying focusable is that focus can still move on.
+    if (isBusy && event.key !== "Tab") {
+      event.preventDefault();
+      event.stopPropagation();
+      return;
+    }
     const { key } = event;
 
     // A key the widget acts on is fully consumed — stopPropagation keeps it
@@ -215,16 +248,33 @@ export function Select({
         aria-labelledby={`${labelId} ${baseId}`}
         aria-activedescendant={open && options.length > 0 ? optionId(active) : undefined}
         disabled={disabled}
-        onClick={() => (open ? setOpen(false) : openList())}
+        aria-disabled={isBusy || undefined}
+        // aria-busy says *why* it went inert; aria-disabled says that it did.
+        aria-busy={isBusy || undefined}
+        onClick={(event) => {
+          if (isBusy) {
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
+          if (open) setOpen(false);
+          else openList();
+        }}
         onKeyDown={onKeyDown}
         // Boxed shrink-wraps to its value: it is a chip, and a chip that
         // stretched to its column would be a field pretending to be a chip.
         // Token shrink-wraps too — with no ring holding its two ends together,
         // a full-width trigger left the label and the arrow marooned at
         // opposite sides of the column, reading as two unrelated scraps.
-        className={`ui-select__trigger ui-select__trigger--${variant} ui-focus-ring flex w-auto items-center self-start disabled:cursor-not-allowed disabled:text-text-faint ${
+        className={`ui-select__trigger ui-select__trigger--${variant} ui-focus-ring flex w-auto items-center self-start disabled:cursor-not-allowed disabled:text-text-faint aria-disabled:cursor-not-allowed aria-disabled:text-text-faint ${
           token
-            ? "gap-2xs font-mono text-cap tracking-token text-text-faint"
+            ? // --text-soft, not --text-faint. `token` rests as quiet mono
+              // text with no box, so its COLOUR is the whole control: at the
+              // metadata register it measured 3.12:1 in the day theme, and
+              // this trigger is the Inbox's only filing affordance. It still
+              // reads as demoted beside the row's ink title — one step down
+              // the ladder rather than two (docs/DESIGN_SYSTEM.md §6).
+              "gap-2xs font-mono text-cap tracking-token text-text-soft"
             : "gap-2xs text-label text-text"
         }`}
       >
@@ -297,7 +347,13 @@ export function Select({
                   viewBox="0 0 14 14"
                   fill="none"
                   aria-hidden="true"
-                  className="flex-none text-text-faint"
+                  // --text-soft, not --text-faint. This glyph is drawn on the
+                  // row it marks, and that row is very often the active one,
+                  // where the ground is --menu-hover rather than the overlay
+                  // plane: faint ink on that fill measures 3.07:1 in the day
+                  // theme and 2.83:1 at night, which is under even the 3:1 a
+                  // graphic is held to (docs/DESIGN_SYSTEM.md §6).
+                  className="flex-none text-text-soft"
                 >
                   <path
                     d="M2.5 7.5l3 3 6-7"
