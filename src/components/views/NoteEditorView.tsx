@@ -127,7 +127,7 @@ function ReadNote({
       <article>
         <BackLink project={project} />
 
-        <header className="mt-sm">
+        <header className="note__title-row">
           <div className="flex items-start justify-between gap-md">
             <h2 className="font-serif text-title-doc font-semibold leading-title-doc tracking-title text-text">
               {note.title}
@@ -149,13 +149,13 @@ function ReadNote({
           // The checkboxes GFM emits are interactive here rather than
           // disabled: an action item you cannot tick in the view you read it
           // in is a to-do list you have to open an editor to use.
-          <div className="note-reading mt-lg font-serif">
+          <div className="note-reading note__body font-serif">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {note.body_markdown}
             </ReactMarkdown>
           </div>
         ) : (
-          <div className="mt-lg">
+          <div className="note__body">
             <StatusMessage variant="empty">This note has no body yet.</StatusMessage>
           </div>
         )}
@@ -309,7 +309,7 @@ function EditNote({
         {/* Read-only: the filename never changes on edit, and moving a note is
             the filing flow, not an edit. The caret still sits beside it,
             because it marks where composing is happening. */}
-        <div className="mt-sm flex items-center">
+        <div className="note__title-row flex items-center">
           <h2 className="font-serif text-title-doc font-semibold leading-title-doc tracking-title text-text">
             {title}
           </h2>
@@ -362,7 +362,7 @@ function EditNote({
           )}
         </div>
 
-        <div className="relative mt-lg">
+        <div className="note__body relative">
           <textarea
             ref={bodyRef}
             value={body}
@@ -477,7 +477,7 @@ function CreateNote({ initialProject }: { initialProject: string | null }) {
           </Button>
         </header>
 
-        <div className="mt-sm flex items-center">
+        <div className="note__title-row flex items-center">
           <input
             autoFocus
             value={title}
@@ -508,7 +508,7 @@ function CreateNote({ initialProject }: { initialProject: string | null }) {
           </datalist>
         </div>
 
-        <div className="mt-lg">
+        <div className="note__body">
           <textarea
             value={body}
             aria-label="Note body"

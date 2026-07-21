@@ -239,7 +239,7 @@ export function SettingsView() {
       {/* The rail filters; it does not navigate. Real tab semantics, so a
           screen reader announces it as a filter rather than as a second set
           of destinations competing with the sidebar. */}
-      <div className="mt-md">
+      <div className="settings__rail">
         <div className="settings__tabs" role="tablist" aria-label="Settings categories">
           {TABS.map((name) => (
             <button

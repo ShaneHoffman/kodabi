@@ -166,6 +166,16 @@
   text-decoration: line-through;
 }
 
+/* The document's own lead-ins. A note breathes wider than a list does — this
+   is the one screen you settle into rather than work through. */
+.note__title-row {
+  margin-top: var(--lead-doc-title);
+}
+
+.note__body {
+  margin-top: var(--lead-doc);
+}
+
 /* ---------- composing ---------- */
 
 /* The title is an input that refuses to look like one: no fill, no ring, no

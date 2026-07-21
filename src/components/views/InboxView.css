@@ -15,6 +15,13 @@
    A 3px rule and a caption. Deliberately not a percentage, a ring, or a
    number in a badge: it answers "how much of this have I cleared today" at a
    glance, and it is not worth one pixel more than that. */
+/* The air between the progress instrument and the first row. Without it the
+   first row's hover plane rises into the caption above it, and the two read as
+   one object rather than as a reading and a list. */
+.inbox__list {
+  margin-top: var(--lead-queue);
+}
+
 .inbox__progress {
   max-width: var(--measure-progress);
 }

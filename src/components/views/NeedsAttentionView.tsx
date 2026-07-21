@@ -173,7 +173,7 @@ export function NeedsAttentionView() {
         )
       ) : (
         <>
-          <ul className="mt-md flex flex-col gap-xs" data-testid="needs-attention">
+          <ul className="attention__stack" data-testid="needs-attention">
             {visible.map((session) => (
               <li key={session.path} className="attention__card">
                 <WarningGlyph />
@@ -229,7 +229,7 @@ export function NeedsAttentionView() {
           {/* The one piece of reassurance on the screen, and it belongs here
               rather than in a tooltip: the whole reason Discard needs no
               confirmation is that nothing it touches is destroyed. */}
-          <p className="mt-md text-cap text-text-faint">
+          <p className="attention__footnote text-cap text-text-faint">
             Retrying re-runs distillation on the original recording. Nothing was
             deleted.
           </p>
