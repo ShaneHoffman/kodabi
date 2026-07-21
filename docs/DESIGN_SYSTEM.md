@@ -182,6 +182,21 @@ No destructive action ships today — nothing in the app deletes anything — so
 exists either. Shipping an unused variant would be inventing a look with nothing to check it against.
 The first delete lands the variant and this rule together.
 
+### A state change never changes the box
+
+**Hover, focus and selection may change the fill, the elevation and the weight.
+They may not change the padding, the size, or the position of anything.**
+
+The design reference draws the sidebar's active pill larger than the row beside
+it (12/16 against 7/8). A static mock never transitions between the two, so the
+difference is invisible there; live, selecting a project slid its label 8px
+right, grew the row 10px, and pushed every row below it down. Each nav group
+now has exactly one box in every state.
+
+The same rule is why an Inbox row's hover lift is `background` and `box-shadow`
+only, why the Settings tab's underline is a `box-shadow` rather than a border,
+and why `Button loading` swaps the label instead of the control.
+
 ### Selected is value, never hue
 
 ```css

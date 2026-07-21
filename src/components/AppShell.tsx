@@ -4,6 +4,7 @@ import { useNavigation } from "../useNavigation";
 import { useSessionsChangedBridge } from "../useSessionsChangedBridge";
 import { useVaultChangedBridge } from "../useVaultChangedBridge";
 import { AppErrorBoundary } from "./AppErrorBoundary";
+import { CaptureToast } from "./CaptureToast";
 import { CommandPalette } from "./CommandPalette";
 import { ConsentNudge } from "./ConsentNudge";
 import { MainContent } from "./MainContent";
@@ -33,6 +34,10 @@ export function AppShell() {
           <MainContent />
         </AppErrorBoundary>
       </main>
+      {/* Outside the error boundary and outside the routed view: the
+          pipeline keeps running whatever screen you are on, and its outcome
+          has to reach you there. */}
+      <CaptureToast />
       {open && <CommandPalette onClose={closePalette} />}
       {consentOpen && <ConsentNudge onClose={closeNudge} />}
     </div>

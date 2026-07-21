@@ -36,13 +36,26 @@
 
 /* ---------- rows ----------
    Two densities, and the difference is the point. The SYSTEM RAIL (Inbox,
-   Needs attention) is indented to the pill's own inset so its labels never
-   shift when one of them becomes active. The PROJECT rows sit tighter and
-   further left — they are a list you scan, not a pair of destinations you
-   choose between. */
+   Needs attention) sits at the heavier inset: those are the two places work
+   waits. The PROJECT rows and the footer sit tighter — they are a list you
+   scan, not a pair of destinations you choose between.
+
+   EACH GROUP HAS EXACTLY ONE BOX, in every state. The design reference draws
+   the active pill bigger than the row beside it, which no static mock ever
+   has to transition between; live, it meant selecting a project slid its
+   label 8px right, grew the row 10px, and shoved the whole list down. A
+   selected row is not a different size of row.
+
+   The nested indent is added to the row's own inset rather than replacing
+   it, and the depth arrives as a custom property because only the component
+   knows it. */
 .sidebar__row {
   border-radius: var(--radius-pill);
-  padding: 7px var(--sidebar-row-x);
+  padding-block: var(--sidebar-row-y);
+  padding-inline: calc(
+      var(--sidebar-row-x) + var(--row-depth, 0) * var(--sidebar-indent)
+    )
+    var(--sidebar-row-x);
   transition:
     background-color var(--dur-quick) var(--ease-standard),
     box-shadow var(--dur-quick) var(--ease-standard),
@@ -50,37 +63,24 @@
 }
 
 .sidebar__row--rail {
-  padding: 10px var(--sidebar-rail-x);
+  padding-block: var(--sidebar-rail-y);
+  padding-inline: calc(
+      var(--sidebar-rail-x) + var(--row-depth, 0) * var(--sidebar-indent)
+    )
+    var(--sidebar-rail-x);
 }
 
 /* ---------- the active pill ----------
-   The one raised plane in the sidebar. Value shift + ring + shadow, all in
-   `--lift` — never a border, never a darker fill, and never the reserved
-   green. The extra padding is deliberate: the active row is the only thing
-   in the rail with a surface, so it needs room inside its own edge or the
-   label sits on the ring. */
+   The one raised plane in the sidebar: a value shift, a ring and a shadow,
+   all carried by `--lift` — never a border, never a darker fill, and never
+   the reserved green. Plus the weight step, which is the only thing here
+   that touches the text at all.
+
+   Note what is NOT in this rule: padding. */
 .sidebar__row.is-selected {
   background: var(--surface);
   box-shadow: var(--lift);
-  padding: 12px var(--sidebar-rail-x);
   font-weight: var(--fw-semibold);
-}
-
-/* A nested project is indented by one step per slug segment. Applied here
-   rather than inline so it composes with the row padding above instead of
-   fighting it; the depth itself arrives as a custom property from the
-   component, because only the component knows it. */
-.sidebar__row {
-  padding-inline-start: calc(
-    var(--sidebar-row-x) + var(--row-depth, 0) * var(--sidebar-indent)
-  );
-}
-
-.sidebar__row--rail,
-.sidebar__row.is-selected {
-  padding-inline-start: calc(
-    var(--sidebar-rail-x) + var(--row-depth, 0) * var(--sidebar-indent)
-  );
 }
 
 /* The lead-in above the projects eyebrow is its own measurement, not a step

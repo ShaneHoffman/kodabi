@@ -2,41 +2,8 @@ import { captureLabel } from "../captureLabel";
 import type { CaptureStateEvent } from "../useCaptureState";
 import { useCaptureState } from "../useCaptureState";
 import { useDebouncedValue } from "../useDebouncedValue";
-import { useDistillState } from "../useDistillState";
-import { useTranscriptionState } from "../useTranscriptionState";
 import { CaptureStatusLine } from "./CaptureStatusLine";
 import "./ListeningIndicator.css";
-
-function transcriptionLabel(
-  state: ReturnType<typeof useTranscriptionState>,
-): string | null {
-  switch (state.status) {
-    case "transcribing":
-      return "Transcribing…";
-    case "saved":
-      return "Saved";
-    case "error":
-      return "Transcription failed";
-    case "idle":
-      return null;
-  }
-}
-
-function distillLabel(state: ReturnType<typeof useDistillState>): string | null {
-  switch (state.status) {
-    case "distilling":
-      return "Distilling…";
-    case "saved":
-      return "Note saved";
-    case "error":
-      return "Distill failed";
-    // A skipped distill (nothing distillable — e.g. a silent capture) is not
-    // worth a status line; only real progress and real failures surface.
-    case "skipped":
-    case "idle":
-      return null;
-  }
-}
 
 /**
  * What is actually reaching disk, as a phrase. The design's live indicator
@@ -64,6 +31,12 @@ function sourceLine(state: CaptureStateEvent): string | null {
  * a mono `IDLE`; live is the one reserved green plus a breathing glow beside a
  * full-ink label. Those are the only two silhouettes.
  *
+ * It reports CAPTURE only. What transcription and distillation are doing
+ * afterwards used to stack up here as extra lines — a bare `SAVED` sitting
+ * under `IDLE`, saying nothing about what was saved and long outliving the
+ * moment it was true. Those are announcements, not state, and they belong in
+ * `CaptureToast`.
+ *
  * The green means precisely one thing: audio is genuinely being recorded. A
  * degraded capture that still has a live source keeps it (it *is* recording,
  * and dropping it would falsely imply privacy); a capture whose sources have
@@ -76,10 +49,6 @@ export function ListeningIndicator() {
   // label — an aria-live region — follows a debounced state so a flapping VAD
   // doesn't spam screen readers (or flicker the label) on every toggle.
   const label = captureLabel(useDebouncedValue(captureState, 400));
-  const transcription = useTranscriptionState(captureState.phase);
-  const transcriptionText = transcriptionLabel(transcription);
-  const distill = useDistillState(captureState.phase);
-  const distillText = distillLabel(distill);
   const live = captureLabel(captureState).live;
   const sources = sourceLine(captureState);
 
@@ -108,8 +77,6 @@ export function ListeningIndicator() {
       {/* Not live, so the detail has nowhere else to go — a failed start still
           has to say so. */}
       {!live && label.detail && <CaptureStatusLine>{label.detail}</CaptureStatusLine>}
-      {transcriptionText && <CaptureStatusLine>{transcriptionText}</CaptureStatusLine>}
-      {distillText && <CaptureStatusLine>{distillText}</CaptureStatusLine>}
     </div>
   );
 }
