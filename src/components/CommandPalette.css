@@ -17,8 +17,9 @@
 .command-palette__search {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 20px 22px 18px;
+  gap: var(--space-xs);
+  padding: var(--palette-query-top) var(--palette-query-x)
+    var(--palette-query-bottom);
 }
 
 .command-palette__input {
@@ -41,7 +42,7 @@
 }
 
 .command-palette__list {
-  padding: 12px 12px 14px;
+  padding: var(--space-xs) var(--space-xs) var(--palette-section-gap);
   /* Whatever the window has left under the panel, rather than a fixed cap: a
      hard max-height hid the whole ACTIONS section behind a scroll on a vault
      with more than four projects, which is every real vault. */
@@ -53,19 +54,19 @@
    view's own eyebrow, so nesting reads through the letter-spacing before the
    size does (--ls-eyebrow-menu, bridged as tracking-eyebrow-menu). */
 .command-palette__section {
-  padding: 8px 12px 6px;
+  padding: var(--space-2xs) var(--space-xs) var(--palette-eyebrow-gap);
 }
 
 .command-palette__section--later {
-  padding-top: 14px;
+  padding-top: var(--palette-section-gap);
 }
 
 .command-palette__row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  padding: 11px 13px;
+  gap: var(--space-xs);
+  padding: var(--palette-row-y) var(--palette-row-x);
   border-radius: var(--radius-control);
   cursor: pointer;
 }

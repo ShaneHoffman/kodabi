@@ -16,13 +16,13 @@
 
 .settings__tabs {
   display: flex;
-  gap: 26px;
+  gap: var(--gap-tab);
 }
 
 /* The active tab carries full ink and a 2px underline drawn as a shadow, so
    it adds no layout box and the inactive tabs do not shift when it moves. */
 .settings__tab {
-  padding: 0 1px 9px;
+  padding: 0 var(--tab-pad-x) var(--tab-pad-bottom);
   transition: color var(--dur-quick) var(--ease-standard);
 }
 
@@ -49,8 +49,8 @@
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
-  column-gap: 20px;
-  padding: 13px 0;
+  column-gap: var(--gap-setting);
+  padding: var(--row-panel-y) 0;
 }
 
 .settings__control {
@@ -62,8 +62,8 @@
    the row above it, so it is pulled up tight against it and given room below
    instead. */
 .settings__sublabel {
-  margin-top: -3px;
-  padding-bottom: 4px;
+  margin-top: var(--sublabel-tuck);
+  padding-bottom: var(--space-3xs);
 }
 
 /* ---------- read-only chips ----------
@@ -74,7 +74,7 @@
   display: inline-block;
   background: var(--surface);
   border-radius: var(--radius-md);
-  padding: 7px 12px;
+  padding: var(--chip-pad-y) var(--space-xs);
   box-shadow: var(--lift-chip);
 }
 

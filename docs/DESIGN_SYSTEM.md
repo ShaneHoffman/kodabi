@@ -110,15 +110,16 @@ Per DESIGN.md, value carries the hierarchy. In practice:
 | Property | Value | Applies to |
 | --- | --- | --- |
 | Row group gap | `gap-3xs` (4px) | Tight nav lists (Sidebar) |
-| Row padding | Layer 4, per view | A content row draws its own (`.inbox__row` 20/16, `.project__row` 16/14) |
-| Title ↔ action column gap | Layer 4, per view | `.inbox__row` and `.project__row` both sit at 28px |
+| Row padding | `--row-queue-*` · `--row-library-*` · `--row-search-*` | A content row consumes its own pair (20/16, 16/14, 15/12) |
+| Title ↔ action column gap | `--gap-row-columns` (28px) | Shared by `.inbox__row` and `.project__row` |
 | Card stack gap | `--gap-card` (14px) | Pre-lifted cards (`.attention__stack`) |
 | Header → list lead-in | `--lead-*` | The gap between a view's header and the thing it heads |
 
 A content row's geometry is not on the 4px step scale and is not shared between views: the row is
-where a queue, a library and a health view differ most, so each states its own in a co-located
-`*.css` (see `docs/UI_CONVENTIONS.md`, *Layer 4*). What is shared is the *rhythm* of a nav list, which
-is chrome rather than content and stays on the step scale.
+where a queue, a library and a health view differ most, so each names its own in `design/tokens.css`
+(Layer 4) and consumes it from a co-located `*.css` (see `docs/UI_CONVENTIONS.md`, *Layer 4*). Being
+off the step scale is why they are named, not an excuse to leave them as literals. What is shared is
+the *rhythm* of a nav list, which is chrome rather than content and stays on the step scale.
 
 Rows align `items-start` when the row has a multi-line body, `items-baseline` when it is a single
 line. Pick by content, not by view.
@@ -553,10 +554,14 @@ Settings toggle disables it permanently.
 Both guards run in gates CI already runs. Neither adds a dependency.
 
 - **[`src/designTokens.test.ts`](../src/designTokens.test.ts)** (`pnpm test`) reads `design/tokens.css`
-  and every `src/**/*.css`, and fails on a literal colour, font-family, or duration outside
-  `tokens.css` — plus asserts each `--k-*` pigment is declared exactly once.
+  and every `src/**/*.css`, and fails on a literal colour, font-family, duration, or spacing value
+  (padding / margin / gap, in px, rem or em) outside `tokens.css` — plus asserts each `--k-*` pigment
+  is declared exactly once.
 - **[`eslint.config.js`](../eslint.config.js)** (`pnpm exec eslint .`) fails numeric spacing utilities
   (`p-3`, `gap-4`) and arbitrary values (`text-[13px]`) inside `className`.
+
+Spacing is the one value checked on both sides, because it can be written in either place: eslint
+reads the class strings, the token test reads the stylesheets, and neither can see the other's half.
 
 What they cannot catch — an eyebrow using the wrong tracking utility, a hover on the wrong element,
 a missing `role="alert"` — is review's job, and this document is the checklist.

@@ -5,11 +5,13 @@ import { describe, expect, it } from "vitest";
 /*
  * The token guard.
  *
- * `design/tokens.css` is the single source of truth for every colour, font and
- * duration in the app (CLAUDE.md). That has always been a review-enforced rule;
- * this makes it a gate. It runs in `pnpm test`, which CI already runs, and adds
- * no dependency — the companion half (numeric spacing and arbitrary values in
- * `className`) is an eslint rule, because those live in TSX rather than CSS.
+ * `design/tokens.css` is the single source of truth for every colour, font,
+ * duration and spacing value in the app (CLAUDE.md). That has always been a
+ * review-enforced rule; this makes it a gate. It runs in `pnpm test`, which CI
+ * already runs, and adds no dependency — the companion half (numeric spacing
+ * and arbitrary values in `className`) is an eslint rule, because those live in
+ * TSX rather than CSS. Spacing is checked on both sides: eslint owns the class
+ * strings it can parse, this owns the stylesheets it cannot.
  *
  * Escape hatch: put `token-guard-allow` in a comment on the offending line or
  * the line above it. It is deliberately noisy to type and greppable, so the
@@ -70,11 +72,21 @@ function allowedLines(raw: string, blanked: string): boolean[] {
 }
 
 /** `stripVars` is wrong for the font-family check, which needs to SEE the
- * `var(...)` to know the declaration is token-sourced. */
+ * `var(...)` to know the declaration is token-sourced.
+ *
+ * `joinContinuations` is what a PROPERTY-SCOPED pattern needs. Token names are
+ * long enough that a three-value `padding` wraps, and the continuation line
+ * carries the literal with no property in front of it — invisible to a pattern
+ * that anchors on `padding:`. With it on, an unterminated declaration's head is
+ * prepended to the next line before matching, and a `token-guard-allow` on the
+ * line the declaration STARTED on still covers it. */
 function scan(
   files: string[],
   pattern: RegExp,
-  { stripVars = true }: { stripVars?: boolean } = {},
+  {
+    stripVars = true,
+    joinContinuations = false,
+  }: { stripVars?: boolean; joinContinuations?: boolean } = {},
 ): Offence[] {
   const offences: Offence[] = [];
   for (const file of files) {
@@ -83,10 +95,32 @@ function scan(
     const lines = blanked.split(/\r?\n/);
     const rawLines = raw.split(/\r?\n/);
     const allowed = allowedLines(raw, blanked);
+    // The unterminated head of a declaration begun on an earlier line, and the
+    // line it began on. Both stay empty unless `joinContinuations` is on.
+    let carry = "";
+    let carryStart = 0;
     lines.forEach((text, index) => {
-      if (allowed[index]) return;
       const subject = stripVars ? text.replace(/var\(--[^)]*\)/g, "") : text;
-      if (pattern.test(subject)) {
+      const probe = carry + subject;
+      const startedAt = carry === "" ? index : carryStart;
+      if (joinContinuations) {
+        // Anything after the line's last `;`, `{` or `}` is still open.
+        const closed = Math.max(
+          subject.lastIndexOf(";"),
+          subject.lastIndexOf("{"),
+          subject.lastIndexOf("}"),
+        );
+        if (closed === -1) {
+          if (carry === "") carryStart = index;
+          carry = probe;
+        } else {
+          const rest = subject.slice(closed + 1);
+          carry = rest.trim() === "" ? "" : rest;
+          carryStart = index;
+        }
+      }
+      if (allowed[index] || allowed[startedAt]) return;
+      if (pattern.test(probe)) {
         offences.push({
           file: relative(ROOT, file),
           line: index + 1,
@@ -170,6 +204,27 @@ describe("design tokens are the single source of truth", () => {
     // is how the two surfaces that animate drifted apart before.
     const duration = /(?<![\w-])\d*\.?\d+m?s(?![\w-])/;
     expect(scan(sheets, duration)).toEqual([]);
+  });
+
+  it("declares no literal spacing outside design/tokens.css", () => {
+    // Padding, margin and gap only, and PROPERTY-SCOPED on purpose: sizing
+    // (`width: 17px`), edges (`border: 3px`), radii and offsets
+    // (`outline-offset: calc(var(--focus-offset) + 1px)`) are not spacing
+    // roles, and a bare length check would fail all of them. A value on the
+    // 4px ladder comes from --space-*; per-view stance is named in Layer 4.
+    //
+    // It runs with `joinContinuations`, because token names are long enough
+    // that a three-value `padding` wraps and the property would otherwise be on
+    // a different line from the literal it governs.
+    //
+    // One thing it deliberately cannot see: the leading lookbehind means a
+    // custom property named for a spacing role (`--card-gap: 20px`) reads as a
+    // declaration of its own rather than a use of one; that is what keeps the
+    // `--spacing` bridge in index.css legal, and it is why Layer 4 belongs in
+    // tokens.css, which this never scans.
+    const spacing =
+      /(?<![\w-])(?:(?:padding|margin)(?:-(?:top|right|bottom|left|inline|block)(?:-(?:start|end))?)?|(?:row|column)-gap|gap)\s*:[^;{]*\d[\d.]*(?:px|r?em)(?![\w-])/;
+    expect(scan(sheets, spacing, { joinContinuations: true })).toEqual([]);
   });
 
   it("declares no literal font-family outside design/tokens.css", () => {

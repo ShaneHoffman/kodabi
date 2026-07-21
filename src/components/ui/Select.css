@@ -23,7 +23,7 @@
   background: var(--surface);
   box-shadow: var(--lift-chip);
   border-radius: var(--radius-md);
-  padding: 7px 12px;
+  padding: var(--chip-pad-y) var(--space-xs);
   transition: box-shadow var(--dur-quick) var(--ease-standard);
 }
 
@@ -50,8 +50,8 @@
 .ui-select__trigger--token {
   background: transparent;
   border-radius: var(--radius-item);
-  padding: 5px 10px;
-  margin: -5px -10px;
+  padding: var(--token-pill-y) var(--token-pill-x);
+  margin: calc(-1 * var(--token-pill-y)) calc(-1 * var(--token-pill-x));
   white-space: nowrap;
   transition:
     background-color var(--dur-quick) var(--ease-standard),
@@ -91,14 +91,14 @@
   background: var(--overlay);
   box-shadow: var(--lift-menu);
   border-radius: var(--radius-pill);
-  padding: 7px;
+  padding: var(--menu-pad);
   min-width: var(--measure-menu);
   z-index: var(--layer-dropdown);
 }
 
 .ui-select__option {
   border-radius: var(--radius-item);
-  padding: 10px 13px;
+  padding: var(--menu-option-y) var(--menu-option-x);
 }
 
 /* The chosen value reads through weight and a check — value, never hue. */

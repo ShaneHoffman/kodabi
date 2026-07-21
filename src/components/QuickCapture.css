@@ -24,7 +24,8 @@
 /* A fixed floor so the window does not resize as the thought grows past one
    line — a box that jumps while you type into it is a box you stop trusting. */
 .capture__body {
-  padding: 24px 28px 22px;
+  padding: var(--capture-pad-top) var(--capture-pad-x)
+    var(--capture-pad-bottom);
   min-height: 132px;
 }
 
@@ -37,8 +38,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 16px;
-  padding: 14px 22px;
+  gap: var(--space-sm);
+  padding: var(--capture-foot-y) var(--capture-foot-x);
 }
 
 /* The thought itself, written in the reading serif at 21px. A captured
@@ -127,6 +128,9 @@
 .capture__wave {
   display: flex;
   align-items: center;
+  /* token-guard-allow: the seam inside a drawn glyph, not a spacing role. It
+     is half of the bars' own 3px width, so it belongs to the mark rather than
+     to the app's rhythm, and a named half-pixel step would imply otherwise. */
   gap: 2.5px;
   height: 15px;
 }
@@ -237,10 +241,10 @@
 .capture__stop {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--space-2xs);
   background: var(--token-active);
   border-radius: var(--radius-control);
-  padding: 8px 15px;
+  padding: var(--space-2xs) var(--capture-stop-x);
   transition: background-color var(--dur-quick) var(--ease-standard);
 }
 
