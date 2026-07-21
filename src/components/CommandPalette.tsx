@@ -118,45 +118,71 @@ export function CommandPalette({ onClose }: Props) {
 
   return (
     <Overlay onDismiss={onClose} label="Command palette" className="overflow-hidden">
-      <input
-        ref={inputRef}
-        role="combobox"
-        aria-expanded="true"
-        aria-controls={LISTBOX_ID}
-        aria-activedescendant={rows.length > 0 ? optionId(active) : undefined}
-        aria-label="Type a command or search"
-        placeholder="Type a command or search…"
-        autoComplete="off"
-        spellCheck={false}
-        value={query}
-        onChange={(event) => {
-          setQuery(event.target.value);
-          setActiveIndex(0);
-        }}
-        onKeyDown={onKeyDown}
-        className="command-palette__input w-full bg-surface px-md py-sm text-body text-text placeholder:text-text-faint"
-      />
+      {/* Magnifier first, then the query. The same glyph at the same size as
+          the Search view's field, so a place you type a query is recognisable
+          wherever it turns up. */}
+      <div className="command-palette__search">
+        <svg
+          width="17"
+          height="17"
+          viewBox="0 0 18 18"
+          fill="none"
+          aria-hidden="true"
+          className="block flex-none text-text-faint"
+        >
+          <circle cx="8" cy="8" r="6.2" stroke="currentColor" strokeWidth="1.4" />
+          <path
+            d="M12.4 12.4L16 16"
+            stroke="currentColor"
+            strokeWidth="1.4"
+            strokeLinecap="round"
+          />
+        </svg>
+        <input
+          ref={inputRef}
+          role="combobox"
+          aria-expanded="true"
+          aria-controls={LISTBOX_ID}
+          aria-activedescendant={rows.length > 0 ? optionId(active) : undefined}
+          aria-label="Type a command or search"
+          placeholder="Type a command or search…"
+          autoComplete="off"
+          spellCheck={false}
+          value={query}
+          onChange={(event) => {
+            setQuery(event.target.value);
+            setActiveIndex(0);
+          }}
+          onKeyDown={onKeyDown}
+          className="command-palette__input text-input text-text placeholder:text-text-faint"
+        />
+      </div>
+      <div className="command-palette__rule" />
       <ul
         id={LISTBOX_ID}
         role="listbox"
         aria-label="Commands"
-        className="max-h-80 overflow-y-auto py-2xs"
+        className="command-palette__list"
       >
         {rows.length === 0 && (
           // Only reachable with an empty query and no commands at all, which
           // means the project listing failed — never a blank pane
           // (docs/DESIGN_SYSTEM.md §3).
-          <li className="px-md py-2xs text-body text-text-soft">
+          <li className="command-palette__row text-body text-text-soft">
             No commands available yet.
           </li>
         )}
-        {sections.map((section) => (
+        {sections.map((section, sectionIndex) => (
           // role="presentation" on the wrapper so the ul/li scaffolding does
           // not put listitem semantics between the listbox and its options;
           // the inner role="group" is what actually carries the section name.
           <li key={section.label ?? "matches"} role="presentation">
             {section.label && (
-              <p className="px-md pb-3xs pt-2xs text-eyebrow uppercase tracking-eyebrow text-text-faint">
+              <p
+                className={`command-palette__section${
+                  sectionIndex > 0 ? " command-palette__section--later" : ""
+                } font-mono text-eyebrow uppercase tracking-eyebrow-menu text-text-faint`}
+              >
                 {section.label}
               </p>
             )}
@@ -176,15 +202,20 @@ export function CommandPalette({ onClose }: Props) {
                     if (moved && index !== active) setActiveIndex(index);
                   }}
                   onClick={() => runCommand(command)}
-                  className={`command-palette__row flex items-baseline justify-between gap-md px-md py-2xs text-body text-text-soft${
-                    index === active ? " ui-wash" : ""
+                  className={`command-palette__row text-body ${
+                    index === active ? "ui-wash" : "text-text"
                   }`}
                 >
                   <span>{command.title}</span>
-                  {/* Only once the sections are gone: inside its own section
-                      the heading has already said this. */}
-                  {section.label === null && command.hint && (
-                    <span className="text-cap text-text-faint">{command.hint}</span>
+                  {/* The focused row says how to run it; any row with a real
+                      global binding says what that is. Mono, because both are
+                      keys. A row with neither shows nothing — the palette
+                      teaches shortcuts, so filling this with a restatement of
+                      the section heading taught nothing. */}
+                  {(index === active || command.hint) && (
+                    <span className="flex-none font-mono text-eyebrow text-text-faint">
+                      {index === active ? "↵" : command.hint}
+                    </span>
                   )}
                 </li>
               ))}

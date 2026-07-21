@@ -21,15 +21,35 @@ answer is missing here and belongs here.
 
 ### The scale
 
-| Step | Token | Role | Never |
+| Step | px | Role | Never |
 | --- | --- | --- | --- |
-| `text-eyebrow` | `--fs-eyebrow` .72rem | Section eyebrows only, always with `uppercase tracking-eyebrow` | Body copy |
-| `text-cap` | `--fs-cap` .8rem | Captions, meta lines, hints, status text | A paragraph someone reads |
-| `text-body` | `--fs-body` .97rem | Interface body, list rows, buttons | — |
-| `text-read` | `--fs-read` 1.18rem | Note bodies, prose (with `font-serif`) | Interface chrome |
-| `text-h3` | `--fs-h3` 1.25rem | Sub-headings inside a view | — |
-| `text-h2` | `--fs-h2` (fluid, 1.5→1.95rem) | The view title (with `font-serif`) | More than once per view |
-| `text-display` | `--fs-display` | Reserved. Nothing ships with it yet | Any current screen |
+| `text-eyebrow` | 11 | Section eyebrows, always mono + `uppercase` + a tracking step | Body copy |
+| `text-micro` | 11.5 | Dense mono: the capture footer, a progress caption, a search breadcrumb | — |
+| `text-cap` | 12 | Mono counts, meta lines, hints, status text | A paragraph someone reads |
+| `text-meta` | 12.5 | Mono meta on a reading surface (a note, a library row) | — |
+| `text-action` | 13 | A compact action inside an overlay window | A view-level action |
+| `text-label` | 14 | Control labels, settings values, view actions | — |
+| `text-body` | 15 | Interface body, nav items, menu items | — |
+| `text-snippet` / `-sm` | 15 / 14.5 | A serif snippet in a list (the smaller one is search density) | Interface chrome |
+| `text-lead` | 16 | A queue masthead; a search result's title | — |
+| `text-input` | 17 | A query field (palette, search) | — |
+| `text-row` | 18 | A working-list row title (sans) | — |
+| `text-read` | 18 | A note body paragraph (serif) | Interface chrome |
+| `text-h3` | 19 | A note's section header; a library index row | — |
+| `text-capture` | 21 | A captured thought | — |
+| `text-wordmark` | 22 | The sidebar wordmark | Anywhere else |
+| `text-title-panel` | 26 | The Settings title | — |
+| `text-title-health` | 28 | The Needs-attention title | — |
+| `text-title-library` | 34 | A project title | — |
+| `text-title-doc` | 36 | A note title | — |
+
+**Fixed px, not rem, and not fluid.** The window is 960×640 and does not reflow
+into a phone; the old `clamp()` steps only made the same role render at two
+sizes for no reader's benefit.
+
+**There are four view-title steps, not one.** That is the redesign's loudest
+move: a config panel and a note must not open at the same size, and `ViewFrame`
+picks the step from its `variant` so two views of the same kind cannot drift.
 
 Sizes always come from this scale. Never `text-[13px]`, never a raw `font-size`. Enforced by the
 eslint rule described in §7.
@@ -38,11 +58,10 @@ eslint rule described in §7.
 
 The scale above is not one ramp, it is two, and they diverge on purpose.
 
-- **The interface ramp** — eyebrow, cap, body, h3, h2 — is the voice of lists, controls, and chrome.
-  It tightened on `feat/screen-overhaul`: `--fs-body` .97rem with `--lh-body` 1.55, `--fs-h3`
-  1.25rem, `--fs-h2` `clamp(1.5rem, 1.15rem + 1.35vw, 1.95rem)`.
-- **The reading ramp** — `--fs-read` 1.18rem at `--lh-read` 1.6 — is the voice of a note's body, and
-  it was deliberately left where it was.
+- **The interface ramp** — eyebrow through lead — is the voice of lists, controls and chrome, and it
+  is compact: 11–16px, at `--lh-body` 1.5.
+- **The reading ramp** — `--fs-read` 18 at `--lh-read` 1.62, plus `--fs-capture` and the four title
+  steps — is the voice of a note, a snippet, and a captured thought. It is generous on purpose.
 
 Before, one loose ramp served both, so the interface wore reading-sized type at reading line-height
 and every list read like a document. The gap between `--fs-body` and `--fs-read` is now the point:
@@ -52,13 +71,23 @@ display are unchanged.
 **Don't close the gap.** Reaching for `text-read` to make an interface element feel more generous
 re-merges the two voices; the interface answer is space (§1, list density), not a larger size.
 
-### The eyebrow is one thing
+### The eyebrow is one thing, at three depths
 
-A section eyebrow is exactly `text-eyebrow uppercase tracking-eyebrow text-text-faint`.
+A section eyebrow is `font-mono text-eyebrow uppercase text-text-faint` plus **one of three tracking
+steps**, and the step says how deep it sits:
 
-`tracking-eyebrow` bridges `--ls-eyebrow` (0.22em). **Never Tailwind's `tracking-wide`** (0.025em).
-Before this pass the Sidebar used the token and twelve other call sites used the Tailwind default,
-so the same role rendered 2.53px and 0.29px apart at identical font-size. There is one eyebrow.
+| Utility | Token | Where |
+| --- | --- | --- |
+| `tracking-eyebrow` | 0.16em | A view's own eyebrow: `UNFILED`, `SYSTEM`, `PROJECT` |
+| `tracking-eyebrow-menu` | 0.14em | A section inside an overlay: `JUMP TO`, `ACTIONS` |
+| `tracking-rail` | 0.12em | The sidebar's `PROJECTS` |
+
+Nesting reads through the letter-spacing before it reads through the size. **Never Tailwind's
+`tracking-wide`** (0.025em) for any of them: before the tokens were bridged, the Sidebar used one
+value and twelve other call sites used the Tailwind default, so the same role rendered 8.8× apart.
+
+The sidebar's rail eyebrow is the one that is sans-600 rather than mono, matching the design
+reference: it is chrome sitting directly above sans nav labels, not a label on content.
 
 An eyebrow labels a *section*. It is not a field label (that is `text-cap text-text-soft`, owned by
 `TextField`) and not a status line (that is `text-cap`).
@@ -102,7 +131,7 @@ so a screen composing primitives gets them for free and must not restate them.
 | --- | --- | --- |
 | **Rest** | Per variant | — |
 | **Hover** | Value step toward `--text`, over `--dur-quick` | `--dur-quick`, `--ease-standard` |
-| **Focus-visible** | 2px accent outline, offset by its own width | `.ui-focus-ring` |
+| **Focus-visible** | 2px **ink** outline, offset by its own width | `.ui-focus-ring` |
 | **Active** (pressed) | One value step past hover, no transition (a press must feel immediate) | — |
 | **Disabled** | `text-text-faint` + `cursor-not-allowed`; controls with no text to fade use `--disabled-opacity` | `--disabled-opacity` |
 | **Destructive** | See below — a confirmation, not a colour | — |
@@ -111,10 +140,16 @@ so a screen composing primitives gets them for free and must not restate them.
 
 ```css
 .ui-focus-ring:focus-visible {
-  outline: var(--focus-width) solid var(--accent);
+  outline: var(--focus-width) solid var(--text);
   outline-offset: var(--focus-offset);
 }
 ```
+
+**The ring is ink, not a hue.** The old interactive-green accent is retired: the
+palette has exactly one green and it means audio is being recorded, so a focused
+button wearing it would claim something false. Ink also reads at full contrast
+against all three planes in both themes, which the green never managed in the
+light one.
 
 Defined once in [`src/components/ui/ui.css`](../src/components/ui/ui.css). Add the class; never
 retype the declarations, and never use plain `:focus` (a pointer press would draw it).
@@ -150,8 +185,11 @@ The first delete lands the variant and this rule together.
 ### Selected is value, never hue
 
 ```css
-background: var(--wash-active);   /* an ink wash of --text, both themes */
+background: var(--wash-active);   /* resolves to --menu-hover, both themes */
 ```
+
+The row a pointer is over and the row the keyboard has landed on are the same colour, because they
+mean the same thing.
 
 Available as `.ui-wash`. **Never `--accent-dot`** for selection: the reserved green means audio is
 being recorded, and a selected row wearing it is a lie.
@@ -159,14 +197,14 @@ being recorded, and a selected row wearing it is a lie.
 ### Selected *text* is ours too
 
 ```css
---selection: color-mix(in srgb, var(--accent) 22%, transparent);
+--selection: var(--highlight);
 ```
 
 Applied once, by the `::selection` rule in `src/index.css`. Highlighted text used to wear the
 platform's blue — the only colour in the app from outside the palette, and it appeared the moment
-anyone dragged across a note. The accent at wash strength reads as ours without fighting the ink
-sitting on top of it. This is the one place `--accent` paints a fill rather than marking
-interactivity, and it does not rank anything.
+anyone dragged across a note. It is now the same ink wash a search match wears, so dragging across a
+note and finding a term read as the same act of marking. Never the reserved green: selecting three
+words is not a recording.
 
 ---
 
@@ -270,12 +308,21 @@ privacy that does not exist. Never let reduced motion remove *information*.
 
 Three planes, and nothing invents a fourth.
 
-| Plane | Background | Shadow | z |
+| Plane | Background | Elevation | z |
 | --- | --- | --- | --- |
-| Page | `bg-bg` (sidebar: `bg-bg-sink`) | none | auto |
-| Raised | `bg-surface` | `--hairline` | auto |
-| Dropdown | `bg-surface` | `--lift` | `--layer-dropdown` (10) |
-| Modal | `bg-surface` | `--lift` | `--layer-overlay` (50) |
+| Page | `bg-bg` (the sidebar shares it) | none | auto |
+| Raised | `bg-surface` | `--lift`, `--lift-card`, `--lift-row`, `--lift-chip*` | auto |
+| Overlay — dropdown | `bg-overlay` | `--lift-menu`, `--lift-toolbar` | `--layer-dropdown` (10) |
+| Overlay — window | `bg-overlay` | `--lift-palette`, `--lift-capture` | `--layer-overlay` (50) |
+
+Three planes, and the sidebar is not a fourth. It used to sit on a recessed
+`--bg-sink` fill, which made it a second, darker box beside the content rather
+than part of the same sheet; that token is gone and the rail shares the page,
+separated by one hairline.
+
+**Every `--lift-*` token carries its own `0 0 0 1px` ring in the same
+declaration.** A ring and a shadow that are set separately drift apart the
+first time one of them is overridden, so they ship as one value.
 
 Separation between adjacent planes is a **value shift plus a hairline**, never a border
 (DESIGN.md: space instead of borders and boxes). Hairlines are inset shadows:
@@ -293,8 +340,9 @@ at low alpha, so one set of values reads on a near-white card and a near-black o
 
 ### A raised plane lifts, it does not fill
 
-`--surface` is **lighter than the page in both themes**. In the light theme it is `--k-washi-raised`
-(#FDFCF8) against a #F7F5EF ground; in the dark theme `--k-night-surface` (#1D1B17) against #131210.
+`--surface` is **lighter than the page in both themes**, and `--overlay` is lighter again. In the
+light theme that ladder is #F2F0E9 → #FBFAF6 → #FEFDFB; in the dark theme #17160F → #221F16 →
+#2A2618.
 
 That is an inversion in the light theme, and it is the point of this pass. `--surface` used to map to
 `mist` — a fill *darker* than the ground — so every button, dropdown, selected row, and modal panel
@@ -345,44 +393,65 @@ A modal traps focus (§6), takes `role="dialog"` + `aria-modal="true"`, and clos
 
 ### Contrast
 
-Measured, not estimated. Text pairs against WCAG AA (4.5:1); the spirit-mark is a graphic (3:1).
-Re-measured from the `feat/screen-overhaul` token values.
+Measured, not estimated. Text pairs against WCAG AA (4.5:1); a graphic needs
+3:1. Re-measured from the redesign's token values.
 
-**Light (washi day)** — `bg` #F7F5EF, `bg-sink` #EFEDE4, `surface` #FDFCF8
+**Light (day washi)** — `bg` #F2F0E9, `surface` #FBFAF6, `overlay` #FEFDFB
 
-| | on `bg` | on `bg-sink` | on `surface` |
-| --- | --- | --- | --- |
-| `text` #1F1E18 | 15.32 | 14.24 | 16.27 |
-| `text-soft` #4F5B46 | 6.60 | 6.14 | 7.01 |
-| `text-faint` #5C6058 | 5.89 | 5.48 | 6.26 |
-| `accent` #3E6B3A | 5.72 | 5.31 | 6.07 |
-| `accent-dot` #5C8455 *(graphic)* | 3.94 | 3.66 | 4.19 |
+| | on `bg` | on `surface` | on `overlay` |
+|---|---|---|---|
+| `text` #211F17 | 14.47 | 15.79 | 16.23 |
+| `text-read` #2E2C24 | 12.26 | 13.39 | 13.75 |
+| `text-soft` #55524A | 6.84 | 7.47 | 7.67 |
+| `text-faint` #8B8879 | 3.12 | 3.41 | 3.50 |
+| `accent-dot` #5F7D4F *(graphic)* | 4.06 | 4.44 | 4.56 |
 
-**Dark (night)** — `bg` #131210, `bg-sink` #0E0D0B, `surface` #1D1B17
+**Dark (night sumi)** — `bg` #17160F, `surface` #221F16, `overlay` #2A2618
 
-| | on `bg` | on `bg-sink` | on `surface` |
-| --- | --- | --- | --- |
-| `text` #ECE9E0 | 15.42 | 16.00 | 14.16 |
-| `text-soft` #B4B0A4 | 8.64 | 8.96 | 7.93 |
-| `text-faint` #8C887C | 5.28 | 5.48 | 4.85 |
-| `accent` #8FB585 | 8.13 | 8.43 | 7.46 |
-| `accent-dot` #8CB183 *(graphic)* | 7.78 | 8.08 | 7.15 |
+| | on `bg` | on `surface` | on `overlay` |
+|---|---|---|---|
+| `text` #EFEDE3 | 15.45 | 14.03 | 12.88 |
+| `text-read` #DCD8CC | 12.73 | 11.55 | 10.61 |
+| `text-soft` #B3AFA1 | 8.26 | 7.50 | 6.89 |
+| `text-faint` #7B7768 | 4.04 | 3.67 | 3.37 |
+| `accent-dot` #86AE6B *(graphic)* | 7.15 | 6.49 | 5.96 |
 
-Every text pair clears 4.5, and now with real headroom. Note that `--surface` is the *easiest*
-column in the light theme, not the hardest: since the raised plane became lighter than the ground
-(§5), the light theme's worst case moved to `bg-sink`, where the tightest pair is `--accent` at 5.31.
-The dark theme's worst case is `--text-faint` on `--surface` at 4.85.
+`text`, `text-read` and `text-soft` clear 4.5 everywhere with room to spare, in
+both themes.
 
-*(History: before this pass the raised plane was the darkest light-theme column and `--k-stone-ink`
-and `--k-accent` had to be nudged 2/255 per channel to scrape past 4.5 on it, landing at 4.55/4.56.
-The rebuilt values clear it outright — the same two tokens now measure 6.26 and 6.07 there — so that
-correction no longer describes the file and is recorded here only as history.)*
+### `--text-faint` does not meet the text floor, and that is a known deviation
 
-**`--accent-dot` is a graphic, never text.** At 3.66–4.19 in the light theme it does not meet the
-text floor, and it never has to: it is spent on the spirit-mark, where 3:1 applies and it passes
-everywhere in both themes. The LISTENING *label* beside it is `--text` when live and `--text-faint`
-when not, so the state reads through value like every other status line, and the green stays the
-mark's alone.
+**It measures 3.12–3.50 in the light theme and 3.37–4.04 in the dark one,
+against a 4.5:1 requirement for text at these sizes.** The value comes from the
+redesign's locked palette (`ink-3`), where it is specified for "metadata,
+counts, eyebrows, placeholders" — which are text, not graphics, so the 3:1
+graphic allowance does not apply to them.
+
+What currently wears it: section eyebrows, list counts, mono meta lines, the
+Inbox progress caption, search breadcrumbs, keyboard hints, placeholders, and
+the muted half of a two-action pair.
+
+This is recorded rather than silently corrected because the palette is locked
+upstream and the value is a deliberate part of the design's near-silent
+register. It is a real accessibility gap all the same, and the two ways out are
+both one-line changes here:
+
+- **Darken the pigment.** `--k-stone` needs roughly #6F6C5F to clear 4.5 on
+  `bg`, and `--k-paper-faint` roughly #93907F. Both are visibly darker than the
+  design specifies and would flatten the gap between `text-soft` and
+  `text-faint` that the three-step ink ladder depends on.
+- **Stop spending it on text.** Move metadata to `text-soft` (6.84–7.67 light,
+  6.89–8.26 dark) and keep `text-faint` for genuinely decorative marks.
+
+Until one is chosen, do not widen its use: a new label reaching for
+`text-text-faint` is adding to a known deficit.
+
+**`--accent-dot` is a graphic, never text.** At 4.06–4.56 in the light theme it
+does not meet the text floor, and it never has to: it is spent on the listening
+dot, the waveform, and the text caret, where 3:1 applies and it passes
+everywhere in both themes. The label beside it is `--text` when live and
+`--text-faint` when not, so the state reads through value like every other
+status line, and the green stays the mark's alone.
 
 Any new colour pair is measured before it ships.
 

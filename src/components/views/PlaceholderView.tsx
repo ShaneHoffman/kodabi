@@ -20,7 +20,7 @@ type Props = {
  */
 export function PlaceholderView({ title, caption, detail }: Props) {
   return (
-    <ViewFrame eyebrow={detail} title={title}>
+    <ViewFrame variant="panel" eyebrow={detail} title={title}>
       <StatusMessage variant="empty" className="max-w-measure">
         {caption}
       </StatusMessage>

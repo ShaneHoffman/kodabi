@@ -1,34 +1,43 @@
 /* ============================================================
    Checkbox — a labelled boolean control.
 
-   Only non-bridged tokens live here: the hairline ring (an inset shadow,
-   never a border, matching TextField), the ink fill and check glyph, and
-   the interaction states. Focus comes from the shared .ui-focus-ring
-   recipe in ui.css (docs/DESIGN_SYSTEM.md §2).
+   Only non-bridged tokens live here: the ring, the ink fill and check
+   glyph, and the interaction states. Focus comes from the shared
+   .ui-focus-ring recipe in ui.css (docs/DESIGN_SYSTEM.md §2).
 
-   The checked state is ink on surface — value, not hue. The reserved green
-   (--accent-dot) is never used here: it means audio is actually being
-   recorded (docs/UI_CONVENTIONS.md), and a settings control claiming that
-   would be a lie.
+   UNCHECKED IS A RING, NOT A BOX. It carries no fill at all, so a column of
+   action items reads as a column of labels with a mark beside each rather
+   than a column of empty containers — space instead of boxes
+   (docs/DESIGN.md). The ring is heavier than a hairline (1.4px at a higher
+   alpha) precisely because it is the whole affordance; there is no fill
+   behind it doing half the work.
+
+   The checked state is ink filled with a page-coloured check — value, not
+   hue. The reserved green (--accent-dot) is never used here: it means audio
+   is actually being recorded (docs/UI_CONVENTIONS.md), and a checked task
+   claiming that would be a lie.
    ============================================================ */
 
 .ui-checkbox {
   appearance: none;
   flex: none;
-  width: 1rem;
-  height: 1rem;
-  background: var(--surface);
-  box-shadow: var(--hairline);
+  width: 17px;
+  height: 17px;
+  border-radius: var(--radius-check);
+  background: transparent;
+  box-shadow: 0 0 0 1.4px var(--edge-check);
   cursor: pointer;
   display: grid;
   place-content: center;
-  transition: background-color var(--dur-quick) var(--ease-standard);
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    box-shadow var(--dur-quick) var(--ease-standard);
 }
 
-/* Hover firms the ring on an unchecked box and deepens the fill on a checked
-   one — the same "step toward --text" the other controls use. */
+/* Hover firms the ring on an unchecked box — the same "step toward --text"
+   the other controls use, spent on the only mark the control has. */
 .ui-checkbox:hover:not(:disabled):not(:checked) {
-  background: color-mix(in srgb, var(--text) 6%, var(--surface));
+  box-shadow: 0 0 0 1.4px var(--text-faint);
 }
 
 .ui-checkbox:active:not(:disabled) {

@@ -70,8 +70,10 @@ below bake this in, so most screens never spell control padding out at all.
 
 Most tokens are bridged into Tailwind utilities and are consumed **as utilities on the component**:
 
-- **Colours** → `bg-bg`, `bg-bg-sink`, `bg-surface`, `text-text`, `text-text-soft`, `text-text-faint`, `text-accent`…
-- **Type sizes** → `text-eyebrow`, `text-cap`, `text-body`, `text-read`, `text-h3`, `text-h2`, `text-display`
+- **Colours** → `bg-bg`, `bg-surface`, `bg-overlay`, `text-text`, `text-text-read`, `text-text-soft`,
+  `text-text-faint`, `bg-menu-hover`, `bg-token-active`, `bg-highlight`, `text-accent-dot`…
+- **Type sizes** → the fixed-px ramp in [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §1, from
+  `text-eyebrow` (11) up through the four view-title steps (`text-title-panel` … `text-title-doc`)
 - **Families** → `font-sans`, `font-serif`, `font-mono`
 - **Weights** → `font-medium`, `font-semibold`
 - **Tracking** → `tracking-eyebrow` (section eyebrows), `tracking-caps` (uppercase micro-text)
@@ -228,9 +230,9 @@ travel together, and every hand-rolled version in the app set one without the ot
 body line-height (`--lh-body`). Height and resize behaviour are the caller's, since a capture box and a
 note body want very different room. `hideLabel` keeps the label as the accessible name only.
 
-It **keeps its fill** (`bg-bg-sink`) where `TextField` gave one up. That is deliberate, not drift: a
-multi-line box you write paragraphs into is a writing well, and the sunk plane is what says "this area is
-yours". A single-line field has no area to speak of.
+It **carries no fill**, the same as `TextField`. It used to sit on a sunk `--bg-sink` plane; that
+token is gone, because a recessed plane is a fourth plane and the system has three. A writing area
+sits on whatever plane its surface sits on.
 
 ```tsx
 <Textarea label="Body" value={body} onChange={…} className="note-editor__body font-mono" />
@@ -447,3 +449,63 @@ Three surfaces keep a documented departure, each forced by what the window is ra
   appearing over a full-screen app never steals focus, which also puts it out of the tab order. The
   keyboard paths that matter remain — the capture hotkey stops the capture and the pill with it, and the
   Settings toggle turns it off for good.
+
+
+---
+
+## Layer 4 — the per-view geometry
+
+The redesign gives each **view type** its own stance: where its content sits,
+how dense it is, and where the weight falls, so a queue and a library are told
+apart before any heading is read. Those measurements do not land on the 4px
+step scale, and they must not — the Inbox pinning left at 44/60 while the
+Project view centres 640px of reading measure at 52/60 *is* the design, and
+rounding both onto a shared step deletes it.
+
+So they are a **fourth token layer** in `design/tokens.css`: `--sidebar-*`,
+`--gutter-*-y` / `--gutter-*-x`, `--measure-*`, `--palette-top`, and the radius
+ladder.
+
+**They are consumed from a co-located `Component.css`, never from `className`.**
+That is what keeps both guards armed: eslint still fails every arbitrary value
+and numeric spacing utility in a class string, and the values still live in one
+file rather than scattered through TSX.
+
+```css
+/* src/components/views/InboxView.css */
+.inbox__row {
+  padding: 20px 16px;
+  margin: 0 -16px;              /* the lift reaches into the gutter */
+  border-radius: var(--radius-row);
+}
+```
+
+The named `--space-*` steps are unchanged and still govern everything *inside* a
+component — gaps between elements, control padding, list rhythm. Layer 4 governs
+the frame around them.
+
+### `ViewFrame` variants are the stance
+
+| `variant` | Gutter | Column | Title step |
+| --- | --- | --- | --- |
+| `queue` | 44 / 60 | full, left-pinned | none — a one-line masthead |
+| `library` | 52 / 60 | 640, centred | `text-title-library` (34) |
+| `panel` | 46 / 56 | rows cap at 520 | `text-title-panel` (26) |
+| `health` | 52 / 60 | 560, centred | `text-title-health` (28) |
+| `doc` | 40 / 64 | 660, left-pinned | supplied by the view |
+| `search` | 40 / 56 | 640, left-pinned | supplied by the view |
+
+There is no default and no bare scaffold: a new view has to say what kind of
+place it is.
+
+### The primitives grew variants to match
+
+- **`Button`** — `primary` (the raised control chip), `filled` (ink fill,
+  page-coloured label; the one action that *ends* a surface), `quiet` (a ghost
+  that carries no padding of its own, because a nav row and a text action are
+  not the same shape).
+- **`Select`** — `boxed` (a control chip with a chevron) and `token` (quiet mono
+  text that takes a pill only while choosing, for a picker beside content it
+  must not out-weigh). Both open the same overlay-plane menu.
+- **`Checkbox`** — unchecked is a ring and nothing else; checked is an ink
+  square with a page-coloured check.

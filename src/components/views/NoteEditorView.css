@@ -1,17 +1,24 @@
 /* ============================================================
-   Note editor — the serif reading view and the body editor.
+   Note — the reading room, and the composing mode that shares its measure.
 
-   Only non-bridged tokens live here (reading line-height, weights,
-   letter-spacing, edges); everything bridged stays in Tailwind
-   utilities on the component (the Sidebar.css discipline).
+   Only non-bridged tokens live here: the reading ramp, the tag chips, the
+   format toolbar, and the checkbox states.
 
-   .note-reading styles the rendered Markdown body. Hierarchy through
-   type and space: the body's own headings step DOWN from the screen's
-   h2 title, hairlines are shadows or hairline-height backgrounds,
-   never borders (docs/DESIGN.md).
+   YOU WRITE IN THE RAMP YOU READ IN. That is the one idea this screen is
+   built on: read mode and edit mode use the same serif, the same 18/1.62
+   body, the same measure and the same left edge. Switching modes changes
+   what you can DO, not what the note looks like — so the chrome has to
+   announce the mode instead (a mono EDITING eyebrow, a filled Done button, a
+   green caret), because the document itself no longer can.
    ============================================================ */
 
+/* ---------- the reading body ----------
+   Styles the rendered Markdown. Hierarchy through type and space alone: the
+   body's own headings step DOWN from the note title, and there is not a rule
+   or a box anywhere in it. */
 .note-reading {
+  color: var(--text-read);
+  font-size: var(--fs-read);
   line-height: var(--lh-read);
 }
 
@@ -19,41 +26,31 @@
   margin-top: 0;
 }
 
-.note-reading h1 {
-  font-size: var(--fs-h3);
-  line-height: var(--lh-h3);
-  letter-spacing: var(--ls-h3);
-  font-weight: var(--fw-semibold);
-  margin-top: var(--space-lg);
-}
-
-.note-reading h2 {
-  font-size: var(--fs-read);
-  font-weight: var(--fw-semibold);
-  margin-top: var(--space-md);
-}
-
+/* A section header inside a note. Ink rather than ink-body — it is the one
+   thing in the body allowed to be as dark as the title. */
+.note-reading h1,
+.note-reading h2,
 .note-reading h3,
 .note-reading h4,
 .note-reading h5,
 .note-reading h6 {
-  font-size: var(--fs-read);
-  font-weight: var(--fw-medium);
-  margin-top: var(--space-md);
+  font-size: var(--fs-h3);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-heading);
+  color: var(--text);
+  margin-top: 28px;
 }
 
-.note-reading p,
-.note-reading ul,
-.note-reading ol,
-.note-reading blockquote,
-.note-reading pre,
-.note-reading table {
-  margin-top: var(--space-sm);
+.note-reading p {
+  margin-top: 12px;
+  text-wrap: pretty;
 }
 
 .note-reading ul,
 .note-reading ol {
-  padding-left: var(--space-md);
+  margin-top: 12px;
+  padding-left: 24px;
+  line-height: var(--lh-list);
 }
 
 .note-reading ul {
@@ -65,25 +62,30 @@
 }
 
 .note-reading li + li {
-  margin-top: var(--space-3xs);
+  margin-top: 8px;
 }
 
+/* A link is ink with an underline, never a colour: this palette has one hue
+   and it belongs to the recording state (docs/DESIGN.md). */
 .note-reading a {
-  color: var(--accent);
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .note-reading code {
   font-family: var(--mono);
   font-size: var(--fs-cap);
-  background: var(--bg-sink);
+  background: var(--surface);
   border-radius: var(--radius-sm);
   padding: 0 var(--space-3xs);
 }
 
 .note-reading pre {
-  background: var(--bg-sink);
+  background: var(--surface);
   border-radius: var(--radius-md);
   padding: var(--space-sm);
+  margin-top: 12px;
   overflow-x: auto;
 }
 
@@ -93,26 +95,176 @@
 }
 
 .note-reading blockquote {
-  box-shadow: inset 2px 0 0 var(--edge);
+  box-shadow: inset 2px 0 0 var(--edge-rule);
   padding-left: var(--space-sm);
+  margin-top: 12px;
   color: var(--text-soft);
 }
 
 .note-reading hr {
   border: none;
   height: 1px;
-  background: var(--edge-faint);
+  background: var(--edge-rule);
   margin: var(--space-lg) 0;
 }
 
-/* GFM task-list checkboxes render disabled; keep the mark on-palette. */
-.note-reading input[type="checkbox"] {
-  accent-color: var(--accent);
+/* ---------- action items ----------
+   A GFM task list, laid out as rows rather than bullets: the checkbox IS the
+   marker, so a disc beside it would be two markers for one item. */
+.note-reading ul:has(> li > input[type="checkbox"]) {
+  list-style: none;
+  padding-left: 0;
+  margin-top: 14px;
 }
 
-/* The body editor earns the page: most of the viewport, body rhythm. */
-.note-editor__body {
-  min-height: 55vh;
-  line-height: var(--lh-body);
-  resize: vertical;
+.note-reading li:has(> input[type="checkbox"]) {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  line-height: var(--lh-snippet);
+}
+
+/* Unchecked is a ring and nothing else — no fill, no box. Checked is an ink
+   square with a page-coloured check, and the label goes muted and struck, so
+   done work recedes without disappearing. Value, never hue. */
+.note-reading input[type="checkbox"] {
+  appearance: none;
+  flex: none;
+  width: 17px;
+  height: 17px;
+  margin: 4px 0 0;
+  border-radius: var(--radius-check);
+  background: transparent;
+  box-shadow: 0 0 0 1.4px var(--edge-check);
+  display: grid;
+  place-content: center;
+  cursor: pointer;
+}
+
+.note-reading input[type="checkbox"]:checked {
+  background: var(--text);
+  box-shadow: none;
+}
+
+.note-reading input[type="checkbox"]::before {
+  content: "";
+  width: 0.55rem;
+  height: 0.3rem;
+  /* A check drawn from two borders, rotated — no icon font, no SVG asset. */
+  border-left: 2px solid var(--bg);
+  border-bottom: 2px solid var(--bg);
+  transform: rotate(-45deg) translate(1px, -1px);
+  opacity: 0;
+}
+
+.note-reading input[type="checkbox"]:checked::before {
+  opacity: 1;
+}
+
+.note-reading li:has(> input[type="checkbox"]:checked) {
+  color: var(--text-faint);
+  text-decoration: line-through;
+}
+
+/* ---------- composing ---------- */
+
+/* The title is an input that refuses to look like one: no fill, no ring, no
+   padding. It is the note's title in the note's own type; the green caret
+   (.ui-writing) is the only thing saying it can be changed. */
+.note-edit__title {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0;
+}
+
+/* A tag is a removable chip on the raised plane, in the mono voice every
+   piece of metadata in this app uses. */
+.note-edit__tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--surface);
+  border-radius: var(--radius-item);
+  padding: 4px 9px;
+  box-shadow: 0 0 0 1px var(--edge);
+}
+
+/* The ghost that adds one. Dashed, because "not yet a thing" is exactly what
+   a dashed edge means, and it is the only dashed edge in the app. */
+.note-edit__tag-add {
+  border: 1px dashed var(--edge-open);
+  border-radius: var(--radius-item);
+  padding: 4px 9px;
+  background: transparent;
+}
+
+/* The body, written in the ramp it is read in. */
+.note-edit__body {
+  width: 100%;
+  min-height: 300px;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0;
+  resize: none;
+  color: var(--text-read);
+  font-family: var(--serif);
+  font-size: var(--fs-read);
+  line-height: var(--lh-read);
+}
+
+/* The selection wears the highlight token — the same ink wash a search match
+   uses. Deliberately NOT the green: the reserved hue means audio is being
+   recorded, and selecting three words is not that. */
+.note-edit__body::selection {
+  background: var(--highlight);
+}
+
+/* ---------- the format toolbar ----------
+   Chrome on demand: it exists only while something is selected, anchored just
+   above the selection with a pointer tail, on the overlay plane. */
+.note-edit__toolbar {
+  position: absolute;
+  transform: translate(-50%, -100%);
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+  background: var(--overlay);
+  border-radius: var(--radius-control);
+  padding: 5px;
+  box-shadow: var(--lift-toolbar);
+  z-index: var(--layer-dropdown);
+}
+
+.note-edit__tool {
+  padding: 5px 9px;
+  border-radius: var(--radius-toolbar);
+  transition: background-color var(--dur-quick) var(--ease-standard);
+}
+
+.note-edit__tool:hover {
+  background: var(--menu-hover);
+}
+
+.note-edit__tool-divider {
+  width: 1px;
+  height: 18px;
+  background: var(--edge-strong);
+  margin: 0 2px;
+}
+
+/* The tail that points at the selection. A rotated square of the same fill,
+   with no shadow of its own — the panel's shadow already reads as one object,
+   and a second shadow here would draw its outline. */
+.note-edit__tail {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%) translateY(-4px) rotate(45deg);
+  width: 8px;
+  height: 8px;
+  background: var(--overlay);
 }

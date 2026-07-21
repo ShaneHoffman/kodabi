@@ -1,0 +1,64 @@
+/* ============================================================
+   Search — results.
+
+   Only non-bridged tokens live here: the pinned query field, the result row,
+   and the matched-term highlight.
+
+   BREADCRUMB FIRST is what keeps this from reading as the Inbox. Both are
+   left-pinned lists of notes with a title and a snippet; the difference is
+   that a search result leads with WHERE it came from, because that is the
+   thing you are actually scanning for. Add the highlighted term and the
+   absence of any lift or file control, and the two lists stop being
+   confusable from across the room.
+   ============================================================ */
+
+/* The query is the one raised thing on the screen and it stays put while the
+   results move under it — the field is the subject of the view, not a control
+   on top of it. */
+.search__field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface);
+  border-radius: var(--radius-card);
+  padding: 13px 16px;
+  box-shadow: var(--lift);
+}
+
+/* A real input wearing no chrome of its own: the field around it already is
+   the chrome, and a second box inside the first is the thing this design
+   spends all its effort avoiding. */
+.search__input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  padding: 0;
+}
+
+/* Results tint, never lift. Nothing here is waiting to be cleared. */
+.search__row {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 15px 12px;
+  margin: 0 -12px;
+  border-radius: var(--radius-control);
+  transition: background-color var(--dur-quick) var(--ease-standard);
+}
+
+.search__row:hover,
+.search__row:focus-visible {
+  background: var(--surface);
+}
+
+/* The match reads through VALUE — an ink wash behind ink text, the same one a
+   dragged text selection uses. Never a colour: a highlight that used hue
+   would be the one place in the app where colour ranked something. */
+.search__mark {
+  background: var(--highlight);
+  color: var(--text);
+  border-radius: var(--radius-match);
+  padding: 1px 3px;
+}

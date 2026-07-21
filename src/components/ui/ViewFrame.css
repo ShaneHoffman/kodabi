@@ -1,0 +1,83 @@
+/* ============================================================
+   ViewFrame — the page scaffold, one stance per view type.
+
+   Only non-bridged tokens live here: the Layer-4 gutters and measures.
+   Type, colour and weight stay as utilities on the component.
+
+   THE GUTTERS ARE NOT ALL THE SAME, AND THAT IS THE DESIGN. A view type is
+   meant to be recognisable before any heading is read — by where its content
+   sits, how dense it is, and where the weight falls. A queue pinned hard left
+   at 44/60 and a library centred on a reading measure at 52/60 are two
+   different kinds of place; collapsing them onto one shared step would delete
+   the only thing telling them apart at a glance.
+
+   So each variant states its own padding and its own column, and there is no
+   "default" gutter to fall back on — a new view has to decide what kind of
+   place it is.
+   ============================================================ */
+
+.view {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  box-sizing: border-box;
+}
+
+.view--queue {
+  padding: var(--gutter-queue-y) var(--gutter-queue-x);
+}
+
+.view--library {
+  padding: var(--gutter-library-y) var(--gutter-library-x);
+}
+
+.view--panel {
+  padding: var(--gutter-panel-y) var(--gutter-panel-x);
+}
+
+.view--health {
+  padding: var(--gutter-health-y) var(--gutter-health-x);
+}
+
+.view--doc {
+  padding: var(--gutter-doc-y) var(--gutter-doc-x);
+}
+
+.view--search {
+  padding: var(--gutter-search-y) var(--gutter-search-x);
+}
+
+.view__column {
+  width: 100%;
+}
+
+/* ---------- centred ----------
+   A library and a system-health view are things you READ, so they sit on a
+   measure in the middle of their pane. They are the only two that centre. */
+.view--library .view__column {
+  max-width: var(--measure-library);
+  margin: 0 auto;
+}
+
+.view--health .view__column {
+  max-width: var(--measure-health);
+  margin: 0 auto;
+}
+
+/* ---------- left-pinned ----------
+   A queue, a document and a result list all start at the same left edge and
+   stay there. A queue you work down wants a stable left margin to scan; a
+   document wants the measure it was written to, not a column that drifts with
+   the window. */
+.view--doc .view__column {
+  max-width: var(--measure-doc);
+}
+
+.view--search .view__column {
+  max-width: var(--measure-search);
+}
+
+/* `queue` and `panel` deliberately cap nothing here. The Inbox's rows want the
+   full width of their gutter (their snippet caps itself), and a settings row
+   caps at --measure-setting on the row, so the tab rail above can still run
+   the pane's full width. */

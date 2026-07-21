@@ -18,6 +18,10 @@ type Props = {
   options: SelectOption[];
   /** Optional explicit id; one is generated (useId) when omitted. */
   id?: string;
+  /**
+   * What the trigger reads when nothing is chosen. On `token` it is the verb
+   * rather than a placeholder — the arrow after it is drawn by the control.
+   */
   placeholder?: string;
   /** Hide the label visually (still an accessible name) — for a control whose
    * purpose is clear from context, e.g. a per-row picker in a list. */
@@ -30,15 +34,17 @@ type Props = {
   /**
    * How much the resting control weighs.
    *
-   *   boxed — a form field, and reads like one. The default.
-   *   quiet — an affordance sitting beside content it must not out-weigh (the
-   *           Inbox's per-row "File to…"). Rests as text, becomes a real
-   *           anchored control on hover and while open.
+   *   boxed — a form or settings control, and reads like one: a raised chip
+   *           carrying its value and a chevron. The default.
+   *   token — an affordance sitting beside content it must not out-weigh (a
+   *           queue row's "File →"). Rests as quiet mono text with no box at
+   *           all and takes a soft pill only while the pointer or the
+   *           keyboard is on it.
    *
-   * Never `quiet` inside a form: a field that does not look like a field is a
+   * Never `token` inside a form: a field that does not look like a field is a
    * field people do not fill in (docs/UI_CONVENTIONS.md).
    */
-  variant?: "boxed" | "quiet";
+  variant?: "boxed" | "token";
 };
 
 /**
@@ -47,8 +53,10 @@ type Props = {
  * dependency — the same combobox know-how the command palette proves
  * (src/components/CommandPalette.tsx), minus the dep. Focus stays on the
  * trigger; ↑/↓ move a virtual highlight via aria-activedescendant,
- * Enter/Space selects, Escape closes, typing jumps. The active row is a
- * value wash, never the reserved green (docs/DESIGN.md).
+ * Enter/Space selects, Escape closes, typing jumps.
+ *
+ * Both variants share one open list, on the overlay plane. The active row is
+ * the menu-hover fill, never the reserved green (docs/DESIGN.md).
  */
 export function Select({
   label,
@@ -85,6 +93,7 @@ export function Select({
   const typedTimer = useRef<number | null>(null);
 
   const active = options.length > 0 ? Math.min(activeIndex, options.length - 1) : 0;
+  const token = variant === "token";
 
   // Opens even with no options: the list then says so. Refusing to open left a
   // trigger that swallowed every click and looked broken.
@@ -208,46 +217,53 @@ export function Select({
         disabled={disabled}
         onClick={() => (open ? setOpen(false) : openList())}
         onKeyDown={onKeyDown}
-        // Boxed fills its column and pushes the caret to the far edge, the way
-        // a form field should. Quiet shrink-wraps instead: with no ring holding
-        // the two ends together, a full-width trigger left its label and its
-        // caret marooned at opposite sides of the column, reading as two
-        // unrelated scraps of text rather than one control.
-        className={`ui-select__trigger ui-focus-ring flex items-center rounded-md px-xs py-2xs text-body disabled:cursor-not-allowed disabled:text-text-faint ${
-          variant === "quiet"
-            ? "ui-select__trigger--quiet w-auto self-start gap-2xs text-text-soft"
-            : "w-full justify-between bg-surface text-text"
+        // Boxed shrink-wraps to its value: it is a chip, and a chip that
+        // stretched to its column would be a field pretending to be a chip.
+        // Token shrink-wraps too — with no ring holding its two ends together,
+        // a full-width trigger left the label and the arrow marooned at
+        // opposite sides of the column, reading as two unrelated scraps.
+        className={`ui-select__trigger ui-select__trigger--${variant} ui-focus-ring flex w-auto items-center self-start disabled:cursor-not-allowed disabled:text-text-faint ${
+          token
+            ? "gap-2xs font-mono text-cap tracking-token text-text-faint"
+            : "gap-2xs text-label text-text"
         }`}
       >
-        <span className={selectedLabel === null ? "text-text-faint" : undefined}>
+        <span
+          className={
+            selectedLabel === null && !token ? "text-text-faint" : undefined
+          }
+        >
           {selectedLabel ?? placeholder}
         </span>
-        <svg
-          className="ui-select__caret"
-          viewBox="0 0 12 12"
-          aria-hidden="true"
-        >
-          <path
-            d="M2.5 4.5 6 8l3.5-3.5"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.25"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
+        {token ? (
+          // The arrow IS the state: → at rest, ↓ the moment the menu is under
+          // it. A chevron would have said "there is a list here"; this says
+          // "the list is open", which is the only thing worth saying twice.
+          <span aria-hidden="true">{open ? "↓" : "→"}</span>
+        ) : (
+          <svg className="ui-select__caret" viewBox="0 0 12 12" aria-hidden="true">
+            <path
+              d="M2.5 4.5 6 8l3.5-3.5"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.25"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        )}
       </button>
       {open && (
         <ul
           id={listboxId}
           role="listbox"
           aria-labelledby={labelId}
-          className="ui-select__list absolute inset-x-0 top-full mt-3xs max-h-64 overflow-y-auto rounded-md bg-surface py-2xs"
+          className="ui-select__list absolute right-0 top-full mt-2xs max-h-64 overflow-y-auto"
         >
           {options.length === 0 && (
             // Not a role=option: there is nothing to choose, so it must not be
             // reachable by the arrow keys or announced as selectable.
-            <li className="px-xs py-2xs text-cap text-text-faint">{emptyLabel}</li>
+            <li className="ui-select__option text-cap text-text-faint">{emptyLabel}</li>
           )}
           {options.map((option, index) => (
             <li
@@ -264,11 +280,34 @@ export function Select({
                 if (moved && index !== active) setActiveIndex(index);
               }}
               onClick={() => choose(index)}
-              className={`ui-select__option flex items-center justify-between px-xs py-2xs text-body text-text-soft${
-                index === active ? " ui-wash is-active" : ""
-              }${index === selectedIndex ? " is-selected" : ""}`}
+              // Mono in a token menu, because what it lists are paths — the
+              // filing destination is a location, and mono is how this app
+              // writes locations everywhere else.
+              className={`ui-select__option flex cursor-pointer items-center justify-between gap-2xs ${
+                token ? "font-mono text-label" : "text-label"
+              } ${index === active ? "ui-wash is-active" : "text-text-soft"}${
+                index === selectedIndex ? " is-selected" : ""
+              }`}
             >
               <span>{option.label}</span>
+              {index === selectedIndex && (
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 14 14"
+                  fill="none"
+                  aria-hidden="true"
+                  className="flex-none text-text-faint"
+                >
+                  <path
+                    d="M2.5 7.5l3 3 6-7"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+              )}
             </li>
           ))}
         </ul>

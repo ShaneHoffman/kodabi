@@ -18,9 +18,10 @@ export type Command = {
   id: string;
   title: string;
   group: CommandGroup;
-  /** Quiet right-aligned context, e.g. "Jump to". Searched along with title,
-   * and shown only once filtering has broken the sections up — inside its own
-   * section the heading has already said it. */
+  /** The keyboard shortcut that runs this without opening the palette, e.g.
+   * "Ctrl+Shift+K". Searched along with the title. Only a command that really
+   * has a global binding carries one — the palette is where people learn the
+   * shortcuts, so an invented hint here teaches something false. */
   hint?: string;
   run: () => void;
 };
@@ -41,7 +42,6 @@ export function useCommands(): Command[] {
       id: entry.kind === "inbox" ? "jump:inbox" : `jump:${entry.project.slug}`,
       title: entry.kind === "inbox" ? "Inbox" : formatSlug(entry.project.slug),
       group: "jump",
-      hint: "Jump to",
       run: () => navigate(entryView(entry)),
     }));
 
@@ -53,7 +53,6 @@ export function useCommands(): Command[] {
         id: "needs-attention",
         title: "Needs attention",
         group: "jump",
-        hint: "Jump to",
         run: () => navigate({ kind: "needsAttention" }),
       });
     }
@@ -69,6 +68,9 @@ export function useCommands(): Command[] {
         id: "open-capture",
         group: "action",
         title: "Quick capture",
+        // The one command here with a global binding, mirroring
+        // `DEFAULT_QUICK_CAPTURE_SHORTCUT` in src-tauri/src/quick_capture.rs.
+        hint: "Ctrl+Alt+Space",
         // Quick capture is its own window (#45), not a main-window view — the
         // palette action pops it, matching the global hotkey.
         run: () => {

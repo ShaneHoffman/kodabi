@@ -4,9 +4,9 @@ import { useTauriEvent } from "../../useTauriEvent";
 import { retryDistill, useFailedSessions, type FailedSession } from "../../useSessions";
 import type { DistillEvent } from "../../useDistillState";
 import { Button } from "../ui/Button";
-import { ListRow } from "../ui/ListRow";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
+import "./NeedsAttentionView.css";
 
 /** A readable name for a session: its slug de-hyphenated, else an honest
  * placeholder. Never the capture time, which the line below already shows, and
@@ -31,6 +31,42 @@ function formatCaptureTime(capturedAt: string): string {
   });
 }
 
+/** The most recent failure, as a short date, for the header's state line. */
+function lastFailure(sessions: FailedSession[]): string | null {
+  const newest = sessions
+    .map((session) => new Date(session.captured_at).getTime())
+    .filter((time) => !Number.isNaN(time))
+    .sort((a, b) => b - a)[0];
+  if (newest === undefined) return null;
+  return new Date(newest).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+/**
+ * An outline circle with a bang. INK, never red — this palette has no red,
+ * and rank is never carried by hue (docs/DESIGN.md). A failed capture is not
+ * an emergency; it is a thing to redo, and drawing it in alarm colours would
+ * be the interface panicking on the user's behalf.
+ */
+function WarningGlyph() {
+  return (
+    <svg
+      width="19"
+      height="19"
+      viewBox="0 0 20 20"
+      fill="none"
+      aria-hidden="true"
+      className="block flex-none text-text-faint"
+    >
+      <circle cx="10" cy="10" r="8.2" stroke="currentColor" strokeWidth="1.3" />
+      <path d="M10 5.6v5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <circle cx="10" cy="13.8" r="0.95" fill="currentColor" />
+    </svg>
+  );
+}
+
 /**
  * Meetings that were captured but never became a note, each with a one-click
  * retry. The founding doc's "never silently misfile" principle extends to never
@@ -42,16 +78,19 @@ function formatCaptureTime(capturedAt: string): string {
  * skip and never appears here, and a session still being distilled is excluded
  * by the backend until its run finishes.
  *
- * This was a section inside the Inbox, capped at three rows behind an expander
- * so it couldn't push the filing queue off the screen. That cap was a mitigation
- * for the real problem: two queues with different verbs and different urgency
- * sharing one column. Here the list is the subject of its own view, so it
- * renders in full and the cap is gone.
+ * The view is the narrowest and airiest in the app: a short centred column of
+ * pre-lifted cards. A list of things that went wrong should feel finite and
+ * finishable, not like a wall.
  */
 export function NeedsAttentionView() {
   const { sessions, loading, error } = useFailedSessions();
   const [pendingPath, setPendingPath] = useState<string | null>(null);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
+  // Cards the user has waved off this session. Discard is deliberately NOT a
+  // delete: the recording is untouched on disk and the card returns on the
+  // next listing. It clears the flag, not the data — which is exactly what the
+  // footnote promises, and why it needs no confirmation.
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
 
   useTauriEvent<DistillEvent>(DISTILL_STATE_EVENT, (payload) => {
     if (payload.status === "distilling" || payload.status === "routing_fallback") {
@@ -61,9 +100,7 @@ export function NeedsAttentionView() {
     // terminal event names its session, so another session finishing (an
     // automatic distill landing mid-retry) can no longer re-arm Retry for a run
     // that is still going, which would queue a second run and a second note.
-    setPendingPath((current) =>
-      current === payload.session_path ? null : current,
-    );
+    setPendingPath((current) => (current === payload.session_path ? null : current));
     if (payload.status === "error") {
       setRowErrors((current) => ({
         ...current,
@@ -86,9 +123,7 @@ export function NeedsAttentionView() {
   if (previousSessions !== sessions) {
     setPreviousSessions(sessions);
     const listed = new Set(sessions.map((session) => session.path));
-    const remaining = Object.entries(rowErrors).filter(([path]) =>
-      listed.has(path),
-    );
+    const remaining = Object.entries(rowErrors).filter(([path]) => listed.has(path));
     if (remaining.length !== Object.keys(rowErrors).length) {
       setRowErrors(Object.fromEntries(remaining));
     }
@@ -107,14 +142,19 @@ export function NeedsAttentionView() {
     });
   };
 
+  const visible = sessions.filter((session) => !dismissed.has(session.path));
+  const failedOn = lastFailure(visible);
+
   return (
     <ViewFrame
-      variant="queue"
+      variant="health"
       eyebrow="System"
       title="Needs attention"
       summary={
-        sessions.length > 0
-          ? `${sessions.length} ${sessions.length === 1 ? "capture" : "captures"} to retry`
+        visible.length > 0
+          ? `${visible.length} ${visible.length === 1 ? "capture" : "captures"} to retry${
+              failedOn ? ` · last failed ${failedOn}` : ""
+            }`
           : undefined
       }
     >
@@ -122,7 +162,7 @@ export function NeedsAttentionView() {
         <StatusMessage variant="error">
           Couldn&apos;t list captured sessions: {error}
         </StatusMessage>
-      ) : sessions.length === 0 ? (
+      ) : visible.length === 0 ? (
         // The sidebar row that leads here disappears at zero, so a user standing
         // on this view when the last retry succeeds would otherwise watch the
         // screen empty out with nothing to tell them it went well. Say so.
@@ -132,46 +172,68 @@ export function NeedsAttentionView() {
           </StatusMessage>
         )
       ) : (
-        <ul className="flex flex-col gap-sm" data-testid="needs-attention">
-          {sessions.map((session) => (
-            <li key={session.path}>
-              <ListRow
-                title={sessionTitle(session)}
-                meta={`${formatCaptureTime(session.captured_at)} · no note was created`}
-                action={
-                  // The button stays mounted and focusable while its retry
-                  // runs. It used to be swapped for a <span>Retrying…</span>,
-                  // which unmounted the focused control and dropped focus to
-                  // <body> (docs/DESIGN_SYSTEM.md §6).
-                  <div className="text-right">
-                    <Button
-                      variant="quiet"
-                      data-testid="retry-distill"
-                      // One retry at a time: each run spends a real headless
-                      // Claude call, and the backend serializes them anyway.
-                      // The running row is excluded from the `disabled` half
-                      // on purpose — `loading` makes it busy-but-focusable,
-                      // and a native `disabled` would blur the very control
-                      // the user just pressed.
-                      disabled={pendingPath !== null && pendingPath !== session.path}
-                      loading={pendingPath === session.path}
-                      loadingLabel="Retrying…"
-                      onClick={() => retry(session.path)}
-                      className="text-body text-text-soft"
-                    >
-                      Retry
-                    </Button>
-                  </div>
-                }
-              />
-              {rowErrors[session.path] && (
-                <StatusMessage variant="error" compact>
-                  Retry failed: {rowErrors[session.path]}
-                </StatusMessage>
-              )}
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul className="mt-md flex flex-col gap-xs" data-testid="needs-attention">
+            {visible.map((session) => (
+              <li key={session.path} className="attention__card">
+                <WarningGlyph />
+                <div className="min-w-0 flex-1">
+                  <p className="text-lead font-semibold text-text">
+                    {sessionTitle(session)}
+                  </p>
+                  <p className="mt-3xs font-mono text-cap text-text-faint">
+                    {formatCaptureTime(session.captured_at)} · no note was created
+                  </p>
+                  {rowErrors[session.path] && (
+                    <StatusMessage variant="error" compact>
+                      Retry failed: {rowErrors[session.path]}
+                    </StatusMessage>
+                  )}
+                </div>
+                {/* Two actions, ranked by weight rather than by colour: Retry
+                    is the one you want, so it carries full ink and semibold;
+                    Discard recedes to muted regular. */}
+                <div className="flex flex-none items-center gap-sm">
+                  <Button
+                    variant="quiet"
+                    data-testid="retry-distill"
+                    // One retry at a time: each run spends a real headless
+                    // Claude call, and the backend serializes them anyway. The
+                    // running row is excluded from the `disabled` half on
+                    // purpose — `loading` makes it busy-but-focusable, and a
+                    // native `disabled` would blur the very control the user
+                    // just pressed.
+                    disabled={pendingPath !== null && pendingPath !== session.path}
+                    loading={pendingPath === session.path}
+                    loadingLabel="Retrying…"
+                    onClick={() => retry(session.path)}
+                    className="py-3xs text-label font-semibold text-text"
+                  >
+                    Retry
+                  </Button>
+                  <Button
+                    variant="quiet"
+                    onClick={() =>
+                      setDismissed((current) =>
+                        new Set(current).add(session.path),
+                      )
+                    }
+                    className="py-3xs text-label text-text-faint"
+                  >
+                    Discard
+                  </Button>
+                </div>
+              </li>
+            ))}
+          </ul>
+          {/* The one piece of reassurance on the screen, and it belongs here
+              rather than in a tooltip: the whole reason Discard needs no
+              confirmation is that nothing it touches is destroyed. */}
+          <p className="mt-md text-cap text-text-faint">
+            Retrying re-runs distillation on the original recording. Nothing was
+            deleted.
+          </p>
+        </>
       )}
     </ViewFrame>
   );

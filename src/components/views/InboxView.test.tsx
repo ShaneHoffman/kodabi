@@ -175,15 +175,16 @@ describe("InboxView", () => {
 
     const { unmount } = renderInbox();
 
-    expect(await screen.findByText("2 notes to file")).toBeInTheDocument();
+    // The count folds into the masthead sentence ("Inbox · 2 to file"), so the
+    // noun lives in the view's name rather than being repeated in the count.
+    expect(await screen.findByText("· 2 to file")).toBeInTheDocument();
     unmount();
 
     resetTauriMocks();
     serveVault([PLANNING]);
     renderInbox();
 
-    // Singular, not "1 notes".
-    expect(await screen.findByText("1 note to file")).toBeInTheDocument();
+    expect(await screen.findByText("· 1 to file")).toBeInTheDocument();
   });
 
   it("holds no needs-attention queue of its own", async () => {

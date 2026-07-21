@@ -1,107 +1,149 @@
 import type { ReactNode } from "react";
+import "./ViewFrame.css";
 
 /**
- * What kind of view this is. Not decoration: each variant answers "what am I
- * looking at" before the heading is read, which is the whole point of having
- * them (docs/DESIGN_SYSTEM.md §1).
+ * What kind of place this view is. Not decoration: the variant is the one
+ * thing that answers "what am I looking at" before the heading is read, and
+ * it fixes the gutter, the column, the alignment AND the title's size
+ * together, so two views of the same kind cannot drift apart
+ * (docs/DESIGN_SYSTEM.md §1).
  *
- *   queue   — work to get through. Carries a workload sentence.
- *   library — a place to browse. Carries a quiet count.
- *   panel   — configuration. Narrower column, h3-led sections, no summary.
+ *   queue   — work to get through. Pinned hard left, densest gutter, and a
+ *             compact one-line masthead instead of a big title: a queue is
+ *             not a document, and giving it a 34px serif heading made it read
+ *             as one.
+ *   library — a place to browse. Centred on a reading measure, the airiest
+ *             gutter, the largest title. Deliberately the opposite stance
+ *             from `queue`.
+ *   panel   — configuration. Left-pinned, a small title, and no column cap
+ *             (its rows cap themselves) so a tab rail can run the full pane.
+ *   health  — system state to recover from. The narrowest column, centred,
+ *             so a short list of problems does not sprawl.
+ *   doc     — a note. Left-pinned on the measure it was written to.
+ *   search  — results under a pinned query.
  *
- * Omitted is a real fourth answer: the bare scaffold, for a view that supplies
- * its own header shape (the note editor) or has nothing to summarise yet (the
- * Search placeholder).
+ * `doc` and `search` render no header of their own: their headers are a
+ * genuinely different shape (a back link and its own actions; a query field)
+ * and arrive as children.
  */
-type Variant = "queue" | "library" | "panel";
+type Variant = "queue" | "library" | "panel" | "health" | "doc" | "search";
 
 type Props = {
+  variant: Variant;
   /** The small uppercase label above the title. Names the section, not the field. */
   eyebrow?: ReactNode;
-  /** Omit both this and `eyebrow` to get the bare scaffold — for a view whose
-   * header is genuinely a different shape (the note editor's carries a back
-   * link and its own actions) and supplies its own as a child. */
+  /** The view's name. On `queue` it leads the one-line masthead instead. */
   title?: ReactNode;
-  /** A single header-level action, right-aligned on the title's baseline. */
+  /** A single header-level action, right-aligned on the title's first line. */
   action?: ReactNode;
-  variant?: Variant;
   /**
-   * The line under the title. Deliberately not a free slot: `variant` fixes its
-   * typographic role, so a workload sentence can never render at a count's
-   * weight in one view and a heading's in another. Pass the content, not the
-   * styling. Omit it when the count is zero — the empty state speaks then, and
-   * two "nothing here" voices in one header is one too many.
+   * The line under the title — a workload sentence for a queue, a count for a
+   * library, a state for a health view. Deliberately not a free styling slot:
+   * the variant fixes its typographic role, so a count can never render at a
+   * heading's weight in one view and a caption's in another. Pass the content,
+   * never a class. Omit it at zero — the empty state speaks then, and two
+   * "nothing here" voices in one header is one too many.
    */
   summary?: ReactNode;
   children: ReactNode;
 };
 
-/** A queue states the work; a library states the size. Both recede from the title. */
+/** Each variant's title step. A config panel and a note must not open at the
+ * same size, which is exactly what one shared `text-h2` used to make them do. */
+const TITLE_CLASS: Record<Variant, string> = {
+  queue: "",
+  library: "font-serif text-title-library leading-title text-text",
+  panel: "font-serif text-title-panel leading-title text-text",
+  health: "font-serif text-title-health leading-title text-text",
+  doc: "",
+  search: "",
+};
+
+/** A queue states the work; a library and a health view state the size. */
 const SUMMARY_CLASS: Record<Variant, string> = {
-  queue: "text-body text-text-soft",
-  library: "text-cap text-text-faint",
+  queue: "",
+  library: "text-label text-text-faint",
   panel: "",
+  health: "text-label text-text-faint",
+  doc: "",
+  search: "",
 };
 
 /**
- * The page scaffold every full view sits in: the gutter, the centred content
- * column, the section rhythm, and the eyebrow/title header
- * (docs/DESIGN_SYSTEM.md §1).
+ * The page scaffold every full view sits in: the gutter, the column, and the
+ * header. The gutter and column come from ViewFrame.css, keyed off the
+ * variant; the header is built here.
  *
- * This was repeated inline in four views and extracted locally as `Frame` in a
- * fifth. The eyebrow in particular is why it is worth a component: it is
- * exactly `text-eyebrow uppercase tracking-eyebrow text-text-faint`, and when
- * each view spelled that out by hand most of them reached for Tailwind's
- * `tracking-wide` (0.025em) while the Sidebar used the `--ls-eyebrow` token
- * (0.22em) — the same role rendering 8.8x apart.
+ * The eyebrow in particular is why this is worth a component: it is exactly
+ * `font-mono text-eyebrow uppercase tracking-eyebrow text-text-faint`, and
+ * when each view spelled that out by hand most of them reached for Tailwind's
+ * `tracking-wide` (0.025em) while the Sidebar used the token (0.22em) — the
+ * same role rendering 8.8x apart.
  */
 export function ViewFrame({
+  variant,
   eyebrow,
   title,
   action,
-  variant,
   summary,
   children,
 }: Props) {
-  // Left-aligned, not centred. `mx-auto` made the side gutters a function of
-  // the window: at the content cap they were 40px, and every pixel the window
-  // grew past that split between left and right, so the same view had a 40px
-  // top and a 300px left on a wide screen. The gutter is now the gutter, on all
-  // four sides, whatever the window is doing.
-  //
-  // Config reads narrow: a settings column that runs the full content width
-  // makes every label and control drift apart from the thing it labels.
-  const column =
-    variant === "panel"
-      ? "flex w-full max-w-measure flex-col gap-lg"
-      : "flex w-full max-w-content flex-col gap-lg";
-  const summaryClass = variant ? SUMMARY_CLASS[variant] : "";
+  const header = renderHeader({ variant, eyebrow, title, action, summary });
 
   return (
-    // p-lg, not p-xl. 64px on every edge spent a tenth of a 640px-tall window
-    // on nothing before the eyebrow even started, and pushed the first row of
-    // every list past 200px down. Ma is space that does work; this was space
-    // that just cost.
-    <section className="flex min-h-full flex-col p-lg">
-      <div className={column}>
-        {title && (
-          <header className="flex items-baseline justify-between gap-md">
-            <div className="flex flex-col gap-3xs">
-              {eyebrow && (
-                <p className="text-eyebrow uppercase tracking-eyebrow text-text-faint">
-                  {eyebrow}
-                </p>
-              )}
-              <h2 className="font-serif text-h2 text-text">{title}</h2>
-              {summary && summaryClass && (
-                <p className={summaryClass}>{summary}</p>
-              )}
-            </div>
-            {action && <div className="flex-none">{action}</div>}
-          </header>
-        )}
+    <section className={`view view--${variant}`}>
+      <div className="view__column">
+        {header}
         {children}
       </div>
     </section>
+  );
+}
+
+function renderHeader({
+  variant,
+  eyebrow,
+  title,
+  action,
+  summary,
+}: Omit<Props, "children">) {
+  if (!eyebrow && !title) return null;
+
+  const eyebrowNode = eyebrow && (
+    <p className="font-mono text-eyebrow uppercase tracking-eyebrow text-text-faint">
+      {eyebrow}
+    </p>
+  );
+
+  // A queue's masthead is one line, not a stack: the view's name and the
+  // amount of work in it belong to the same sentence ("Inbox · 4 to file"),
+  // and splitting them across a title and a subtitle made a short list of
+  // chores look like a chapter opening.
+  if (variant === "queue") {
+    return (
+      <header className="flex items-baseline justify-between gap-md">
+        <div>
+          {eyebrowNode}
+          <p className="mt-2xs text-lead text-text">
+            <span className="font-semibold">{title}</span>
+            {summary && <span className="text-text-faint"> · {summary}</span>}
+          </p>
+        </div>
+        {action && <div className="flex-none">{action}</div>}
+      </header>
+    );
+  }
+
+  return (
+    <header className="flex items-start justify-between gap-md">
+      <div>
+        {eyebrowNode}
+        {title && <h2 className={`mt-2xs ${TITLE_CLASS[variant]}`}>{title}</h2>}
+        {summary && SUMMARY_CLASS[variant] && (
+          <p className={`mt-2xs ${SUMMARY_CLASS[variant]}`}>{summary}</p>
+        )}
+      </div>
+      {action && <div className="flex-none">{action}</div>}
+    </header>
   );
 }
