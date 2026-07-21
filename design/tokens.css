@@ -19,10 +19,12 @@
         single reserved green is spent on the listening/recording state and
         the editing caret, and on nothing else — not selection, not rank,
         not body text, not links, not the focus ring (which is now ink).
-     3. GEOMETRY IS NAMED. Each view type states its stance in pixels — the
-        Inbox pins left at 44/60, the Project view centres a reading measure
-        at 52/60, Settings sits at 46/56. Those numbers are tokens (Layer 4)
-        rather than one shared step, because the differences ARE the design.
+     3. GEOMETRY IS NAMED. The per-view stance lives in pixels — the sidebar's
+        boxes, the measures a column may run to, the lead-in above each view's
+        content. Those numbers are tokens (Layer 4) rather than one shared
+        step, because they do not land on a 4px scale and should not be made
+        to. The gutter is the one thing NOT per view: it is 44/60 everywhere,
+        on all four sides (see Layer 4 below).
 
    Layers
      1. pigments  (--k-*)            every literal is defined here EXACTLY ONCE
@@ -324,12 +326,14 @@
   --layer-overlay: 50; /* modal surfaces (palette, nudge, capture) */
 
   /* ---------- Layer 4 — geometry: the per-view stance ----------
-     Each view type is told apart BEFORE any heading is read, by where its
-     content sits and how dense it is. That is what these numbers encode, so
-     they are named per view rather than folded into one shared step: the
-     Inbox pinning left at 44/60 while the Project view centres 640px of
-     reading measure at 52/60 IS the design, and averaging them away would
-     delete it.
+     Each view type is told apart BEFORE any heading is read, by how dense it
+     is and where its weight falls. That is what these numbers encode, and
+     they are named rather than folded into one shared step because they do
+     not land on the 4px scale — rounding a lead-in onto the nearest step is
+     what once let a lifted Inbox row rise into the caption above it.
+
+     Where the content SITS is not part of it: the gutter below is one pair
+     for every view. See its own note for what happened when it wasn't.
 
      Consumed from co-located Component.css (docs/UI_CONVENTIONS.md), never
      as an arbitrary Tailwind value. */

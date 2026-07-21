@@ -29,7 +29,10 @@ export function MainContent() {
         />
       );
     case "search":
-      return <SearchView query={view.query} />;
+      // Keyed for the same reason as noteEditor: SearchView seeds its editable
+      // draft from this prop once, so a second search (the palette's
+      // `Search for "…"` row) has to remount to be seen at all.
+      return <SearchView key={view.query} query={view.query} />;
     case "settings":
       return <SettingsView />;
     default: {

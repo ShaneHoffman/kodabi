@@ -6,11 +6,19 @@ import { useEffect, useRef } from "react";
  * without a conditional hook call, and re-arming (null → a delay) restarts the
  * timer from zero.
  *
+ * `resetKey` restarts the timer for a caller whose delay is a constant but
+ * whose *subject* changes: without it, a second thing scheduled at the same
+ * delay silently inherits whatever is left of the first one's clock.
+ *
  * The imperative sibling of `useDebouncedValue`: that one debounces a value,
  * this one schedules an effect. `callback` is read through a ref, so an inline
  * closure never restarts the timer.
  */
-export function useTimeout(callback: () => void, delayMs: number | null): void {
+export function useTimeout(
+  callback: () => void,
+  delayMs: number | null,
+  resetKey?: string | number | null,
+): void {
   const callbackRef = useRef(callback);
   callbackRef.current = callback;
 
@@ -18,5 +26,5 @@ export function useTimeout(callback: () => void, delayMs: number | null): void {
     if (delayMs === null) return;
     const timer = setTimeout(() => callbackRef.current(), delayMs);
     return () => clearTimeout(timer);
-  }, [delayMs]);
+  }, [delayMs, resetKey]);
 }

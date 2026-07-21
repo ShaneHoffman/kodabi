@@ -3,24 +3,26 @@ import "./ViewFrame.css";
 
 /**
  * What kind of place this view is. Not decoration: the variant is the one
- * thing that answers "what am I looking at" before the heading is read, and
- * it fixes the gutter, the column, the alignment AND the title's size
- * together, so two views of the same kind cannot drift apart
- * (docs/DESIGN_SYSTEM.md §1).
+ * thing that answers "what am I looking at" before the heading is read. It
+ * fixes the title's size and the shape of the header, so two views of the
+ * same kind cannot drift apart (docs/DESIGN_SYSTEM.md §1).
  *
- *   queue   — work to get through. Pinned hard left, densest gutter, and a
- *             compact one-line masthead instead of a big title: a queue is
- *             not a document, and giving it a 34px serif heading made it read
- *             as one.
- *   library — a place to browse. Centred on a reading measure, the airiest
- *             gutter, the largest title. Deliberately the opposite stance
- *             from `queue`.
- *   panel   — configuration. Left-pinned, a small title, and no column cap
- *             (its rows cap themselves) so a tab rail can run the full pane.
- *   health  — system state to recover from. The narrowest column, centred,
- *             so a short list of problems does not sprawl.
- *   doc     — a note. Left-pinned on the measure it was written to.
- *   search  — results under a pinned query.
+ * It does NOT fix the gutter or the alignment. Those are the same on every
+ * view, on all four sides, and nothing centres — see the banner in
+ * ViewFrame.css for why moving them per view failed in the running app.
+ *
+ *   queue   — work to get through. A compact one-line masthead instead of a
+ *             big title: a queue is not a document, and giving it a 34px
+ *             serif heading made it read as one. Caps no column.
+ *   library — a place to browse. The largest title in the app, and the
+ *             opposite stance from `queue` in weight and density. Caps no
+ *             column: its rows are rows, not prose.
+ *   panel   — configuration. A small title and no column cap, so a tab rail
+ *             can run the full pane (its rows cap themselves).
+ *   health  — system state to recover from. A short list of pre-lifted
+ *             cards under a serif title. Caps no column.
+ *   doc     — a note, on the measure it was written to (--measure-doc).
+ *   search  — results under a pinned query (--measure-search).
  *
  * `doc` and `search` render no header of their own: their headers are a
  * genuinely different shape (a back link and its own actions; a query field)
@@ -77,8 +79,8 @@ const SUMMARY_CLASS: Record<Variant, string> = {
  * The eyebrow in particular is why this is worth a component: it is exactly
  * `font-mono text-eyebrow uppercase tracking-eyebrow text-text-faint`, and
  * when each view spelled that out by hand most of them reached for Tailwind's
- * `tracking-wide` (0.025em) while the Sidebar used the token (0.22em) — the
- * same role rendering 8.8x apart.
+ * `tracking-wide` (0.025em) while the Sidebar used the token (0.16em) — the
+ * same role rendering 6.4x apart.
  */
 export function ViewFrame({
   variant,

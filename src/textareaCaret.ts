@@ -93,24 +93,45 @@ export function selectionAnchor(textarea: HTMLTextAreaElement): SelectionAnchor 
   return { left, top: top - textarea.scrollTop };
 }
 
-/** Wrap or prefix the current selection, then hand back the new value and
- * where the selection should land. Pure, so the caller stays a plain event
+/** Wrap, prefix or link the current selection, then hand back the new value
+ * and where the selection should land. Pure, so the caller stays a plain event
  * handler and nothing here touches React state. */
 export function applyMarkup(
   value: string,
   start: number,
   end: number,
-  markup: { wrap?: string; prefix?: string },
+  markup: { wrap?: string; prefix?: string; link?: true },
 ): { value: string; start: number; end: number } {
   const selected = value.slice(start, end);
+
+  // A link is not a wrap: its two halves differ, and the useful thing to do
+  // after inserting one is to type the URL. So it has its own branch, and it
+  // hands back a collapsed caret sitting inside the empty parens.
+  if (markup.link) {
+    const caret = start + selected.length + 3; // past `[`, the text, `]` and `(`
+    return {
+      value: `${value.slice(0, start)}[${selected}]()${value.slice(end)}`,
+      start: caret,
+      end: caret,
+    };
+  }
 
   if (markup.wrap) {
     const { wrap } = markup;
     // Toggling: wrapping something already wrapped unwraps it, so pressing B
     // twice is a no-op rather than `****bold****`.
+    //
+    // The outer checks stop a SHORTER marker from matching the tail of a
+    // longer run: without them, italic on `**bold**` sees a `*` on each side,
+    // takes this branch, and silently downgrades the bold to italic.
+    const before = start >= wrap.length ? value.slice(start - wrap.length, start) : "";
+    const outerStart = start - wrap.length * 2;
+    const outerBefore = outerStart >= 0 ? value.slice(outerStart, start - wrap.length) : "";
     const alreadyWrapped =
-      value.slice(start - wrap.length, start) === wrap &&
-      value.slice(end, end + wrap.length) === wrap;
+      before === wrap &&
+      value.slice(end, end + wrap.length) === wrap &&
+      outerBefore !== wrap &&
+      value.slice(end + wrap.length, end + wrap.length * 2) !== wrap;
     if (alreadyWrapped) {
       return {
         value:

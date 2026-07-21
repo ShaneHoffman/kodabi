@@ -15,6 +15,10 @@ const CAPTURE_STATE_EVENT = "capture:state";
 const TRANSCRIPTION_STATE_EVENT = "transcription:state";
 
 const IDLE = { phase: "idle", sources: { loopback: "off", microphone: "off" } };
+const LISTENING = {
+  phase: "listening",
+  sources: { loopback: "live", microphone: "live" },
+};
 
 /** Render with capture idle, and wait for the seed read to land — the pipeline
  * hooks drop events that arrive while a capture is engaged, so the phase has to
@@ -140,5 +144,59 @@ describe("CaptureToast", () => {
     await distill({ status: "error", message: "boom", session_path: "b.jsonl" });
 
     expect(screen.getByRole("alert")).toBeInTheDocument();
+  });
+
+  it("reports a second failure of the same kind after the first was dismissed", async () => {
+    // The notice ids name a KIND of outcome, not a run, so the record of what
+    // has been dismissed has to end when the pipeline goes quiet. Without
+    // that, dismissing one capture's failure swallowed the next capture's
+    // identical failure entirely — silence for a note that never landed.
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    await renderToast();
+
+    await distill({ status: "error", message: "boom", session_path: "a.jsonl" });
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(screen.queryByTestId("capture-toast")).not.toBeInTheDocument();
+
+    // A second capture runs and fails the same way. Both of its steps finish
+    // inside the dwell, so no timer ever fires to refresh what was seen.
+    await act(async () => {
+      emitFromBackend(CAPTURE_STATE_EVENT, LISTENING);
+    });
+    await act(async () => {
+      emitFromBackend(CAPTURE_STATE_EVENT, IDLE);
+    });
+    await distill({ status: "error", message: "boom again", session_path: "b.jsonl" });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/Couldn't distill that capture/);
+  });
+
+  it("gives a saved note its own full dwell, not the remains of the running one", async () => {
+    // Every non-failed notice dwells for the same length, so the timer has to
+    // be keyed on the notice as well as the delay. Otherwise "Note saved."
+    // inherits whatever was left of "Distilling…"'s clock and can flash past
+    // before it can be read.
+    await renderToast();
+
+    await distill({ status: "distilling" });
+    expect(screen.getByTestId("capture-toast")).toHaveTextContent("Distilling the meeting…");
+
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    await distill({ status: "saved", path: "n.md", session_path: "s.jsonl" });
+    expect(screen.getByTestId("capture-toast")).toHaveTextContent("Note saved.");
+
+    // Past where the first notice's clock would have run out, well short of
+    // this one's.
+    await act(async () => {
+      vi.advanceTimersByTime(3000);
+    });
+    expect(screen.getByTestId("capture-toast")).toHaveTextContent("Note saved.");
+
+    await act(async () => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.queryByTestId("capture-toast")).not.toBeInTheDocument();
   });
 });

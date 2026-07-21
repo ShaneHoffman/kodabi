@@ -21,9 +21,12 @@ type Props = {
 export function PlaceholderView({ title, caption, detail }: Props) {
   return (
     <ViewFrame variant="panel" eyebrow={detail} title={title}>
-      <StatusMessage variant="empty" className="max-w-measure">
-        {caption}
-      </StatusMessage>
+      {/* No `max-w-measure` here any more: the redesign split `--measure` into
+          the un-bridged `--measure-*` family, so that utility named a container
+          token that no longer exists. Tailwind emits nothing for an unknown
+          utility and raises no error, so it was a class that did nothing.
+          `panel` caps its own rows. */}
+      <StatusMessage variant="empty">{caption}</StatusMessage>
     </ViewFrame>
   );
 }
