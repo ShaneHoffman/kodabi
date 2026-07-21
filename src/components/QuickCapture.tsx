@@ -6,7 +6,8 @@ import {
 import { captureLabel } from "../captureLabel";
 import { startCapture, stopCapture } from "../captureControl";
 import { hideQuickCaptureWindow, submitQuickCapture } from "../quickCapture";
-import { useCaptureState } from "../useCaptureState";
+import { isCaptureActive, useCaptureState } from "../useCaptureState";
+import { useDebouncedValue } from "../useDebouncedValue";
 import { formatElapsed, useElapsed } from "../useElapsed";
 import { useTauriEvent } from "../useTauriEvent";
 import { useTimeout } from "../useTimeout";
@@ -30,12 +31,18 @@ type Status =
 /**
  * The quick-capture window: a thought, typed or spoken, in one summoned box.
  *
- * It has exactly two states and they are told apart by the reserved green.
- * TYPING is silent — serif text, a green caret, and nothing else moving.
- * SPEAKING turns the green fully live: a breathing dot, four animated bars,
- * and a timer. That is the whole reason the hue is reserved; this window is
- * where it pays off, because "is this thing recording me" has to be
- * answerable from the doorway.
+ * It reads in three registers. TYPING is silent — serif text, a green caret,
+ * and nothing else moving. ENGAGED BUT NOT ON AIR (starting up, or every
+ * source dropped and reconnecting) wears the full recording chrome — header,
+ * timer, Stop — in ink: the session is running and Enter must stop it, but
+ * nothing is reaching disk so nothing may claim the green. SPEAKING turns the
+ * green fully live: a breathing dot, four animated bars, and a timer. That is
+ * the whole reason the hue is reserved; this window is where it pays off,
+ * because "is this thing recording me" has to be answerable from the doorway.
+ *
+ * The two questions are kept apart deliberately. `isCaptureActive` decides
+ * which chrome is mounted, what Enter and Escape do, and when the clock runs;
+ * `captureLabel().live` decides the green, and nothing else.
  *
  * Window show/hide lives in Rust — this component submits text, starts and
  * stops the capture, and asks the backend to hide.
@@ -54,19 +61,22 @@ export function QuickCapture() {
   const sessionRef = useRef(0);
 
   const captureState = useCaptureState();
-  const live = captureLabel(captureState).live;
+  const engaged = isCaptureActive(captureState.phase);
 
-  // Timed from the moment the phase went live. The backend reports a phase,
-  // not a duration, so this is the honest source — accurate to within a tick,
-  // which is the resolution a `0:07` shows anyway. Held during render rather
-  // than in an effect: it is derived from a prop-like value changing.
-  const [liveSince, setLiveSince] = useState<number | null>(null);
-  const [wasLive, setWasLive] = useState(live);
-  if (wasLive !== live) {
-    setWasLive(live);
-    setLiveSince(live ? Date.now() : null);
+  // Timed from the moment the session engaged — the press — not from the
+  // moment audio started arriving, so a source dropping out and recovering
+  // mid-capture never rewinds the clock to 0:00 and under-reports how long
+  // this recording has been going. The backend reports a phase, not a
+  // duration, so this is the honest source — accurate to within a tick, which
+  // is the resolution a `0:07` shows anyway. Held during render rather than in
+  // an effect: it is derived from a prop-like value changing.
+  const [engagedSince, setEngagedSince] = useState<number | null>(null);
+  const [wasEngaged, setWasEngaged] = useState(engaged);
+  if (wasEngaged !== engaged) {
+    setWasEngaged(engaged);
+    setEngagedSince(engaged ? Date.now() : null);
   }
-  const elapsed = useElapsed(liveSince);
+  const elapsed = useElapsed(engagedSince);
 
   // Re-show refocuses the box. A prior *error* keeps its message and draft so a
   // blur-dismiss can't silently bury a failed capture — the user sees it on the
@@ -131,11 +141,11 @@ export function QuickCapture() {
     if (event.nativeEvent.isComposing) return;
     if (event.key === "Enter" && !event.shiftKey) {
       event.preventDefault();
-      if (live) stopAndFile();
+      if (engaged) stopAndFile();
       else submit();
     } else if (event.key === "Escape") {
       event.preventDefault();
-      if (live) stopAndFile();
+      if (engaged) stopAndFile();
       void hideQuickCaptureWindow();
     }
   };
@@ -143,18 +153,18 @@ export function QuickCapture() {
   return (
     <main className="capture flex h-screen flex-col">
       <div className="capture__body flex-1">
-        {live ? <Listening elapsed={elapsed} state={captureState} /> : null}
+        {engaged ? <Listening elapsed={elapsed} state={captureState} /> : null}
         {/* The box stays mounted while recording rather than being replaced:
             a spoken capture and a typed one land in the same note, so what you
             have already typed must not vanish the moment you press Record. */}
-        <div className={live ? "mt-sm" : ""}>
+        <div className={engaged ? "mt-sm" : ""}>
           <textarea
             ref={inputRef}
             aria-label="Capture a thought"
             autoFocus
             spellCheck={false}
-            rows={live ? 2 : 3}
-            placeholder={live ? "Add a note alongside the recording…" : "Capture a thought…"}
+            rows={engaged ? 2 : 3}
+            placeholder={engaged ? "Add a note alongside the recording…" : "Capture a thought…"}
             value={text}
             onChange={(event) => setText(event.target.value)}
             onKeyDown={onKeyDown}
@@ -178,7 +188,7 @@ export function QuickCapture() {
           </StatusMessage>
         ) : (
           <span className="font-mono text-micro text-text-faint">
-            {live
+            {engaged
               ? // Not "Esc cancels". There is no cancel: Escape runs the same
                 // stop-and-file path Enter does, and a hint that promised
                 // otherwise would be a lie about a recording.
@@ -191,7 +201,7 @@ export function QuickCapture() {
           <span className="flex-none font-mono text-micro text-text">
             → {status.destination}
           </span>
-        ) : live ? (
+        ) : engaged ? (
           <button
             type="button"
             onClick={stopAndFile}
@@ -233,11 +243,18 @@ export function QuickCapture() {
 }
 
 /**
- * The listening header: the reserved green, fully live.
+ * The recording header: mounted for the whole session, green only when live.
  *
  * A dot inside a breathing glow, four bars, the state as a word, and a timer.
  * Together they answer the only question that matters here without being read:
  * something is being recorded, and it has been for this long.
+ *
+ * It follows `ListeningIndicator`'s contract, for the same reason: the state
+ * reads through the dot's FILL and the label's VALUE, never through a change
+ * of shape. A capture that is starting up, or whose sources have all dropped,
+ * keeps every part of this header in place — same dot, same bars, same timer —
+ * but wears them in ink, because the green means precisely one thing and
+ * nothing is reaching disk yet. The label says which it is.
  */
 function Listening({
   elapsed,
@@ -246,17 +263,27 @@ function Listening({
   elapsed: number;
   state: ReturnType<typeof useCaptureState>;
 }) {
-  const label = captureLabel(state);
+  // The mark reacts instantly for immediate visual feedback, but the label —
+  // a live region — follows a debounced state so a flapping source doesn't
+  // spam screen readers (or flicker the word) on every toggle.
+  const label = captureLabel(useDebouncedValue(state, 400));
+  const live = captureLabel(state).live;
   return (
     <div className="flex items-center gap-xs">
       <span className="capture__dot">
-        <span className="capture__glow" aria-hidden="true" />
-        <span className="capture__core" />
+        {live && <span className="capture__glow" aria-hidden="true" />}
+        <span className={`capture__core${live ? " capture__core--live" : ""}`} />
       </span>
-      <p role="status" className="text-label font-semibold text-text">
+      <p
+        role="status"
+        className={`text-label font-semibold ${live ? "text-text" : "text-text-faint"}`}
+      >
         {label.text}
       </p>
-      <span className="capture__wave" aria-hidden="true">
+      <span
+        className={`capture__wave${live ? "" : " capture__wave--quiet"}`}
+        aria-hidden="true"
+      >
         <span className="capture__bar" />
         <span className="capture__bar" />
         <span className="capture__bar" />
