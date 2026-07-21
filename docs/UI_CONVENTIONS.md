@@ -39,7 +39,7 @@ drift starts (the same control turning up as `px-3 py-1`, then `py-2`, then `px-
 | Role | Step | Utility | px |
 | --- | --- | --- | --- |
 | Control padding (button / select / field) | xs / 2xs | `px-xs py-2xs` | 12 / 8 |
-| View gutter | lg | `p-lg` | 40 |
+| View gutter | (Layer 4) | `--gutter-view-y` / `--gutter-view-x` | 44 / 60 |
 | Field stack gap (vertical) | sm | `gap-sm` | 16 |
 | Section gap | lg | `gap-lg` | 40 |
 | Inline label ↔ control gap | 2xs | `gap-2xs` | 8 |
@@ -49,9 +49,9 @@ drift starts (the same control turning up as `px-3 py-1`, then `py-2`, then `px-
 | List row vertical padding | 2xs | `py-2xs` | 8 |
 | Reading / writing column width | measure | `max-w-measure` | 33rem |
 
-The view gutter and the section gap are owned by [`ViewFrame`](../src/components/ui/ViewFrame.tsx), so
-a screen never spells them out. (This table previously claimed the gutter was `px-lg py-lg`; every view
-in the tree used `p-xl`. The component now settles it, and it settled on `p-lg`: 64px every side spent a tenth of a short window before the eyebrow started.)
+The view gutter and the header lead-in are owned by [`ViewFrame`](../src/components/ui/ViewFrame.tsx),
+so a screen never spells them out. The gutter is a Layer-4 value rather than a step on this scale
+(see *Layer 4* below), and it is the same on every view and on all four sides.
 
 **Every list of `ListRow`s separates at `gap-sm`, whatever its rows contain.** The gap has to beat the
 `gap-3xs` a row stacks its own lines at, or the list stops reading as rows — the Inbox shipped
@@ -317,8 +317,9 @@ audio is actually being recorded, and a settings control wearing it would be cla
 
 ### `ViewFrame` — the page scaffold, `variant="queue" | "library" | "panel"`
 
-The view gutter (`p-lg`), the centred content column, the section rhythm (`gap-lg`), and the
-eyebrow/title header. Every full view sits in one.
+The view gutter, the content column, the header lead-in, and the eyebrow/title header. Every full
+view sits in one. The gutter (`--gutter-view-y` / `--gutter-view-x`) is the same on every variant and
+on all four sides; see *Layer 4* below for why that is not negotiable per view.
 
 **`variant` answers "what am I looking at" before the heading is read.** It is not decoration — it is the
 one place a view declares its kind, so two views of the same kind can't drift apart:
@@ -456,19 +457,29 @@ Three surfaces keep a documented departure, each forced by what the window is ra
 
 ## Layer 4 — the per-view geometry
 
-The redesign gives each **view type** its own stance: where its content sits,
-how dense it is, and where the weight falls, so a queue and a library are told
-apart before any heading is read. Those measurements do not land on the 4px
-step scale, and they must not — the Inbox pinning left at 44/60 while the
-Project view centres 640px of reading measure at 52/60 *is* the design, and
-rounding both onto a shared step deletes it.
+The redesign gives each **view type** its own stance: how dense it is, what its
+header looks like, and where the weight falls, so a queue and a library are
+told apart before any heading is read. Those measurements do not land on the
+4px step scale, and they must not.
 
 So they are a **fourth token layer** in `design/tokens.css`: `--sidebar-*`,
-`--gutter-*-y` / `--gutter-*-x`, `--measure-*`, `--lead-*`, `--palette-top`,
-and the radius ladder.
+`--gutter-view-y` / `--gutter-view-x`, `--measure-*`, `--lead-*`,
+`--palette-top`, and the radius ladder.
+
+**The gutter is not part of the stance.** Each view type used to set its own
+padding and its own column alignment — the Inbox pinned left at 44/60, the
+Project view centring a 640px measure at 52/60 — on the theory that where the
+content sat was itself a signal. It reads that way in a static comp and not at
+all in the running app, where clicking between two sidebar rows moved the left
+edge of the page and registered as the layout being unstable, not as the two
+places being different kinds of place. There is now **one gutter, on all four
+sides, on every view**, and identity is carried by the header, the density and
+the weight instead. `--measure-*` still varies, but only to stop a long line of
+prose running too far right; nothing centres, so every view starts at the same
+left edge.
 
 The `--lead-*` family is the gap between a view's header and the thing it
-heads, and it is per view for the same reason the gutters are:
+heads, and it *is* per view — that is a density decision, which is stance:
 
 | Token | px | Where |
 | --- | --- | --- |
