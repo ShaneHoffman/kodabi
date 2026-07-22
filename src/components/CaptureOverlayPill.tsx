@@ -58,7 +58,7 @@ export function CaptureOverlayPill() {
           type="button"
           aria-label="Hide capture pill"
           data-testid="capture-overlay-dismiss"
-          className="capture-overlay-pill__dismiss ui-focus-ring text-text-faint"
+          className="capture-overlay-pill__dismiss ui-focus-ring text-text-soft"
           onClick={() => void dismissCaptureOverlay()}
         >
           {/* Decorative: the accessible name is on the button. */}

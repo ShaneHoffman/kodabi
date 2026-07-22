@@ -168,12 +168,14 @@ export function QuickCapture() {
             value={text}
             onChange={(event) => setText(event.target.value)}
             onKeyDown={onKeyDown}
-            className="capture__input ui-writing placeholder:text-text-faint"
+            className="capture__input ui-focus-ring ui-writing placeholder:text-text-faint"
           />
         </div>
       </div>
 
-      <div className="capture__rule" />
+      {/* A real <hr>: a thematic break between the thought and the transport
+          under it, which is what the element means. */}
+      <hr className="capture__rule" />
 
       <footer className="capture__footer">
         {status.kind === "error" ? (

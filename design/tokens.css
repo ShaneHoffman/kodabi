@@ -299,7 +299,6 @@
   --dur-settle: 200ms; /* a row leaving a list */
   --dur-wake: 450ms; /* the capture mark waking / settling */
   --dur-wave: 1000ms; /* one waveform bar's rise and fall */
-  --dur-caret: 1100ms; /* the caret blink */
   --dur-pulse: 1600ms; /* starting + reconnecting pulse */
   --dur-glow: 2600ms; /* the listening dot's breath */
   --dur-breath: 4200ms; /* the capture mark's breath cycle */
@@ -314,10 +313,15 @@
   --delay-wave-3: 420ms;
   --delay-wave-4: 140ms;
 
-  --ease-standard: ease; /* entrances, exits, state changes */
-  --ease-breath: ease-in-out; /* the continuous listening motion */
-  --ease-step: step-end; /* the caret: a blink has no in-between */
-  --ease-out: ease-out;
+  /* A decelerating curve: leaves immediately, arrives softly. It is spelled
+     out rather than left as the CSS keyword `ease` (0.25, 0.1, 0.25, 1),
+     whose symmetric ease-IN makes a 150ms hover feel like it hesitates before
+     it starts. Every state change in the app runs on this one curve, so the
+     shape of the motion is a single decision made here, not a per-component
+     one. */
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1); /* entrances, exits, state changes */
+  --ease-breath: ease-in-out; /* the continuous listening motion — symmetric on
+                                 purpose: a breath has no direction */
   --ease-drift: linear; /* constant-rate rotation */
 
   /* ---------- Layer 3 — stacking ----------
@@ -371,7 +375,6 @@
   --gutter-view-x: 60px;
 
   /* content measures */
-  --measure-capture: 500px; /* the quick-capture window */
   --measure-setting: 520px; /* a settings row: label left, control right */
   --measure-snippet: 500px; /* how far a queue row's serif snippet may run */
   --measure-palette: 560px;
@@ -379,6 +382,13 @@
   --measure-doc: 660px;
   --measure-progress: 340px; /* the Inbox progress instrument */
   --measure-menu: 236px; /* an overlay menu's floor */
+
+  /* how much room a writing surface is given before it has any text in it.
+     A floor, not a height: both grow. Named for the same reason the measures
+     above are — they are the writing surfaces' half of the per-view stance,
+     and a box that resizes as you type into it is a box you stop trusting. */
+  --measure-body-min: 300px; /* the note editor's body */
+  --measure-capture-min: 132px; /* the quick-capture window's */
 
   /* the lead-in between a view's header and the thing it heads.
 
@@ -440,6 +450,36 @@
   --field-search-y: 13px; /* the pinned query field */
   --mark-pad-y: 1px; /* the box drawn around a matched term */
   --mark-pad-x: 3px;
+  /* the boolean controls' geometry.
+
+     Drawn twice before this pass — once in ui/Checkbox.css and once in
+     NoteEditorView.css for a note's GFM task list — as the same five literals
+     in two files, which is exactly the drift a name prevents. The token guard
+     could not see them: it scopes its spacing check to padding/margin/gap, so
+     a width or a ring thickness is structurally invisible to it. Named here
+     the two skins are provably one skin.
+
+     17px rather than 16: at 1rem the box sits a hair small beside the 15px
+     sans label it is bound to, and the extra pixel is what makes the two read
+     as level. --check-mark-* is the tick itself, drawn from two borders. */
+  --check-box: 17px;
+  --check-ring: 1.4px;
+  --check-mark-w: 0.55rem;
+  --check-mark-h: 0.3rem;
+  --check-mark-stroke: 2px;
+
+  /* The pill toggle. The travel is a calc off the other three rather than its
+     own number, so a knob can never drift out of its track: it is exactly the
+     room the track has left once the knob and both insets are taken out. Same
+     reasoning as the Inbox row's calc'd negative margin. */
+  --toggle-w: 42px;
+  --toggle-h: 24px;
+  --toggle-inset: 3px;
+  --toggle-knob: 18px;
+  --toggle-travel: calc(
+    var(--toggle-w) - var(--toggle-knob) - 2 * var(--toggle-inset)
+  );
+
   --gap-tab: 26px; /* between the Settings tab rail's tabs */
   --tab-pad-x: 1px; /* optical, so the underline clears the text */
   --tab-pad-bottom: 9px; /* tab text to the rule it sits on */
@@ -512,7 +552,6 @@
   --glow-out: var(--k-glow-day-out);
   --edge-faint: var(--k-ink-05-day);
   --edge: var(--k-ink-06-day);
-  --edge-chip: var(--k-ink-07-day);
   --edge-rule: var(--k-ink-08-day);
   --edge-strong: var(--k-ink-09-day);
   --edge-open: var(--k-ink-14-day);
@@ -553,7 +592,6 @@
     --glow-out: var(--k-glow-night-out);
     --edge-faint: var(--k-paper-06-night);
     --edge: var(--k-paper-08-night);
-    --edge-chip: var(--k-paper-08-night);
     --edge-rule: var(--k-paper-08-night);
     --edge-strong: var(--k-paper-12-night);
     --edge-open: var(--k-paper-18-night);
@@ -594,7 +632,6 @@
   --glow-out: var(--k-glow-night-out);
   --edge-faint: var(--k-paper-06-night);
   --edge: var(--k-paper-08-night);
-  --edge-chip: var(--k-paper-08-night);
   --edge-rule: var(--k-paper-08-night);
   --edge-strong: var(--k-paper-12-night);
   --edge-open: var(--k-paper-18-night);
@@ -634,7 +671,6 @@
   --glow-out: var(--k-glow-day-out);
   --edge-faint: var(--k-ink-05-day);
   --edge: var(--k-ink-06-day);
-  --edge-chip: var(--k-ink-07-day);
   --edge-rule: var(--k-ink-08-day);
   --edge-strong: var(--k-ink-09-day);
   --edge-open: var(--k-ink-14-day);

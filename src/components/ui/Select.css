@@ -27,15 +27,29 @@
   transition: box-shadow var(--dur-quick) var(--ease-standard);
 }
 
-.ui-select__trigger--boxed:hover:not(:disabled) {
+/* Every interactive state is guarded on BOTH inert forms, the same way
+   Button.css guards its own: `disabled` means there is nothing to choose,
+   `aria-disabled` is Select.tsx's `busy` (a write in flight, kept focusable
+   so it cannot drop the user's place in the page). They must look identical
+   and neither may answer the pointer. */
+.ui-select__trigger--boxed:hover:not(:disabled):not([aria-disabled="true"]) {
   box-shadow: var(--lift-chip-hover);
+}
+
+/* A press settles the chip back onto the page, immediately — the same
+   treatment Button's primary chip gets (docs/DESIGN_SYSTEM.md §2). */
+.ui-select__trigger--boxed:active:not(:disabled):not([aria-disabled="true"]) {
+  box-shadow: var(--lift-chip);
+  background: color-mix(in srgb, var(--text) 6%, var(--surface));
+  transition: none;
 }
 
 .ui-select__trigger--boxed[aria-expanded="true"] {
   box-shadow: var(--lift-chip-open);
 }
 
-.ui-select__trigger--boxed:disabled {
+.ui-select__trigger--boxed:disabled,
+.ui-select__trigger--boxed[aria-disabled="true"] {
   box-shadow: 0 0 0 1px var(--edge-faint);
 }
 
@@ -58,13 +72,20 @@
     color var(--dur-quick) var(--ease-standard);
 }
 
-.ui-select__trigger--token:hover:not(:disabled),
+.ui-select__trigger--token:hover:not(:disabled):not([aria-disabled="true"]),
 .ui-select__trigger--token[aria-expanded="true"] {
   background: var(--token-active);
   color: var(--text);
 }
 
-.ui-select__trigger--token:disabled {
+.ui-select__trigger--token:active:not(:disabled):not([aria-disabled="true"]) {
+  background: var(--token-hover);
+  color: var(--text);
+  transition: none;
+}
+
+.ui-select__trigger--token:disabled,
+.ui-select__trigger--token[aria-disabled="true"] {
   background: transparent;
 }
 
@@ -96,9 +117,22 @@
   z-index: var(--layer-dropdown);
 }
 
+/* The wash arrives over --dur-quick like every other hover in the app. The
+   highlight is driven from JS (onMouseMove sets the active index, so pointer
+   and keyboard land on the same row for the same reason), which is why the
+   transition has to be stated here rather than coming from a :hover rule. */
 .ui-select__option {
   border-radius: var(--radius-item);
   padding: var(--menu-option-y) var(--menu-option-x);
+  transition:
+    background-color var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard);
+}
+
+.ui-select__option:active {
+  background: var(--token-hover);
+  color: var(--text);
+  transition: none;
 }
 
 /* The chosen value reads through weight and a check — value, never hue. */
