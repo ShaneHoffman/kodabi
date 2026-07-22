@@ -1,0 +1,15 @@
+[package]
+name = "kodabi-aec"
+description = "Acoustic echo cancellation for Kodabi — a safe wrapper over a vendored speexdsp echo canceller."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+# speexdsp is BSD-3-Clause (see vendor/COPYING); the workspace license applies
+# to the wrapper code in `src/`, not the vendored C in `vendor/`.
+
+[dependencies]
+thiserror = "2"
+
+[build-dependencies]
+cc = "1"

@@ -2386,6 +2386,7 @@ name = "kodabi"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "kodabi-aec",
  "kodabi-audio",
  "kodabi-core",
  "kodabi-embed",
@@ -2398,6 +2399,14 @@ dependencies = [
  "tauri-plugin-global-shortcut",
  "tauri-plugin-notification",
  "winreg",
+]
+
+[[package]]
+name = "kodabi-aec"
+version = "0.1.0"
+dependencies = [
+ "cc",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
