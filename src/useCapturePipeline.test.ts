@@ -17,6 +17,8 @@ function pipeline(overrides: Partial<CapturePipeline>): CapturePipeline {
     capture: IDLE_CAPTURE,
     transcription: { status: "idle" },
     distill: { status: "idle" },
+    handledFiledId: null,
+    markFiledHandled: () => {},
     ...overrides,
   };
 }

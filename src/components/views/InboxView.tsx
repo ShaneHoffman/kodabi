@@ -4,6 +4,7 @@ import {
   savedDestination,
   savedPathMatchesNote,
   useCapturePipeline,
+  type CapturePipeline,
   type PipelineStage,
 } from "../../useCapturePipeline";
 import { useNavigation } from "../../useNavigation";
@@ -31,6 +32,10 @@ const VANISH_MS = 200;
 const TOAST_DWELL_MS = 3500;
 /** Mirrors `--dur-settle`: the toast's own fade-out, once the dwell ends. */
 const TOAST_FADE_MS = 200;
+/** Covers `--dur-plane` with a little room: how long after an Inbox-routed
+ * note lands before its outcome counts as fully presented — the fill-in has
+ * played and there is nothing left for a remount to replay. */
+const FILL_IN_MS = 200;
 /** Covers the two ways a stage could otherwise wait forever: a dev/mock
  * build never follows a saved transcript with a distill, and an Inbox-routed
  * save's vault refetch can fail or never land. */
@@ -76,8 +81,10 @@ export function InboxView() {
   // The one pipeline subscription, held above the routed view (AppShell), so
   // the placeholder below reflects the current stage even when the Inbox
   // mounts mid-pipeline.
-  const stage = pipelineStage(useCapturePipeline());
+  const pipeline = useCapturePipeline();
+  const stage = pipelineStage(pipeline);
   const { placeholder, toast, pauseToast, resumeToast } = usePipelinePresence(
+    pipeline,
     stage,
     notes,
     projectSlugs,
@@ -87,9 +94,13 @@ export function InboxView() {
   // list yet — purely derived, so it needs no state of its own and cannot go
   // stale: it tracks whatever `stage` is pointing at, for as long as it keeps
   // pointing at it. It gives the arriving row a one-shot fill-in animation
-  // (`InboxRow`'s `fresh` prop) instead of the row simply appearing.
+  // (`InboxRow`'s `fresh` prop) instead of the row simply appearing. Once the
+  // fill-in has settled the outcome is marked handled (see
+  // `usePipelinePresence`), which is what keeps a remount from replaying it.
   const freshNotePath =
-    stage?.kind === "filed" && savedDestination(stage.savedPath, projectSlugs).kind === "inbox"
+    stage?.kind === "filed" &&
+    stage.id !== pipeline.handledFiledId &&
+    savedDestination(stage.savedPath, projectSlugs).kind === "inbox"
       ? (notes.find((note) => savedPathMatchesNote(stage.savedPath, note.path))?.path ?? null)
       : null;
 
@@ -161,12 +172,20 @@ function resolvePlaceholderStage(
   stage: PipelineStage | null,
   notes: NoteSummary[],
   projectSlugs: string[],
+  handledFiledId: string | null,
 ): PlaceholderStage | null {
   if (stage === null) return null;
   if (stage.kind === "transcribing") return { id: stage.id, kind: "transcribing" };
   if (stage.kind === "distilling") {
     return { id: stage.id, kind: "distilling", awaitingDistill: stage.awaitingDistill };
   }
+
+  // An outcome the Inbox has already fully presented (vanish-and-toast
+  // played, or the routed row's fill-in settled) is over, however long the
+  // distill hook keeps reporting it. Checked before the listed-note probe
+  // below: a landed note that later leaves the list (the user filed it
+  // somewhere else) must not resurrect this as a phantom "distilling" row.
+  if (stage.id === handledFiledId) return null;
 
   const destination = savedDestination(stage.savedPath, projectSlugs);
   if (destination.kind === "project") {
@@ -208,6 +227,7 @@ type FiledToastPresence = { slug: string; savedPath: string; fading: boolean };
  * capture) never inherits a clock that belonged to the one before it.
  */
 function usePipelinePresence(
+  pipeline: CapturePipeline,
   stage: PipelineStage | null,
   notes: NoteSummary[],
   projectSlugs: string[],
@@ -217,7 +237,7 @@ function usePipelinePresence(
   pauseToast: () => void;
   resumeToast: () => void;
 } {
-  const resolved = resolvePlaceholderStage(stage, notes, projectSlugs);
+  const resolved = resolvePlaceholderStage(stage, notes, projectSlugs, pipeline.handledFiledId);
 
   const [waivedId, setWaivedId] = useState<string | null>(null);
   const [toast, setToast] = useState<
@@ -266,11 +286,12 @@ function usePipelinePresence(
   );
 
   // The vanish plays for VANISH_MS; when it finishes the placeholder is gone
-  // for good and the toast it hands off to takes over the announcement.
+  // for good — marked handled at the shell, so a remount cannot replay it —
+  // and the toast it hands off to takes over the announcement.
   useTimeout(
     () => {
       if (!resolved || resolved.kind !== "filedToProject") return;
-      setWaivedId(resolved.id);
+      pipeline.markFiledHandled(resolved.id);
       setToastPaused(false);
       setToast({
         id: resolved.id,
@@ -281,6 +302,24 @@ function usePipelinePresence(
     },
     vanishing ? VANISH_MS : null,
     resolved?.id ?? null,
+  );
+
+  // The silent handoff's equivalent: an Inbox-routed note has landed in the
+  // list, its row's fill-in has had time to play, and the outcome is over.
+  // Without this, the stage would stay live until the next capture, and a
+  // landed note that later left the list (filed elsewhere by the user) would
+  // resurrect the placeholder as a phantom "distilling" row.
+  const inboxLanded =
+    stage?.kind === "filed" &&
+    stage.id !== pipeline.handledFiledId &&
+    savedDestination(stage.savedPath, projectSlugs).kind === "inbox" &&
+    notes.some((note) => savedPathMatchesNote(stage.savedPath, note.path));
+  useTimeout(
+    () => {
+      if (stage?.kind === "filed") pipeline.markFiledHandled(stage.id);
+    },
+    inboxLanded ? FILL_IN_MS : null,
+    stage?.id ?? null,
   );
 
   // The toast's own lifecycle: dwell (paused while the user is reading or
@@ -323,9 +362,13 @@ function usePipelinePresence(
  * capture has already stopped (docs/UI_CONVENTIONS.md).
  *
  * The status and meta lines are two texts stacked in place, crossfading as
- * `phase` advances, rather than one line rewriting its content — the same
- * node is what makes the `role="status"` region below reliably announce the
- * change (docs/DESIGN_SYSTEM.md §6).
+ * `phase` advances, rather than one line rewriting its content — so the box
+ * never reflows. Both texts existing at once (and the once-a-second clock)
+ * is a visual trick, though, so the whole visual layer is `aria-hidden` and
+ * the `role="status"` region announces through one sr-only line that
+ * genuinely rewrites as the stage advances (docs/DESIGN_SYSTEM.md §6) — a
+ * class flip alone would announce nothing, and a live clock would announce
+ * every second.
  */
 function PipelinePlaceholder({ presence }: { presence: PlaceholderPresence }) {
   return (
@@ -340,8 +383,11 @@ function PipelinePlaceholder({ presence }: { presence: PlaceholderPresence }) {
           }`}
         >
           <div role="status">
-            <p className="inbox__pipeline-title text-row font-semibold tracking-row text-text-soft">
-              <span className="inbox__pipeline-dot" aria-hidden="true" />
+            <p
+              aria-hidden="true"
+              className="inbox__pipeline-title text-row font-semibold tracking-row text-text-soft"
+            >
+              <span className="inbox__pipeline-dot" />
               <span className="inbox__pipeline-stack">
                 <span className={presence.phase === "transcribing" ? "is-visible" : ""}>
                   Transcribing the capture
@@ -351,7 +397,7 @@ function PipelinePlaceholder({ presence }: { presence: PlaceholderPresence }) {
                 </span>
               </span>
             </p>
-            <p className="mt-2xs font-mono text-cap text-text-faint">
+            <p aria-hidden="true" className="mt-2xs font-mono text-cap text-text-faint">
               <span className="inbox__pipeline-stack">
                 <span className={presence.phase === "transcribing" ? "is-visible" : ""}>
                   just stopped · queued
@@ -365,9 +411,19 @@ function PipelinePlaceholder({ presence }: { presence: PlaceholderPresence }) {
                   seconds (model load, ASR, a headless Claude cleanup call),
                   and a ticking number is the honest way to show the run is
                   still alive without claiming to know which of those it's
-                  in right now. */}
+                  in right now. Inside the aria-hidden layer on purpose: a
+                  clock in a live region would announce every second. */}
               <span className="ui-tnum"> · {formatElapsed(presence.elapsedSeconds)}</span>
             </p>
+            {/* The announcement itself: one line whose text genuinely
+                rewrites as the stage advances, which is what a live region
+                actually reacts to — the crossfade above only flips classes,
+                and a class flip announces nothing. */}
+            <span className="sr-only">
+              {presence.phase === "transcribing"
+                ? "Transcribing the capture"
+                : "Distilling the meeting"}
+            </span>
           </div>
           <div />
         </div>

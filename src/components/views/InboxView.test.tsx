@@ -126,6 +126,14 @@ function activeStatusText(): string | null {
   return placeholder.querySelector(".is-visible")?.textContent ?? null;
 }
 
+/** What the placeholder actually announces: the sr-only line inside its
+ * `role="status"` region. The visual crossfade is aria-hidden and always
+ * carries both stage texts, so only this line's rewrite is an announcement. */
+function announcedStatusText(): string | null {
+  const placeholder = screen.getByTestId("pipeline-placeholder");
+  return placeholder.querySelector(".sr-only")?.textContent ?? null;
+}
+
 describe("InboxView", () => {
   beforeEach(() => {
     resetTauriMocks();
@@ -281,7 +289,7 @@ describe("InboxView", () => {
         emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "transcribing" });
       });
       expect(activeStatusText()).toBe("Transcribing the capture");
-      expect(screen.getByRole("status")).toHaveTextContent("Transcribing the capture");
+      expect(announcedStatusText()).toBe("Transcribing the capture");
 
       // The gap before distill actually picks up is sub-millisecond in a real
       // build, so the placeholder already reads "distilling" here.
@@ -289,6 +297,9 @@ describe("InboxView", () => {
         emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "saved", path: "t.jsonl" });
       });
       expect(activeStatusText()).toBe("Distilling the meeting");
+      // The announcement line's text genuinely rewrites — a class flip alone
+      // would announce nothing — and carries exactly one stage at a time.
+      expect(announcedStatusText()).toBe("Distilling the meeting");
 
       await act(async () => {
         emitFromBackend(DISTILL_STATE_EVENT, { status: "distilling" });
@@ -560,6 +571,104 @@ describe("InboxView", () => {
         emitFromBackend(CAPTURE_STATE_EVENT, LISTENING);
       });
       expect(screen.queryByRole("button", { name: /Open the note filed to/ })).not.toBeInTheDocument();
+    });
+
+    it("does not replay the vanish or the filed toast when the Inbox remounts", async () => {
+      serveVault([]);
+      onCommand("capture_phase", () => IDLE);
+      const { rerender } = render(
+        <NavigationProvider>
+          <CapturePipelineProvider>
+            <InboxView />
+          </CapturePipelineProvider>
+        </NavigationProvider>,
+      );
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(DISTILL_STATE_EVENT, {
+          status: "saved",
+          path: "/kb/briarwood-golf/meeting.md",
+          session_path: "s10.jsonl",
+        });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(200); // VANISH_MS — the toast takes over
+      });
+      expect(screen.getByRole("button", { name: /Open the note filed to/ })).toBeInTheDocument();
+      await act(async () => {
+        vi.advanceTimersByTime(3500); // TOAST_DWELL_MS
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(200); // TOAST_FADE_MS — seen out in full
+      });
+      expect(
+        screen.queryByRole("button", { name: /Open the note filed to/ }),
+      ).not.toBeInTheDocument();
+
+      // Navigate away and back. The provider — and the distill hook's
+      // terminal `saved`, which persists until the next capture — survive
+      // the view unmounting, so without a shell-held record of the outcome
+      // having been presented, this would replay the whole gesture.
+      rerender(
+        <NavigationProvider>
+          <CapturePipelineProvider>
+            <div />
+          </CapturePipelineProvider>
+        </NavigationProvider>,
+      );
+      rerender(
+        <NavigationProvider>
+          <CapturePipelineProvider>
+            <InboxView />
+          </CapturePipelineProvider>
+        </NavigationProvider>,
+      );
+      await screen.findByText(/Nothing waiting/);
+      expect(screen.queryByTestId("pipeline-placeholder")).not.toBeInTheDocument();
+      await act(async () => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(
+        screen.queryByRole("button", { name: /Open the note filed to/ }),
+      ).not.toBeInTheDocument();
+    });
+
+    it("stays gone when the freshly landed note is filed away again", async () => {
+      serveVault([PLANNING]);
+      renderInbox();
+      await screen.findByText("Quarterly planning");
+
+      await act(async () => {
+        emitFromBackend(DISTILL_STATE_EVENT, {
+          status: "saved",
+          path: "C:\\kb\\Inbox\\n_g7h8i9.md",
+          session_path: "s11.jsonl",
+        });
+      });
+      const NEW_NOTE = makeNote({ id: "n_g7h8i9", title: "New capture" });
+      serveVault([NEW_NOTE, PLANNING]);
+      act(() => {
+        notifyVaultChanged();
+      });
+      await waitFor(() => {
+        expect(screen.queryByTestId("pipeline-placeholder")).not.toBeInTheDocument();
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(200); // FILL_IN_MS — the outcome is now handled
+      });
+
+      // The user files the fresh note somewhere else: it leaves the list
+      // while the distill hook still reports the run as saved-to-Inbox. The
+      // placeholder must not come back as a phantom "distilling" row.
+      serveVault([PLANNING]);
+      act(() => {
+        notifyVaultChanged();
+      });
+      await waitFor(() => {
+        expect(screen.queryByText("New capture")).not.toBeInTheDocument();
+      });
+      expect(screen.queryByTestId("pipeline-placeholder")).not.toBeInTheDocument();
     });
 
     it("shows the current stage when the Inbox mounts mid-pipeline", async () => {

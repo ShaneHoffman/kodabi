@@ -108,8 +108,9 @@
 
 /* The status/meta text pairs are two spans stacked on the same grid cell,
    crossfading as the stage advances, rather than one node rewriting its
-   content — so the box never reflows and the polite `role="status"`
-   wrapper's DOM identity never changes (docs/DESIGN_SYSTEM.md §6). */
+   content — so the box never reflows. The stack is purely visual and sits
+   under `aria-hidden`; the polite `role="status"` announcement is a separate
+   sr-only line whose text really rewrites (docs/DESIGN_SYSTEM.md §6). */
 .inbox__pipeline-stack {
   display: inline-grid;
 }
