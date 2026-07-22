@@ -1,15 +1,31 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InboxView } from "./InboxView";
+import { CapturePipelineProvider } from "../CapturePipelineProvider";
 import { NavigationProvider } from "../NavigationProvider";
+import { INITIAL_VIEW, NavigationContext, type View } from "../../useNavigation";
+import { DISTILL_STATE_EVENT } from "../../events";
 import type { NoteSummary } from "../../useNotes";
 import type { Project } from "../../useProjects";
 import { notifyVaultChanged } from "../../useVaultQuery";
-import { invoke, onCommand, resetTauriMocks } from "../../test/tauri";
+import { emitFromBackend, invoke, onCommand, resetTauriMocks } from "../../test/tauri";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
+
+/* The capture/transcription event names the hooks keep private, spelled out
+ * here for the same reason `CaptureToast.test.tsx` does: they are the
+ * contract with Rust (`audio_cmds`, `transcribe_cmds`), not a test
+ * convenience. */
+const CAPTURE_STATE_EVENT = "capture:state";
+const TRANSCRIPTION_STATE_EVENT = "transcription:state";
+
+const IDLE = { phase: "idle", sources: { loopback: "off", microphone: "off" } };
+const LISTENING = {
+  phase: "listening",
+  sources: { loopback: "live", microphone: "live" },
+};
 
 function makeNote(overrides: Partial<NoteSummary> & { id: string; title: string }): NoteSummary {
   return {
@@ -54,11 +70,33 @@ function serveVault(
 }
 
 function renderInbox() {
+  // The pipeline provider seeds from this on mount; left unrouted every test
+  // would reject and log noise, and the placeholder would never settle on
+  // "idle" for the not-showing assertions.
+  onCommand("capture_phase", () => IDLE);
   return render(
     <NavigationProvider>
-      <InboxView />
+      <CapturePipelineProvider>
+        <InboxView />
+      </CapturePipelineProvider>
     </NavigationProvider>,
   );
+}
+
+/** Renders with a recording `navigate` in place of the real
+ * `NavigationProvider`, for tests that only need to prove which `View` a
+ * click resolves to — no `MainContent`/`NoteEditorView` required. */
+function renderInboxWithNavigateSpy(): (view: View) => void {
+  const navigate = vi.fn();
+  onCommand("capture_phase", () => IDLE);
+  render(
+    <NavigationContext value={{ view: INITIAL_VIEW, navigate }}>
+      <CapturePipelineProvider>
+        <InboxView />
+      </CapturePipelineProvider>
+    </NavigationContext>,
+  );
+  return navigate;
 }
 
 /** Matches a row's picker by its accessible name, which is the sr-only label
@@ -80,9 +118,22 @@ async function fileNote(
   await user.click(screen.getByRole("option", { name: project }));
 }
 
+/** The status span currently reading `is-visible` inside the placeholder —
+ * the crossfade renders both texts of a pair always, so a plain substring
+ * match can't tell which one is actually showing. */
+function activeStatusText(): string | null {
+  const placeholder = screen.getByTestId("pipeline-placeholder");
+  return placeholder.querySelector(".is-visible")?.textContent ?? null;
+}
+
 describe("InboxView", () => {
   beforeEach(() => {
     resetTauriMocks();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("lists the notes waiting to be filed", async () => {
@@ -95,7 +146,7 @@ describe("InboxView", () => {
   });
 
   it("re-routes a note to the chosen project and drops the row once the vault refetches", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     serveVault([PLANNING, VENDOR]);
     onCommand("file_note_to_project", () => ({
       note: { ...PLANNING, project: "paradise-golf", path: "Projects/paradise-golf/planning.md" },
@@ -128,7 +179,7 @@ describe("InboxView", () => {
   });
 
   it("keeps the row and surfaces the message when the re-route fails", async () => {
-    const user = userEvent.setup();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     serveVault([PLANNING]);
     onCommand("file_note_to_project", () => {
       throw "no such project: paradise-golf";
@@ -218,5 +269,329 @@ describe("InboxView", () => {
 
     expect(await screen.findByText(/the vault is unreadable/)).toBeInTheDocument();
     expect(screen.queryByText(/Nothing waiting/)).not.toBeInTheDocument();
+  });
+
+  describe("the pipeline placeholder", () => {
+    it("wears a row's silhouette and advances as the pipeline does", async () => {
+      serveVault([PLANNING]);
+      renderInbox();
+      await screen.findByText("Quarterly planning");
+
+      await act(async () => {
+        emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "transcribing" });
+      });
+      expect(activeStatusText()).toBe("Transcribing the capture");
+      expect(screen.getByRole("status")).toHaveTextContent("Transcribing the capture");
+
+      // The gap before distill actually picks up is sub-millisecond in a real
+      // build, so the placeholder already reads "distilling" here.
+      await act(async () => {
+        emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "saved", path: "t.jsonl" });
+      });
+      expect(activeStatusText()).toBe("Distilling the meeting");
+
+      await act(async () => {
+        emitFromBackend(DISTILL_STATE_EVENT, { status: "distilling" });
+      });
+      expect(activeStatusText()).toBe("Distilling the meeting");
+    });
+
+    it("shows over an empty inbox without the empty-state message", async () => {
+      serveVault([]);
+      renderInbox();
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "transcribing" });
+      });
+
+      expect(screen.getByTestId("pipeline-placeholder")).toBeInTheDocument();
+      expect(screen.queryByText(/Nothing waiting/)).not.toBeInTheDocument();
+    });
+
+    it("hands off silently to the real row, with its fill-in, once a note routed to the Inbox appears", async () => {
+      serveVault([PLANNING]);
+      renderInbox();
+      await screen.findByText("Quarterly planning");
+
+      // The backend path is absolute with the OS's own separators; the note
+      // list's path is KB-relative with forward slashes.
+      await act(async () => {
+        emitFromBackend(DISTILL_STATE_EVENT, {
+          status: "saved",
+          path: "C:\\kb\\Inbox\\n_g7h8i9.md",
+          session_path: "s2.jsonl",
+        });
+      });
+      expect(activeStatusText()).toBe("Distilling the meeting");
+
+      const NEW_NOTE = makeNote({ id: "n_g7h8i9", title: "New capture" });
+      serveVault([NEW_NOTE, PLANNING]);
+      act(() => {
+        notifyVaultChanged();
+      });
+
+      await waitFor(() => {
+        expect(screen.queryByTestId("pipeline-placeholder")).not.toBeInTheDocument();
+      });
+      const rows = screen.getAllByText("New capture");
+      expect(rows).toHaveLength(1);
+      expect(rows[0].closest(".inbox__row")).toHaveClass("inbox__row--fresh");
+    });
+
+    it("vanishes immediately and hands off to a toast when distill routes elsewhere", async () => {
+      serveVault([]);
+      renderInbox();
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(DISTILL_STATE_EVENT, {
+          status: "saved",
+          path: "/kb/paradise-golf/meeting.md",
+          session_path: "s1.jsonl",
+        });
+      });
+      // No dwell on the row itself any more: it starts leaving at once.
+      expect(screen.getByTestId("pipeline-placeholder").className).toContain(
+        "inbox__slot--leaving",
+      );
+      expect(screen.queryByRole("button", { name: /Open the note filed to/ })).not.toBeInTheDocument();
+
+      await act(async () => {
+        vi.advanceTimersByTime(200); // VANISH_MS
+      });
+      expect(screen.queryByTestId("pipeline-placeholder")).not.toBeInTheDocument();
+      const toast = screen.getByRole("button", {
+        name: 'Open the note filed to "paradise-golf"',
+      });
+      expect(toast).toHaveTextContent("Filed to");
+      expect(toast).toHaveTextContent("paradise-golf");
+      expect(screen.getByRole("status")).toHaveTextContent("paradise-golf");
+
+      await act(async () => {
+        vi.advanceTimersByTime(3500); // TOAST_DWELL_MS
+      });
+      expect(screen.getByRole("button", { name: /Open the note filed to/ })).toHaveClass(
+        "inbox__toast--fading",
+      );
+
+      await act(async () => {
+        vi.advanceTimersByTime(200); // TOAST_FADE_MS
+      });
+      expect(screen.queryByRole("button", { name: /Open the note filed to/ })).not.toBeInTheDocument();
+    });
+
+    it("pauses the toast's dwell while hovered, and resumes it on unhover", async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      serveVault([]);
+      renderInbox();
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(DISTILL_STATE_EVENT, {
+          status: "saved",
+          path: "/kb/paradise-golf/meeting.md",
+          session_path: "s6.jsonl",
+        });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+      const toast = screen.getByRole("button", { name: /Open the note filed to/ });
+
+      await user.hover(toast);
+      await act(async () => {
+        vi.advanceTimersByTime(5000); // well past TOAST_DWELL_MS
+      });
+      expect(screen.getByRole("button", { name: /Open the note filed to/ })).not.toHaveClass(
+        "inbox__toast--fading",
+      );
+
+      await user.unhover(toast);
+      await act(async () => {
+        vi.advanceTimersByTime(3500); // TOAST_DWELL_MS, restarted
+      });
+      expect(screen.getByRole("button", { name: /Open the note filed to/ })).toHaveClass(
+        "inbox__toast--fading",
+      );
+    });
+
+    it("opens the filed note when the toast is clicked", async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      onCommand("list_projects", () => ({
+        inbox_note_count: 0,
+        projects: [makeProject("paradise-golf")],
+      }));
+      const FILED = makeNote({
+        id: "n_x9y8z7",
+        title: "Vendor sync",
+        path: "paradise-golf/vendor-sync.md",
+      });
+      onCommand("list_notes", (args) =>
+        args?.project === "paradise-golf" ? [FILED] : [],
+      );
+      const navigate = renderInboxWithNavigateSpy();
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(DISTILL_STATE_EVENT, {
+          status: "saved",
+          path: "C:\\kb\\paradise-golf\\vendor-sync.md",
+          session_path: "s7.jsonl",
+        });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+
+      await user.click(screen.getByRole("button", { name: /Open the note filed to/ }));
+
+      await waitFor(() => {
+        expect(navigate).toHaveBeenCalledWith({
+          kind: "noteEditor",
+          noteId: "n_x9y8z7",
+          project: "paradise-golf",
+        });
+      });
+    });
+
+    it("falls back to the project view when the filed note can't be found", async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      onCommand("list_projects", () => ({
+        inbox_note_count: 0,
+        projects: [makeProject("paradise-golf")],
+      }));
+      // Nothing matches the saved path — moved, renamed, or the lookup fails.
+      onCommand("list_notes", () => []);
+      const navigate = renderInboxWithNavigateSpy();
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(DISTILL_STATE_EVENT, {
+          status: "saved",
+          path: "C:\\kb\\paradise-golf\\vendor-sync.md",
+          session_path: "s8.jsonl",
+        });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+
+      await user.click(screen.getByRole("button", { name: /Open the note filed to/ }));
+
+      await waitFor(() => {
+        expect(navigate).toHaveBeenCalledWith({ kind: "project", slug: "paradise-golf" });
+      });
+    });
+
+    it("collapses without comment on a skipped or failed distill", async () => {
+      serveVault([]);
+      renderInbox();
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(DISTILL_STATE_EVENT, { status: "distilling" });
+      });
+      expect(screen.getByTestId("pipeline-placeholder")).toBeInTheDocument();
+
+      await act(async () => {
+        emitFromBackend(DISTILL_STATE_EVENT, {
+          status: "skipped",
+          reason: "no speech",
+          session_path: "s3.jsonl",
+        });
+      });
+      expect(screen.queryByTestId("pipeline-placeholder")).not.toBeInTheDocument();
+      expect(await screen.findByText(/Nothing waiting/)).toBeInTheDocument();
+    });
+
+    it("gives up on a stalled distill after a grace period", async () => {
+      // The scenario in a dev/mock build: transcription saves but nothing
+      // ever follows it with a distill run.
+      serveVault([]);
+      renderInbox();
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "saved", path: "t.jsonl" });
+      });
+      expect(screen.getByTestId("pipeline-placeholder")).toBeInTheDocument();
+
+      await act(async () => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(screen.queryByTestId("pipeline-placeholder")).not.toBeInTheDocument();
+    });
+
+    it("hides the moment a new capture starts", async () => {
+      serveVault([]);
+      renderInbox();
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(DISTILL_STATE_EVENT, { status: "distilling" });
+      });
+      expect(screen.getByTestId("pipeline-placeholder")).toBeInTheDocument();
+
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, LISTENING);
+      });
+      expect(screen.queryByTestId("pipeline-placeholder")).not.toBeInTheDocument();
+    });
+
+    it("clears a still-open toast the moment a new capture starts", async () => {
+      serveVault([]);
+      renderInbox();
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(DISTILL_STATE_EVENT, {
+          status: "saved",
+          path: "/kb/paradise-golf/meeting.md",
+          session_path: "s9.jsonl",
+        });
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(200);
+      });
+      expect(screen.getByRole("button", { name: /Open the note filed to/ })).toBeInTheDocument();
+
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, LISTENING);
+      });
+      expect(screen.queryByRole("button", { name: /Open the note filed to/ })).not.toBeInTheDocument();
+    });
+
+    it("shows the current stage when the Inbox mounts mid-pipeline", async () => {
+      serveVault([]);
+      onCommand("capture_phase", () => IDLE);
+      const { rerender } = render(
+        <NavigationProvider>
+          <CapturePipelineProvider>
+            <div />
+          </CapturePipelineProvider>
+        </NavigationProvider>,
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // The pipeline started while some other screen was mounted — the Inbox
+      // was not there to catch the event with its own listener.
+      await act(async () => {
+        emitFromBackend(DISTILL_STATE_EVENT, { status: "distilling" });
+      });
+
+      rerender(
+        <NavigationProvider>
+          <CapturePipelineProvider>
+            <InboxView />
+          </CapturePipelineProvider>
+        </NavigationProvider>,
+      );
+
+      await screen.findByTestId("pipeline-placeholder");
+      expect(activeStatusText()).toBe("Distilling the meeting");
+    });
   });
 });
