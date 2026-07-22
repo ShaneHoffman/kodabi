@@ -279,15 +279,25 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// `Command::new` that never pops a console window on Windows. Every spawn in
 /// this crate goes through this constructor rather than `Command::new`
 /// directly.
+///
+/// The platform split lives in `hide_console_window` (mirroring
+/// [`kill_process`]) rather than an inline `#[cfg(windows)]` block, so the
+/// non-Windows expansion doesn't strip every use of the binding and trip
+/// `unused_mut`/`let_and_return` under `-D warnings`.
 fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
     let mut command = Command::new(program);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(CREATE_NO_WINDOW);
-    }
+    hide_console_window(&mut command);
     command
 }
+
+#[cfg(windows)]
+fn hide_console_window(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn hide_console_window(_command: &mut Command) {}
 
 /// Envelope shape from `claude -p --output-format json`. On failure, the
 /// message lands in `result` itself (there is no separate `error` field);
