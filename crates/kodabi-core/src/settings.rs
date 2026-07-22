@@ -14,6 +14,7 @@ use std::io;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 /// How long raw session transcripts are kept before pruning.
@@ -96,11 +97,45 @@ pub struct AppearanceSettings {
     pub theme: Theme,
 }
 
+/// What the Settings mic test found: whether the microphone picks up the
+/// speakers strongly enough to bleed into a capture's "you" channel — the
+/// crosstalk `EchoCancelledSource` (`src-tauri/src/transcribe.rs`) cleans up
+/// on every real meeting, made visible here before one starts. Mirrors
+/// `kodabi_audio::MicTestOutcome` rather than reusing it: `kodabi-core` stays
+/// free of `kodabi-audio`, a platform-IO crate, so `src-tauri` (the one layer
+/// that depends on both) maps between them.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "outcome", rename_all = "snake_case")]
+pub enum MicCheckOutcome {
+    /// The mic didn't meaningfully hear the test tone — channels separate
+    /// cleanly.
+    Headphones,
+    /// The mic clearly heard the tone played through the speakers: `echo_db`
+    /// is how much louder it was than the pre-tone noise floor, `delay_ms`
+    /// the acoustic delay before the mic picked it up.
+    Speakers { echo_db: f32, delay_ms: f32 },
+    /// The recording was silent throughout — too little signal to classify.
+    MicSilent,
+}
+
+/// A stored mic-test result: what the last run found, and when. Advisory
+/// only — the echo canceller runs on every capture regardless of whether
+/// this exists or what it says; this is purely something to show the user.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct MicCheckResult {
+    #[serde(flatten)]
+    pub outcome: MicCheckOutcome,
+    pub measured_at: DateTime<Utc>,
+}
+
 /// The persisted app settings. `#[serde(default)]` makes every field optional
 /// on load, so an older file missing a field (or a future file with an extra
 /// one) still deserializes — forward/backward compatibility for a config the
 /// user may carry across app versions.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+///
+/// `PartialEq` only, not `Eq`: `MicCheckOutcome::Speakers`'s `f32` fields
+/// aren't `Eq`.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Settings {
     /// Whether the user has acknowledged the recording-consent nudge. Gates
@@ -111,10 +146,13 @@ pub struct Settings {
     pub retention: RetentionPolicy,
     /// Capture-overlay visibility.
     pub overlay: OverlaySettings,
-    /// Theme choice. Last field deliberately: serde emits fields in declaration
-    /// order, so appending leaves the existing JSON/TOML prefix byte-identical
-    /// for anything mirroring the older shape.
+    /// Theme choice.
     pub appearance: AppearanceSettings,
+    /// The most recent Settings mic-test result, if the user has ever run
+    /// one. Last field deliberately: serde emits fields in declaration
+    /// order, so appending leaves the existing JSON/TOML prefix
+    /// byte-identical for anything mirroring the older shape.
+    pub mic_check: Option<MicCheckResult>,
 }
 
 /// Loads the settings stored at `config_path`, writing defaults on first run.
@@ -253,6 +291,7 @@ mod tests {
                 retention: policy,
                 overlay: OverlaySettings::default(),
                 appearance: AppearanceSettings::default(),
+                mic_check: None,
             };
             save(&path, &settings).unwrap();
             assert_eq!(load_or_create(&path).unwrap(), settings);
@@ -276,6 +315,7 @@ mod tests {
                 auto_captures: false,
             },
             appearance: AppearanceSettings::default(),
+            mic_check: None,
         };
         save(&path, &settings).unwrap();
         assert_eq!(load_or_create(&path).unwrap(), settings);
@@ -292,6 +332,7 @@ mod tests {
             retention: keep_days(14),
             overlay: OverlaySettings::default(),
             appearance: AppearanceSettings::default(),
+            mic_check: None,
         })
         .unwrap();
         assert!(toml.contains("consent_acknowledged = true"), "{toml}");
@@ -409,7 +450,7 @@ mod tests {
         let json = serde_json::to_string(&Settings::default()).unwrap();
         assert_eq!(
             json,
-            r#"{"consent_acknowledged":false,"retention":{"policy":"keep_all"},"overlay":{"manual_captures":false,"auto_captures":true},"appearance":{"theme":"system"}}"#
+            r#"{"consent_acknowledged":false,"retention":{"policy":"keep_all"},"overlay":{"manual_captures":false,"auto_captures":true},"appearance":{"theme":"system"},"mic_check":null}"#
         );
 
         let keep = serde_json::to_string(&Settings {
@@ -420,11 +461,20 @@ mod tests {
                 auto_captures: false,
             },
             appearance: AppearanceSettings { theme: Theme::Dark },
+            mic_check: Some(MicCheckResult {
+                outcome: MicCheckOutcome::Speakers {
+                    echo_db: 12.5,
+                    delay_ms: 85.0,
+                },
+                measured_at: DateTime::parse_from_rfc3339("2026-07-22T00:48:18Z")
+                    .unwrap()
+                    .with_timezone(&Utc),
+            }),
         })
         .unwrap();
         assert_eq!(
             keep,
-            r#"{"consent_acknowledged":true,"retention":{"policy":"keep_days","days":30},"overlay":{"manual_captures":true,"auto_captures":false},"appearance":{"theme":"dark"}}"#
+            r#"{"consent_acknowledged":true,"retention":{"policy":"keep_days","days":30},"overlay":{"manual_captures":true,"auto_captures":false},"appearance":{"theme":"dark"},"mic_check":{"outcome":"speakers","echo_db":12.5,"delay_ms":85.0,"measured_at":"2026-07-22T00:48:18Z"}}"#
         );
     }
 
@@ -465,6 +515,49 @@ mod tests {
             save(&path, &settings).unwrap();
             assert_eq!(load_or_create(&path).unwrap(), settings);
         }
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn every_mic_check_outcome_round_trips_through_toml() {
+        let dir = temp_dir("mic-check-roundtrip");
+        let path = dir.join("settings.toml");
+        let measured_at = DateTime::parse_from_rfc3339("2026-07-22T00:48:18Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        for outcome in [
+            MicCheckOutcome::Headphones,
+            MicCheckOutcome::Speakers {
+                echo_db: 12.5,
+                delay_ms: 85.0,
+            },
+            MicCheckOutcome::MicSilent,
+        ] {
+            let settings = Settings {
+                mic_check: Some(MicCheckResult {
+                    outcome,
+                    measured_at,
+                }),
+                ..Settings::default()
+            };
+            save(&path, &settings).unwrap();
+            assert_eq!(load_or_create(&path).unwrap(), settings);
+        }
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn absent_mic_check_round_trips_through_toml_as_none() {
+        let dir = temp_dir("mic-check-absent-roundtrip");
+        let path = dir.join("settings.toml");
+
+        let settings = Settings::default();
+        assert!(settings.mic_check.is_none());
+        save(&path, &settings).unwrap();
+        assert_eq!(load_or_create(&path).unwrap().mic_check, None);
 
         fs::remove_dir_all(&dir).unwrap();
     }
