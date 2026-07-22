@@ -139,7 +139,7 @@ const sheets = styleSheets(join(ROOT, "src")).filter((f) => f !== TOKENS);
  * primitives that live alongside them aren't mistaken for semantic keys.
  *
  * The list is long because the redesign made the palette answer more
- * questions — three planes rather than two-and-a-sink, an eight-step edge
+ * questions — three planes rather than two-and-a-sink, a seven-step edge
  * ladder, and one elevation recipe per plane role — and every one of those
  * has to be stated in all four theme blocks or it silently keeps its light
  * value down one of the two dark paths. That silent-drift failure is exactly
@@ -162,7 +162,6 @@ const SEMANTIC = [
   // edges — a value ladder, named by what wears them
   "--edge-faint",
   "--edge",
-  "--edge-chip",
   "--edge-rule",
   "--edge-strong",
   "--edge-open",

@@ -60,21 +60,29 @@ export function Sidebar({ onOpenPalette }: Props) {
     const depth = entry.kind === "inbox" ? 0 : slugDepth(entry.project.slug);
     const rail = entry.kind === "inbox";
     return (
-      <Button
-        key={entry.kind === "inbox" ? "inbox" : entry.project.id}
-        variant="quiet"
-        aria-current={selected ? "page" : undefined}
-        onClick={() => navigate(entryView(entry))}
-        style={depthStyle(depth)}
-        className={`sidebar__row${rail ? " sidebar__row--rail" : ""} flex w-full items-center justify-between gap-2xs text-left text-body ${
-          selected ? "is-selected text-text" : "text-text-soft"
-        }`}
-      >
-        <span className="truncate">{name}</span>
-        <span className="font-mono text-cap font-normal text-text-faint">
-          {count}
-        </span>
-      </Button>
+      // A real list item. The three nav lists were <div>s of buttons inside
+      // <nav>, so a screen reader announced neither that they were lists nor
+      // how many places there were to go — which is most of what a sidebar is
+      // for.
+      <li key={entry.kind === "inbox" ? "inbox" : entry.project.id}>
+        <Button
+          variant="quiet"
+          aria-current={selected ? "page" : undefined}
+          onClick={() => navigate(entryView(entry))}
+          style={depthStyle(depth)}
+          className={`sidebar__row${rail ? " sidebar__row--rail" : ""} flex w-full items-center justify-between gap-2xs text-left text-body ${
+            selected ? "is-selected text-text" : "text-text-soft"
+          }`}
+        >
+          <span className="truncate">{name}</span>
+          {/* Tabular figures: this column counts up and down as notes are
+              filed, and proportional digits made the numbers shuffle
+              sideways against the rail's right edge as they changed. */}
+          <span className="ui-tnum font-mono text-cap font-normal text-text-faint">
+            {count}
+          </span>
+        </Button>
+      </li>
     );
   };
 
@@ -88,7 +96,10 @@ export function Sidebar({ onOpenPalette }: Props) {
       <h1 className="sidebar__wordmark font-serif text-wordmark tracking-wordmark text-text">
         kodabi
       </h1>
-      <div className="sidebar__divider" />
+      {/* A real <hr>: it is a thematic break between what the app is called
+          and where you can go, which is exactly what the element means. It
+          was an empty <div> whose only content was a background colour. */}
+      <hr className="sidebar__divider" />
 
       <nav
         aria-label="Knowledge base"
@@ -102,10 +113,10 @@ export function Sidebar({ onOpenPalette }: Props) {
         )}
 
         {/* The system rail: the two places work waits, as peers. */}
-        <div className="flex flex-col gap-3xs">
+        <ul aria-label="System" className="flex flex-col gap-3xs">
           {inboxEntry && renderRow(inboxEntry)}
           <NeedsAttentionRow />
-        </div>
+        </ul>
 
         <p className="sidebar__eyebrow px-2xs pb-2xs text-eyebrow font-semibold uppercase tracking-rail text-text-faint">
           Projects
@@ -119,10 +130,12 @@ export function Sidebar({ onOpenPalette }: Props) {
           // and this is first-run copy rather than progress — role="status"
           // would make a static sentence a live region (§3).
           <StatusMessage variant="empty" compact>
-            No projects yet.
+            No projects yet. Give a new note a project name to make one.
           </StatusMessage>
         )}
-        <div className="sidebar__list">{projectEntries.map(renderRow)}</div>
+        <ul aria-label="Projects" className="sidebar__list">
+          {projectEntries.map(renderRow)}
+        </ul>
       </nav>
 
       {/* mt-auto pins the foot, so the rows above can grow without the
@@ -131,26 +144,44 @@ export function Sidebar({ onOpenPalette }: Props) {
           step between them is what says so. */}
       <footer className="mt-auto flex flex-col">
         <ListeningIndicator />
-        <div className="sidebar__list">
-          <Button
-            variant="quiet"
-            aria-current={view.kind === "settings" ? "page" : undefined}
-            onClick={() => navigate({ kind: "settings" })}
-            className={`sidebar__row flex w-full text-left text-body ${
-              view.kind === "settings" ? "is-selected text-text" : "text-text-soft"
-            }`}
-          >
-            <span>Settings</span>
-          </Button>
-          <Button
-            variant="quiet"
-            onClick={onOpenPalette}
-            className="sidebar__row flex w-full items-center justify-between gap-2xs text-left text-body text-text-faint"
-          >
-            <span>Commands</span>
-            <span className="font-mono text-cap">{PALETTE_SHORTCUT_LABEL}</span>
-          </Button>
-        </div>
+        {/* Its own landmark. `aria-current="page"` on the Settings row was
+            being announced from outside any <nav>, which is where the
+            attribute means something. */}
+        <nav aria-label="App">
+          <ul className="sidebar__list">
+            <li>
+              <Button
+                variant="quiet"
+                aria-current={view.kind === "settings" ? "page" : undefined}
+                onClick={() => navigate({ kind: "settings" })}
+                className={`sidebar__row flex w-full text-left text-body ${
+                  view.kind === "settings" ? "is-selected text-text" : "text-text-soft"
+                }`}
+              >
+                <span>Settings</span>
+              </Button>
+            </li>
+            <li>
+              {/* --text-soft, matching the row above it. This is an
+                  interactive control label, and --text-faint is the metadata
+                  register — 3.12:1 in the day theme, under the 4.5:1 floor
+                  (docs/DESIGN_SYSTEM.md §6 says not to widen its use, and a
+                  nav row is exactly the widening it warns about). The key
+                  hint beside it stays faint: that IS metadata. */}
+              <Button
+                variant="quiet"
+                aria-haspopup="dialog"
+                onClick={onOpenPalette}
+                className="sidebar__row flex w-full items-center justify-between gap-2xs text-left text-body text-text-soft"
+              >
+                <span>Commands</span>
+                <span className="font-mono text-cap text-text-faint">
+                  {PALETTE_SHORTCUT_LABEL}
+                </span>
+              </Button>
+            </li>
+          </ul>
+        </nav>
       </footer>
     </aside>
   );
@@ -185,21 +216,23 @@ function NeedsAttentionRow() {
 
   const selected = view.kind === "needsAttention";
   return (
-    <Button
-      variant="quiet"
-      data-testid="needs-attention-nav"
-      aria-current={selected ? "page" : undefined}
-      onClick={() => navigate({ kind: "needsAttention" })}
-      className={`sidebar__row sidebar__row--rail flex w-full items-center justify-between gap-2xs text-left text-body ${
-        selected ? "is-selected text-text" : "text-text-soft"
-      }`}
-    >
-      <span>Needs attention</span>
-      {sessions.length > 0 && (
-        <span className="font-mono text-cap font-normal text-text-faint">
-          {sessions.length}
-        </span>
-      )}
-    </Button>
+    <li>
+      <Button
+        variant="quiet"
+        data-testid="needs-attention-nav"
+        aria-current={selected ? "page" : undefined}
+        onClick={() => navigate({ kind: "needsAttention" })}
+        className={`sidebar__row sidebar__row--rail flex w-full items-center justify-between gap-2xs text-left text-body ${
+          selected ? "is-selected text-text" : "text-text-soft"
+        }`}
+      >
+        <span>Needs attention</span>
+        {sessions.length > 0 && (
+          <span className="ui-tnum font-mono text-cap font-normal text-text-faint">
+            {sessions.length}
+          </span>
+        )}
+      </Button>
+    </li>
   );
 }

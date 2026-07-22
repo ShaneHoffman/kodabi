@@ -126,19 +126,30 @@
 
 /* Unchecked is a ring and nothing else — no fill, no box. Checked is an ink
    square with a page-coloured check, and the label goes muted and struck, so
-   done work recedes without disappearing. Value, never hue. */
+   done work recedes without disappearing. Value, never hue.
+
+   THIS IS THE SAME SKIN AS ui/Checkbox.css, and the --check-* tokens are why
+   that is now provable rather than asserted. It used to be the same five
+   literals typed out in both files, which the token guard could not catch
+   (it scopes its spacing check to padding/margin/gap, so a width or a ring
+   thickness is invisible to it). Two files still draw it, because one is a
+   real <input> the app renders and the other is a primitive, but neither
+   holds a number of its own any more.
+
+   These render `disabled` — react-markdown's GFM task lists always do — so
+   they take no hover, no active and no pointer cursor: a control that cannot
+   be operated must not advertise that it can. */
 .note-reading input[type="checkbox"] {
   appearance: none;
   flex: none;
-  width: 17px;
-  height: 17px;
+  width: var(--check-box);
+  height: var(--check-box);
   margin: var(--space-3xs) 0 0;
   border-radius: var(--radius-check);
   background: transparent;
-  box-shadow: 0 0 0 1.4px var(--edge-check);
+  box-shadow: 0 0 0 var(--check-ring) var(--edge-check);
   display: grid;
   place-content: center;
-  cursor: pointer;
 }
 
 .note-reading input[type="checkbox"]:checked {
@@ -148,11 +159,11 @@
 
 .note-reading input[type="checkbox"]::before {
   content: "";
-  width: 0.55rem;
-  height: 0.3rem;
+  width: var(--check-mark-w);
+  height: var(--check-mark-h);
   /* A check drawn from two borders, rotated — no icon font, no SVG asset. */
-  border-left: 2px solid var(--bg);
-  border-bottom: 2px solid var(--bg);
+  border-left: var(--check-mark-stroke) solid var(--bg);
+  border-bottom: var(--check-mark-stroke) solid var(--bg);
   transform: rotate(-45deg) translate(1px, -1px);
   opacity: 0;
 }
@@ -178,45 +189,88 @@
 
 /* ---------- composing ---------- */
 
-/* The title is an input that refuses to look like one: no fill, no ring, no
-   padding. It is the note's title in the note's own type; the green caret
-   (.ui-writing) is the only thing saying it can be changed. */
+/* The title is an input that refuses to look like one: no fill, no resting
+   box, no padding. It is the note's title in the note's own type; the green
+   caret (.ui-writing) is the only thing at rest saying it can be changed.
+
+   It does keep its FOCUS ring, though — `.ui-focus-ring` on the element, and
+   no `outline: none` here to fight it. "A form field always keeps its ring"
+   (docs/DESIGN_SYSTEM.md §2), and this one sits in a form with a body, a tag
+   row and a submit button after it: without the ring, a keyboard user tabbing
+   into compose mode has no way to tell which of the four they landed on. */
 .note-edit__title {
   width: 100%;
   background: transparent;
   border: none;
-  outline: none;
   padding: 0;
 }
 
 /* A tag is a removable chip on the raised plane, in the mono voice every
-   piece of metadata in this app uses. */
+   piece of metadata in this app uses.
+
+   The transparent border is an OPTICAL CORRECTION, not an edge — the visible
+   edge is the inset-free ring below it. Its one job is to give this chip the
+   same layout box as the "+ tag" ghost beside it, which has to use a real
+   dashed `border` (see below) and so carries 1px of layout on every side. At
+   identical padding the two were 2px apart in both axes and sat visibly
+   unlevel in the same row. */
 .note-edit__tag {
   display: inline-flex;
   align-items: center;
   gap: var(--tag-gap);
   background: var(--surface);
+  border: 1px solid transparent;
   border-radius: var(--radius-item);
   padding: var(--space-3xs) var(--tag-pad-x);
   box-shadow: 0 0 0 1px var(--edge);
 }
 
+.note-edit__tag button {
+  transition: color var(--dur-quick) var(--ease-standard);
+}
+
+.note-edit__tag button:hover {
+  color: var(--text);
+}
+
+.note-edit__tag button:active {
+  color: var(--text);
+  transition: none;
+}
+
 /* The ghost that adds one. Dashed, because "not yet a thing" is exactly what
-   a dashed edge means, and it is the only dashed edge in the app. */
+   a dashed edge means, and it is the only dashed edge in the app — and the
+   one place a real `border` is correct rather than an inset shadow, because
+   `box-shadow` has no dashed form. That is why the chip above has to carry a
+   transparent border to match its box. */
 .note-edit__tag-add {
   border: 1px dashed var(--edge-open);
   border-radius: var(--radius-item);
   padding: var(--space-3xs) var(--tag-pad-x);
   background: transparent;
+  transition:
+    border-color var(--dur-quick) var(--ease-standard),
+    color var(--dur-quick) var(--ease-standard);
 }
 
-/* The body, written in the ramp it is read in. */
+.note-edit__tag-add:hover {
+  border-color: var(--edge-check);
+  color: var(--text);
+}
+
+.note-edit__tag-add:active {
+  border-color: var(--edge-check);
+  color: var(--text);
+  transition: none;
+}
+
+/* The body, written in the ramp it is read in. It keeps its focus ring for
+   the same reason the title does: it is one tab stop of four. */
 .note-edit__body {
   width: 100%;
-  min-height: 300px;
+  min-height: var(--measure-body-min);
   background: transparent;
   border: none;
-  outline: none;
   padding: 0;
   resize: none;
   color: var(--text-read);
@@ -255,8 +309,15 @@
   transition: background-color var(--dur-quick) var(--ease-standard);
 }
 
-.note-edit__tool:hover {
+.note-edit__tool:hover:not(:disabled) {
   background: var(--menu-hover);
+}
+
+/* A press lands immediately — no transition — like every other control in the
+   app (docs/DESIGN_SYSTEM.md §2). */
+.note-edit__tool:active:not(:disabled) {
+  background: var(--token-hover);
+  transition: none;
 }
 
 .note-edit__tool-divider {

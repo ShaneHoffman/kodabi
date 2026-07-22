@@ -55,7 +55,7 @@ describe("Sidebar needs-attention row", () => {
     // Wait for the listing to land, so this asserts "read, and nothing to say"
     // rather than "has not read yet".
     await waitFor(() => {
-      expect(screen.getByText("No projects yet.")).toBeInTheDocument();
+      expect(screen.getByText(/No projects yet\./)).toBeInTheDocument();
     });
     expect(screen.queryByTestId("needs-attention-nav")).not.toBeInTheDocument();
   });
@@ -89,7 +89,7 @@ describe("Sidebar needs-attention row", () => {
     serveVault([]);
     renderShell();
     await waitFor(() => {
-      expect(screen.getByText("No projects yet.")).toBeInTheDocument();
+      expect(screen.getByText(/No projects yet\./)).toBeInTheDocument();
     });
 
     onCommand("list_failed_sessions", () => [makeSession("team-sync")]);

@@ -21,6 +21,30 @@
     opacity var(--dur-quick) var(--ease-standard);
 }
 
+/* ---------- disabled, per variant ----------
+   `primary` and `quiet` rest as ink on a light plane, so they recede by
+   stepping the ink down the ladder. `filled` is the inverse — a page-coloured
+   label on an ink fill — and gets its own rule below, because the same step
+   applied to its LABEL lands --text-faint on --text (≈3.6:1 at night: the
+   app's most emphatic control, unreadable). It recedes by stepping the FILL
+   instead, which is the same idea applied to the right half of the pair and
+   keeps the label at full contrast (6.8:1 day, 8.3:1 night).
+
+   Both attribute forms, always together: `disabled` is a genuine disable and
+   `aria-disabled` is Button.tsx's `loading`, and they must look identical. */
+.ui-btn--primary:disabled,
+.ui-btn--primary[aria-disabled="true"],
+.ui-btn--quiet:disabled,
+.ui-btn--quiet[aria-disabled="true"] {
+  color: var(--text-faint);
+}
+
+.ui-btn--filled:disabled,
+.ui-btn--filled[aria-disabled="true"] {
+  background: var(--text-soft);
+  color: var(--bg);
+}
+
 /* ---------- primary: the raised control chip ----------
    A value plane that LIFTS off the page: a lighter fill, a hairline ring and
    a shallow shadow, all carried by one token so the ring and the shadow can

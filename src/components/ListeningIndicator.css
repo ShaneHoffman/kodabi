@@ -101,3 +101,18 @@
     transform: none;
   }
 }
+
+/* The same floor, reached from Settings → Appearance instead of from the OS
+   (src/reduceMotion.ts). Stated separately because a plain selector and an
+   @media block cannot share a rule.
+
+   Without it the in-app switch fell through to the app-wide 1ms floor in
+   src/index.css, which collapses the animation's DURATION but leaves the
+   glow resting whereever the keyframes' 0% happens to put it — not at the
+   still, mid-strength halo this rule exists to specify. Two of the three
+   animated components were missing this branch; QuickCapture.css had it. */
+:root[data-reduce-motion="on"] .listening__glow {
+  animation: none;
+  opacity: 0.6;
+  transform: none;
+}

@@ -111,10 +111,20 @@ function Progress({
 }) {
   return (
     <div className="inbox__progress mt-sm">
-      <div className="inbox__track">
+      {/* aria-hidden, not role="progressbar". The bar is a redrawing of the
+          caption directly beneath it, which already says both numbers in
+          words; announcing it as a progressbar would report the same fact
+          twice, once as a percentage nobody asked for. One region per
+          concern (docs/DESIGN_SYSTEM.md §6). */}
+      <div className="inbox__track" aria-hidden="true">
         <div className="inbox__fill" style={{ width: `${percent}%` }} />
       </div>
-      <p className="mt-2xs font-mono text-eyebrow text-text-faint">
+      {/* text-micro, not text-eyebrow. §1 reserves the eyebrow step for a
+          section label and requires it to be mono + uppercase + a tracking
+          step; this is neither, and §1 names text-micro for exactly this
+          role ("a progress caption"). Tabular figures because both numbers
+          change as the queue is cleared. */}
+      <p className="ui-tnum mt-2xs font-mono text-micro text-text-faint">
         {filed} filed this session · {remaining} to go
       </p>
     </div>
@@ -202,7 +212,7 @@ function InboxRow({
                 value={null}
                 placeholder={pending ? "Filing" : "File"}
                 options={options}
-                disabled={pending}
+                busy={pending}
                 onChange={route}
               />
             )}

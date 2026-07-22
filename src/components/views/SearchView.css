@@ -27,7 +27,12 @@
 
 /* A real input wearing no chrome of its own: the field around it already is
    the chrome, and a second box inside the first is the thing this design
-   spends all its effort avoiding. */
+   spends all its effort avoiding.
+
+   Which is exactly why `outline: none` stays here and the FIELD carries
+   `.ui-focus-ring-within` instead. The field is not a sanctioned focus-ring
+   exception — §2 names only the command palette's input — it just wears the
+   one ring on the box the user actually sees. */
 .search__input {
   flex: 1;
   min-width: 0;
@@ -37,7 +42,6 @@
   padding: 0;
 }
 
-/* Results tint, never lift. Nothing here is waiting to be cleared. */
 /* Two pixels. The scope line is a caption on the results, not a heading over
    them, so it sits almost against the first one. */
 .search__results {
@@ -54,9 +58,20 @@
   transition: background-color var(--dur-quick) var(--ease-standard);
 }
 
+/* RESULTS TINT, NEVER LIFT. Nothing here is waiting to be cleared, so a
+   result rises no further than a project's index row does — the Inbox is the
+   only list in the app whose rows take the raised plane, because the Inbox is
+   the only list whose rows are chores.
+
+   This used to say exactly that in a comment and then paint `--surface`, the
+   raised plane, one rule below it. The comment was right and the code was
+   not: at `--surface` with no lift a search row read as a plane that had
+   half-arrived, and it out-weighed the identical row in Project view.
+   `--tint` is what "tint" means, and it is what `.project__row` already uses
+   (docs/DESIGN_SYSTEM.md §2: the same meaning gets the same colour). */
 .search__row:hover,
 .search__row:focus-visible {
-  background: var(--surface);
+  background: var(--tint);
 }
 
 /* The match reads through VALUE — an ink wash behind ink text, the same one a

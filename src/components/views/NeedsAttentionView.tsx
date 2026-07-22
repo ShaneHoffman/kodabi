@@ -187,7 +187,8 @@ export function NeedsAttentionView() {
                     {sessionTitle(session)}
                   </p>
                   <p className="mt-3xs font-mono text-cap text-text-faint">
-                    {formatCaptureTime(session.captured_at)} · no note was created
+                    {formatCaptureTime(session.captured_at)} · Kodabi made no note
+                    from it
                   </p>
                   {rowErrors[session.path] && (
                     <StatusMessage variant="error" compact>
@@ -228,20 +229,33 @@ export function NeedsAttentionView() {
                         new Set(current).add(session.path),
                       )
                     }
-                    className="py-3xs text-label text-text-faint"
+                    className="py-3xs text-label text-text-soft"
                   >
-                    Discard
+                    {/* "Dismiss", not "Discard". The handler adds the path to
+                        a component-local Set — it hides the row for this
+                        session and touches nothing on disk. "Discard" named a
+                        deletion the code does not perform, on the one screen
+                        whose whole job is to reassure you that a failed
+                        capture still exists. */}
+                    Dismiss
                   </Button>
                 </div>
               </li>
             ))}
           </ul>
           {/* The one piece of reassurance on the screen, and it belongs here
-              rather than in a tooltip: the whole reason Discard needs no
-              confirmation is that nothing it touches is destroyed. */}
+              rather than in a tooltip: the whole reason Dismiss needs no
+              confirmation is that nothing it touches is destroyed.
+
+              It says how long the hiding lasts, and the answer has to be the
+              one the code actually implements: `dismissed` is cleared on the
+              next listing (see the prune above) and is component-local, so it
+              is also gone the moment you leave this view. Saying "until you
+              restart Kodabi" promised a persistence nothing here has. */}
           <p className="attention__footnote text-cap text-text-faint">
-            Retrying re-runs distillation on the original recording. Nothing was
-            deleted.
+            Retrying re-runs distillation on the original recording. Dismissing
+            hides a row until this list next refreshes. Neither one deletes
+            anything.
           </p>
         </>
       )}

@@ -69,8 +69,10 @@ export function SearchView({ query }: Props) {
     [notes, needle],
   ) as Hit[];
 
-  // The scope line counts what was actually searched, not what matched: it is
-  // there to tell you how wide the net was before you judge an empty result.
+  // The scope line counts where the matches LANDED, so it renders only on the
+  // branch that has hits. (It once claimed to count what was searched rather
+  // than what matched, which the code never did — and a count of the corpus
+  // would have to come from `useSearchCorpus`, not from `hits`.)
   const projectsHit = new Set(
     hits.map((hit) => hit.note.project).filter((project): project is string => !!project),
   ).size;
@@ -78,7 +80,7 @@ export function SearchView({ query }: Props) {
 
   return (
     <ViewFrame variant="search">
-      <div className="search__field">
+      <div className="search__field ui-focus-ring-within">
         <MagnifierGlyph />
         <input
           value={draft}
@@ -88,8 +90,14 @@ export function SearchView({ query }: Props) {
           autoFocus
           className="search__input ui-writing text-input text-text placeholder:text-text-faint"
         />
-        <span className="flex-none font-mono text-cap text-text-faint">
-          {needle ? `${hits.length} ${hits.length === 1 ? "result" : "results"}` : ""}
+        {/* Gated on `loading` for the same reason the empty state below is:
+            the corpus is empty until the listing lands, so an ungated count
+            flashed "0 results" on every cold start while the branch beneath
+            it correctly rendered nothing (docs/DESIGN_SYSTEM.md §3). */}
+        <span className="ui-tnum flex-none font-mono text-cap text-text-faint">
+          {needle && !loading
+            ? `${hits.length} ${hits.length === 1 ? "result" : "results"}`
+            : ""}
         </span>
       </div>
 
@@ -104,12 +112,13 @@ export function SearchView({ query }: Props) {
         <StatusMessage variant="error">Couldn&apos;t search your notes: {error}</StatusMessage>
       ) : !needle ? (
         <StatusMessage variant="empty">
-          Type to search across every project and meeting.
+          Type to search every note in every project, plus the unfiled ones.
         </StatusMessage>
       ) : hits.length === 0 ? (
         !loading && (
           <StatusMessage variant="empty">
-            Nothing matches &ldquo;{draft.trim()}&rdquo;.
+            Nothing matches &ldquo;{draft.trim()}&rdquo;. Search reads note titles,
+            snippets and tags, so a word from deeper in the body will not match yet.
           </StatusMessage>
         )
       ) : (

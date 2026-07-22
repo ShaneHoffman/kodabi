@@ -25,7 +25,8 @@ not a new-tokens layer.
 (`px-3`, `py-2`, `gap-4`…) for padding, margins, or gaps.**
 
 `src/index.css` deliberately aligns Tailwind's numeric grid to the same 4px base as the named `--space-*`
-steps and *also* exposes the named aliases (`index.css:44-55`). So `py-2` and `py-2xs` compile to the
+steps and *also* exposes the named aliases (the `--spacing-*` block in `src/index.css`, which is where
+`--spacing` sets the 4px base). So `py-2` and `py-2xs` compile to the
 **identical** declaration — they are the same 8px. The named step is the only form that reads as
 *deliberate*: it names the role instead of restating a multiple of 4. Numeric spacing utilities are how
 drift starts (the same control turning up as `px-3 py-1`, then `py-2`, then `px-lg py-lg` across screens).
@@ -93,7 +94,8 @@ Most tokens are bridged into Tailwind utilities and are consumed **as utilities 
 > `@theme inline` block; the redesign split that family into the un-bridged `--measure-*` set and
 > the bridge entries went with it. Tailwind emits nothing for an unknown utility and raises no
 > error, so those three class names now silently do nothing — a column cap is read from a
-> co-located `Component.css` instead (`PlaceholderView` carries the note about it).
+> co-located `Component.css` instead (`ViewFrame.css` is the reference; it is where every variant's
+> `--measure-*` is applied).
 
 > **Never Tailwind's own `tracking-wide`.** It is 0.025em; the eyebrow token is 0.16em. The Sidebar used
 > the token through a CSS class while twelve other call sites used the Tailwind default, so the same role
@@ -156,7 +158,26 @@ token: this palette has exactly one green and it means audio is being recorded, 
 wearing it would claim something false.
 
 There is exactly one sanctioned exception (the palette input, and nothing else), stated in
-[`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §2.
+[`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §2. Where the focusable element is not the box the user
+sees — a chrome-less `<input>` inside a field that already is the chrome — add
+`ui-focus-ring-within` to the **wrapper** and leave `outline: none` on the input. It is the same
+declaration at a `:has(:focus-visible)` trigger, in the same rule, so the two cannot drift.
+
+**Two more shared recipes live in `ui.css`, and both are one line at the call site:**
+
+```tsx
+<span className="ui-tnum">{count} notes</span>   {/* a number that CHANGES */}
+<h2 className="ui-balance …">{title}</h2>        {/* a display-step heading */}
+```
+
+- **`ui-tnum`** sets `font-variant-numeric: tabular-nums`. Only for a number that changes under the
+  user — a count, a workload, a progress caption. The interface sans is proportionally spaced, so
+  digits have different widths and a ticking number shuffles everything after it sideways. A date or
+  an id sits still and reads better in the figures the face was drawn with, and the mono voice is
+  already tabular by construction, so neither restates this.
+- **`ui-balance`** sets `text-wrap: balance`, for the display steps only (`ViewFrame`'s three serif
+  titles, the note title). Body prose uses `text-wrap: pretty` in its own CSS — `balance` is
+  specified to give up after a few lines, so it is a heading rule, not a paragraph one.
 
 **The reserved green (`--accent-dot`) is untouchable.** It belongs to the listening state alone. Precisely:
 it means **audio is actually being recorded**. A degraded capture that still has a live source keeps the
@@ -170,9 +191,12 @@ Selected and highlighted rows use the shared `ui-wash` class (or `var(--wash-act
 that ink-mix defined once in `tokens.css` — **never `var(--accent-dot)`**.
 
 The reserved green is spent on the SpiritMark and nothing else, including the status label beside it.
-As *text* it measures 3.42–3.70:1 against the light theme's surfaces, below the 4.5:1 floor; as a
-*graphic* it clears the 3:1 one. The label carries the same state through value instead
-([`CaptureStatusLine`](../src/components/CaptureStatusLine.tsx)).
+As *text* it measures **4.06–4.56:1** against the light theme's three planes, below the 4.5:1 floor
+on two of them; as a *graphic* it clears the 3:1 one everywhere in both themes. The label carries
+the same state through value instead
+([`CaptureStatusLine`](../src/components/CaptureStatusLine.tsx)). The measured figures live once, in
+[`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §6 — this line used to quote 3.42–3.70, which were the
+*pre-re-tune* green's numbers and had been wrong here since the pigment changed.
 
 ---
 
@@ -253,26 +277,15 @@ travel together, and every hand-rolled version in the app set one without the ot
 <TextField label="Days to keep" value={days} error={saveError} onChange={…} />
 ```
 
-### `Textarea` — labelled multi-line input *(currently unused)*
+### There is no `Textarea` primitive
 
-> **Nothing composes this today.** Both writing surfaces in the app — the note editor's body and the
-> quick-capture box — are a raw `<textarea>` carrying an `aria-label`, the `ui-writing` caret class,
-> and their own class from a co-located `*.css` (`.note-edit__body`, `.capture__input`). Don't reach
-> for this primitive expecting the app's writing surfaces to match it; either match the raw pattern
-> those two use, or bring them onto this component in the same change. The description below records
-> what the component does, not what the app currently looks like.
-
-`TextField`'s shape for prose: the same control padding, writing-line hairline and focus ring, plus the
-body line-height (`--lh-body`). Height and resize behaviour are the caller's, since a capture box and a
-note body want very different room. `hideLabel` keeps the label as the accessible name only.
-
-It **carries no fill**, the same as `TextField`. It used to sit on a sunk `--bg-sink` plane; that
-token is gone, because a recessed plane is a fourth plane and the system has three. A writing area
-sits on whatever plane its surface sits on.
-
-```tsx
-<Textarea label="Body" value={body} onChange={…} className="note-editor__body font-mono" />
-```
+It existed and nothing ever composed it. Both writing surfaces in the app — the note editor's body
+and the quick-capture box — are a raw `<textarea>` carrying an `aria-label`, the `ui-writing` caret
+class, `ui-focus-ring`, and their own class from a co-located `*.css` (`.note-edit__body`,
+`.capture__input`). That is not an oversight to be corrected: the two want very different room and
+very different type (one is the reading ramp at `--fs-read`, the other is `--fs-capture`), and a
+primitive whose only job would be to be overridden twice is a primitive that documents a shape
+nobody wears. **Copy the raw pattern those two use.**
 
 ### `Select` — token-styled dropdown, `variant="boxed" | "token"`
 
@@ -301,9 +314,19 @@ import { Select } from "./ui/Select";
 Pass `hideLabel` when the control's purpose is clear from context (a per-row picker in a list): the `label`
 stays as the accessible name (`sr-only`) but takes no visual row. The Inbox re-route picker uses this.
 
-Pass `disabled` while a write is in flight, and `emptyLabel` for what the list says when there are no
-options — it opens and explains rather than refusing to open, which used to leave a trigger that
-swallowed every click.
+Pass **`busy`** while a write is in flight — never `disabled`. They are different states and the
+difference is focus: `busy` is `aria-disabled` + `aria-busy` on a control that stays focusable and
+declines its own activation, exactly like `Button`'s `loading`, while `disabled` is the native
+attribute and blurs a focused trigger straight to `<body>`. `disabled` means "there is nothing here
+to choose"; passing both puts the focus loss back, because `disabled` wins. See
+[`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §6.
+
+```tsx
+<Select label="Retention" value={kind} onChange={setKind} options={…} busy={saving} />
+```
+
+Pass `emptyLabel` for what the list says when there are no options — it opens and explains rather
+than refusing to open, which used to leave a trigger that swallowed every click.
 
 **`variant` fixes how much the *resting* trigger weighs; nothing else changes.** The dropdown list, the
 focus ring, and every keyboard behaviour are identical across both. **The box exists only while
@@ -333,15 +356,26 @@ carries the hierarchy*). Settings' two pickers and `ConsentNudge`'s stay `boxed`
 **Never a raw `<select>`.** The native control ignores the token theme entirely (system chrome, no focus
 ring, no value wash), so this primitive is the only dropdown.
 
-### `Checkbox` — labelled boolean *(currently unused)*
+### `Checkbox` — labelled boolean *(no component consumer, but it owns a live skin)*
 
-> **Nothing composes this today.** Every boolean in the app is a setting that takes effect the moment
-> it moves, so `SettingsView` carries its own local `Toggle`: a `<button role="switch">` with
-> `aria-checked` and a knob, styled by `.settings__toggle` / `.settings__knob` in `SettingsView.css`.
-> The platform semantics for "this applies immediately" and "this is one of several things you are
-> about to submit" differ, and the switch is the first of those. Reach for this component only for the
-> second kind, and expect to be its first caller. The description below records what it does, not what
-> the app currently looks like.
+> **No component composes this today, and it is kept anyway.** Every boolean the app *ships* is a
+> setting that takes effect the moment it moves, so `SettingsView` carries its own local `Toggle`:
+> a `<button role="switch">` with `aria-checked` and a knob, styled by `.settings__toggle` /
+> `.settings__knob` in `SettingsView.css`. The platform semantics for "this applies immediately"
+> and "this is one of several things you are about to submit" differ, and the switch is the first
+> of those. Reach for this component only for the second kind, and expect to be its first caller.
+>
+> What keeps it from being dead code is that **a note's GFM task list draws the identical skin**
+> (`.note-reading input[type="checkbox"]`, `NoteEditorView.css`). Those two used to be the same
+> five literals typed out in two files, invisible to the token guard — which scopes its spacing
+> check to padding/margin/gap, so a width or a ring thickness was structurally unseeable. Both now
+> read the Layer-4 `--check-*` family (`--check-box`, `--check-ring`, `--check-mark-w`,
+> `--check-mark-h`, `--check-mark-stroke`), so the skin is defined once. Editing one without the
+> other is the drift the tokens exist to prevent.
+>
+> The note-body copy renders **`disabled`** — `mdast-util-to-hast` hard-codes it on a task-list
+> item — so it takes no hover, no active and no pointer cursor. This primitive, which is genuinely
+> interactive, does.
 
 A real `<input type="checkbox">` under a token skin (`appearance: none`), so keyboard behaviour, form
 semantics, and screen-reader state come from the platform rather than re-implemented ARIA — the opposite
@@ -404,6 +438,13 @@ either is not an error and not a look anyone has designed — pass the header as
 can never render at a count's weight in one view and a heading's in another. Call sites pass the content,
 never a class — there is no `className` on it to reach for.
 
+**And it is only a prop on the three variants that draw one.** `queue`, `library` and `health` accept
+it; on `panel`, `doc` and `search` it is a **type error**, not a silent no-op. Note the asymmetry with
+the paragraph above: passing `eyebrow`/`title` to `doc`/`search` compiles and simply renders no header,
+because those two legitimately supply their own. `summary` is different — there is no typographic role
+for one on those variants at all, so the props are discriminated on `variant` and the compiler says so
+at the call site. It used to be accepted, dropped at render, and reported nowhere.
+
 **Omit `summary` at zero.** The empty `StatusMessage` in the body already says there's nothing here, and
 two "nothing here" voices in one header is one too many. Every call site does this with a conditional
 (`notes.length > 0 ? … : undefined`).
@@ -427,23 +468,24 @@ before it, `role="alert"` was on some async failures and not others. `compact` s
 <StatusMessage variant="error">Couldn&apos;t load notes: {error}</StatusMessage>
 ```
 
-### `ListRow` — one row in a list *(currently unused)*
+### There is no `ListRow` primitive
 
-> **Nothing composes this today.** Each list-bearing view now draws its own row from a co-located
-> `*.css`, because the row *is* the view's stance: `.inbox__row` lifts onto the raised plane when you
-> touch it (these are items you clear), `.project__row` only tints (a reading room, nothing is waiting
-> on you), and `.attention__card` arrives already lifted with no hover at all (it flagged itself). One
-> affordance, three meanings — which is exactly the difference a single shared row was flattening. Its
-> one still-live rule is the one below about hover and focus. The description below records what the
-> component does, not what the app currently looks like.
+It existed and nothing ever composed it. **A row is the view's stance, and the whole redesign turns
+on that**: `.inbox__row` lifts onto the raised plane when you touch it (these are items you clear),
+`.project__row` only tints (a reading room, nothing is waiting on you), and `.attention__card`
+arrives already lifted with no hover at all (it flagged itself). One affordance, three meanings —
+which is exactly the difference a single shared row was flattening. Each list-bearing view draws its
+own from a co-located `*.css`.
 
-Title, meta, optional two-line snippet, optional trailing control in a fixed column. `layout="inline"`
-keeps title and meta on one baseline; `"stacked"` (the default) puts meta underneath. **Hover and the
-focus ring live on the same element** — the Inbox previously put hover on the inner title span while the
-ring sat on the outer button, so keyboard focus produced a ring with no colour change.
+It also carried the bug it claimed to have fixed: its hover recoloured the inner title span while
+the ring sat on the outer element, with no `:focus-visible` counterpart — the very failure its own
+doc comment cited. **Hover and the focus ring live on the same element** is the rule that outlived
+it; it is stated in [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §2, where it applies to everything
+rather than to one unused component.
 
-Build the meta string with [`noteMeta`](../src/noteMeta.ts), which takes the surface's own middle
-segment: `noteMeta(note)`, `noteMeta(note, note.type)`, `noteMeta(note, matchScore(note.confidence))`.
+Build a row's meta string with [`noteMeta`](../src/noteMeta.ts), which takes the surface's own
+middle segment: `noteMeta(note)`, `noteMeta(note, note.type)`,
+`noteMeta(note, matchScore(note.confidence))`.
 
 ### `Overlay` — the modal shell
 
@@ -495,9 +537,8 @@ new screen should find its shape here rather than inventing one.
 | `ProjectView` | `ViewFrame variant="library"`, `Button`, `StatusMessage` | `.project__row`, a hand-rolled index row |
 | `NoteEditorView` | `ViewFrame variant="doc"`, `Button`, `StatusMessage` | its own header, and raw `<textarea>` / `<input>` elements with `aria-label` + `ui-writing` |
 | `SettingsView` | `ViewFrame variant="panel"`, `Select`, `Button`, `StatusMessage` | a local `role="switch"` `Toggle`, and a raw number `<input>` (`.settings__chip`) |
-| `SearchView` | `ViewFrame variant="search"`, `StatusMessage` | its own query field |
-| `PlaceholderView` | `ViewFrame variant="panel"`, `StatusMessage` | — |
-| `AppErrorBoundary` | `ViewFrame variant="health"`, `StatusMessage` | — |
+| `SearchView` | `ViewFrame variant="search"`, `StatusMessage` | its own query field (`.ui-focus-ring-within`) |
+| `AppErrorBoundary` | `ViewFrame variant="health"`, `Button`, `StatusMessage` | — |
 | `CommandPalette` | `Overlay` | its own combobox input and rows |
 | `ConsentNudge` | `Overlay`, `Select`, `TextField`, `Button`, `StatusMessage` | — |
 | `QuickCapture` | `Button`, `StatusMessage` | a raw `<textarea>` (`.capture__input ui-writing`) |
@@ -506,10 +547,16 @@ new screen should find its shape here rather than inventing one.
 | `CaptureToast` | — | the overlay plane directly (it is not a modal, so not `Overlay`) |
 
 The right-hand column is not an accusation. A view drawing its own row is the redesign working as
-intended (see `ListRow` above): the row is where a queue, a library and a health view differ most, so
-each one states that difference in its own CSS. What it does mean is that **`ListRow`, `Checkbox` and
-`Textarea` have no call sites at all** — check this table before assuming a primitive is the shape the
-app actually wears.
+intended: the row is where a queue, a library and a health view differ most, so each one states that
+difference in its own CSS.
+
+**Every primitive in `src/components/ui/` now has at least one call site.** `ListRow` and `Textarea`
+did not, and are gone (see the two notes above for what replaced them, and why nothing should
+resurrect them); `PlaceholderView` was never routed and is gone with them. `Checkbox` is the one
+remaining primitive with no *component* consumer, and it is kept deliberately: a note's GFM task
+list draws the identical skin, and both now read it from the shared `--check-*` tokens, so the
+component is where that skin is defined rather than a second copy of it. Check this table before
+assuming a primitive is the shape the app actually wears.
 
 Three surfaces keep a documented departure, each forced by what the window is rather than by preference:
 
@@ -545,8 +592,19 @@ So they are a **fourth token layer** in `design/tokens.css`: `--sidebar-*`,
 (`--row-*`, `--card-pad-*`, `--gap-row-columns`), the control insets
 (`--chip-pad-y`, `--btn-filled-x`, `--tag-*`, `--toolbar-*`, `--token-pill-*`,
 `--field-search-y`, `--mark-pad-*`), the Settings panel's own furniture
-(`--gap-tab`, `--tab-pad-*`, `--gap-setting`, `--sublabel-tuck`) and the
-summoned surfaces (`--palette-*`, `--menu-*`, `--capture-*`).
+(`--gap-tab`, `--tab-pad-*`, `--gap-setting`, `--sublabel-tuck`), the two
+boolean controls' geometry (`--check-*`, `--toggle-*`), the writing surfaces'
+floors (`--measure-body-min`, `--measure-capture-min`) and the summoned
+surfaces (`--palette-*`, `--menu-*`, `--capture-*`).
+
+**The guards cannot see a width, a height or a border thickness.** The token
+test scopes its spacing check to `padding` / `margin` / `gap`, and eslint only
+reads class strings — so a `width: 17px` in a stylesheet passes both. That is
+how the checkbox skin came to be written out twice and the toggle's five
+numbers once, unnamed. `--check-*` and `--toggle-*` exist because the rule is
+the same whether or not a guard can enforce it, and `--toggle-travel` is
+written as a `calc` off the other three so a knob provably cannot drift out of
+its track — the same discipline as the Inbox row's `calc(-1 * var(--row-queue-x))`.
 
 **Off the step scale is not a licence to be a literal.** These are named
 precisely *because* they are off it: a number that no ladder explains is one

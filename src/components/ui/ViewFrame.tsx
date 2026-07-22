@@ -30,46 +30,71 @@ import "./ViewFrame.css";
  */
 type Variant = "queue" | "library" | "panel" | "health" | "doc" | "search";
 
-type Props = {
-  variant: Variant;
+type BaseProps = {
   /** The small uppercase label above the title. Names the section, not the field. */
   eyebrow?: ReactNode;
   /** The view's name. On `queue` it leads the one-line masthead instead. */
   title?: ReactNode;
   /** A single header-level action, right-aligned on the title's first line. */
   action?: ReactNode;
-  /**
-   * The line under the title — a workload sentence for a queue, a count for a
-   * library, a state for a health view. Deliberately not a free styling slot:
-   * the variant fixes its typographic role, so a count can never render at a
-   * heading's weight in one view and a caption's in another. Pass the content,
-   * never a class. Omit it at zero — the empty state speaks then, and two
-   * "nothing here" voices in one header is one too many.
-   */
-  summary?: ReactNode;
   children: ReactNode;
 };
 
+/**
+ * `summary` is only accepted by the variants that draw one.
+ *
+ * The line under the title — a workload sentence for a queue, a count for a
+ * library, a state for a health view. Deliberately not a free styling slot:
+ * the variant fixes its typographic role, so a count can never render at a
+ * heading's weight in one view and a caption's in another. Pass the content,
+ * never a class. Omit it at zero — the empty state speaks then, and two
+ * "nothing here" voices in one header is one too many.
+ *
+ * On `panel`, `doc` and `search` it is a TYPE ERROR rather than a silent
+ * no-op. The render guarded on `SUMMARY_CLASS[variant]` being non-empty, so
+ * those three accepted the prop, dropped it, and raised nothing — a prop that
+ * works on half the variants and quietly does not on the rest.
+ */
+type Props = BaseProps &
+  (
+    | { variant: SummaryVariant; summary?: ReactNode }
+    | { variant: Exclude<Variant, SummaryVariant>; summary?: never }
+  );
+
 /** Each variant's title step. A config panel and a note must not open at the
- * same size, which is exactly what one shared `text-h2` used to make them do. */
+ * same size, which is exactly what one shared `text-h2` used to make them do.
+ *
+ * `ui-balance` on all three: these run to 26–34px in a serif inside a capped
+ * measure, which is the exact shape that drops a single word onto a line of
+ * its own. */
 const TITLE_CLASS: Record<Variant, string> = {
   queue: "",
-  library: "font-serif text-title-library leading-title text-text",
-  panel: "font-serif text-title-panel leading-title text-text",
-  health: "font-serif text-title-health leading-title text-text",
+  library: "ui-balance font-serif text-title-library leading-title text-text",
+  panel: "ui-balance font-serif text-title-panel leading-title text-text",
+  health: "ui-balance font-serif text-title-health leading-title text-text",
   doc: "",
   search: "",
 };
 
-/** A queue states the work; a library and a health view state the size. */
+/** A queue states the work; a library and a health view state the size.
+ *
+ * `ui-tnum` because every one of these is a count that changes under the
+ * user ("12 notes" → "13 notes"), rendered in the proportional interface
+ * sans. The empty entries are not oversights — see `summary` on Props. */
 const SUMMARY_CLASS: Record<Variant, string> = {
   queue: "",
-  library: "text-label text-text-faint",
+  library: "ui-tnum text-label text-text-faint",
   panel: "",
-  health: "text-label text-text-faint",
+  health: "ui-tnum text-label text-text-faint",
   doc: "",
   search: "",
 };
+
+/** The variants that render `summary` at all. `panel`, `doc` and `search`
+ * have no typographic role for one, so passing it there is a mistake rather
+ * than a no-op — the type below is what says so, at the call site, instead of
+ * the value being silently dropped at render. */
+type SummaryVariant = "queue" | "library" | "health";
 
 /**
  * The page scaffold every full view sits in: the gutter, the column, and the
@@ -90,16 +115,34 @@ export function ViewFrame({
   summary,
   children,
 }: Props) {
-  const header = renderHeader({ variant, eyebrow, title, action, summary });
+  const header = renderHeader({ variant, eyebrow, title, action, summary } as Omit<
+    Props,
+    "children"
+  >);
 
   return (
-    <section className={`view view--${variant}`}>
+    // Named, so it is a real region landmark. A bare <section> has no
+    // accessible name and is not exposed as one at all, which left the window
+    // with a main, an aside and a nav and nothing identifying the view inside
+    // them. `title` when there is one, `eyebrow` when the view draws its own
+    // header instead (doc, search).
+    <section
+      aria-label={landmarkName(title) ?? landmarkName(eyebrow)}
+      className={`view view--${variant}`}
+    >
       <div className="view__column">
         {header}
         {children}
       </div>
     </section>
   );
+}
+
+/** An accessible name, but only from a node that is already a plain string.
+ * A view whose title is composed of elements gets no name rather than a
+ * stringified one: "[object Object]" is worse than silence. */
+function landmarkName(node: ReactNode): string | undefined {
+  return typeof node === "string" && node.trim() ? node : undefined;
 }
 
 function renderHeader({
@@ -128,7 +171,7 @@ function renderHeader({
           {eyebrowNode}
           <p className="mt-2xs text-lead text-text">
             <span className="font-semibold">{title}</span>
-            {summary && <span className="text-text-faint"> · {summary}</span>}
+            {summary && <span className="ui-tnum text-text-faint"> · {summary}</span>}
           </p>
         </div>
         {action && <div className="flex-none">{action}</div>}

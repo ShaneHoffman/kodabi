@@ -92,7 +92,12 @@ export function CommandPalette({ onClose }: Props) {
     onClose();
   };
 
-  const onKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+  // Bound to the PANEL, not to the input, and it reaches the input's keys all
+  // the same because they bubble. Bound to the input it was one blur away from
+  // being gone: clicking the palette's own padding moves focus off the input,
+  // and Escape then closed nothing at all. The panel is `tabIndex={-1}` so it
+  // can hold that focus rather than dropping it to <body>.
+  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     // Keys pressed mid-IME-composition belong to the composition (committing
     // with Enter, cancelling with Escape), never to the palette.
     if (event.nativeEvent.isComposing) return;
@@ -110,14 +115,22 @@ export function CommandPalette({ onClose }: Props) {
       event.preventDefault();
       onClose();
     } else if (event.key === "Tab") {
-      // The dialog's only tabbable element is this input — hold focus here
-      // so Tab can't reach controls hidden behind the overlay (aria-modal).
+      // The dialog's only tabbable element is the query input — hold focus
+      // here so Tab can't reach controls hidden behind the overlay
+      // (aria-modal). Refocus it too: if the click that blurred it landed on
+      // the panel, Tab should put the caret back rather than go nowhere.
       event.preventDefault();
+      inputRef.current?.focus();
     }
   };
 
   return (
-    <Overlay onDismiss={onClose} label="Command palette" className="overflow-hidden">
+    <Overlay
+      onDismiss={onClose}
+      label="Command palette"
+      className="overflow-hidden"
+      onKeyDown={onKeyDown}
+    >
       {/* Magnifier first, then the query. The same glyph at the same size as
           the Search view's field, so a place you type a query is recognisable
           wherever it turns up. */}
@@ -141,7 +154,10 @@ export function CommandPalette({ onClose }: Props) {
         <input
           ref={inputRef}
           role="combobox"
-          aria-expanded="true"
+          // Reflects the list, rather than being pinned open. It was hardcoded
+          // `"true"`, which told a screen reader there were options to walk
+          // even on the branch that renders none.
+          aria-expanded={rows.length > 0}
           aria-controls={LISTBOX_ID}
           aria-activedescendant={rows.length > 0 ? optionId(active) : undefined}
           aria-label="Type a command or search"
@@ -153,25 +169,24 @@ export function CommandPalette({ onClose }: Props) {
             setQuery(event.target.value);
             setActiveIndex(0);
           }}
-          onKeyDown={onKeyDown}
           className="command-palette__input text-input text-text placeholder:text-text-faint"
         />
       </div>
-      <div className="command-palette__rule" />
+      <hr className="command-palette__rule" />
       <ul
         id={LISTBOX_ID}
         role="listbox"
         aria-label="Commands"
         className="command-palette__list"
       >
-        {rows.length === 0 && (
-          // Only reachable with an empty query and no commands at all, which
-          // means the project listing failed — never a blank pane
-          // (docs/DESIGN_SYSTEM.md §3).
-          <li className="command-palette__row text-body text-text-soft">
-            No commands available yet.
-          </li>
-        )}
+        {/* There is deliberately no empty row here. One used to sit at this
+            spot saying "No commands available yet.", justified as the branch
+            taken "when the project listing failed" — but `rows` cannot reach
+            zero: useCommands unconditionally pushes four actions, and a query
+            that matches nothing is answered by the synthetic search row. It
+            was a state vocabulary for a state that does not exist, and it was
+            a bare <li> with no role sitting directly inside role="listbox",
+            which is not a valid owned element either. */}
         {sections.map((section, sectionIndex) => (
           // role="presentation" on the wrapper so the ul/li scaffolding does
           // not put listitem semantics between the listbox and its options;
@@ -213,7 +228,17 @@ export function CommandPalette({ onClose }: Props) {
                       teaches shortcuts, so filling this with a restatement of
                       the section heading taught nothing. */}
                   {(index === active || command.hint) && (
-                    <span className="flex-none font-mono text-eyebrow text-text-faint">
+                    // --text-soft on the active row, --text-faint on the rest.
+                    // The active row's ground is --menu-hover, not the overlay
+                    // plane, and faint ink on that fill measures 3.07:1 in the
+                    // day theme and 2.83:1 at night — under even the 3:1 floor
+                    // a graphic gets, for the one row the user is looking at
+                    // (docs/DESIGN_SYSTEM.md §6).
+                    <span
+                      className={`flex-none font-mono text-eyebrow ${
+                        index === active ? "text-text-soft" : "text-text-faint"
+                      }`}
+                    >
                       {index === active ? "↵" : command.hint}
                     </span>
                   )}

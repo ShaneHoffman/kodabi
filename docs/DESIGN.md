@@ -77,31 +77,37 @@ green, and it is spent only on the **listening state**.
 and type, then let the near-neutral forest tones sit underneath as warmth. Never use color to rank
 or categorize. The single accent green is reserved; do not spend it on ordinary UI.
 
-**The v2 values.** The day ground is washi `#F7F5EF` — a warm near-white rather than the earlier
-beige — sinking to `#EFEDE4`. Ink is sumi `#1F1E18`, receding through moss `#4F5B46` and a darkened
-stone `#5C6058`. Night is a deep warm black `#131210` (never a blue-grey charcoal), sinking to
-`#0E0D0B`, with warm paper `#ECE9E0` for ink. Mist `#E4E7DF`, stone `#8B8F86`, and fern `#3B4636`
-remain pigments in the ladder.
+**The values live in [`design/tokens.css`](../design/tokens.css), and only there.** This paragraph
+used to restate them, and by the time anyone read it again it was quoting a palette that no longer
+existed — a day ground of `#F7F5EF`, an ink of `#1F1E18`, a "sinking" fourth plane that had since
+been deleted. The relationships are what this document fixes, and they are unchanged: a warm
+near-white day ground and a deep warm black night one (never a blue-grey charcoal), three planes
+each *lighter* than the last, ink receding through two muted steps, and hue almost silent
+throughout. For the hexes, read the file. The measured contrast matrix is
+[`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §6.
 
 **A raised plane lifts; it does not fill.** This is the one structural change v2 made, and it follows
 from Ma and from "space instead of boxes". The light theme's raised surface used to be mist — a fill
 *darker* than the page — so every button, dropdown, selected row, and modal read as a grey box
-stamped down onto the paper. It is now `#FDFCF8`, a hair *lighter* than the ground, because a lifted
+stamped down onto the paper. It is now a hair *lighter* than the ground, because a lifted
 sheet catches more light than the surface under it. Separation is the value shift plus a hairline
 plus a shadow, never a border and never a darker fill. (Night was already lighter-than-ground and is
 unchanged in principle.) Three planes only: page, raised, overlay.
 
-**The accent was promoted; the listening green is still reserved.** The interactive green (links,
-focus, selected text) is now `#3E6B3A` in day and `#8FB585` in night — enough presence that an
-interactive thing looks interactive. The one living green, `#5C8455` in day and `#8CB183` in night,
-is more alive than before and remains **spent only on the listening state**. That reservation is
-unchanged and absolute: it means audio is being recorded, so it never marks selection, never ranks,
-and is never used as text.
+**There is exactly ONE green, and the interactive accent is retired.** v2 briefly kept two — a
+quiet interactive green for links, focus and selected text, alongside the reserved listening one —
+and that second hue is gone as a token. Links are ink with an underline, the focus ring is ink,
+selection is an ink wash. The single living green (`--accent-dot`) is **spent only on the listening
+state and the writing caret**, both of which mean the same thing: this is happening right now. That
+reservation is absolute — it never marks selection, never ranks, and is never used as text, where
+it does not clear the contrast floor anyway.
 
 > The exact tokens, the full ramp, and the light/dark mapping live in
-> [`design/tokens.css`](../design/tokens.css) — the single source of truth. This document fixes the
-> *roles and relationships*; the hexes above are quoted so the intent is readable, and the file wins
-> if they ever disagree.
+> [`design/tokens.css`](../design/tokens.css) — the single source of truth. **This document quotes
+> no hexes at all**, deliberately: it fixes the *roles and relationships*, and every time it also
+> restated a value, the value moved and the prose did not. It said the raised plane was `#FDFCF8`
+> for two re-tunes after it became `#FBFAF6`. Read the file for values; read this for what they
+> are for.
 
 ### 3. Wabi-sabi restraint — quiet, warm, and unfinished on purpose
 
@@ -158,18 +164,25 @@ never copy their imagery.
   feeling.
 
 **Locked in P0-4, re-tuned in v2:** the design tokens live in
-[`design/tokens.css`](../design/tokens.css) (demonstrated by
-[`design/tokens.html`](../design/tokens.html)). **Typefaces are unchanged** — **Source Sans 3**
+[`design/tokens.css`](../design/tokens.css). **Typefaces are unchanged** — **Source Sans 3**
 (interface) + **Source Serif 4** (reading views) + **Source Code Pro** (mono), self-hosted so they
-render offline. Both greens are kept: a quiet interactive accent and the brighter listening green.
+render offline, at the weights the `--fw-*` scale names (400/500/600/700, plus a sans italic) and
+no others.
 
 What v2 replaced is the values P0-4 adopted from the moodboard. The palette was rebuilt to product
-grade (above), and the **type ramp split into two voices**: the interface ramp tightened
-(`--fs-body` .97rem at 1.55 line-height, down from 1.06rem at 1.72) while the reading ramp
-(`--fs-read` 1.18rem at 1.6) was left exactly as it was. One loose ramp used to serve both, so the
-interface wore reading-sized type; chrome is now compact and a note still opens like a page.
-Weights, letter-spacings, spacing, radii, motion, and focus are untouched. The measured contrast
-matrix for the new values is in [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §6.
+grade (above), and the **type ramp split into two voices**: the interface ramp tightened while the
+reading ramp was left as it was, so chrome is compact and a note still opens like a page. The ramp
+is now **fixed px, not rem** — the window is 960×640 and does not reflow, so the earlier relative
+steps only made the same role render at two sizes for no reader's benefit. Both ramps are
+enumerated in [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §1, which is where they are maintained;
+letter-spacings, spacing, radii and focus are untouched. Motion has changed once since: the shared
+easing is a stated curve rather than the CSS `ease` keyword (§4). The measured contrast matrix is
+§6.
+
+> **`design/tokens.html` and `design/moodboard.html` are Phase-0 artefacts and have drifted.** Both
+> still demonstrate `--accent` and a recessed `bg-sink` plane, neither of which exists any more.
+> They are kept as a record of where the aesthetic started, not as a reference for what it is. The
+> file above is the source of truth; when the two disagree, the file wins.
 
 ---
 

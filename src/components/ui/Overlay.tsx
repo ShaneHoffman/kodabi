@@ -71,6 +71,14 @@ export function Overlay({
         aria-label={label}
         aria-labelledby={labelledBy}
         onKeyDown={onKeyDown}
+        // A fallback focus target, and the reason `onKeyDown` above is worth
+        // having on the panel at all. Clicking the panel's own padding blurs
+        // whatever held focus, and with nothing focusable underneath it the
+        // active element becomes <body> — outside the dialog, where a keydown
+        // no longer bubbles through here and Escape silently stops closing the
+        // modal. -1 keeps it out of the tab order while still letting it take
+        // focus, so the dialog always has somewhere to hold it.
+        tabIndex={-1}
         className={`ui-overlay__panel w-full${
           className ? ` ${className}` : ""
         }`}
