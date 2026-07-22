@@ -37,11 +37,25 @@ export type AppearanceSettings = {
   theme: Theme;
 };
 
+/** Mirrors `MicCheckOutcome` in `crates/kodabi-core/src/settings.rs` —
+ * internally tagged on `outcome`, flattened into `MicCheckResult` below. */
+export type MicCheckOutcome =
+  | { outcome: "headphones" }
+  | { outcome: "speakers"; echo_db: number; delay_ms: number }
+  | { outcome: "mic_silent" };
+
+/** Mirrors `MicCheckResult` in `crates/kodabi-core/src/settings.rs`: the
+ * outcome fields flattened alongside `measured_at`, an RFC 3339 UTC instant. */
+export type MicCheckResult = MicCheckOutcome & {
+  measured_at: string;
+};
+
 export type Settings = {
   consent_acknowledged: boolean;
   retention: RetentionPolicy;
   overlay: OverlaySettings;
   appearance: AppearanceSettings;
+  mic_check: MicCheckResult | null;
 };
 
 /** The theme choices, in the order they are offered. */
@@ -105,6 +119,14 @@ export function setAppearance(appearance: AppearanceSettings): Promise<Settings>
 
 export function acknowledgeConsent(retention: RetentionPolicy): Promise<Settings> {
   return invoke<Settings>("acknowledge_consent", { retention });
+}
+
+/** Runs the mic test: plays a short tone through the default output device
+ * while recording the default microphone, and returns the settings with the
+ * result stored in `mic_check`. Rejects while a capture is running (the
+ * backend refuses rather than fighting the live capture for the mic). */
+export function runMicTest(): Promise<Settings> {
+  return invoke<Settings>("run_mic_test");
 }
 
 /**

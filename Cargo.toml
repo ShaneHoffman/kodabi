@@ -4,6 +4,7 @@ members = [
     "src-tauri",
     "crates/kodabi-core",
     "crates/kodabi-audio",
+    "crates/kodabi-aec",
     "crates/kodabi-transcribe",
     "crates/kodabi-embed",
     "crates/kodabi-llm",

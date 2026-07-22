@@ -4,11 +4,13 @@ import {
   buildRetentionPolicy,
   DEFAULT_KEEP_DAYS,
   RETENTION_OPTIONS,
+  runMicTest,
   setAppearance,
   setCaptureOverlay,
   setRetentionPolicy,
   THEME_OPTIONS,
   useSettings,
+  type MicCheckResult,
   type OverlaySettings,
   type RetentionKind,
   type Theme,
@@ -121,6 +123,19 @@ function Toggle({
   );
 }
 
+/** The Capture tab's stored mic-test result, phrased for what it means for a
+ * recording rather than just what was measured. */
+function micCheckSummary(result: MicCheckResult): string {
+  switch (result.outcome) {
+    case "headphones":
+      return "Headphones detected. Your microphone and speaker channels stay separate.";
+    case "speakers":
+      return `Speakers detected. Your microphone hears them (about ${result.echo_db.toFixed(1)} dB, ${result.delay_ms.toFixed(0)} ms delay). Kodabi removes this automatically when transcribing.`;
+    case "mic_silent":
+      return "No signal from your microphone. Check that it is connected and not muted.";
+  }
+}
+
 /**
  * Rebuilds the note index from the files on disk. The index is a derived cache
  * the file watcher normally keeps live; this is the manual "reconstruct from
@@ -209,6 +224,8 @@ export function SettingsView() {
   const [savingOverlay, setSavingOverlay] = useState(false);
   const [appearanceError, setAppearanceError] = useState<string | null>(null);
   const [savingAppearance, setSavingAppearance] = useState(false);
+  const [micTestError, setMicTestError] = useState<string | null>(null);
+  const [runningMicTest, setRunningMicTest] = useState(false);
   // Set once the day field has been committed, so the save is visible: this
   // control persists on Enter or blur, and without an acknowledgement a
   // keyboard user has no signal that anything happened.
@@ -246,6 +263,18 @@ export function SettingsView() {
   );
 
   const kind: RetentionKind = settings?.retention.policy ?? "keep_all";
+
+  const runMicTestClick = async () => {
+    setMicTestError(null);
+    setRunningMicTest(true);
+    try {
+      setSettings(await runMicTest());
+    } catch (err) {
+      setMicTestError(String(err));
+    } finally {
+      setRunningMicTest(false);
+    }
+  };
 
   const apply = async (nextKind: RetentionKind, nextDays: number) => {
     setSaveError(null);
@@ -530,6 +559,32 @@ export function SettingsView() {
                 Kodabi does not detect meetings on its own yet, so this has nothing
                 to act on today.
               </SubLabel>
+
+              <Row label="Echo check">
+                <Button
+                  onClick={runMicTestClick}
+                  loading={runningMicTest}
+                  loadingLabel="Testing…"
+                  className="text-label"
+                >
+                  Run test
+                </Button>
+              </Row>
+              <SubLabel>
+                Plays a short tone through your speakers and listens for it on
+                your microphone, so you can see whether the two stay separate.
+              </SubLabel>
+              {settings.mic_check && !runningMicTest && (
+                <StatusMessage variant="status" compact>
+                  {micCheckSummary(settings.mic_check)} Checked{" "}
+                  {new Date(settings.mic_check.measured_at).toLocaleString()}.
+                </StatusMessage>
+              )}
+              {micTestError && (
+                <StatusMessage variant="error" compact>
+                  Couldn&apos;t run the mic test: {micTestError}
+                </StatusMessage>
+              )}
 
               <RebuildIndexControl />
 

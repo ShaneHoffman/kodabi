@@ -11,6 +11,16 @@ pub enum AudioError {
     #[error("failed to query default {kind} device config: {msg}", kind = .0.device_kind(), msg = .1)]
     DefaultConfig(CaptureSource, String),
 
+    /// Playback (not capture) found no default output device — kept distinct
+    /// from `NoDefaultDevice(CaptureSource::Loopback)` since that variant
+    /// means "no render endpoint to capture as loopback", a different intent
+    /// than "nothing to play a test tone through".
+    #[error("no default output device available")]
+    NoDefaultOutputDevice,
+
+    #[error("failed to query default output device config: {0}")]
+    DefaultOutputConfig(String),
+
     #[error("unsupported device sample format: {0:?}")]
     UnsupportedFormat(cpal::SampleFormat),
 

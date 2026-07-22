@@ -145,6 +145,7 @@ pub fn run() {
             audio_cmds::stop_capture,
             audio_cmds::capture_status,
             audio_cmds::capture_phase,
+            audio_cmds::run_mic_test,
             distill_cmds::distill_session,
             distill_cmds::list_failed_sessions,
             note_cmds::write_note,
