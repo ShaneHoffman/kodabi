@@ -14,6 +14,14 @@ export type CapturePipeline = {
   capture: CaptureStateEvent;
   transcription: TranscriptionState;
   distill: DistillState;
+  /** The `filed` stage id the Inbox has fully presented — vanish-and-toast
+   * played, or the routed row's fill-in settled. Held here rather than in the
+   * Inbox because a distill's terminal `saved` state persists until the next
+   * capture starts, while the Inbox's own state dies with every unmount:
+   * without a shell-held record, re-entering the Inbox would replay the
+   * vanish and the "Filed to <project>" toast for an outcome already seen. */
+  handledFiledId: string | null;
+  markFiledHandled: (id: string) => void;
 };
 
 export const CapturePipelineContext = createContext<CapturePipeline | undefined>(undefined);
