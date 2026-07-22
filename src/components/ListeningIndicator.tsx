@@ -34,8 +34,9 @@ function sourceLine(state: CaptureStateEvent): string | null {
  * It reports CAPTURE only. What transcription and distillation are doing
  * afterwards used to stack up here as extra lines — a bare `SAVED` sitting
  * under `IDLE`, saying nothing about what was saved and long outliving the
- * moment it was true. Those are announcements, not state, and they belong in
- * `CaptureToast`.
+ * moment it was true. That progress now lives where its result will land —
+ * the Inbox placeholder row (`InboxView.tsx`) — and its failures in
+ * `CaptureToast`, which the sidebar foot never has to make room for.
  *
  * The green means precisely one thing: audio is genuinely being recorded. A
  * degraded capture that still has a live source keeps it (it *is* recording,

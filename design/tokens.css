@@ -297,6 +297,9 @@
   --dur-quick: 150ms; /* a control's own colour / fill change */
   --dur-plane: 180ms; /* a row rising onto the raised plane; a toggle knob */
   --dur-settle: 200ms; /* a row leaving a list */
+  --dur-enter: 280ms; /* the Inbox placeholder row arriving at the top of the
+                         queue — the one entrance in the app, earned by being
+                         the other half of distill-and-route (FOUNDING_DOC §4) */
   --dur-wake: 450ms; /* the capture mark waking / settling */
   --dur-wave: 1000ms; /* one waveform bar's rise and fall */
   --dur-pulse: 1600ms; /* starting + reconnecting pulse */

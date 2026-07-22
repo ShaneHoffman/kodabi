@@ -235,9 +235,10 @@ recovered session produces a routed note":
 3. Confirm the spill survived: `<app-data>/sessions/inflight/<…>/mic.f32le` and `system.f32le` exist
    and their size corresponds to roughly (elapsed − ≤`KODABI_FLUSH_SECS`) of 48 kHz `f32`
    (4 bytes/sample). Lower `KODABI_FLUSH_SECS` to tighten the worst-case loss.
-4. Relaunch the app. Startup recovery transcribes the orphan (watch the sidebar status:
-   "Transcribing…" → "Saved" → "Note saved") and deletes the `inflight/` directory; a routed note
-   appears in the vault.
+4. Relaunch the app. Startup recovery transcribes the orphan (watch the Inbox placeholder row:
+   "Transcribing the capture" → "Distilling the meeting", then either the row fills in as the
+   routed note, or it vanishes and a "Filed to \<project\>" toast reports where it went) and deletes
+   the `inflight/` directory; a routed note appears in the vault.
 
 ### Transcription burst
 

@@ -1,6 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { CapturePipelineProvider } from "./CapturePipelineProvider";
 import { CaptureToast } from "./CaptureToast";
 import { DISTILL_STATE_EVENT } from "../events";
 import { emitFromBackend, onCommand, resetTauriMocks } from "../test/tauri";
@@ -25,7 +26,11 @@ const LISTENING = {
  * be settled before anything is emitted. */
 async function renderToast() {
   onCommand("capture_phase", () => IDLE);
-  const result = render(<CaptureToast />);
+  const result = render(
+    <CapturePipelineProvider>
+      <CaptureToast />
+    </CapturePipelineProvider>,
+  );
   await act(async () => {
     await Promise.resolve();
   });
@@ -58,20 +63,27 @@ describe("CaptureToast", () => {
     expect(screen.queryByTestId("capture-toast")).not.toBeInTheDocument();
   });
 
-  it("announces a saved note, then takes itself away", async () => {
-    // The whole reason this is a toast: it is an announcement, not state. It
-    // used to render as a bare `SAVED` line stacked under the sidebar's IDLE
-    // dot, where it stayed long after it was true.
+  it("stays quiet through progress and success, since those now live in the Inbox", async () => {
+    // The whole reason this toast exists now: a failure, not an announcement.
+    // Progress and a saved note render live in the Inbox placeholder instead
+    // (InboxView.test.tsx), so none of the pipeline's non-failure states
+    // should ever surface here.
     await renderToast();
 
-    await distill({ status: "saved", path: "n.md", session_path: "s.jsonl" });
-    expect(screen.getByTestId("capture-toast")).toHaveTextContent("Note saved.");
-    expect(screen.getByRole("status")).toBeInTheDocument();
+    await act(async () => {
+      emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "transcribing" });
+    });
+    expect(screen.queryByTestId("capture-toast")).not.toBeInTheDocument();
 
     await act(async () => {
-      vi.advanceTimersByTime(4000);
+      emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "saved", path: "t.txt" });
     });
+    expect(screen.queryByTestId("capture-toast")).not.toBeInTheDocument();
 
+    await distill({ status: "distilling" });
+    expect(screen.queryByTestId("capture-toast")).not.toBeInTheDocument();
+
+    await distill({ status: "saved", path: "n.md", session_path: "s.jsonl" });
     expect(screen.queryByTestId("capture-toast")).not.toBeInTheDocument();
   });
 
@@ -114,36 +126,14 @@ describe("CaptureToast", () => {
     expect(screen.queryByTestId("capture-toast")).not.toBeInTheDocument();
   });
 
-  it("does not announce a saved transcript, because the note is the result", async () => {
-    // One capture, one announcement. Transcription saving is a step on the way
-    // to the note, and distill is about to speak for both.
+  it("announces a transcription failure too", async () => {
     await renderToast();
 
     await act(async () => {
-      emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "saved", path: "t.txt" });
+      emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "error", message: "boom" });
     });
 
-    expect(screen.queryByTestId("capture-toast")).not.toBeInTheDocument();
-  });
-
-  it("lets a second outcome speak after the first was dismissed", async () => {
-    // The dwell timer is keyed on the notice's identity, so a new outcome is
-    // never silenced by the previous one having been seen out.
-    await renderToast();
-
-    await distill({ status: "saved", path: "a.md", session_path: "a.jsonl" });
-    await act(async () => {
-      vi.advanceTimersByTime(4000);
-    });
-    expect(screen.queryByTestId("capture-toast")).not.toBeInTheDocument();
-
-    // A later capture fails; the toast has to come back.
-    await act(async () => {
-      emitFromBackend(CAPTURE_STATE_EVENT, IDLE);
-    });
-    await distill({ status: "error", message: "boom", session_path: "b.jsonl" });
-
-    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/Couldn't transcribe that capture/);
   });
 
   it("reports a second failure of the same kind after the first was dismissed", async () => {
@@ -169,34 +159,5 @@ describe("CaptureToast", () => {
     await distill({ status: "error", message: "boom again", session_path: "b.jsonl" });
 
     expect(screen.getByRole("alert")).toHaveTextContent(/Couldn't distill that capture/);
-  });
-
-  it("gives a saved note its own full dwell, not the remains of the running one", async () => {
-    // Every non-failed notice dwells for the same length, so the timer has to
-    // be keyed on the notice as well as the delay. Otherwise "Note saved."
-    // inherits whatever was left of "Distilling…"'s clock and can flash past
-    // before it can be read.
-    await renderToast();
-
-    await distill({ status: "distilling" });
-    expect(screen.getByTestId("capture-toast")).toHaveTextContent("Distilling the meeting…");
-
-    await act(async () => {
-      vi.advanceTimersByTime(3000);
-    });
-    await distill({ status: "saved", path: "n.md", session_path: "s.jsonl" });
-    expect(screen.getByTestId("capture-toast")).toHaveTextContent("Note saved.");
-
-    // Past where the first notice's clock would have run out, well short of
-    // this one's.
-    await act(async () => {
-      vi.advanceTimersByTime(3000);
-    });
-    expect(screen.getByTestId("capture-toast")).toHaveTextContent("Note saved.");
-
-    await act(async () => {
-      vi.advanceTimersByTime(1000);
-    });
-    expect(screen.queryByTestId("capture-toast")).not.toBeInTheDocument();
   });
 });
