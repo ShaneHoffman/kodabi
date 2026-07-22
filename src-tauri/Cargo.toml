@@ -26,6 +26,7 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-notification = "2"
 kodabi-core = { path = "../crates/kodabi-core" }
 kodabi-audio = { path = "../crates/kodabi-audio" }
+kodabi-aec = { path = "../crates/kodabi-aec" }
 kodabi-transcribe = { path = "../crates/kodabi-transcribe", optional = true }
 kodabi-embed = { path = "../crates/kodabi-embed", optional = true }
 kodabi-llm = { path = "../crates/kodabi-llm" }

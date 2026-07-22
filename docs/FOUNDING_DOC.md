@@ -105,8 +105,9 @@ The app never calls the Anthropic API directly. Instead:
 ### 3.3 Audio capture (Windows-first)
 
 - **System audio:** WASAPI loopback via the `cpal` crate — captures whatever the speakers play (Teams, Zoom, YouTube, recorded talks). Mature and well-supported.
-- **Microphone:** captured in parallel. On a headset call, your voice never hits system audio, so both streams are required for complete meetings.
-- **Two-channel bonus:** mic channel = you, system channel = them. Crude but useful two-way speaker attribution with zero diarization cost.
+- **Microphone:** captured in parallel. Both streams are required for complete meetings, whether on speakers or a headset.
+- **Two-channel bonus:** mic channel = you, system channel = them. Crude but useful two-way speaker attribution with zero diarization cost. **On speakers, the mic acoustically picks up what they play** — the same audio would otherwise duplicate onto both channels — so the mic channel is run through an echo canceller (`crates/kodabi-aec`, a vendored speexdsp) referenced against the system channel before transcription, and a Settings mic test (`crates/kodabi-audio`'s `mic_test`) lets you see how well the two separate on your setup.
+- **On a headset call, the played audio never acoustically reaches the mic** (headphones don't leak into the room), so there is nothing for the canceller to remove — it degrades to a no-op passthrough.
 - **Controls:** global hotkey + tray/menu toggle to start/stop. Unambiguous visual "listening" state (also the consent story — see 3.7).
 - macOS (ScreenCaptureKit) and Linux (PipeWire monitor) are post-launch, ideally community-contributed.
 

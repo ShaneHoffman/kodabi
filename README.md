@@ -49,9 +49,19 @@ src/                    # React + TypeScript frontend. src/index.css bridges the
                         # typeface trio.
 src-tauri/              # Tauri v2 binary crate — the desktop shell and its three
                         # windows (main, quick capture, capture overlay pill).
-crates/kodabi-core/     # Pure, UI-agnostic, unit-testable data layer that the shell
-                        # depends on. Future SQLite index and MCP query surface live here.
-Cargo.toml              # Cargo workspace manifest (src-tauri + crates/kodabi-core).
+crates/kodabi-core/     # Pure, UI-agnostic, unit-testable data layer: settings, the
+                        # SQLite note index, distill, and the MCP query surface.
+crates/kodabi-audio/    # WASAPI loopback (system audio) and microphone capture via cpal,
+                        # plus the two-channel combiner and the Settings mic test.
+crates/kodabi-aec/      # Acoustic echo cancellation — a safe wrapper over a vendored
+                        # speexdsp echo canceller, cleaning speaker bleed off the mic channel.
+crates/kodabi-transcribe/ # Transcription engines: Parakeet TDT via sherpa-onnx (shipped),
+                        # whisper.cpp (fallback), both cargo-feature-gated.
+crates/kodabi-embed/    # Local embedding backend — bge-small-en-v1.5 via fastembed/ONNX
+                        # Runtime, fully offline at runtime; cargo-feature-gated.
+crates/kodabi-llm/      # The headless Claude Code runner every LLM call (cleanup, distill,
+                        # routing) goes through.
+Cargo.toml              # Cargo workspace manifest (src-tauri + every crates/kodabi-* member).
 package.json            # Frontend package manifest and scripts.
 vite.config.ts, tsconfig*.json, eslint.config.js   # Frontend build/lint config.
 target/, dist/          # Build output (git-ignored).

@@ -2,6 +2,11 @@
 //! and two-channel orchestration logic lives in the `kodabi-audio` crate;
 //! these commands only own the managed [`DualCapture`] and map its status /
 //! aligned-session outputs to serializable IPC DTOs.
+//!
+//! `run_mic_test` is the one command here that isn't capture-status
+//! plumbing: it wraps `kodabi_audio::run_mic_test`'s device I/O and persists
+//! the result through the managed `SettingsState` (`settings_cmds.rs`),
+//! since a mic-test result is exactly that — a stored setting.
 
 use std::sync::Mutex;
 
@@ -12,7 +17,8 @@ use kodabi_audio::{
 };
 use kodabi_core::device::DeviceId;
 use kodabi_core::inflight::{self, InflightSession};
-use tauri::Manager;
+use kodabi_core::settings::{MicCheckOutcome, MicCheckResult, Settings as CoreSettings};
+use tauri::{Emitter, Manager};
 
 /// Default bound on each source's capture-item channel — the slack between a
 /// cpal callback enqueuing a frame and the combiner's coordinator thread
@@ -467,9 +473,89 @@ pub(crate) fn seed_event(
     }
 }
 
+/// Maps `kodabi_audio::MicTestOutcome` onto the persisted
+/// `kodabi_core::settings::MicCheckOutcome` — can't be a `From` impl since
+/// neither type is local to this crate (the orphan rule), so this is the one
+/// place both are in scope. `kodabi-core` stays free of `kodabi-audio`, a
+/// platform-IO crate.
+fn to_settings_outcome(outcome: kodabi_audio::MicTestOutcome) -> MicCheckOutcome {
+    match outcome {
+        kodabi_audio::MicTestOutcome::Headphones => MicCheckOutcome::Headphones,
+        kodabi_audio::MicTestOutcome::Speakers { echo_db, delay_ms } => {
+            MicCheckOutcome::Speakers { echo_db, delay_ms }
+        }
+        kodabi_audio::MicTestOutcome::MicSilent => MicCheckOutcome::MicSilent,
+    }
+}
+
+/// Runs the Settings mic test: plays a short tone through the default output
+/// device while recording the default microphone, classifies whether (and
+/// how strongly) the mic heard it, and persists the result. Refuses while a
+/// capture is in progress — a second stream on the mic device would fight
+/// the live one for it, and the tone would land in the meeting's own
+/// recording.
+///
+/// `async`, with the test itself on a blocking worker: the test blocks for a
+/// few seconds by construction (pre-roll + tone + post-roll, and up to the
+/// playback timeout on a broken device), and a sync command would hold the
+/// main thread's event loop — tray, hotkeys, every window's IPC — for that
+/// whole span, the same freeze the note commands are async to avoid.
+#[tauri::command]
+pub async fn run_mic_test(
+    app: tauri::AppHandle,
+    capture: tauri::State<'_, CaptureState>,
+    settings: tauri::State<'_, crate::settings_cmds::SettingsState>,
+) -> Result<CoreSettings, String> {
+    if capture.is_active()? {
+        return Err("stop the current capture before running the mic test".to_string());
+    }
+    let outcome = tauri::async_runtime::spawn_blocking(kodabi_audio::run_mic_test)
+        .await
+        .map_err(|err| err.to_string())?
+        .map_err(|err| err.to_string())?;
+    // Re-check now that the command no longer serializes against capture
+    // starts: a hotkey/tray start during the test puts meeting audio into the
+    // measurement (and the tone into the meeting), so the classification is
+    // untrustworthy — discard it rather than persist a corrupted result.
+    if capture.is_active()? {
+        return Err(
+            "a capture started during the mic test, so its result was discarded. Run the test again after stopping".to_string(),
+        );
+    }
+    let result = MicCheckResult {
+        outcome: to_settings_outcome(outcome),
+        measured_at: Utc::now(),
+    };
+    let updated = settings.update(|s| s.mic_check = Some(result))?;
+    let _ = app.emit(crate::settings_cmds::SETTINGS_CHANGED_EVENT, updated);
+    Ok(updated)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mic_test_outcome_maps_onto_the_stored_shape() {
+        assert_eq!(
+            to_settings_outcome(kodabi_audio::MicTestOutcome::Headphones),
+            MicCheckOutcome::Headphones
+        );
+        assert_eq!(
+            to_settings_outcome(kodabi_audio::MicTestOutcome::MicSilent),
+            MicCheckOutcome::MicSilent
+        );
+        assert_eq!(
+            to_settings_outcome(kodabi_audio::MicTestOutcome::Speakers {
+                echo_db: 12.5,
+                delay_ms: 85.0,
+            }),
+            MicCheckOutcome::Speakers {
+                echo_db: 12.5,
+                delay_ms: 85.0,
+            }
+        );
+    }
 
     #[test]
     fn capture_status_is_idle_before_any_start() {
