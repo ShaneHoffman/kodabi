@@ -36,9 +36,11 @@ const TOAST_FADE_MS = 200;
  * note lands before its outcome counts as fully presented — the fill-in has
  * played and there is nothing left for a remount to replay. */
 const FILL_IN_MS = 200;
-/** Covers the two ways a stage could otherwise wait forever: a dev/mock
- * build never follows a saved transcript with a distill, and an Inbox-routed
- * save's vault refetch can fail or never land. */
+/** Covers the three ways a stage could otherwise wait forever: a stop the
+ * backend never acknowledges (a mis-tap under its minimum session duration
+ * emits nothing at all), a dev/mock build never following a saved transcript
+ * with a distill, and an Inbox-routed save whose vault refetch fails or
+ * never lands. */
 const GRACE_MS = 10_000;
 
 /**
@@ -163,7 +165,7 @@ export function InboxView() {
  * `savedPath` too, so the toast it hands off to can resolve the exact note.
  */
 type PlaceholderStage =
-  | { id: string; kind: "transcribing" }
+  | { id: string; kind: "transcribing"; awaitingTranscribe: boolean }
   | { id: string; kind: "distilling"; awaitingDistill: boolean }
   | { id: string; kind: "awaitingInboxHandoff" }
   | { id: string; kind: "filedToProject"; slug: string; savedPath: string };
@@ -175,7 +177,9 @@ function resolvePlaceholderStage(
   handledFiledId: string | null,
 ): PlaceholderStage | null {
   if (stage === null) return null;
-  if (stage.kind === "transcribing") return { id: stage.id, kind: "transcribing" };
+  if (stage.kind === "transcribing") {
+    return { id: stage.id, kind: "transcribing", awaitingTranscribe: stage.awaitingTranscribe };
+  }
   if (stage.kind === "distilling") {
     return { id: stage.id, kind: "distilling", awaitingDistill: stage.awaitingDistill };
   }
@@ -271,13 +275,17 @@ function usePipelinePresence(
   const visible = resolved !== null && resolved.id !== waivedId;
   const vanishing = visible && resolved?.kind === "filedToProject";
 
-  // Covers a dev/mock build (distill never follows a saved transcript) and
-  // an Inbox-routed save whose vault refetch fails or never lands. Without
-  // this the placeholder would sit on "Distilling the meeting" forever.
+  // Covers a stop the backend never acknowledges (a mis-tap under its
+  // minimum session duration emits nothing at all), a dev/mock build
+  // (distill never follows a saved transcript), and an Inbox-routed save
+  // whose vault refetch fails or never lands. Without this the placeholder
+  // would sit on "Transcribing the capture" or "Distilling the meeting"
+  // forever.
   const awaitingResolution =
     visible &&
     resolved !== null &&
-    ((resolved.kind === "distilling" && resolved.awaitingDistill) ||
+    ((resolved.kind === "transcribing" && resolved.awaitingTranscribe) ||
+      (resolved.kind === "distilling" && resolved.awaitingDistill) ||
       resolved.kind === "awaitingInboxHandoff");
   useTimeout(
     () => resolved && setWaivedId(resolved.id),

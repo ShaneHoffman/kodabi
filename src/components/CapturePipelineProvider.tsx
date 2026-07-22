@@ -15,6 +15,12 @@ import { useTranscriptionState } from "../useTranscriptionState";
  * presented (`handledFiledId`): the distill hook keeps reporting `saved`
  * until the next capture starts, and this record is what stops a remounting
  * Inbox from replaying the vanish and the filed toast for it.
+ *
+ * And it records the stop itself (`stopPending`): stops land from the tray,
+ * a global shortcut, or the QuickCapture window, so no local handler in this
+ * window sees them all — but every one flows through `capture:state`, and
+ * the phase leaving listening/degraded for idle is the transition that says
+ * a pipeline is due before the backend has said anything.
  */
 export function CapturePipelineProvider({ children }: { children: ReactNode }) {
   const capture = useCaptureState();
@@ -30,6 +36,26 @@ export function CapturePipelineProvider({ children }: { children: ReactNode }) {
     setHandledFiledId(null);
   }
 
+  // The stop is only observable as this transition, so it's recorded with
+  // the prev/current compare (`QuickCapture`'s `wasEngaged` shape).
+  // `starting` falling back to `idle` is a failed start, not a stop: nothing
+  // was recorded, so no pipeline is coming.
+  const [stopPending, setStopPending] = useState(false);
+  const [previousPhase, setPreviousPhase] = useState(capture.phase);
+  if (previousPhase !== capture.phase) {
+    setPreviousPhase(capture.phase);
+    if (
+      capture.phase === "idle" &&
+      (previousPhase === "listening" || previousPhase === "degraded")
+    ) {
+      setStopPending(true);
+    }
+  }
+  // A new capture starting is this record's run boundary too.
+  if (isCaptureActive(capture.phase) && stopPending) {
+    setStopPending(false);
+  }
+
   const value = useMemo(
     () => ({
       capture,
@@ -37,8 +63,9 @@ export function CapturePipelineProvider({ children }: { children: ReactNode }) {
       distill,
       handledFiledId,
       markFiledHandled: setHandledFiledId,
+      stopPending,
     }),
-    [capture, transcription, distill, handledFiledId],
+    [capture, transcription, distill, handledFiledId, stopPending],
   );
 
   return <CapturePipelineContext value={value}>{children}</CapturePipelineContext>;
