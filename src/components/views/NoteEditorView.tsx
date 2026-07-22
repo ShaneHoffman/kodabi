@@ -13,10 +13,12 @@ import {
   type NoteType,
 } from "../../useNotes";
 import { useProjects } from "../../useProjects";
+import { isSessionSource } from "../../useSessions";
 import { applyMarkup, selectionAnchor } from "../../textareaCaret";
 import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
+import { SessionArtifactsSection } from "./SessionArtifactsSection";
 import "./NoteEditorView.css";
 
 type Props = {
@@ -165,6 +167,13 @@ function ReadNote({
               This note has no body yet. Choose Edit to write one.
             </StatusMessage>
           </div>
+        )}
+
+        {/* The source pairing: only a note distilled from a captured session
+            has one — a keyword source (manual, quick-capture) names no
+            artifact, so the section (and its fetch) never exists for those. */}
+        {isSessionSource(note.source) && (
+          <SessionArtifactsSection source={note.source} />
         )}
       </article>
     </ViewFrame>

@@ -410,6 +410,15 @@
   --lead-doc-section: 28px; /* Note: above a section header inside the body */
   --lead-doc-tasks: 14px; /* Note: above the action-item list, which carries
                              its own row gap and so needs less air than prose */
+  --lead-session: 28px; /* Note: the body to the source-pairing section, and
+                           between that section's own blocks — the section
+                           leads like an in-body header, not like the doc */
+  --row-transcript-y: 10px; /* Note: between two transcript turns — tighter
+                               than prose, it reads as an exchange */
+  --transcript-col-offset: 48px; /* Note: the turn's m:ss column — sized for
+                                    an hour-long session's 1:23:45 */
+  --transcript-col-speaker: 56px; /* Note: the speaker column — sized for the
+                                     widest label, "Unknown" */
   --lead-search: 2px; /* Search: the scope line to the results */
   --lead-footnote: 22px; /* Needs attention: the cards to the reassurance */
   --gap-card: 14px; /* between two pre-lifted cards */

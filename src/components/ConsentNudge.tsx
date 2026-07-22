@@ -134,8 +134,8 @@ export function ConsentNudge({ onClose }: Props) {
           person is sitting.
         </p>
         <p>
-          Transcripts stay on this device as plain files. Choose how long
-          Kodabi keeps the raw transcripts:
+          Transcripts and recordings stay on this device as plain files.
+          Choose how long Kodabi keeps them:
         </p>
       </div>
 

@@ -1,0 +1,50 @@
+/* ============================================================
+   Session source — the pairing under a distilled note.
+
+   Chrome below the document, not part of it: the note body owns "no rule, no
+   box anywhere", so the one hairline that separates summary from source sits
+   here, on the section. Everything below it speaks the mono metadata voice
+   until the transcript text itself, which reads in the serif at the
+   transcript's own leading (--lh-transcript, and this section is its debut).
+   ============================================================ */
+
+.session-artifacts {
+  margin-top: var(--lead-session);
+  /* A hairline is an inset shadow, never a border (docs/UI_CONVENTIONS.md). */
+  box-shadow: inset 0 1px 0 var(--edge-rule);
+  padding-top: var(--lead-session);
+}
+
+.session-artifacts__recording + .session-artifacts__transcript,
+.session-artifacts__recording + .session-artifacts__unavailable {
+  margin-top: var(--lead-session);
+}
+
+/* Native playback chrome, full measure: the seek bar is the whole point of
+   pairing audio with a transcript, so it gets the doc's width to scrub in. */
+.session-artifacts__player {
+  width: 100%;
+}
+
+.session-artifacts__turns {
+  margin-top: var(--space-xs);
+}
+
+/* One turn of the exchange: offset, speaker, text on a shared baseline. The
+   two mono columns are fixed so fifty turns read as three columns, not a
+   ragged list. */
+.session-artifacts__turn {
+  display: grid;
+  grid-template-columns: var(--transcript-col-offset) var(--transcript-col-speaker) 1fr;
+  gap: var(--space-2xs);
+  align-items: baseline;
+}
+
+.session-artifacts__turn + .session-artifacts__turn {
+  margin-top: var(--row-transcript-y);
+}
+
+.session-artifacts__turn-text {
+  line-height: var(--lh-transcript);
+  text-wrap: pretty;
+}
