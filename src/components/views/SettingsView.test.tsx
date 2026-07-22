@@ -15,6 +15,7 @@ const DEFAULTS: Settings = {
   retention: { policy: "keep_all" },
   overlay: { manual_captures: false, auto_captures: true },
   appearance: { theme: "system" },
+  mic_check: null,
 };
 
 function settingsWith(overlay: OverlaySettings): Settings {
@@ -247,5 +248,95 @@ describe("SettingsView appearance", () => {
     await user.click(screen.getByRole("switch", { name: "Reduce motion" }));
 
     expect(document.documentElement).not.toHaveAttribute("data-reduce-motion");
+  });
+});
+
+describe("SettingsView mic test", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  function runTestButton(): HTMLElement {
+    return screen.getByRole("button", { name: "Run test" });
+  }
+
+  it("shows no result line until a test has ever run", async () => {
+    await renderSeeded(DEFAULTS, "Capture");
+
+    expect(screen.queryByText(/Checked/)).not.toBeInTheDocument();
+  });
+
+  it("reports headphones and adopts the echoed settings", async () => {
+    const user = userEvent.setup();
+    const stored: Settings = {
+      ...DEFAULTS,
+      mic_check: { outcome: "headphones", measured_at: "2026-07-22T00:48:18Z" },
+    };
+    onCommand("run_mic_test", () => stored);
+    await renderSeeded(DEFAULTS, "Capture");
+
+    await user.click(runTestButton());
+
+    expect(invoke).toHaveBeenCalledWith("run_mic_test");
+    expect(
+      await screen.findByText(/Headphones detected\. Your microphone and speaker channels stay separate\./),
+    ).toBeInTheDocument();
+  });
+
+  it("reports speakers with the measured echo and delay", async () => {
+    const user = userEvent.setup();
+    const stored: Settings = {
+      ...DEFAULTS,
+      mic_check: {
+        outcome: "speakers",
+        echo_db: 12.5,
+        delay_ms: 85,
+        measured_at: "2026-07-22T00:48:18Z",
+      },
+    };
+    onCommand("run_mic_test", () => stored);
+    await renderSeeded(DEFAULTS, "Capture");
+
+    await user.click(runTestButton());
+
+    expect(
+      await screen.findByText(/Speakers detected\. Your microphone hears them \(about 12\.5 dB, 85 ms delay\)\./),
+    ).toBeInTheDocument();
+  });
+
+  it("reports mic silent", async () => {
+    const user = userEvent.setup();
+    const stored: Settings = {
+      ...DEFAULTS,
+      mic_check: { outcome: "mic_silent", measured_at: "2026-07-22T00:48:18Z" },
+    };
+    onCommand("run_mic_test", () => stored);
+    await renderSeeded(DEFAULTS, "Capture");
+
+    await user.click(runTestButton());
+
+    expect(
+      await screen.findByText(/No signal from your microphone\./),
+    ).toBeInTheDocument();
+  });
+
+  it("surfaces a failure without discarding a previously stored result", async () => {
+    const user = userEvent.setup();
+    const seeded: Settings = {
+      ...DEFAULTS,
+      mic_check: { outcome: "headphones", measured_at: "2026-07-22T00:48:18Z" },
+    };
+    onCommand("run_mic_test", () => {
+      throw "stop the current capture before running the mic test";
+    });
+    await renderSeeded(seeded, "Capture");
+
+    await user.click(runTestButton());
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "stop the current capture before running the mic test",
+    );
+    // The last real result is still what's shown underneath the error.
+    expect(screen.getByText(/Headphones detected/)).toBeInTheDocument();
   });
 });

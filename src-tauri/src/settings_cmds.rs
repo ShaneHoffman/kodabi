@@ -52,8 +52,10 @@ impl SettingsState {
 
     /// Applies `mutate` to the settings, persists the result, and returns it.
     /// The disk write happens under the lock so concurrent updates can't
-    /// interleave into a torn file.
-    fn update(&self, mutate: impl FnOnce(&mut Settings)) -> Result<Settings, String> {
+    /// interleave into a torn file. `pub(crate)` so `audio_cmds::run_mic_test`
+    /// can persist its result through the same write-through path other
+    /// settings mutations use.
+    pub(crate) fn update(&self, mutate: impl FnOnce(&mut Settings)) -> Result<Settings, String> {
         let mut guard = self
             .current
             .lock()

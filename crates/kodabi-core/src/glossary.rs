@@ -308,7 +308,10 @@ terms:
     fn upsert_updates_existing_term_case_insensitively() {
         let mut glossary = Glossary::default();
         glossary
-            .upsert(term("MERIDIAN", "First definition.", &[]), OnConflict::Error)
+            .upsert(
+                term("MERIDIAN", "First definition.", &[]),
+                OnConflict::Error,
+            )
             .unwrap();
 
         let created = glossary
@@ -330,10 +333,16 @@ terms:
     fn upsert_on_conflict_error_rejects_existing_term() {
         let mut glossary = Glossary::default();
         glossary
-            .upsert(term("MERIDIAN", "First definition.", &[]), OnConflict::Error)
+            .upsert(
+                term("MERIDIAN", "First definition.", &[]),
+                OnConflict::Error,
+            )
             .unwrap();
 
-        let result = glossary.upsert(term("meridian", "Second definition.", &[]), OnConflict::Error);
+        let result = glossary.upsert(
+            term("meridian", "Second definition.", &[]),
+            OnConflict::Error,
+        );
 
         assert!(matches!(result, Err(GlossaryError::Conflict { term }) if term == "meridian"));
         assert_eq!(glossary.terms().len(), 1);
@@ -361,13 +370,19 @@ terms:
 
         let mut glossary_a = Glossary::default();
         glossary_a
-            .upsert(term("MERIDIAN", "Client A's project.", &[]), OnConflict::Error)
+            .upsert(
+                term("MERIDIAN", "Client A's project.", &[]),
+                OnConflict::Error,
+            )
             .unwrap();
         glossary_a.save(dir_a.path()).unwrap();
 
         let mut glossary_b = Glossary::default();
         glossary_b
-            .upsert(term("TeeTrack", "Client B's vendor.", &[]), OnConflict::Error)
+            .upsert(
+                term("TeeTrack", "Client B's vendor.", &[]),
+                OnConflict::Error,
+            )
             .unwrap();
         glossary_b.save(dir_b.path()).unwrap();
 
@@ -395,7 +410,11 @@ terms:
         let mut glossary = Glossary::default();
         glossary
             .upsert(
-                term("TeeTrack", "Tee-sheet / POS vendor.", &["t-track", "tee-track"]),
+                term(
+                    "TeeTrack",
+                    "Tee-sheet / POS vendor.",
+                    &["t-track", "tee-track"],
+                ),
                 OnConflict::Error,
             )
             .unwrap();

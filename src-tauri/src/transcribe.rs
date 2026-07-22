@@ -20,6 +20,7 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
+use kodabi_aec::EchoCanceller;
 use kodabi_audio::{AlignedSession, CombinedSession, MonoResampler, SessionChannel, SpillReader};
 use kodabi_core::device::DeviceId;
 use kodabi_core::glossary::Glossary;
@@ -348,8 +349,20 @@ fn run_spilled(
         Resampling16kSource::open(mic_path, source_rate).map_err(|err| err.to_string())?;
     let mut system =
         Resampling16kSource::open(system_path, source_rate).map_err(|err| err.to_string())?;
-    let mut channels: [(Channel, &mut dyn AudioSource); 2] =
-        [(Channel::You, &mut mic), (Channel::Them, &mut system)];
+    // A second, independent reader over the same spill file: the AEC
+    // reference stream. It must be a distinct `AudioSource` instance from
+    // `system` above (not a shared handle) because the You and Them channels
+    // are transcribed one after the other, each fully draining its source —
+    // sharing one reader between the reference and the Them channel would
+    // have the second consumer see an already-drained stream.
+    let mut system_reference =
+        Resampling16kSource::open(system_path, source_rate).map_err(|err| err.to_string())?;
+    let mut cleaned_mic =
+        EchoCancelledSource::new(&mut mic, &mut system_reference).map_err(|err| err.to_string())?;
+    let mut channels: [(Channel, &mut dyn AudioSource); 2] = [
+        (Channel::You, &mut cleaned_mic),
+        (Channel::Them, &mut system),
+    ];
     persist(app, &mut channels, captured_at)
 }
 
@@ -368,8 +381,15 @@ fn run_in_memory(
         .map_err(|err| err.to_string())?;
     let mut mic = SliceSource::new(&mic_pcm, IN_MEMORY_CHUNK_SAMPLES);
     let mut system = SliceSource::new(&system_pcm, IN_MEMORY_CHUNK_SAMPLES);
-    let mut channels: [(Channel, &mut dyn AudioSource); 2] =
-        [(Channel::You, &mut mic), (Channel::Them, &mut system)];
+    // See `run_spilled`'s matching comment: the AEC reference must be its own
+    // reader, independent of the one the Them channel drains.
+    let mut system_reference = SliceSource::new(&system_pcm, IN_MEMORY_CHUNK_SAMPLES);
+    let mut cleaned_mic =
+        EchoCancelledSource::new(&mut mic, &mut system_reference).map_err(|err| err.to_string())?;
+    let mut channels: [(Channel, &mut dyn AudioSource); 2] = [
+        (Channel::You, &mut cleaned_mic),
+        (Channel::Them, &mut system),
+    ];
     persist(app, &mut channels, captured_at)
 }
 
@@ -467,6 +487,141 @@ impl AudioSource for Resampling16kSource {
                 }
             }
         }
+    }
+}
+
+/// Echo canceller frame size (20 ms at [`ENGINE_SAMPLE_RATE_HZ`]) —
+/// speexdsp's documented sweet spot is 10-20 ms.
+const AEC_FRAME_SIZE: usize = (ENGINE_SAMPLE_RATE_HZ as usize / 1000) * 20;
+
+/// Echo canceller tail length (256 ms at [`ENGINE_SAMPLE_RATE_HZ`]) — well
+/// past the acoustic delay between a speaker and the microphone that hears
+/// it, which is typically under 250 ms even for a wireless setup.
+const AEC_FILTER_LENGTH: usize = (ENGINE_SAMPLE_RATE_HZ as usize / 1000) * 256;
+
+/// cpal/dasp's f32-PCM convention (also used by `kodabi_audio::convert`):
+/// full-scale is ±1.0, scaled against `i16::MIN`'s magnitude so the two
+/// conversions are exact inverses at zero and never overflow on the clamp.
+const PCM_I16_SCALE: f32 = 32768.0;
+
+/// Converts `src` to `i16` into `dst`, zero-padding any remainder of `dst`
+/// beyond `src`'s length — the shared tail-frame and silent-reference padding
+/// [`EchoCancelledSource`] needs, in one pass.
+fn f32_to_i16_into(src: &[f32], dst: &mut [i16]) {
+    for (out, &sample) in dst.iter_mut().zip(src.iter()) {
+        *out = (sample * PCM_I16_SCALE).clamp(i16::MIN as f32, i16::MAX as f32) as i16;
+    }
+    for out in dst.iter_mut().skip(src.len()) {
+        *out = 0;
+    }
+}
+
+/// Wraps a mic [`AudioSource`] and cancels the echo of a reference (the
+/// system/loopback channel) [`AudioSource`] out of it — the fix for the
+/// acoustic crosstalk a speaker-and-microphone setup produces (the mic
+/// picking up what the speakers play, duplicating the Them channel's speech
+/// onto You). Both inputs must already be [`ENGINE_SAMPLE_RATE_HZ`] mono
+/// `f32`.
+///
+/// Yields exactly as many samples, in the same order, as `mic` would have on
+/// its own: the canceller only ever cleans a frame, it never resizes the
+/// timeline the You channel's segment timestamps are measured against. A
+/// reference that runs short (or is silent throughout, e.g. a mic-only
+/// capture) is padded with silence, which is speexdsp's natural no-op — the
+/// output degrades to a passthrough of `mic` rather than failing.
+struct EchoCancelledSource<'a> {
+    mic: &'a mut dyn AudioSource,
+    reference: &'a mut dyn AudioSource,
+    canceller: EchoCanceller,
+    /// This call's mic samples, copied out of `mic`'s borrowed buffer so
+    /// `mic` can be read again (`fill_reference`, the next call) while this
+    /// buffer is still being processed.
+    mic_scratch: Vec<f32>,
+    /// Reference samples pulled ahead of what's been consumed so far —
+    /// `mic`'s and `reference`'s upstream chunk boundaries rarely line up.
+    reference_buffer: Vec<f32>,
+    reference_finished: bool,
+    mic_frame: Vec<i16>,
+    reference_frame: Vec<i16>,
+    out_frame: Vec<i16>,
+    out: Vec<f32>,
+}
+
+impl<'a> EchoCancelledSource<'a> {
+    fn new(mic: &'a mut dyn AudioSource, reference: &'a mut dyn AudioSource) -> io::Result<Self> {
+        let canceller =
+            EchoCanceller::new(ENGINE_SAMPLE_RATE_HZ, AEC_FRAME_SIZE, AEC_FILTER_LENGTH)
+                .map_err(io::Error::other)?;
+        Ok(EchoCancelledSource {
+            mic,
+            reference,
+            canceller,
+            mic_scratch: Vec::new(),
+            reference_buffer: Vec::new(),
+            reference_finished: false,
+            mic_frame: vec![0i16; AEC_FRAME_SIZE],
+            reference_frame: vec![0i16; AEC_FRAME_SIZE],
+            out_frame: vec![0i16; AEC_FRAME_SIZE],
+            out: Vec::new(),
+        })
+    }
+
+    /// Tops up `reference_buffer` to at least `needed` samples, or until the
+    /// reference source is exhausted.
+    fn fill_reference(&mut self, needed: usize) -> io::Result<()> {
+        while self.reference_buffer.len() < needed && !self.reference_finished {
+            match self.reference.next_chunk()? {
+                Some(chunk) => self.reference_buffer.extend_from_slice(chunk),
+                None => self.reference_finished = true,
+            }
+        }
+        Ok(())
+    }
+}
+
+impl AudioSource for EchoCancelledSource<'_> {
+    fn next_chunk(&mut self) -> io::Result<Option<&[f32]>> {
+        {
+            // Scoped so `mic_chunk`'s borrow of `self.mic` ends here — the
+            // rest of this method needs to borrow other fields of `self`.
+            let mic_chunk = match self.mic.next_chunk()? {
+                Some(chunk) => chunk,
+                None => return Ok(None),
+            };
+            self.mic_scratch.clear();
+            self.mic_scratch.extend_from_slice(mic_chunk);
+        }
+
+        self.fill_reference(self.mic_scratch.len())?;
+
+        self.out.clear();
+        let mut offset = 0;
+        while offset < self.mic_scratch.len() {
+            let frame_len = AEC_FRAME_SIZE.min(self.mic_scratch.len() - offset);
+            let ref_len = frame_len.min(self.reference_buffer.len());
+
+            f32_to_i16_into(
+                &self.mic_scratch[offset..offset + frame_len],
+                &mut self.mic_frame,
+            );
+            f32_to_i16_into(&self.reference_buffer[..ref_len], &mut self.reference_frame);
+
+            self.canceller
+                .cancel(&self.mic_frame, &self.reference_frame, &mut self.out_frame)
+                .map_err(io::Error::other)?;
+            self.out.extend(
+                self.out_frame[..frame_len]
+                    .iter()
+                    .map(|&s| s as f32 / PCM_I16_SCALE),
+            );
+
+            if ref_len > 0 {
+                self.reference_buffer.drain(..ref_len);
+            }
+            offset += frame_len;
+        }
+
+        Ok(Some(&self.out))
     }
 }
 
@@ -674,6 +829,94 @@ mod tests {
         write_metrics_line(
             &sample_timings(),
             "Z:\\definitely\\not\\a\\real\\path.jsonl",
+        );
+    }
+
+    /// A cheap deterministic pseudo-random generator, scaled into the f32 PCM
+    /// range — avoids adding a `rand` dependency for synthetic test audio.
+    fn lcg_noise_f32(len: usize, seed: u32) -> Vec<f32> {
+        let mut state = seed;
+        (0..len)
+            .map(|_| {
+                state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                ((state >> 16) as i16 as f32) / (4.0 * PCM_I16_SCALE)
+            })
+            .collect()
+    }
+
+    fn rms(samples: &[f32]) -> f64 {
+        let sum_sq: f64 = samples.iter().map(|&s| (s as f64) * (s as f64)).sum();
+        (sum_sq / samples.len() as f64).sqrt()
+    }
+
+    fn drain_all(source: &mut dyn AudioSource) -> Vec<f32> {
+        let mut out = Vec::new();
+        while let Some(chunk) = source.next_chunk().unwrap() {
+            out.extend_from_slice(chunk);
+        }
+        out
+    }
+
+    /// The property the You channel's segment timing depends on: cancelling
+    /// echo must never grow or shrink the timeline, only clean it.
+    #[test]
+    fn echo_cancelled_source_preserves_sample_count() {
+        // Deliberately not a whole multiple of `AEC_FRAME_SIZE` or of the
+        // sources' own chunk size, to exercise the tail-frame padding path.
+        let total = AEC_FRAME_SIZE * 50 + 37;
+        let mic = lcg_noise_f32(total, 1);
+        let reference = lcg_noise_f32(total, 2);
+        let mut mic_source = SliceSource::new(&mic, 4000);
+        let mut reference_source = SliceSource::new(&reference, 4000);
+        let mut cleaned = EchoCancelledSource::new(&mut mic_source, &mut reference_source).unwrap();
+
+        assert_eq!(drain_all(&mut cleaned).len(), total);
+    }
+
+    /// The bug this crate exists to fix: a mic channel that is mostly a
+    /// delayed, attenuated copy of the reference (acoustic speaker bleed)
+    /// must come out the other side with most of that echo removed.
+    #[test]
+    fn echo_cancelled_source_adapts_out_a_pure_echo() {
+        let total_frames = 200; // several seconds — enough for MDF to converge
+        let total = total_frames * AEC_FRAME_SIZE;
+        let reference = lcg_noise_f32(total, 42);
+        let delay = 240; // 15ms at 16kHz, comfortably inside the 256ms tail
+        let mut mic = vec![0.0f32; total];
+        for i in delay..total {
+            mic[i] = reference[i - delay] * 0.5;
+        }
+        let mut mic_source = SliceSource::new(&mic, 4000);
+        let mut reference_source = SliceSource::new(&reference, 4000);
+        let mut cleaned = EchoCancelledSource::new(&mut mic_source, &mut reference_source).unwrap();
+
+        let out = drain_all(&mut cleaned);
+        let tail = total - ENGINE_SAMPLE_RATE_HZ as usize..total;
+        let echo_rms = rms(&mic[tail.clone()]);
+        let out_rms = rms(&out[tail]);
+        assert!(
+            out_rms < echo_rms * 0.5,
+            "expected the echo adapted well below the original (echo_rms={echo_rms}, out_rms={out_rms})"
+        );
+    }
+
+    /// A mic-only capture (no loopback, or a silent one) must degrade to a
+    /// passthrough rather than mangling or dropping the near-end signal.
+    #[test]
+    fn echo_cancelled_source_passes_through_with_silent_reference() {
+        let total = AEC_FRAME_SIZE * 20;
+        let mic = lcg_noise_f32(total, 7);
+        let silence = vec![0.0f32; total];
+        let mut mic_source = SliceSource::new(&mic, 4000);
+        let mut reference_source = SliceSource::new(&silence, 4000);
+        let mut cleaned = EchoCancelledSource::new(&mut mic_source, &mut reference_source).unwrap();
+
+        let out = drain_all(&mut cleaned);
+        let mic_rms = rms(&mic);
+        let out_rms = rms(&out);
+        assert!(
+            out_rms > mic_rms * 0.5,
+            "expected the near-end signal to mostly survive a silent reference (mic_rms={mic_rms}, out_rms={out_rms})"
         );
     }
 }

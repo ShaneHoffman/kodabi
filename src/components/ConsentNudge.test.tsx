@@ -18,6 +18,7 @@ const ACKNOWLEDGED: Settings = {
   retention: { policy: "keep_all" },
   overlay: { manual_captures: false, auto_captures: true },
   appearance: { theme: "system" },
+  mic_check: null,
 };
 
 function primaryButton(): HTMLElement {
