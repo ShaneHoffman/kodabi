@@ -14,9 +14,9 @@ use crate::error::{AudioError, Result};
 use crate::resample::MonoResampler;
 
 /// How long to keep polling for the playback callback to finish before
-/// giving up — a stuck or disconnected device must not hang the caller
-/// forever (the mic test's whole point is to run and report, even on a
-/// broken audio setup).
+/// giving up with an error — a stuck or disconnected device must not hang
+/// the caller forever, and it must not report success either: a tone that
+/// never played would otherwise classify as "the mic didn't hear it".
 const PLAYBACK_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// A little silence after the last real sample is handed to the callback, so
@@ -79,6 +79,11 @@ pub fn play_blocking(mono: &[f32], sample_rate: u32) -> Result<()> {
     let deadline = Instant::now() + PLAYBACK_TIMEOUT;
     while !done.load(Ordering::Acquire) && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
+    }
+    if !done.load(Ordering::Acquire) {
+        return Err(AudioError::Play(
+            "output device did not finish rendering before the timeout".to_string(),
+        ));
     }
     std::thread::sleep(DRAIN_TAIL);
     Ok(())

@@ -494,8 +494,14 @@ fn to_settings_outcome(outcome: kodabi_audio::MicTestOutcome) -> MicCheckOutcome
 /// capture is in progress — a second stream on the mic device would fight
 /// the live one for it, and the tone would land in the meeting's own
 /// recording.
+///
+/// `async`, with the test itself on a blocking worker: the test blocks for a
+/// few seconds by construction (pre-roll + tone + post-roll, and up to the
+/// playback timeout on a broken device), and a sync command would hold the
+/// main thread's event loop — tray, hotkeys, every window's IPC — for that
+/// whole span, the same freeze the note commands are async to avoid.
 #[tauri::command]
-pub fn run_mic_test(
+pub async fn run_mic_test(
     app: tauri::AppHandle,
     capture: tauri::State<'_, CaptureState>,
     settings: tauri::State<'_, crate::settings_cmds::SettingsState>,
@@ -503,7 +509,19 @@ pub fn run_mic_test(
     if capture.is_active()? {
         return Err("stop the current capture before running the mic test".to_string());
     }
-    let outcome = kodabi_audio::run_mic_test().map_err(|err| err.to_string())?;
+    let outcome = tauri::async_runtime::spawn_blocking(kodabi_audio::run_mic_test)
+        .await
+        .map_err(|err| err.to_string())?
+        .map_err(|err| err.to_string())?;
+    // Re-check now that the command no longer serializes against capture
+    // starts: a hotkey/tray start during the test puts meeting audio into the
+    // measurement (and the tone into the meeting), so the classification is
+    // untrustworthy — discard it rather than persist a corrupted result.
+    if capture.is_active()? {
+        return Err(
+            "a capture started during the mic test, so its result was discarded. Run the test again after stopping".to_string(),
+        );
+    }
     let result = MicCheckResult {
         outcome: to_settings_outcome(outcome),
         measured_at: Utc::now(),
