@@ -171,7 +171,7 @@ fn invoke(config: &ClaudeConfig, request: &LlmRequest) -> Result<String, LlmRunE
         .clone()
         .unwrap_or_else(|| PathBuf::from("claude"));
 
-    let mut command = Command::new(program);
+    let mut command = hidden_command(program);
     command
         .arg("-p")
         .arg("--output-format")
@@ -256,14 +256,37 @@ fn wait_with_timeout(
 
 #[cfg(windows)]
 fn kill_process(pid: u32) {
-    let _ = Command::new("taskkill")
+    let _ = hidden_command("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .output();
 }
 
 #[cfg(not(windows))]
 fn kill_process(pid: u32) {
-    let _ = Command::new("kill").arg("-9").arg(pid.to_string()).output();
+    let _ = hidden_command("kill")
+        .arg("-9")
+        .arg(pid.to_string())
+        .output();
+}
+
+/// `CREATE_NO_WINDOW` (Win32 process-creation flag): the child gets a console
+/// but no console window. Kodabi's release build is a GUI-subsystem app with
+/// no console of its own, so without this every spawned console process
+/// (`claude`, `taskkill`) pops a visible terminal on the user's screen.
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// `Command::new` that never pops a console window on Windows. Every spawn in
+/// this crate goes through this constructor rather than `Command::new`
+/// directly.
+fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
 }
 
 /// Envelope shape from `claude -p --output-format json`. On failure, the
