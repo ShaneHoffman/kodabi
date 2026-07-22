@@ -1,14 +1,15 @@
 /* ============================================================
-   CaptureToast — what the distill pipeline did, said once and then gone.
+   CaptureToast — a pipeline failure, said once and left up until dismissed.
 
    Only non-bridged tokens live here: the overlay plane, its elevation, and
    the corner it sits in.
 
-   IT IS AN OVERLAY, NOT A PANEL IN THE PAGE. Transcription and distillation
-   run after a capture ends, on their own schedule, and their outcomes are
-   announcements rather than state — so they belong in front of the app for a
-   moment rather than stacked into the sidebar foot, which is where they used
-   to pile up under the IDLE dot.
+   IT IS AN OVERLAY, NOT A PANEL IN THE PAGE. A distill or transcription
+   failure can land on any screen, so it belongs in front of the app for a
+   moment rather than waiting for the user to notice it in the Inbox — which
+   is also where it can never appear, since a failed capture never produces a
+   note. Progress and success are not here: they render live in the Inbox as
+   the placeholder row that becomes the routed note (`InboxView.css`).
 
    Bottom right because that is the emptiest corner of every view in the app:
    content is pinned left or centred on a measure, and the sidebar owns the

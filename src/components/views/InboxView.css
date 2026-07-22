@@ -82,11 +82,246 @@
   text-wrap: pretty;
 }
 
+/* ---------- the pipeline placeholder ----------
+   The placeholder wears `.inbox__row`'s own silhouette (title slot, meta
+   slot, empty trailing slot) from the moment it arrives, so becoming a real
+   note later is a fill-in, never a swap — see PipelinePlaceholder's doc
+   comment in InboxView.tsx. It never turns green — that colour means audio
+   is being recorded, and this runs entirely after a capture has already
+   stopped (docs/UI_CONVENTIONS.md). */
+
+/* It never lifts under the pointer either: it isn't actionable yet, so the
+   `.inbox__row:hover`/`:focus-within` lift above — which it would otherwise
+   inherit by sharing the base class — is cancelled here. Two classes beat
+   `.inbox__row`'s one, so this wins regardless of source order. */
+.inbox__row.inbox__row--placeholder:hover,
+.inbox__row.inbox__row--placeholder:focus-within {
+  background: none;
+  box-shadow: none;
+}
+
+.inbox__pipeline-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2xs);
+}
+
+/* The status/meta text pairs are two spans stacked on the same grid cell,
+   crossfading as the stage advances, rather than one node rewriting its
+   content — so the box never reflows. The stack is purely visual and sits
+   under `aria-hidden`; the polite `role="status"` announcement is a separate
+   sr-only line whose text really rewrites (docs/DESIGN_SYSTEM.md §6). */
+.inbox__pipeline-stack {
+  display: inline-grid;
+}
+
+.inbox__pipeline-stack > span {
+  grid-area: 1 / 1;
+  opacity: 0;
+  transition: opacity var(--dur-plane) var(--ease-standard);
+}
+
+.inbox__pipeline-stack > span.is-visible {
+  opacity: 1;
+}
+
+.inbox__pipeline-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  animation: inbox-pipeline-breathe var(--dur-glow) var(--ease-breath) infinite;
+}
+
+@keyframes inbox-pipeline-breathe {
+  0%,
+  100% {
+    opacity: 0.38;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 0.82;
+    transform: scale(1.05);
+  }
+}
+
+/* ---------- entrance ----------
+   A capture stopping is an arrival, not a value flicking on, so the
+   placeholder drops in from above and settles — the one entrance motion in
+   the app, and the other half of the "one deliberate motion" FOUNDING_DOC §4
+   reserves for distill-and-route (the vanish below is the first half). It
+   plays once, on mount, via `animation` rather than a class toggled after
+   render: a `transition` cannot animate a freshly created element's very
+   first frame without a rAF trick, and this needs none. */
+.inbox__row--placeholder {
+  animation: inbox-row-enter var(--dur-enter) var(--ease-standard) both;
+}
+
+@keyframes inbox-row-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---------- vanish ----------
+   Filed to a different project: the row itself travels left, toward the
+   sidebar where projects live, fading as it goes — more than the flat height
+   collapse every other exit in this list plays, because this is the one
+   place a resolution has a direction in space. `.inbox__slot--leaving`
+   (below) still owns closing the gap underneath it; this is only the row's
+   own extra travel. */
+.inbox__row--placeholder.inbox__row--vanishing {
+  transition:
+    opacity var(--dur-settle) var(--ease-standard),
+    transform var(--dur-settle) var(--ease-standard);
+  opacity: 0;
+  transform: translateX(-36px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inbox__row--placeholder {
+    animation: none;
+  }
+  .inbox__row--placeholder.inbox__row--vanishing {
+    transition: none;
+    opacity: 0;
+  }
+  .inbox__pipeline-dot {
+    animation: none;
+    opacity: 0.6;
+  }
+  .inbox__pipeline-stack > span {
+    transition: none;
+  }
+}
+
+:root[data-reduce-motion="on"] .inbox__row--placeholder {
+  animation: none;
+}
+:root[data-reduce-motion="on"] .inbox__row--placeholder.inbox__row--vanishing {
+  transition: none;
+  opacity: 0;
+}
+:root[data-reduce-motion="on"] .inbox__pipeline-dot {
+  animation: none;
+  opacity: 0.6;
+}
+:root[data-reduce-motion="on"] .inbox__pipeline-stack > span {
+  transition: none;
+}
+
+/* ---------- fill-in ----------
+   The other resolution: filed to the Inbox itself. Nothing vanishes — the
+   placeholder's slot becomes the real row in the same list position, and
+   this is that row's one-shot arrival: the text column fades in, the
+   picker slides in a step behind it. Scoped to the two direct children so a
+   fresh row's own hover/hand-off states are untouched once the animation
+   ends. */
+.inbox__row--fresh > div:first-child {
+  animation: inbox-fresh-fade var(--dur-plane) var(--ease-standard) both;
+}
+
+.inbox__row--fresh > div:last-child {
+  animation: inbox-fresh-slide var(--dur-plane) var(--ease-standard) both;
+}
+
+@keyframes inbox-fresh-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes inbox-fresh-slide {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inbox__row--fresh > div:first-child,
+  .inbox__row--fresh > div:last-child {
+    animation: none;
+  }
+}
+:root[data-reduce-motion="on"] .inbox__row--fresh > div:first-child,
+:root[data-reduce-motion="on"] .inbox__row--fresh > div:last-child {
+  animation: none;
+}
+
+/* ---------- the filed toast ----------
+   The one success announcement left once `CaptureToast` went failures-only
+   (see FiledToast's doc comment): the payoff the vanish above hands off to.
+   Same corner and elevation as `CaptureToast` — the emptiest corner of every
+   view — but it earns an entrance `CaptureToast` deliberately has none of:
+   this one is the second half of a gesture already in motion, not a bare
+   announcement arriving cold. */
+.inbox__toast {
+  position: fixed;
+  right: var(--space-md);
+  bottom: var(--space-md);
+  z-index: var(--layer-overlay);
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  min-width: var(--measure-menu);
+  background: var(--overlay);
+  border-radius: var(--radius-pill);
+  padding: var(--space-xs) var(--space-sm);
+  box-shadow: var(--lift-menu);
+  text-align: left;
+  cursor: pointer;
+  animation: inbox-toast-enter var(--dur-settle) var(--ease-standard) both;
+  transition: opacity var(--dur-settle) var(--ease-standard);
+}
+
+.inbox__toast--fading {
+  opacity: 0;
+}
+
+@keyframes inbox-toast-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.inbox__toast__arrow {
+  flex: none;
+  font-size: var(--fs-label);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .inbox__toast {
+    animation: none;
+  }
+}
+:root[data-reduce-motion="on"] .inbox__toast {
+  animation: none;
+}
+
 /* ---------- leaving ----------
    A filed note collapses its height and fades as it goes, covering the gap
-   until the vault-changed refetch drops it from the list. This is the minimal
-   form of the distill-and-route motion (FOUNDING_DOC §4) and the only
-   animation in the view.
+   until the vault-changed refetch drops it from the list — the minimal form
+   of the distill-and-route motion (FOUNDING_DOC §4). The pipeline
+   placeholder plays the same collapse alongside its own vanish above.
 
    Reduced motion is handled app-wide in src/index.css (transitions collapse
    to 1ms), so there is no media query here: the row simply disappears on

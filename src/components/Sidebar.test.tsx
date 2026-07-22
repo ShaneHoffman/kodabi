@@ -1,6 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { CapturePipelineProvider } from "./CapturePipelineProvider";
 import { Sidebar } from "./Sidebar";
 import { MainContent } from "./MainContent";
 import { NavigationProvider } from "./NavigationProvider";
@@ -36,8 +37,10 @@ function serveVault(sessions: FailedSession[] = []): void {
 function renderShell() {
   return render(
     <NavigationProvider>
-      <Sidebar onOpenPalette={() => {}} />
-      <MainContent />
+      <CapturePipelineProvider>
+        <Sidebar onOpenPalette={() => {}} />
+        <MainContent />
+      </CapturePipelineProvider>
     </NavigationProvider>,
   );
 }

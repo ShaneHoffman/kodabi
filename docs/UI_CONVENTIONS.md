@@ -532,7 +532,7 @@ new screen should find its shape here rather than inventing one.
 | Surface | Composes | Draws itself |
 | --- | --- | --- |
 | `Sidebar` | `Button variant="quiet"` rows (including the needs-attention row), `StatusMessage` | the nav rows' geometry (`Sidebar.css`) |
-| `InboxView` | `ViewFrame variant="queue"`, `Select variant="token"`, `StatusMessage` | `.inbox__row` and the progress instrument |
+| `InboxView` | `ViewFrame variant="queue"`, `Select variant="token"`, `StatusMessage` | `.inbox__row`, the progress instrument, the pipeline placeholder row (which wears `.inbox__row`'s own shape), and the filed toast (`.inbox__toast`) |
 | `NeedsAttentionView` | `ViewFrame variant="health"`, `Button` (with `loading`), `StatusMessage` | `.attention__card`, pre-lifted |
 | `ProjectView` | `ViewFrame variant="library"`, `Button`, `StatusMessage` | `.project__row`, a hand-rolled index row |
 | `NoteEditorView` | `ViewFrame variant="doc"`, `Button`, `StatusMessage` | its own header, and raw `<textarea>` / `<input>` elements with `aria-label` + `ui-writing` |
@@ -544,7 +544,7 @@ new screen should find its shape here rather than inventing one.
 | `QuickCapture` | `Button`, `StatusMessage` | a raw `<textarea>` (`.capture__input ui-writing`) |
 | `ListeningIndicator` | `CaptureStatusLine` | its own dot and waveform |
 | `CaptureOverlayPill` | `CaptureStatusLine`, `SpiritMark` | the pill window |
-| `CaptureToast` | — | the overlay plane directly (it is not a modal, so not `Overlay`) |
+| `CaptureToast` | — | the overlay plane directly (it is not a modal, so not `Overlay`); failures only — progress and the one success case (filed elsewhere) live in the Inbox's own placeholder and toast |
 
 The right-hand column is not an accusation. A view drawing its own row is the redesign working as
 intended: the row is where a queue, a library and a health view differ most, so each one states that

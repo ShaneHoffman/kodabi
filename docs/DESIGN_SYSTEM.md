@@ -303,12 +303,13 @@ disappears before the user can see the result — quick capture flashes its dest
 | Token | Value | Spent on |
 | --- | --- | --- |
 | `--dur-quick` | 150ms | Hover and colour changes on a control |
-| `--dur-plane` | 180ms | A row rising onto the raised plane; the toggle knob's travel |
-| `--dur-settle` | 200ms | A row leaving or entering a list |
+| `--dur-plane` | 180ms | A row rising onto the raised plane; the toggle knob's travel; a fresh-filed row's fill-in |
+| `--dur-settle` | 200ms | A row leaving or entering a list; the Inbox placeholder's vanish-left; the filed toast's entrance and fade |
+| `--dur-enter` | 280ms | The Inbox placeholder arriving at the top of the queue |
 | `--dur-wake` | 450ms | The spirit-mark waking and settling |
 | `--dur-wave` | 1000ms | One waveform bar's rise and fall |
 | `--dur-pulse` | 1600ms | Starting / reconnecting pulse |
-| `--dur-glow` | 2600ms | The listening dot's breath |
+| `--dur-glow` | 2600ms | The listening dot's breath; the Inbox placeholder's working dot |
 | `--dur-breath` | 4200ms | The listening breath cycle |
 | `--dur-drift` / `--dur-drift-slow` | 15s / 21s | The aura's counter-rotating blobs |
 
@@ -329,16 +330,28 @@ purpose: a breath has no direction.
 ### What animates
 
 **Animates:** a control's own state change (`--dur-quick`); a row leaving a list (`--dur-settle`);
-the spirit-mark, which is the app's one continuous motion.
+the spirit-mark, which is the app's one continuous motion; and the Inbox pipeline placeholder,
+which spends both halves of the "one deliberate motion" FOUNDING_DOC §4 reserves for
+distill-and-route. It arrives at the top of the queue (`--dur-enter`) as a capture stops, and when
+it resolves to a different project it travels left — toward the sidebar, where projects live — and
+vanishes (`--dur-settle`) before handing off to the filed toast. Resolved to the Inbox itself, there
+is nowhere to travel to, so nothing travels: the placeholder's slot fills in with the routed note
+using a plain fade (`--dur-plane`) instead.
 
 **Never animates:**
 
 - **A data refresh.** `vault:changed` refetches constantly. Animating it would make the app twitch
   whenever a file changed on disk.
-- **Overlay entrance.** The palette, the consent nudge, quick capture and the capture pill all appear
-  instantly. Showing the surface *is* the transition. A hotkey surface that fades in feels slow.
+- **Overlay entrance, with one sanctioned exception.** The palette, the consent nudge, quick
+  capture, the capture pill, and `CaptureToast` all appear instantly — showing the surface *is* the
+  transition, and a hotkey surface that fades in feels slow. The Inbox's filed toast (`InboxView.tsx`)
+  is the exception: it is not a surface arriving cold, it is the second half of a gesture already in
+  motion (the placeholder's vanish, immediately before it), so its own short entrance (`--dur-settle`)
+  reads as one continuous motion rather than two unrelated ones.
 - **Layout.** Nothing reflows under the user.
-- **Anything on a list of unknown length.** Staggered row animations are decoration.
+- **Anything on a list of unknown length.** Staggered row animations are decoration. The
+  placeholder's arrival and a fresh-filed row's fill-in are each a one-shot reaction to a real event
+  on exactly one row, not a stagger applied across a list of unknown length.
 
 **Two sanctioned layout transitions, and they are the only two.** "Never animates: layout" is about
 content moving under the reader, and neither of these does:
@@ -622,7 +635,7 @@ Any new colour pair is measured before it ships.
 
 | Role | For | Politeness |
 | --- | --- | --- |
-| `role="status"` | Progress and success — "Transcribing…", "Note saved" | polite |
+| `role="status"` | Progress — the Inbox placeholder's "Transcribing the capture" → "Distilling the meeting"; capture state (`ListeningIndicator`); the filed-toast's "Filed to \<project\>" | polite |
 | `role="alert"` | Failures the user did not cause and may not be looking at | assertive |
 
 **Every async failure gets `role="alert"`.** A retry that fails silently while the user looks
@@ -633,8 +646,23 @@ mark reacts instantly for visual feedback, but the announced label follows
 `useDebouncedValue(state, 400)`, so a flapping voice-activity detector cannot spam a screen reader.
 The visual and the announcement are allowed to run at different speeds.
 
-**One region per concern.** Capture state, transcription, and distill are three concerns and get
-three regions. Do not merge them into one node whose text rewrites itself.
+**One region per concern, but a concern can be a narrative.** Capture state is its own region
+(`ListeningIndicator`) — a different concern from what happens after a capture stops. Transcription
+and distill, though, are chapters of one story up to the point they resolve, and the Inbox
+placeholder (`InboxView.tsx`) reports that story as a single `role="status"` region whose text
+advances — "Transcribing the capture" → "Distilling the meeting". A screen reader announces the
+rewritten text each time it changes, so nothing is lost by not spawning a new node per stage.
+
+The story then ends one of two ways, and only one of them needs a new region. Routed to the Inbox
+itself, the placeholder goes silent and the row it becomes is the result — there is nothing left to
+announce. Routed to a different project, the placeholder vanishes and hands off to a **fourth**
+region: the filed toast, a freshly inserted `role="status"` node announcing "Filed to \<project\>"
+the moment it appears. Spawning a new node here is correct rather than a risk, unlike the case above
+— the placeholder is already leaving, so there is no existing region left to rewrite, and a
+freshly-inserted live region is the ordinary, well-supported way a screen reader picks up new
+content. `CaptureToast` is the one `role="alert"` region: only a transcription or distill failure
+ever reaches it, because a failed capture never produces a note for the placeholder or the toast to
+describe.
 
 ### Keyboard paths
 

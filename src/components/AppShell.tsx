@@ -4,6 +4,7 @@ import { useNavigation, viewKey } from "../useNavigation";
 import { useSessionsChangedBridge } from "../useSessionsChangedBridge";
 import { useVaultChangedBridge } from "../useVaultChangedBridge";
 import { AppErrorBoundary } from "./AppErrorBoundary";
+import { CapturePipelineProvider } from "./CapturePipelineProvider";
 import { CaptureToast } from "./CaptureToast";
 import { CommandPalette } from "./CommandPalette";
 import { ConsentNudge } from "./ConsentNudge";
@@ -25,24 +26,29 @@ export function AppShell() {
   useSessionsChangedBridge();
 
   return (
-    <div className="flex h-screen overflow-hidden bg-bg font-sans text-text">
-      <Sidebar onOpenPalette={openPalette} />
-      <main className="flex-1 overflow-y-auto">
-        {/* Only the routed view is guarded: a crash here leaves the sidebar
-            alive, so the user navigates out rather than restarting. The key is
-            the whole destination, not just its kind — the fallback tells the
-            user to pick another screen, and picking a second project (or a
-            second note, or a second search) has to actually clear it. */}
-        <AppErrorBoundary resetKey={viewKey(view)}>
-          <MainContent />
-        </AppErrorBoundary>
-      </main>
-      {/* Outside the error boundary and outside the routed view: the
-          pipeline keeps running whatever screen you are on, and its outcome
-          has to reach you there. */}
-      <CaptureToast />
-      {open && <CommandPalette onClose={closePalette} />}
-      {consentOpen && <ConsentNudge onClose={closeNudge} />}
-    </div>
+    // The one capture/transcription/distill subscription, above the error
+    // boundary so a crashed routed view doesn't tear it down, and around both
+    // the Inbox (which shows the pipeline's progress) and the toast (which
+    // now only ever shows its failures).
+    <CapturePipelineProvider>
+      <div className="flex h-screen overflow-hidden bg-bg font-sans text-text">
+        <Sidebar onOpenPalette={openPalette} />
+        <main className="flex-1 overflow-y-auto">
+          {/* Only the routed view is guarded: a crash here leaves the sidebar
+              alive, so the user navigates out rather than restarting. The key is
+              the whole destination, not just its kind — the fallback tells the
+              user to pick another screen, and picking a second project (or a
+              second note, or a second search) has to actually clear it. */}
+          <AppErrorBoundary resetKey={viewKey(view)}>
+            <MainContent />
+          </AppErrorBoundary>
+        </main>
+        {/* Outside the error boundary and outside the routed view: a failure
+            reaches you whatever screen you are on. */}
+        <CaptureToast />
+        {open && <CommandPalette onClose={closePalette} />}
+        {consentOpen && <ConsentNudge onClose={closeNudge} />}
+      </div>
+    </CapturePipelineProvider>
   );
 }
