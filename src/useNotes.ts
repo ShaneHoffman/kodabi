@@ -92,6 +92,14 @@ export function saveNote(input: SaveNoteInput): Promise<NoteDetail> {
   return invoke<NoteDetail>("save_note", { input });
 }
 
+/** One-off read of a project's notes — the same `list_notes` command
+ * `useProjectNotes` wraps, for a caller that needs a single lookup rather
+ * than a live-refetching subscription (the filed-toast's click-to-open,
+ * which resolves a distill outcome's path to the note it belongs to). */
+export function listNotes(project: string): Promise<NoteSummary[]> {
+  return invoke<NoteSummary[]>("list_notes", { project });
+}
+
 /**
  * A project's notes, newest first, straight from disk — refetched (and
  * response-sequenced) via `useVaultQuery` on every vault change.
