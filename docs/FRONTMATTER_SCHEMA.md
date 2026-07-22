@@ -55,8 +55,9 @@ Canonical key order the writer emits: **`id, type, project, date, tags, source, 
   leading `.` or `_` — those prefixes mark infra folders (`.obsidian`, `_assets`, the
   `_glossary.yml` home) that routing discovery skips, so such a project would be writable yet
   invisible to routing. `Inbox` (any casing) is a reserved folder name — a real project may not be
-  named `Inbox` — and `raw` (any casing) is reserved as a first segment: `<vault>/raw/` holds raw
-  session artifacts, never notes (a nested segment like `Data/raw` is fine).
+  named `Inbox` — and `sessions` and `raw` (any casing) are reserved as first segments:
+  `<vault>/sessions/` holds raw session artifacts, never notes (`raw` stays reserved alongside it;
+  a nested segment like `Data/raw` is fine).
 - **`date`** — full timestamp+offset for anything with a real start time (a meeting, a chat
   session); date-only is acceptable for a quick-capture note jotted with no meaningful clock time.
   Store the value exactly as written. The two accepted shapes are strictly a `YYYY-MM-DD` calendar
@@ -116,7 +117,7 @@ type: meeting
 project: Paradise Golf
 date: 2026-07-09T14:00:00-07:00
 tags: [budgeting, phase-2]
-source: raw/20260709T210000000Z-k4m2xp7q-paradise-golf-sync.jsonl
+source: sessions/20260709T210000000Z-k4m2xp7q-paradise-golf-sync.jsonl
 confidence: 0.94
 ---
 
@@ -164,7 +165,7 @@ type: chat
 project: Paradise Golf
 date: 2026-07-10T09:15:00-07:00
 tags: [research]
-source: raw/20260710T161500000Z-k4m2xp7q-irrigation-contractor-comparison.jsonl
+source: sessions/20260710T161500000Z-k4m2xp7q-irrigation-contractor-comparison.jsonl
 ---
 
 # Chat: irrigation contractor comparison
@@ -186,7 +187,7 @@ are the placement and byte-level rules it establishes.
 
 - **Folder.** A note lives at `<vault>/<project>/<slug>.md`. A hierarchical `project` nests folders
   (`Growth/Q3` → `<vault>/Growth/Q3/`), creating any missing parents; an `Inbox` note lives in
-  `<vault>/Inbox/`. The vault root is the KB root (`raw/…` in `source` is relative to it).
+  `<vault>/Inbox/`. The vault root is the KB root (`sessions/…` in `source` is relative to it).
 - **Filename.** `{slug}.md`, where `slug` comes from a human-readable title under the same slug
   rules the session scheme uses (lowercase, non-alphanumeric runs → `-`, 40-char cap). This is the
   distilled-note filename and is **distinct** from the timestamp+device *raw/session* scheme in

@@ -10,6 +10,7 @@ mod overlay;
 mod quick_capture;
 mod retention;
 mod routing_env;
+mod session_cmds;
 mod settings_cmds;
 mod transcribe;
 mod tray_promotion;
@@ -148,6 +149,8 @@ pub fn run() {
             audio_cmds::run_mic_test,
             distill_cmds::distill_session,
             distill_cmds::list_failed_sessions,
+            session_cmds::read_session_artifacts,
+            session_cmds::reveal_session_audio,
             note_cmds::write_note,
             note_cmds::list_notes,
             note_cmds::read_note,

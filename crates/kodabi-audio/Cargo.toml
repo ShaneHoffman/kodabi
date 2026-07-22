@@ -16,6 +16,10 @@ serde = { version = "1", features = ["derive"] }
 rubato = "4"
 # Zero-copy buffer views rubato's `process_into_buffer` reads/writes through.
 audioadapter-buffers = "4"
+# Stereo WAV write for the retained-recording artifact (`src/wav.rs`) — the
+# runtime persistence the old dev-dependency comment called "a separate
+# ticket". Examples/tests also use it for read-back verification.
+hound = "3.5"
 
 # cpal 0.18.1 declares its own `windows-core = ">=0.61,<=0.62"` dependency
 # separate from its `windows` dependency, which Tauri's stack pins to 0.61.2
@@ -28,9 +32,4 @@ windows-core = "=0.61.2"
 
 [dev-dependencies]
 serde_json = "1"
-# Stereo WAV write/read: the hardware-gated two-channel test's tangible
-# verification artifact, and the `record_meeting` example's output format.
-# Runtime persistence is a separate ticket (`feat/persist-raw-session`), so
-# this stays a dev-dependency rather than shipping in the app.
-hound = "3.5"
 tempfile = "3"

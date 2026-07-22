@@ -21,6 +21,7 @@ mod session;
 mod source;
 mod spill;
 mod tuning;
+mod wav;
 
 pub use capture::Capture;
 pub use combine::{AlignedSession, CombinedSession, Combiner, SessionChannel, SpilledSession};
@@ -34,3 +35,4 @@ pub use resample::{MonoResampler, ResampleParams};
 pub use session::{CaptureTuning, DualCapture, DualHealth, DualStatus, SourceHealth, SourceStatus};
 pub use source::CaptureSource;
 pub use spill::{SpillConfig, SpillReader};
+pub use wav::{write_stereo_wav_from_channels, write_stereo_wav_from_spills};

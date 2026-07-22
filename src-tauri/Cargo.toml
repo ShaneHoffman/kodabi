@@ -19,7 +19,10 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon"] }
+# `protocol-asset` backs `app.security.assetProtocol` in tauri.conf.json: the
+# note view streams a retained recording (`sessions/*.wav`) through the asset
+# protocol rather than a byte-shuttling IPC command.
+tauri = { version = "2", features = ["tray-icon", "protocol-asset"] }
 tauri-plugin-global-shortcut = "2"
 # The capture-start toast (FOUNDING_DOC §3.7): fired from the Rust shell, not a
 # webview, so it still appears when the window is hidden to the tray.

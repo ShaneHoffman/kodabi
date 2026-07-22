@@ -82,6 +82,15 @@ export const listen = vi.fn(
   },
 );
 
+/**
+ * The `@tauri-apps/api/core` `convertFileSrc` stand-in: this module wholesale
+ * replaces that entry point, so any component importing it must find it here.
+ * Mirrors the real Windows shape closely enough to assert on (`http://<protocol>.localhost/<encoded path>`).
+ */
+export function convertFileSrc(filePath: string, protocol = "asset"): string {
+  return `http://${protocol}.localhost/${encodeURIComponent(filePath)}`;
+}
+
 /** Delivers a backend event to every live subscriber, as Rust emitting it
  * would. Deliberately *not* named `emit` — see the module doc. Wrap calls in
  * React's `act`: subscribers set state synchronously. */
