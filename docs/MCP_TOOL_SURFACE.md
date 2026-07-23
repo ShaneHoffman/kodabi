@@ -607,7 +607,7 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
       "properties": {
         "id": { "$ref": "#/$defs/NoteId" },
         "path": { "type": "string", "description": "Current note path relative to the KB root, e.g. \"Growth/Q3/weekly-sync.md\"; an unfiled (Inbox) note's path begins with \"Inbox/\". The filename is a slug of the title (or the id when the title slugifies to empty)." },
-        "title": { "type": "string", "description": "Note title." },
+        "title": { "type": "string", "description": "Note display title. The frontmatter `title` when the note carries one (kept in full, past the 40-char filename slug); otherwise the de-slugged filename stem for a legacy or hand-made note without the key." },
         "type": { "$ref": "#/$defs/NoteType" },
         "project": { "oneOf": [ { "$ref": "#/$defs/ProjectSlug" }, { "type": "null" } ], "description": "Owning project slug, or null if unfiled (Inbox). Frontmatter stores the sentinel string \"Inbox\" for the null case." },
         "date": { "oneOf": [ { "$ref": "#/$defs/IsoDateTime" }, { "$ref": "#/$defs/IsoDate" } ], "description": "Frontmatter date, verbatim as stored: full timestamp with the device's local offset (not UTC) when a time is known, local calendar date otherwise. The writer accepts only these two shapes and rejects a naive timestamp with no offset." },
@@ -799,8 +799,10 @@ All three calls are read-only and already in the v1 surface — no gap remains f
 - **→ Phase 2 (`search_notes` via hybrid retrieval):** the `search_notes` input filters and the
   `SearchHit`/`PageInfo` output shape that the FTS5 + `sqlite-vec` + RRF pipeline must produce.
 - **→ P0-9 (frontmatter schema):** the `id`-field recommendation above (adopted); the
-  `NoteSummary` fields (`id`, `project`, `date`, `type`, `tags`, `source`, `confidence`) mirror the
-  frontmatter fields, so the two specs must stay in agreement as either evolves. The Phase 2 markdown
+  `NoteSummary` fields (`id`, `type`, `title`, `project`, `date`, `tags`, `source`, `confidence`)
+  mirror the frontmatter fields, so the two specs must stay in agreement as either evolves. (`path`
+  is the one `NoteSummary` field with no frontmatter counterpart — it is the note's current
+  location, not stored content.) The Phase 2 markdown
   writer (`kodabi-core::note`) now implements the frontmatter emitter/parser; building it surfaced
   edge cases (offset-required dates, tag grammar, project-segment folder-name constraints, the
   `source` keyword-vs-path rule, the `confidence`/re-route reconciliation, Inbox-folder placement)

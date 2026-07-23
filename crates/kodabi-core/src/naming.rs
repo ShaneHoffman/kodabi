@@ -21,7 +21,10 @@ use chrono::{DateTime, NaiveDateTime, Utc};
 use crate::device::DeviceId;
 
 const TIMESTAMP_FORMAT: &str = "%Y%m%dT%H%M%S%3fZ";
-const MAX_SLUG_LEN: usize = 40;
+/// The filename-slug length cap. Deliberately short for filesystem sanity; a
+/// note's stored `title` is decoupled from it (`note::MAX_TITLE_LEN`) so a long
+/// title is never cut mid-word to fit a filename.
+pub(crate) const MAX_SLUG_LEN: usize = 40;
 
 /// Composes a session filename from a capture instant, device identity, and
 /// an optional human-readable slug.

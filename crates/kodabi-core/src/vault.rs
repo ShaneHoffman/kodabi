@@ -23,9 +23,9 @@ use crate::routing_examples::{self, RoutingExample, RoutingExamples, RoutingExam
 #[derive(Debug, Clone, PartialEq)]
 pub struct ListedNote {
     pub path: PathBuf,
-    /// De-slugged filename stem (`weekly-sync` → `weekly sync`). The title is
-    /// not frontmatter — the filename is the slug of the title — so the stem
-    /// is the only faithful source; an id-fallback filename stays as-is.
+    /// The note's effective display title ([`effective_title`]): its stored
+    /// frontmatter `title` when present, else the de-slugged filename stem
+    /// (`weekly-sync` → `weekly sync`) for a legacy or hand-made note.
     pub title: String,
     pub note: Note,
 }
@@ -80,7 +80,7 @@ pub fn scan_project_notes(vault_root: &Path, project: &str) -> Result<NoteScan> 
             .and_then(|contents| Note::from_markdown(&contents).map_err(|_| ()))
         {
             Ok(note) => scan.notes.push(ListedNote {
-                title: display_title(&path),
+                title: effective_title(&note, &path),
                 path,
                 note,
             }),
@@ -359,10 +359,11 @@ pub fn file_note_to_project(
     });
     target_log.save(&target_dir).map_err(routing_example_err)?;
 
-    // ⑩ Title is re-derived from the (possibly suffixed) new path.
+    // ⑩ Title prefers the note's stored frontmatter title; the (possibly
+    //    suffixed) new path is only the de-slug fallback for a note without one.
     Ok(Some(RoutedNote {
         note: ListedNote {
-            title: display_title(&new_path),
+            title: effective_title(&moved_note, &new_path),
             path: new_path,
             note: moved_note,
         },
@@ -506,7 +507,7 @@ pub fn delete_project(vault_root: &Path, project: &str) -> Result<DeletedProject
         )?;
         let new_path = note::relocate_note_file(&moved, &path, &inbox_dir)?;
         moved_notes.push(ListedNote {
-            title: display_title(&new_path),
+            title: effective_title(&moved, &new_path),
             path: new_path,
             note: moved,
         });
@@ -814,15 +815,28 @@ fn is_project_segment(name: &str) -> bool {
     !name.starts_with('.') && !name.starts_with('_') && note::validate_folder_segment(name).is_ok()
 }
 
+/// The display title for a note: its stored frontmatter `title` when present,
+/// else the de-slugged filename stem ([`display_title`]).
+///
+/// This is the single seam that prefers the stored title over the lossy
+/// filename fallback. Both the disk listing ([`ListedNote::title`]) and the
+/// index writer derive the title this way, so a note's indexed title matches
+/// what a later read shows. A legacy or hand-made note without the `title` key
+/// falls through to the de-slugged stem, unchanged — and because that value is
+/// identical to what the index already holds, it does not spuriously re-index.
+pub fn effective_title(note: &Note, path: &Path) -> String {
+    note.title.clone().unwrap_or_else(|| display_title(path))
+}
+
 /// De-slugged display title from the filename stem: hyphens become spaces
 /// (`weekly-sync` → `weekly sync`); an id-fallback stem (`n_a1b2c3`) has no
 /// hyphens and passes through unchanged.
 ///
-/// The title is not a frontmatter field — the filename is the slug of the title
-/// — so the stem is its only faithful source. Both the disk listing
-/// ([`ListedNote::title`]) and the index writer derive the title this way, so a
-/// note's indexed title matches what a later read shows and a create-then-edit
-/// cycle sees no spurious title change.
+/// The fallback used by [`effective_title`] when a note carries no frontmatter
+/// `title` — the filename is the slug of the title, so the stem is the only
+/// faithful source. Lossy for long titles (capped at the 40-char slug length)
+/// and for casing/punctuation, which is exactly why a stored `title` is
+/// preferred when present.
 pub fn display_title(path: &Path) -> String {
     path.file_stem()
         .and_then(|stem| stem.to_str())
@@ -877,6 +891,25 @@ mod tests {
 
     fn write(vault: &Path, project: &str, id: &str, date: &str, title: Option<&str>) -> PathBuf {
         note::write_note(vault, &note_in(project, id, date, NoteType::Note), title).unwrap()
+    }
+
+    // --- effective_title --------------------------------------------------
+
+    #[test]
+    fn effective_title_prefers_stored_title_else_de_slugs_the_path() {
+        let path = Path::new("/vault/Ops/weekly-sync-notes.md");
+
+        // No frontmatter title: fall back to the de-slugged filename stem.
+        let untitled = note_in("Ops", "n_aaaaaa", "2026-07-10", NoteType::Note);
+        assert_eq!(effective_title(&untitled, path), "weekly sync notes");
+
+        // A stored title wins verbatim — the casing and length the slug loses.
+        let titled =
+            untitled.with_title(Some("Weekly Sync: Q3 planning and headcount".to_string()));
+        assert_eq!(
+            effective_title(&titled, path),
+            "Weekly Sync: Q3 planning and headcount"
+        );
     }
 
     // --- scan_project_notes ------------------------------------------------

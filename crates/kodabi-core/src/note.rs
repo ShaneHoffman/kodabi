@@ -4,14 +4,18 @@
 //! the other way around, so the files stay Obsidian-compatible, git-diffable,
 //! and free of lock-in.
 //!
-//! This module is the schema's first real consumer: it emits the seven
-//! frontmatter keys in their locked canonical order — `id, type, project,
-//! date, tags, source, confidence` — with the field-presence rules the schema
+//! This module is the schema's first real consumer: it emits the frontmatter
+//! keys in their locked canonical order — `id, type, title, project, date,
+//! tags, source, confidence` — with the field-presence rules the schema
 //! specifies, and round-trips (`struct → md → struct`). The frontmatter fields
 //! mirror the MCP `NoteSummary` shape (`docs/MCP_TOOL_SURFACE.md`); the two
 //! specs must stay in agreement.
 //!
 //! ## Representation choices the writer owns
+//! - `title` is the note's human display label, stored so it survives past the
+//!   40-char filename slug it also seeds. It is optional: a hand-made or legacy
+//!   note without the key falls back to the de-slugged filename stem (see
+//!   [`crate::vault::display_title`]), so its display title is unchanged.
 //! - `project: Inbox` is a sentinel string (the MCP layer maps it to `null`);
 //!   it also names a literal `<vault>/Inbox/` folder on disk.
 //! - `tags` is omitted entirely when empty (the MCP layer reports `[]`), and
@@ -46,6 +50,13 @@ const ALPHABET: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";
 const NOTE_ID_RANDOM_LEN: usize = 8;
 /// Minimum random-part length the schema regex accepts (`{6,}`).
 const NOTE_ID_MIN_RANDOM_LEN: usize = 6;
+
+/// Maximum length (in characters) of a stored frontmatter `title`. Aligned with
+/// the distiller's own title cap (`distill::MAX_TITLE_LEN`). Deliberately much
+/// longer than the 40-char filename slug (`naming::MAX_SLUG_LEN`): decoupling
+/// the two is the whole point — the title is not the slug, so it is not cut
+/// mid-word to fit a filename.
+const MAX_TITLE_LEN: usize = 120;
 
 /// The sentinel `project` value for a note routing could not confidently file.
 /// Not a real project — it maps to a literal `<vault>/Inbox/` folder and, at
@@ -438,9 +449,9 @@ impl Routing {
 // ---------------------------------------------------------------------------
 
 /// The editable subset of a note — what the edit flow may replace. Everything
-/// else (`id`, `source`, routing) is preserved verbatim by
+/// else (`id`, `title`, `source`, routing) is preserved verbatim by
 /// [`Note::with_edits`]; moving a note between projects is the re-route flow,
-/// not an edit.
+/// not an edit, and the title is set once at creation like the filename.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NoteEdit {
     pub note_type: NoteType,
@@ -449,15 +460,21 @@ pub struct NoteEdit {
     pub body: String,
 }
 
-/// A single note: its seven frontmatter fields plus the Markdown body.
+/// A single note: its frontmatter fields plus the Markdown body.
 ///
 /// Construct through [`Note::new`], which validates every field and normalizes
 /// the body; the public fields are exposed for read access and for building in
-/// tests, but bypassing `new` skips validation.
+/// tests, but bypassing `new` skips validation. `title` is set separately via
+/// [`Note::with_title`] (it needs no cross-field validation, only normalizing),
+/// so `new`'s signature and its many call sites stay unchanged.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Note {
     pub id: NoteId,
     pub note_type: NoteType,
+    /// The human display title, stored in frontmatter so it survives past the
+    /// 40-char filename slug. `None` for a legacy or hand-made note that never
+    /// wrote the key — the display layer then de-slugs the filename stem.
+    pub title: Option<String>,
     pub routing: Routing,
     /// ISO 8601, stored **verbatim** — a full RFC 3339 timestamp with offset
     /// when a time is known, or a date-only `YYYY-MM-DD` otherwise. Never
@@ -486,6 +503,7 @@ impl Note {
         let note = Note {
             id,
             note_type,
+            title: None,
             routing,
             date: date.into(),
             tags,
@@ -496,12 +514,28 @@ impl Note {
         Ok(note)
     }
 
+    /// Sets the display title, normalizing it to its stored form: internal
+    /// whitespace (including newlines) collapses to single spaces, the value is
+    /// trimmed and capped at [`MAX_TITLE_LEN`] characters, and a blank or
+    /// whitespace-only title clears it to `None` (so the display layer falls
+    /// back to the de-slugged filename). Kept off [`Note::new`] so the writers
+    /// that have a title opt in without churning every `new` call site.
+    #[must_use]
+    pub fn with_title(mut self, title: Option<String>) -> Self {
+        self.title = normalize_title(title);
+        self
+    }
+
     /// Applies an edit, preserving `id`, `source`, and routing (project +
     /// confidence) verbatim and replacing only the editable fields; the result
     /// is re-validated. This is the edit path's preservation contract — it
     /// lives here so every shell (Tauri command, MCP `edit_note`) shares one
     /// implementation instead of re-merging by hand.
     pub fn with_edits(self, edit: NoteEdit) -> Result<Self> {
+        // The title is set once at creation and preserved verbatim across edits
+        // (like `id`, `source`, and routing) — an edit replaces only the body,
+        // tags, date, and type. Carry it across the rebuild.
+        let title = self.title;
         Note::new(
             self.id,
             edit.note_type,
@@ -511,6 +545,7 @@ impl Note {
             self.source,
             edit.body,
         )
+        .map(|note| note.with_title(title))
     }
 
     /// Checks every field against the schema. The type of each field already
@@ -554,6 +589,12 @@ impl Note {
         // `true`, or one containing `: `) round-trips as a string.
         let _ = writeln!(fm, "id: {}", self.id);
         let _ = writeln!(fm, "type: {}", self.note_type.as_str());
+        // `title` is optional; when present it sits after `type` in the
+        // canonical order and goes through the YAML serializer so a value
+        // needing quotes (a colon, a leading `[`) round-trips as a string.
+        if let Some(title) = &self.title {
+            let _ = writeln!(fm, "title: {}", emit_scalar_str(title));
+        }
         let _ = writeln!(fm, "project: {}", emit_scalar_str(self.routing.project()));
         // `date` is emitted verbatim (validation guarantees a plain-safe shape).
         let _ = writeln!(fm, "date: {}", self.date);
@@ -605,6 +646,7 @@ impl Note {
         let routing = Routing::from_project_and_confidence(raw.project, raw.confidence)?;
 
         Note::new(id, note_type, routing, raw.date, tags, source, body)
+            .map(|note| note.with_title(raw.title))
     }
 }
 
@@ -616,6 +658,8 @@ struct RawFrontmatter {
     id: String,
     #[serde(rename = "type")]
     note_type: String,
+    #[serde(default)]
+    title: Option<String>,
     project: String,
     date: String,
     #[serde(default)]
@@ -642,6 +686,18 @@ fn emit_scalar_f64(value: f64) -> String {
         .expect("serializing a float scalar to YAML is infallible")
         .trim_end()
         .to_string()
+}
+
+/// Normalizes a raw title into its stored form: collapse every run of internal
+/// whitespace (spaces, tabs, newlines) to a single space, trim the ends, cap at
+/// [`MAX_TITLE_LEN`] characters, and treat a blank result as `None`. Keeping the
+/// value a single trimmed line means it always emits as one clean YAML scalar.
+fn normalize_title(title: Option<String>) -> Option<String> {
+    let collapsed = title?.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.is_empty() {
+        return None;
+    }
+    Some(collapsed.chars().take(MAX_TITLE_LEN).collect())
 }
 
 /// Splits `input` into (frontmatter YAML block, body), operating on byte
@@ -1082,6 +1138,7 @@ mod tests {
 ---
 id: n_a1b2c3
 type: meeting
+title: Paradise Golf Q3 budget and irrigation contractor shortlist
 project: Paradise Golf
 date: 2026-07-09T14:00:00-07:00
 tags: [budgeting, phase-2]
@@ -1119,6 +1176,9 @@ contractor shortlist.
             "# Summary\n\nReviewed Q3 budget allocation for the course renovation and agreed on the irrigation\ncontractor shortlist.\n\n## Decisions\n\n- Approved the revised irrigation budget of $42,000.\n- Selected GreenFlow Systems as the lead contractor for bidding.\n\n## Action items\n\n- [ ] Shane to send the signed budget memo to finance by 2026-07-11.\n- [ ] Priya to request formal bids from GreenFlow and two alternates.",
         )
         .unwrap()
+        .with_title(Some(
+            "Paradise Golf Q3 budget and irrigation contractor shortlist".to_string(),
+        ))
     }
 
     fn note_inbox() -> Note {
@@ -1210,8 +1270,78 @@ contractor shortlist.
         assert_eq!(note.routing.confidence(), Some(0.94));
         assert_eq!(note.date, "2026-07-09T14:00:00-07:00");
         assert_eq!(note.tags, tags(&["budgeting", "phase-2"]));
+        assert_eq!(
+            note.title.as_deref(),
+            Some("Paradise Golf Q3 budget and irrigation contractor shortlist")
+        );
         assert!(note.body.starts_with("# Summary"));
         assert!(note.body.ends_with("two alternates."));
+    }
+
+    // --- title ------------------------------------------------------------
+
+    #[test]
+    fn title_emits_after_type_and_before_project() {
+        let md = meeting_note().to_markdown();
+        let type_at = md.find("type:").unwrap();
+        let title_at = md.find("title:").unwrap();
+        let project_at = md.find("project:").unwrap();
+        assert!(type_at < title_at && title_at < project_at);
+    }
+
+    #[test]
+    fn long_title_survives_the_40_char_slug_cap() {
+        // The bug: a title over the 40-char filename slug used to be lost. Now
+        // it is stored whole in frontmatter and round-trips verbatim.
+        let title = "kodabi recording distill flow walkthrough";
+        assert!(title.len() > naming::MAX_SLUG_LEN);
+        let note = meeting_note().with_title(Some(title.to_string()));
+        let round_tripped = Note::from_markdown(&note.to_markdown()).unwrap();
+        assert_eq!(round_tripped.title.as_deref(), Some(title));
+    }
+
+    #[test]
+    fn absent_title_stays_none_and_is_omitted() {
+        let note = note_inbox();
+        assert_eq!(note.title, None);
+        assert!(!note.to_markdown().contains("title:"));
+        let round_tripped = Note::from_markdown(&note.to_markdown()).unwrap();
+        assert_eq!(round_tripped.title, None);
+    }
+
+    #[test]
+    fn with_title_normalizes_collapses_trims_and_caps() {
+        // Collapse internal whitespace/newlines, trim the ends.
+        let note = meeting_note().with_title(Some("  a\n  messy   title  ".to_string()));
+        assert_eq!(note.title.as_deref(), Some("a messy title"));
+
+        // A blank or whitespace-only title clears to None.
+        assert_eq!(
+            meeting_note().with_title(Some("   ".to_string())).title,
+            None
+        );
+        assert_eq!(meeting_note().with_title(None).title, None);
+
+        // Capped at MAX_TITLE_LEN characters.
+        let long = "x".repeat(MAX_TITLE_LEN + 50);
+        let note = meeting_note().with_title(Some(long));
+        assert_eq!(note.title.map(|t| t.chars().count()), Some(MAX_TITLE_LEN));
+    }
+
+    #[test]
+    fn with_edits_preserves_the_title() {
+        let note = meeting_note();
+        let original_title = note.title.clone();
+        assert!(original_title.is_some());
+        let edited = note
+            .with_edits(NoteEdit {
+                note_type: NoteType::Meeting,
+                date: "2026-07-11".to_string(),
+                tags: tags(&["edited"]),
+                body: "# Edited\n\nnew body".to_string(),
+            })
+            .unwrap();
+        assert_eq!(edited.title, original_title);
     }
 
     // --- field-omission combinations --------------------------------------

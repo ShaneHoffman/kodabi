@@ -1,6 +1,7 @@
 ---
 id: n_a1b2c3
 type: meeting
+title: Paradise Golf Q3 budget and irrigation contractor shortlist
 project: Paradise Golf
 date: 2026-07-09T14:00:00-07:00
 tags: [budgeting, phase-2]
