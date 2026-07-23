@@ -205,6 +205,11 @@ confirmation dialog, as the non-default control beside a `primary` Cancel — an
 holds initial focus (`useDialogFocus`), so the keyboard's first Enter dismisses rather than
 destroys.
 
+This shape is now a shared primitive, `DestructiveConfirmDialog` (`src/components/ui/`), so the rule
+above lives in one place. Both destructive flows compose it: **Delete project** and the Needs
+Attention **capture delete**, which replaced an inline second-click confirm with the same modal.
+Every new destructive action confirms through it rather than hand-rolling a fourth dialog.
+
 ### A state change never changes the box
 
 **Hover, focus and selection may change the fill, the elevation and the weight.
