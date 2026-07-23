@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { DISTILL_STATE_EVENT } from "../events";
 import { PALETTE_SHORTCUT_LABEL } from "../useCommandPalette";
 import type { DistillEvent } from "../useDistillState";
@@ -13,6 +13,7 @@ import {
 import { useFailedSessions } from "../useSessions";
 import { useTauriEvent } from "../useTauriEvent";
 import { notifyVaultChanged } from "../useVaultQuery";
+import { CreateProjectDialog } from "./CreateProjectDialog";
 import { ListeningIndicator } from "./ListeningIndicator";
 import { Button } from "./ui/Button";
 import { StatusMessage } from "./ui/StatusMessage";
@@ -48,6 +49,7 @@ function depthStyle(depth: number): CSSProperties | undefined {
 export function Sidebar({ onOpenPalette }: Props) {
   const { entries, loading, error } = useProjects();
   const { view, navigate } = useNavigation();
+  const [creatingProject, setCreatingProject] = useState(false);
 
   const inboxEntry = entries.find((entry) => entry.kind === "inbox");
   const projectEntries = entries.filter((entry) => entry.kind === "project");
@@ -118,9 +120,24 @@ export function Sidebar({ onOpenPalette }: Props) {
           <NeedsAttentionRow />
         </ul>
 
-        <p className="sidebar__eyebrow px-2xs pb-2xs text-eyebrow font-semibold uppercase tracking-rail text-text-faint">
-          Projects
-        </p>
+        {/* The eyebrow and the rail's one creation verb share a baseline row.
+            The button is always visible (hover may enhance, never reveal) and
+            reads in the soft interactive register, not the eyebrow's faint
+            metadata one. */}
+        <div className="flex items-baseline justify-between">
+          <p className="sidebar__eyebrow px-2xs pb-2xs text-eyebrow font-semibold uppercase tracking-rail text-text-faint">
+            Projects
+          </p>
+          <Button
+            variant="quiet"
+            aria-haspopup="dialog"
+            aria-label="New project"
+            onClick={() => setCreatingProject(true)}
+            className="px-2xs pb-2xs text-cap text-text-soft"
+          >
+            New
+          </Button>
+        </div>
         {/* Gated on !loading too: without it the first read of every cold
             start rendered "No projects yet." before the listing landed, so
             the app opened by telling the user their vault was empty
@@ -130,7 +147,7 @@ export function Sidebar({ onOpenPalette }: Props) {
           // and this is first-run copy rather than progress — role="status"
           // would make a static sentence a live region (§3).
           <StatusMessage variant="empty" compact>
-            No projects yet. Give a new note a project name to make one.
+            No projects yet. Use the New button to create one.
           </StatusMessage>
         )}
         <ul aria-label="Projects" className="sidebar__list">
@@ -183,6 +200,10 @@ export function Sidebar({ onOpenPalette }: Props) {
           </ul>
         </nav>
       </footer>
+
+      {creatingProject && (
+        <CreateProjectDialog onClose={() => setCreatingProject(false)} />
+      )}
     </aside>
   );
 }

@@ -195,11 +195,15 @@ of the row does nothing.
 
 There is no red token, and DESIGN.md refuses hue as a ranking device. So a destructive action is not
 marked by painting its control: it is marked by **making the user confirm**, and by the confirming
-control being the non-default one (`quiet` beside a `primary` cancel).
+control being the non-default one (`quiet` weight beside a `primary` cancel).
 
-No destructive action ships today — nothing in the app deletes anything — so no `variant="destructive"`
-exists either. Shipping an unused variant would be inventing a look with nothing to check it against.
-The first delete lands the variant and this rule together.
+The first destructive flow is **Delete project** (`DeleteProjectDialog`), and it landed
+`variant="destructive"` together with this rule. The variant is deliberately not a fourth look: it
+wears the quiet ghost's exact chrome (shared selectors in `Button.css`, never a second copy) and
+exists so call sites state intent. Its contract: a destructive button may only ever appear inside a
+confirmation dialog, as the non-default control beside a `primary` Cancel — and the Cancel is what
+holds initial focus (`useDialogFocus`), so the keyboard's first Enter dismisses rather than
+destroys.
 
 ### A state change never changes the box
 

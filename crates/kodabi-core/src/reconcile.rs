@@ -490,4 +490,28 @@ mod tests {
         assert_eq!(ids(&index), vec!["n_a00001", "n_b00002"]);
         assert_eq!(index.get_note("n_b00002").unwrap().unwrap().body, "b body");
     }
+
+    #[test]
+    fn a_deleted_project_reconciles_to_inbox_rows_with_none_stale() {
+        let dir = tempdir().unwrap();
+        let vault = dir.path();
+        write(vault, "n_moved01", "Acme", "acme body", &[]);
+        write(vault, "n_moved02", "Acme/Sub", "sub body", &[]);
+
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        reconcile(vault, &mut index).unwrap();
+
+        crate::vault::delete_project(vault, "Acme").unwrap();
+        let report = reconcile(vault, &mut index).unwrap();
+
+        // Every note survived the deletion (relocated, same id), so the stale
+        // sweep removes nothing and the rows now point into the Inbox.
+        assert_eq!(report.deleted, 0);
+        assert_eq!(ids(&index), vec!["n_moved01", "n_moved02"]);
+        for id in ["n_moved01", "n_moved02"] {
+            let row = index.get_note(id).unwrap().unwrap();
+            assert_eq!(row.project, None);
+            assert!(row.path.starts_with("Inbox/"), "{}", row.path);
+        }
+    }
 }

@@ -8,6 +8,7 @@ import {
   RETENTION_OPTIONS,
   type RetentionKind,
 } from "../useSettings";
+import { wrapDialogTab } from "./dialogTabTrap";
 import { Button } from "./ui/Button";
 import { Overlay } from "./ui/Overlay";
 import { Select } from "./ui/Select";
@@ -17,31 +18,6 @@ import { TextField } from "./ui/TextField";
 type Props = {
   onClose: () => void;
 };
-
-// Focusable descendants for the dialog's Tab-wrap trap. The Select renders its
-// options as non-tabbable list items, so only the trigger, day field, and
-// buttons participate today.
-//
-// `textarea`, `select` and `[contenteditable]` are listed even though this
-// dialog renders none of them: the trap works by finding the FIRST and LAST
-// match, so a control this selector cannot see is not merely skipped — it
-// sits outside the wrap entirely and Tab escapes the modal at it. That is a
-// hole that opens silently, the first time someone adds a field here.
-//
-// Nothing inert is excluded by attribute either. `:not([disabled])` used to
-// be the whole guard, which was right when a busy control took the native
-// attribute; now that a write in flight is `aria-disabled` (it has to stay
-// focusable, see below), a busy control is still a real tab stop and still
-// belongs in the wrap.
-const FOCUSABLE = [
-  "a[href]",
-  "button:not([disabled])",
-  "input:not([disabled])",
-  "textarea:not([disabled])",
-  "select:not([disabled])",
-  "[contenteditable]:not([contenteditable='false'])",
-  '[tabindex]:not([tabindex="-1"])',
-].join(", ");
 
 const PRIMARY_ID = "consent-nudge-primary";
 
@@ -98,17 +74,9 @@ export function ConsentNudge({ onClose }: Props) {
       return;
     }
     if (event.key !== "Tab") return;
-    const focusables = panelRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE);
-    if (!focusables || focusables.length === 0) return;
-    const first = focusables[0];
-    const last = focusables[focusables.length - 1];
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault();
-      last.focus();
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault();
-      first.focus();
-    }
+    // The Select renders its options as non-tabbable list items, so only the
+    // trigger, day field, and buttons participate in the wrap today.
+    wrapDialogTab(event, panelRef.current);
   };
 
   return (
