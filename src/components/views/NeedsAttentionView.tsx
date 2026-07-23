@@ -12,6 +12,7 @@ import {
 import { notifyVaultChanged } from "../../useVaultQuery";
 import type { DistillEvent } from "../../useDistillState";
 import { Button } from "../ui/Button";
+import { DestructiveConfirmDialog } from "../ui/DestructiveConfirmDialog";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
 import "./NeedsAttentionView.css";
@@ -145,10 +146,14 @@ export function NeedsAttentionView() {
   // Retry's.
   const [actionPending, setActionPending] = useState<SessionAction | null>(null);
   const [showDismissed, setShowDismissed] = useState(false);
-  // The dismissed row whose Delete is waiting on its inline confirm. Delete is
-  // the one destructive verb on this screen, so it never fires on the first
-  // click — but a modal would be heavier than the act deserves.
+  // The dismissed row whose delete confirmation is open. Delete is the one
+  // destructive verb on this screen, so it always goes through the same
+  // confirmation modal the project delete uses (`DestructiveConfirmDialog`),
+  // never firing on the row's first click.
   const [confirmingDeletePath, setConfirmingDeletePath] = useState<string | null>(null);
+  // The error from a failed delete, shown inside the modal rather than under
+  // the row. Cleared when the modal opens, closes, or its row is pruned away.
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useTauriEvent<DistillEvent>(DISTILL_STATE_EVENT, (payload) => {
     if (payload.status === "distilling" || payload.status === "routing_fallback") {
@@ -189,6 +194,7 @@ export function NeedsAttentionView() {
     }
     if (confirmingDeletePath !== null && !listed.has(confirmingDeletePath)) {
       setConfirmingDeletePath(null);
+      setDeleteError(null);
     }
   }
 
@@ -230,8 +236,34 @@ export function NeedsAttentionView() {
   const isRunning = (verb: SessionAction["verb"], path: string) =>
     actionPending !== null && actionPending.verb === verb && actionPending.path === path;
 
+  // The delete the confirmation modal commits. It routes its error into the
+  // modal (`deleteError`) rather than the row's `rowErrors`, and closes the
+  // modal itself on success before the shared refetch lands. No pendingPath /
+  // actionPending guard is needed here the way the row buttons need one: the
+  // modal's Overlay scrim blocks every other row action while it is open, so
+  // nothing else can be in flight at confirm time. `actionPending` is still set
+  // so the confirm button reads busy and the screen stays consistent.
+  const confirmDelete = () => {
+    const path = confirmingDeletePath;
+    if (path === null) return;
+    setActionPending({ path, verb: "delete" });
+    setDeleteError(null);
+    deleteSession(path)
+      .then(() => {
+        setConfirmingDeletePath(null);
+        notifyVaultChanged();
+      })
+      .catch((err: unknown) => {
+        setDeleteError(`Couldn't delete the capture: ${String(err)}`);
+      })
+      .finally(() => setActionPending(null));
+  };
+
   const activeSessions = sessions.filter((session) => !session.dismissed);
   const dismissedSessions = sessions.filter((session) => session.dismissed);
+  const confirmingSession = confirmingDeletePath
+    ? dismissedSessions.find((session) => session.path === confirmingDeletePath) ?? null
+    : null;
   const failedOn = lastFailure(activeSessions);
 
   return (
@@ -359,77 +391,47 @@ export function NeedsAttentionView() {
                         muted
                       />
                       <div className="flex flex-none items-center gap-sm">
-                        {confirmingDeletePath === session.path ? (
-                          <>
-                            {/* The inline confirm: same spot, second click.
-                                Restore and Delete swap out so the question is
-                                the only thing to answer, and Cancel restores
-                                them unchanged. */}
-                            <span className="text-cap text-text-soft">Delete for good?</span>
-                            <Button
-                              variant="quiet"
-                              data-testid="confirm-delete-session"
-                              // `pendingPath` for the same reason as Dismiss:
-                              // the refetch a delete triggers would drop the
-                              // retrying row from the listing mid-run.
-                              disabled={pendingPath !== null || actionPending !== null}
-                              onClick={() => {
-                                setConfirmingDeletePath(null);
-                                runAction("delete", session.path, deleteSession);
-                              }}
-                              className="py-3xs text-label font-semibold text-text"
-                            >
-                              Delete
-                            </Button>
-                            <Button
-                              variant="quiet"
-                              data-testid="cancel-delete-session"
-                              onClick={() => setConfirmingDeletePath(null)}
-                              className="py-3xs text-label text-text-soft"
-                            >
-                              Cancel
-                            </Button>
-                          </>
-                        ) : (
-                          <>
-                            <Button
-                              variant="quiet"
-                              data-testid="restore-session"
-                              // `pendingPath` for the same reason as Dismiss:
-                              // a restore's refetch would drop the retrying
-                              // row from the listing mid-run.
-                              disabled={
-                                pendingPath !== null ||
-                                (actionPending !== null && !isRunning("restore", session.path))
-                              }
-                              // Same reasoning as Dismiss: no `loadingLabel`,
-                              // since the swap would resolve before it could
-                              // be read.
-                              loading={isRunning("restore", session.path)}
-                              onClick={() => runAction("restore", session.path, restoreSession)}
-                              className="py-3xs text-label font-semibold text-text"
-                            >
-                              Restore
-                            </Button>
-                            <Button
-                              variant="quiet"
-                              data-testid="delete-session"
-                              // `pendingPath` too, even though this click only
-                              // opens the confirm: arming a delete whose
-                              // confirm is disabled would be a dead end.
-                              disabled={
-                                pendingPath !== null ||
-                                (actionPending !== null && !isRunning("delete", session.path))
-                              }
-                              // Same reasoning as Dismiss.
-                              loading={isRunning("delete", session.path)}
-                              onClick={() => setConfirmingDeletePath(session.path)}
-                              className="py-3xs text-label text-text-soft"
-                            >
-                              Delete
-                            </Button>
-                          </>
-                        )}
+                        <Button
+                          variant="quiet"
+                          data-testid="restore-session"
+                          // `pendingPath` for the same reason as Dismiss:
+                          // a restore's refetch would drop the retrying
+                          // row from the listing mid-run.
+                          disabled={
+                            pendingPath !== null ||
+                            (actionPending !== null && !isRunning("restore", session.path))
+                          }
+                          // Same reasoning as Dismiss: no `loadingLabel`,
+                          // since the swap would resolve before it could
+                          // be read.
+                          loading={isRunning("restore", session.path)}
+                          onClick={() => runAction("restore", session.path, restoreSession)}
+                          className="py-3xs text-label font-semibold text-text"
+                        >
+                          Restore
+                        </Button>
+                        <Button
+                          variant="quiet"
+                          data-testid="delete-session"
+                          // Disabled while any retry or other marker action is
+                          // in flight, the same as Restore: this click opens
+                          // the confirmation modal, and confirming it would fire
+                          // a refetch that drops the retrying row mid-run. Once
+                          // the modal is open its scrim blocks new actions, so
+                          // this guard is what keeps the confirm safe.
+                          disabled={
+                            pendingPath !== null ||
+                            (actionPending !== null && !isRunning("delete", session.path))
+                          }
+                          loading={isRunning("delete", session.path)}
+                          onClick={() => {
+                            setDeleteError(null);
+                            setConfirmingDeletePath(session.path);
+                          }}
+                          className="py-3xs text-label text-text-soft"
+                        >
+                          Delete
+                        </Button>
                       </div>
                     </li>
                   ))}
@@ -451,6 +453,25 @@ export function NeedsAttentionView() {
               nothing. Deleting from the dismissed list removes the recording
               and transcript for good.
             </p>
+          )}
+          {confirmingSession && (
+            <DestructiveConfirmDialog
+              title="Delete this capture?"
+              confirmLabel="Delete capture"
+              busyLabel="Deleting…"
+              busy={isRunning("delete", confirmingSession.path)}
+              error={deleteError}
+              onConfirm={confirmDelete}
+              onClose={() => {
+                setConfirmingDeletePath(null);
+                setDeleteError(null);
+              }}
+            >
+              <p>
+                This removes the recording and transcript for good. Dismiss only
+                hides a capture; deleting cannot be undone.
+              </p>
+            </DestructiveConfirmDialog>
           )}
         </>
       )}
