@@ -439,6 +439,17 @@
   --row-search-x: 12px;
   --row-panel-y: 13px; /* Settings: the grid owns the width, so y only */
   --gap-row-columns: 28px; /* a row's text column to its trailing action */
+  /* The Inbox row is one full-surface button with the File token OVERLAID on
+     its right rather than drawn in a second grid column (a button cannot
+     nest a button). The trail is the room the button's own right padding
+     reserves for it: the row's inset, the token at its widest resting text
+     ("Filing" plus its arrow), and the same column gap the grid used to
+     draw. A calc rather than one number for the same reason the negative
+     bleed is: provable, not remembered. */
+  --row-queue-file-w: 60px;
+  --row-queue-trail: calc(
+    var(--row-queue-x) + var(--row-queue-file-w) + var(--gap-row-columns)
+  );
   --card-pad-y: 18px; /* Needs attention: a card is pre-lifted, so its inset
                          reads deeper than a row's at the same number */
   --card-pad-x: 20px;

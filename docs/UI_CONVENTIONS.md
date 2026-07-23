@@ -58,8 +58,10 @@ one applies its own `--lead-*` in its co-located CSS (`.inbox__list`, `.project_
 
 **A content list's rhythm is Layer-4 geometry, and it is named in `design/tokens.css`.** There is no
 shared list gap and no shared row padding: an Inbox row is `--row-queue-y` / `--row-queue-x` (20/16)
-with a matching negative inline margin — written `calc(-1 * var(--row-queue-x))`, so the bleed
-provably tracks the pad — that lets its hover plane reach into the gutter, a `.project__row` is
+inside a shell that carries the matching negative inline margin — written
+`calc(-1 * var(--row-queue-x))`, so the bleed provably tracks the pad — that lets its hover plane
+reach into the gutter (the row itself is one full-surface button whose `--row-queue-trail` right
+padding reserves the overlaid File picker's ground), a `.project__row` is
 `--row-library-*` (16/14) and only tints, a `.search__row` is `--row-search-*` (15/12), and
 `.attention__stack` separates its already-lifted cards at `--gap-card` (14px).
 Those numbers are off the 4px step scale on purpose — what separates rows has to beat what a row
@@ -532,7 +534,7 @@ new screen should find its shape here rather than inventing one.
 | Surface | Composes | Draws itself |
 | --- | --- | --- |
 | `Sidebar` | `Button variant="quiet"` rows (including the needs-attention row), `StatusMessage` | the nav rows' geometry (`Sidebar.css`) |
-| `InboxView` | `ViewFrame variant="queue"`, `Select variant="token"`, `StatusMessage` | `.inbox__row`, the progress instrument, the pipeline placeholder row (which wears `.inbox__row`'s own shape), and the filed toast (`.inbox__toast`) |
+| `InboxView` | `ViewFrame variant="queue"`, `Select variant="token"`, `StatusMessage` | `.inbox__rowShell` + `.inbox__row` (one full-surface button with the File picker overlaid in `.inbox__rowActions`), the progress instrument, the pipeline placeholder row (which wears the same shell and row shape), and the filed toast (`.inbox__toast`) |
 | `NeedsAttentionView` | `ViewFrame variant="health"`, `Button` (with `loading`), `StatusMessage` | `.attention__card`, pre-lifted |
 | `ProjectView` | `ViewFrame variant="library"`, `Button`, `StatusMessage` | `.project__row`, a hand-rolled index row |
 | `NoteEditorView` | `ViewFrame variant="doc"`, `Button`, `StatusMessage` | its own header, and raw `<textarea>` / `<input>` elements with `aria-label` + `ui-writing` |
@@ -649,16 +651,25 @@ through TSX.
 
 ```css
 /* src/components/views/InboxView.css */
-.inbox__row {
-  padding: var(--row-queue-y) var(--row-queue-x);
+.inbox__rowShell {
   margin: 0 calc(-1 * var(--row-queue-x)); /* the lift reaches into the gutter */
+}
+
+.inbox__row {
+  padding: var(--row-queue-y) var(--row-queue-trail) var(--row-queue-y)
+    var(--row-queue-x);
   border-radius: var(--radius-row);
 }
 ```
 
 The bleed is written as a `calc` off the pad rather than as its own number, so
 the two cannot drift: a row whose hover plane reaches into the gutter has to
-reach by exactly its own inset, and this is the form that proves it.
+reach by exactly its own inset, and this is the form that proves it. It sits on
+a shell rather than the row because the row is one full-surface `<button>` (a
+block button's `width: 100%` against two negative margins silently drops the
+right-hand bleed) with the File picker overlaid on it as a sibling — a button
+cannot nest a button. `--row-queue-trail` is the same discipline again: the
+room the picker needs, derived in the token file from the pieces it is made of.
 
 The named `--space-*` steps are unchanged and still govern everything *inside* a
 component — gaps between elements, control padding, list rhythm. Layer 4 governs

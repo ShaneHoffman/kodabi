@@ -392,55 +392,59 @@ function PipelinePlaceholder({ presence }: { presence: PlaceholderPresence }) {
       data-testid="pipeline-placeholder"
     >
       <div>
-        <div
-          className={`inbox__row inbox__row--placeholder${
-            presence.vanishing ? " inbox__row--vanishing" : ""
-          }`}
-        >
-          <div role="status">
-            <p
-              aria-hidden="true"
-              className="inbox__pipeline-title text-row font-semibold tracking-row text-text-soft"
-            >
-              <span className="inbox__pipeline-dot" />
-              <span className="inbox__pipeline-stack">
-                <span className={presence.phase === "transcribing" ? "is-visible" : ""}>
-                  Transcribing the capture
+        {/* The shell keeps the placeholder's box congruent with a real row's
+            (same negative bleed, same padded silhouette), so the fill-in
+            later is a fill-in and not a reflow. */}
+        <div className="inbox__rowShell">
+          <div
+            className={`inbox__row inbox__row--placeholder${
+              presence.vanishing ? " inbox__row--vanishing" : ""
+            }`}
+          >
+            <div role="status">
+              <p
+                aria-hidden="true"
+                className="inbox__pipeline-title text-row font-semibold tracking-row text-text-soft"
+              >
+                <span className="inbox__pipeline-dot" />
+                <span className="inbox__pipeline-stack">
+                  <span className={presence.phase === "transcribing" ? "is-visible" : ""}>
+                    Transcribing the capture
+                  </span>
+                  <span className={presence.phase === "distilling" ? "is-visible" : ""}>
+                    Distilling the meeting
+                  </span>
                 </span>
-                <span className={presence.phase === "distilling" ? "is-visible" : ""}>
-                  Distilling the meeting
+              </p>
+              <p aria-hidden="true" className="mt-2xs font-mono text-cap text-text-faint">
+                <span className="inbox__pipeline-stack">
+                  <span className={presence.phase === "transcribing" ? "is-visible" : ""}>
+                    just stopped · queued
+                  </span>
+                  <span className={presence.phase === "distilling" ? "is-visible" : ""}>
+                    reading transcript · routing
+                  </span>
                 </span>
+                {/* A running clock, not a phase label: the real transcribe
+                    phase alone can hold "Transcribing the capture" for several
+                    seconds (model load, ASR, a headless Claude cleanup call),
+                    and a ticking number is the honest way to show the run is
+                    still alive without claiming to know which of those it's
+                    in right now. Inside the aria-hidden layer on purpose: a
+                    clock in a live region would announce every second. */}
+                <span className="ui-tnum"> · {formatElapsed(presence.elapsedSeconds)}</span>
+              </p>
+              {/* The announcement itself: one line whose text genuinely
+                  rewrites as the stage advances, which is what a live region
+                  actually reacts to — the crossfade above only flips classes,
+                  and a class flip announces nothing. */}
+              <span className="sr-only">
+                {presence.phase === "transcribing"
+                  ? "Transcribing the capture"
+                  : "Distilling the meeting"}
               </span>
-            </p>
-            <p aria-hidden="true" className="mt-2xs font-mono text-cap text-text-faint">
-              <span className="inbox__pipeline-stack">
-                <span className={presence.phase === "transcribing" ? "is-visible" : ""}>
-                  just stopped · queued
-                </span>
-                <span className={presence.phase === "distilling" ? "is-visible" : ""}>
-                  reading transcript · routing
-                </span>
-              </span>
-              {/* A running clock, not a phase label: the real transcribe
-                  phase alone can hold "Transcribing the capture" for several
-                  seconds (model load, ASR, a headless Claude cleanup call),
-                  and a ticking number is the honest way to show the run is
-                  still alive without claiming to know which of those it's
-                  in right now. Inside the aria-hidden layer on purpose: a
-                  clock in a live region would announce every second. */}
-              <span className="ui-tnum"> · {formatElapsed(presence.elapsedSeconds)}</span>
-            </p>
-            {/* The announcement itself: one line whose text genuinely
-                rewrites as the stage advances, which is what a live region
-                actually reacts to — the crossfade above only flips classes,
-                and a class flip announces nothing. */}
-            <span className="sr-only">
-              {presence.phase === "transcribing"
-                ? "Transcribing the capture"
-                : "Distilling the meeting"}
-            </span>
+            </div>
           </div>
-          <div />
         </div>
       </div>
     </li>
@@ -554,8 +558,15 @@ function Progress({
 }
 
 /**
- * One unfiled note. The title opens it; the picker in the right gutter files
- * it. On success the row plays its collapse/fade exit; the file command
+ * One unfiled note. The whole card opens it — one full-surface button, like
+ * a search row, so the hover lift and the click target are finally the same
+ * shape — and the picker overlaid on its right files it. The picker is a
+ * SIBLING of the button under the shell, never a child: a button cannot nest
+ * a button, so the shell anchors it over the card instead (`.inbox__rowShell`
+ * / `.inbox__rowActions` in InboxView.css). That also means its clicks never
+ * pass through the navigation handler — no stopPropagation anywhere.
+ *
+ * On success the row plays its collapse/fade exit; the file command
  * broadcasts `vault:changed` itself, which refetches the list and the sidebar
  * count together and drops the row (the file watcher is a fallback for
  * external edits, not the only trigger, so the row leaves even if the watcher
@@ -564,7 +575,8 @@ function Progress({
  * `fresh` marks the one row that just finished being the pipeline
  * placeholder: it plays a one-shot fill-in on mount instead of simply being
  * present, so the placeholder becoming this row reads as continuous rather
- * than as a swap.
+ * than as a swap. The modifier lives on the shell, whose two children are
+ * the fill-in's two players (the card fades, the picker slides).
  */
 function InboxRow({
   note,
@@ -599,41 +611,43 @@ function InboxRow({
   return (
     <li className={`inbox__slot${leaving ? " inbox__slot--leaving" : ""}`}>
       <div>
-        <div className={`inbox__row${fresh ? " inbox__row--fresh" : ""}`}>
-          <div>
-            <button
-              type="button"
-              className="inbox__open ui-focus-ring text-row font-semibold tracking-row text-text"
-              onClick={() =>
-                navigate({
-                  kind: "noteEditor",
-                  noteId: note.id,
-                  project: INBOX_PROJECT,
-                })
-              }
-            >
+        <div
+          className={`inbox__rowShell${fresh ? " inbox__rowShell--fresh" : ""}`}
+        >
+          {/* Only phrasing content inside: the old title/meta/snippet <p>s
+              become block <span>s, because a button's content model allows
+              nothing more and the whole card is now the button. */}
+          <button
+            type="button"
+            className="inbox__row ui-focus-ring"
+            onClick={() =>
+              navigate({
+                kind: "noteEditor",
+                noteId: note.id,
+                project: INBOX_PROJECT,
+              })
+            }
+          >
+            <span className="block text-row font-semibold tracking-row text-text">
               {note.title}
-            </button>
-            <p className="mt-2xs font-mono text-cap text-text-faint">
+            </span>
+            <span className="mt-2xs block font-mono text-cap text-text-faint">
               {noteMeta(note, matchScore(note.confidence))}
-            </p>
+            </span>
             {note.snippet && (
-              <p className="inbox__snippet mt-2xs font-serif text-snippet leading-snippet text-text-soft">
+              <span className="inbox__snippet mt-2xs block font-serif text-snippet leading-snippet text-text-soft">
                 {note.snippet}
-              </p>
+              </span>
             )}
-          </div>
-          <div>
-            {options.length === 0 ? (
-              // No picker at all when there is nothing to file into: a control
-              // whose only outcome is a dead end should not be offered.
-              // variant="empty", not "status": the variant fixes the ARIA role,
-              // and a static sentence repeated once per row must not be N live
-              // regions (docs/DESIGN_SYSTEM.md §3).
-              <StatusMessage variant="empty" compact>
-                Create a project to file notes.
-              </StatusMessage>
-            ) : (
+          </button>
+          {/* No picker at all when there is nothing to file into: a control
+              whose only outcome is a dead end should not be offered. No
+              substitute hint either — a static sentence repeated once per
+              row is N copies of one fact, and pointing at the fix is the
+              sidebar's job, where projects live and where task #84's
+              create-project affordance lands. */}
+          {options.length > 0 && (
+            <div className="inbox__rowActions">
               <Select
                 hideLabel
                 variant="token"
@@ -644,8 +658,8 @@ function InboxRow({
                 busy={pending}
                 onChange={route}
               />
-            )}
-          </div>
+            </div>
+          )}
         </div>
         {error && (
           <StatusMessage variant="error" compact>
