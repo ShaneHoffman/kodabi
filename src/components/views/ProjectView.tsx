@@ -1,6 +1,9 @@
+import { useState } from "react";
 import { useNavigation } from "../../useNavigation";
 import { noteMeta } from "../../noteMeta";
 import { useProjectNotes } from "../../useNotes";
+import { useProjects } from "../../useProjects";
+import { DeleteProjectDialog } from "../DeleteProjectDialog";
 import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
@@ -22,6 +25,20 @@ type Props = {
 export function ProjectView({ slug }: Props) {
   const { navigate } = useNavigation();
   const { notes, loading, error } = useProjectNotes(slug);
+  const { entries } = useProjects();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  // What deleting this project would take with it, from the sidebar listing
+  // the shell already holds: the project's own notes plus everything under
+  // `slug/` (descendant projects and their notes).
+  const projectEntries = entries.filter((entry) => entry.kind === "project");
+  const own = projectEntries.find((entry) => entry.project.slug === slug);
+  const descendants = projectEntries.filter((entry) =>
+    entry.project.slug.startsWith(`${slug}/`),
+  );
+  const containedNoteCount =
+    (own?.project.note_count ?? notes.length) +
+    descendants.reduce((sum, entry) => sum + entry.project.note_count, 0);
 
   return (
     <ViewFrame
@@ -37,16 +54,27 @@ export function ProjectView({ slug }: Props) {
           : undefined
       }
       action={
-        <Button
-          variant="quiet"
-          // Ink, not the reserved green: this is the one action on a reading
-          // screen, and it earns its place by being the only verb here — not
-          // by being a colour.
-          className="py-3xs text-label text-text-soft"
-          onClick={() => navigate({ kind: "noteEditor", noteId: null, project: slug })}
-        >
-          New note
-        </Button>
+        // Ink, not the reserved green: the two verbs on a reading screen earn
+        // their place by being quiet text, not by being a colour. Creation
+        // leads; the destructive one sits behind a confirmation
+        // (DeleteProjectDialog) and so needs no weight of its own here.
+        <div className="flex items-center gap-sm">
+          <Button
+            variant="quiet"
+            className="py-3xs text-label text-text-soft"
+            onClick={() => navigate({ kind: "noteEditor", noteId: null, project: slug })}
+          >
+            New note
+          </Button>
+          <Button
+            variant="quiet"
+            aria-haspopup="dialog"
+            className="py-3xs text-label text-text-soft"
+            onClick={() => setConfirmingDelete(true)}
+          >
+            Delete project
+          </Button>
+        </div>
       }
     >
       {error ? (
@@ -84,6 +112,15 @@ export function ProjectView({ slug }: Props) {
             </li>
           ))}
         </ul>
+      )}
+
+      {confirmingDelete && (
+        <DeleteProjectDialog
+          slug={slug}
+          noteCount={containedNoteCount}
+          descendantProjectCount={descendants.length}
+          onClose={() => setConfirmingDelete(false)}
+        />
       )}
     </ViewFrame>
   );

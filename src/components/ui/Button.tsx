@@ -2,7 +2,7 @@ import type { ComponentPropsWithRef, ReactNode } from "react";
 import "./Button.css";
 
 type Props = ComponentPropsWithRef<"button"> & {
-  variant?: "primary" | "quiet" | "filled";
+  variant?: "primary" | "quiet" | "filled" | "destructive";
   /** Whether the action this button started is still running. */
   loading?: boolean;
   /** What to read while `loading`; falls back to the button's own children. */
@@ -28,6 +28,12 @@ type Props = ComponentPropsWithRef<"button"> & {
  *   quiet   — a ghost that stays transparent via Preflight's
  *             `button { background: transparent }` and inherits its colour,
  *             so a selected row can add its own `bg-surface`.
+ *
+ * `destructive` is not a fourth weight: it wears the quiet ghost's exact
+ * chrome (there is no red token — docs/DESIGN_SYSTEM.md marks a destructive
+ * action by confirmation, not colour) and exists so call sites state intent.
+ * It may only ever appear inside a confirmation dialog, as the non-default
+ * control beside a `primary` Cancel that holds initial focus.
  *
  * Padding follows the variant rather than the component: `primary` and
  * `filled` are real chips with a fixed size, but a `quiet` button is whatever
@@ -75,6 +81,7 @@ export function Button({
     primary: "ui-btn--primary rounded-md px-xs py-2xs bg-surface text-text",
     filled: "ui-btn--filled",
     quiet: "ui-btn--quiet",
+    destructive: "ui-btn--destructive",
   }[variant];
   // The disabled LOOK lives in Button.css, not here, because it is per
   // variant: `primary` and `quiet` recede to --text-faint, but `filled` is an

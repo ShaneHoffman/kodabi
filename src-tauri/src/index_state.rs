@@ -135,6 +135,14 @@ impl IndexState {
         self.send(Job::Rebuild)
     }
 
+    /// Requests a whole-vault reconcile pass (upsert by id plus the stale
+    /// sweep), returning whether the worker accepted it. Used after a bulk
+    /// mutation (a project deletion) so the index converges promptly instead
+    /// of waiting on the file watcher's debounce.
+    pub fn request_reconcile(&self) -> bool {
+        self.send(Job::Reconcile)
+    }
+
     /// Hands a job to the worker, returning whether it was queued. A closed
     /// channel (worker gone at shutdown) or an unopened index simply drops it —
     /// fine for a best-effort cache.

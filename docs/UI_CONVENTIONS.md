@@ -208,7 +208,7 @@ The shared controls live in [`src/components/ui/`](../src/components/ui/). They 
 padding, the focus ring, and the hairline recipes, so screens compose them instead of restating utility
 strings. Named function exports, relative imports, one co-located `*.css` per component.
 
-### `Button` — `variant="primary" | "quiet" | "filled"`
+### `Button` — `variant="primary" | "quiet" | "filled" | "destructive"`
 
 Owns **structure only** (rounding and every interaction state: focus, hover, active, disabled) plus
 each variant's emphasis. It deliberately sets **no text size**, so a caller's own `text-*` utilities
@@ -216,7 +216,11 @@ never collide with a baked-in one. `primary` is the raised control chip — `bg-
 the app's control padding `px-xs py-2xs`, `--fw-medium`, and the ring-plus-shadow of `--lift-chip` in
 one declaration; `filled` is an ink fill with a page-coloured label, the heaviest control in the app
 and the only one that inverts, spent on the single action that *ends* a surface; `quiet` is a
-transparent ghost that inherits its colour — the low-emphasis and navigation form.
+transparent ghost that inherits its colour — the low-emphasis and navigation form. `destructive` is
+not a fourth weight: it shares the quiet ghost's chrome (one CSS rule, two selectors) and exists so
+call sites state intent — it may only appear inside a confirmation dialog, as the non-default
+control beside a `primary` Cancel (docs/DESIGN_SYSTEM.md, "Destructive is a confirmation, not a
+colour").
 
 **Padding follows the variant, not the component.** `primary` and `filled` are real chips with a
 fixed size, but a `quiet` button is whatever shape its context needs (a sidebar nav row, a text
@@ -537,6 +541,8 @@ new screen should find its shape here rather than inventing one.
 | `InboxView` | `ViewFrame variant="queue"`, `Select variant="token"`, `StatusMessage` | `.inbox__rowShell` + `.inbox__row` (one full-surface button with the File picker overlaid in `.inbox__rowActions`), the progress instrument, the pipeline placeholder row (which wears the same shell and row shape), and the filed toast (`.inbox__toast`) |
 | `NeedsAttentionView` | `ViewFrame variant="health"`, `Button` (with `loading`), `StatusMessage` | `.attention__card`, pre-lifted |
 | `ProjectView` | `ViewFrame variant="library"`, `Button`, `StatusMessage` | `.project__row`, a hand-rolled index row |
+| `CreateProjectDialog` | `Overlay`, `TextField`, `Button` (`quiet` + `filled`) | — |
+| `DeleteProjectDialog` | `Overlay`, `Button` (`destructive` beside a `primary` Cancel), `StatusMessage` | — |
 | `NoteEditorView` | `ViewFrame variant="doc"`, `Button`, `StatusMessage` | its own header, and raw `<textarea>` / `<input>` elements with `aria-label` + `ui-writing` |
 | `SettingsView` | `ViewFrame variant="panel"`, `Select`, `Button`, `StatusMessage` | a local `role="switch"` `Toggle`, and a raw number `<input>` (`.settings__chip`) |
 | `SearchView` | `ViewFrame variant="search"`, `StatusMessage` | its own query field (`.ui-focus-ring-within`) |

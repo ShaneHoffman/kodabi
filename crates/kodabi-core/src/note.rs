@@ -97,6 +97,8 @@ pub enum NoteError {
     DuplicateNoteId { id: String, paths: Vec<PathBuf> },
     #[error("target project {project:?} does not exist; pass create_project to create it")]
     MissingProject { project: String },
+    #[error("project {project:?} already exists")]
+    ProjectExists { project: String },
 }
 
 /// `Result` specialised to [`NoteError`].

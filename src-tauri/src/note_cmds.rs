@@ -443,6 +443,62 @@ pub async fn list_projects(app: AppHandle) -> Result<ProjectListDto, String> {
     })
 }
 
+/// Creates an empty project folder via `vault::create_project`, echoing the
+/// canonical (casing-adopted) project row so the frontend can navigate to it
+/// without waiting for a refetch.
+#[tauri::command]
+pub async fn create_project(app: AppHandle, project: String) -> Result<ProjectDto, String> {
+    let kb = knowledge_base_dir(&app)?;
+    let info = vault::create_project(&kb, &project).map_err(|err| err.to_string())?;
+    broadcast_vault_changed(&app);
+    Ok(project_dto(info))
+}
+
+/// The `delete_project` outcome echoed to the frontend, for the confirmation's
+/// closing copy.
+#[derive(serde::Serialize)]
+pub struct DeletedProjectDto {
+    slug: String,
+    moved_note_count: u32,
+}
+
+/// Deletes a project via `vault::delete_project`: its notes (direct and in
+/// child projects) move back to the Inbox first, then the folder tree is
+/// removed. Index consistency comes in two best-effort layers: a per-note
+/// upsert lands each move immediately (a moved note keeps its id, so no row is
+/// deleted), and a reconcile sweep converges anything else without waiting on
+/// the file watcher.
+#[tauri::command]
+pub async fn delete_project(app: AppHandle, project: String) -> Result<DeletedProjectDto, String> {
+    let kb = knowledge_base_dir(&app)?;
+    let deleted = vault::delete_project(&kb, &project).map_err(|err| match err {
+        // The core message suggests passing create_project, which only makes
+        // sense on the filing path; deletion gets plain copy.
+        note::NoteError::MissingProject { project } => {
+            format!("project \"{project}\" does not exist")
+        }
+        other => other.to_string(),
+    })?;
+
+    let index = app.state::<IndexState>();
+    for listed in &deleted.moved_notes {
+        let rel = listed.path.strip_prefix(&kb).unwrap_or(&listed.path);
+        let indexed = IndexedNote::from_note(
+            &listed.note,
+            &listed.title,
+            &rel.to_string_lossy().replace('\\', "/"),
+        );
+        index.index_note_best_effort(indexed);
+    }
+    index.request_reconcile();
+    broadcast_vault_changed(&app);
+
+    Ok(DeletedProjectDto {
+        slug: deleted.slug,
+        moved_note_count: deleted.moved_notes.len() as u32,
+    })
+}
+
 fn parse_note_id(id: &str) -> Result<NoteId, String> {
     NoteId::parse(id).map_err(|_| format!("id {id:?} must match ^n_[0-9a-z]{{6,}}$"))
 }
