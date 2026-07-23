@@ -154,6 +154,66 @@ describe("InboxView", () => {
     expect(screen.getByText("Vendor follow-up")).toBeInTheDocument();
   });
 
+  it("opens the note when the card body is clicked", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    serveVault([
+      makeNote({
+        id: "n_a1b2c3",
+        title: "Quarterly planning",
+        snippet: "Walked the Q3 budget line by line.",
+      }),
+    ]);
+    const navigate = renderInboxWithNavigateSpy();
+    await screen.findByText("Quarterly planning");
+
+    // The snippet, not the title: the whole card is one button now, and the
+    // text farthest from the old title-only target is what proves it.
+    await user.click(screen.getByText("Walked the Q3 budget line by line."));
+
+    expect(navigate).toHaveBeenCalledWith({
+      kind: "noteEditor",
+      noteId: "n_a1b2c3",
+      project: "Inbox",
+    });
+  });
+
+  it("opens the note from the keyboard: the card is one real button", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    serveVault([PLANNING]);
+    const navigate = renderInboxWithNavigateSpy();
+    await screen.findByText("Quarterly planning");
+
+    // A regex, because the button's accessible name is the card's whole text
+    // (title, then meta). One tab stop, Enter — the entire keyboard path.
+    screen.getByRole("button", { name: /Quarterly planning/ }).focus();
+    await user.keyboard("{Enter}");
+
+    expect(navigate).toHaveBeenCalledWith({
+      kind: "noteEditor",
+      noteId: "n_a1b2c3",
+      project: "Inbox",
+    });
+  });
+
+  it("files without navigating: the picker sits over the card, not inside it", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    serveVault([PLANNING]);
+    onCommand("file_note_to_project", () => ({
+      note: { ...PLANNING, project: "paradise-golf", path: "Projects/paradise-golf/planning.md" },
+      previous: { path: PLANNING.path, project: null },
+      moved: true,
+    }));
+    const navigate = renderInboxWithNavigateSpy();
+    await screen.findByText("Quarterly planning");
+
+    await fileNote(user, "Quarterly planning", "paradise-golf");
+
+    expect(invoke).toHaveBeenCalledWith("file_note_to_project", {
+      input: { id: "n_a1b2c3", project: "paradise-golf" },
+    });
+    expect(navigate).not.toHaveBeenCalled();
+  });
+
   it("re-routes a note to the chosen project and drops the row once the vault refetches", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     serveVault([PLANNING, VENDOR]);
@@ -215,8 +275,12 @@ describe("InboxView", () => {
 
     renderInbox();
 
-    expect(await screen.findByText("Create a project to file notes.")).toBeInTheDocument();
+    // No per-row hint in its place either: pointing at the fix is the
+    // sidebar's job (task #84's create-project affordance), not one copy of
+    // the same sentence on every card.
+    await screen.findByText("Quarterly planning");
     expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Create a project/)).not.toBeInTheDocument();
   });
 
   it("says nothing is waiting when the inbox is empty", async () => {
@@ -503,7 +567,7 @@ describe("InboxView", () => {
       });
       const rows = screen.getAllByText("New capture");
       expect(rows).toHaveLength(1);
-      expect(rows[0].closest(".inbox__row")).toHaveClass("inbox__row--fresh");
+      expect(rows[0].closest(".inbox__rowShell")).toHaveClass("inbox__rowShell--fresh");
     });
 
     it("vanishes immediately and hands off to a toast when distill routes elsewhere", async () => {

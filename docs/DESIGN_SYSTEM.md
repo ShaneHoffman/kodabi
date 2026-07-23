@@ -111,7 +111,7 @@ Per DESIGN.md, value carries the hierarchy. In practice:
 | --- | --- | --- |
 | Row group gap | `gap-3xs` (4px) | Tight nav lists (Sidebar) |
 | Row padding | `--row-queue-*` · `--row-library-*` · `--row-search-*` | A content row consumes its own pair (20/16, 16/14, 15/12) |
-| Title ↔ action column gap | `--gap-row-columns` (28px) | Shared by `.inbox__row` and `.project__row` |
+| Title ↔ action column gap | `--gap-row-columns` (28px) | `.project__row`'s grid; folded into the Inbox row's `--row-queue-trail` reservation |
 | Card stack gap | `--gap-card` (14px) | Pre-lifted cards (`.attention__stack`) |
 | Header → list lead-in | `--lead-*` | The gap between a view's header and the thing it heads |
 
