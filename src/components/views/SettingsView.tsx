@@ -436,8 +436,8 @@ export function SettingsView() {
                 />
               </Row>
               <SubLabel>
-                Kodabi deletes raw transcripts past this age. Your notes are
-                never removed.
+                Kodabi deletes raw transcripts and recordings past this age.
+                Your notes are never removed.
               </SubLabel>
 
               {kind === "keep_days" && (

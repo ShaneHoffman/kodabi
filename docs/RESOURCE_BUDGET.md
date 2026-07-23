@@ -181,7 +181,9 @@ accounting), `crates/kodabi-core/src/inflight.rs` (the on-disk session + recover
 little-endian `f32` file under `<sessions>/inflight/<timestamp>-<device>/` once it reaches
 `KODABI_FLUSH_SECS` (default 10s) of audio, then clears the in-memory buffer (retaining capacity).
 At stop, transcription streams the files back a chunk at a time (resampling 48 kHz → 16 kHz on the
-fly) rather than materialising the session, writes the atomic `.jsonl`, then deletes the directory.
+fly) rather than materialising the session, writes the atomic `.jsonl`, converts the spill into the
+session's retained `.wav` recording (best-effort — see *Retained-recording disk cost* below), then
+deletes the directory.
 A directory still present at the next launch is an orphan (a crash): startup recovers it through the
 same transcribe → distill chain. Retention never touches `inflight/` (it prunes only top-level
 `.jsonl`); un-recoverable leftovers are swept after a 48h grace by `inflight::sweep_stale`, piggybacked
@@ -209,6 +211,14 @@ session held in memory before — so it costs **~1.4 GB/hour** for both channels
 3h meeting), deleted within minutes of stop once the transcript lands. `meta.json` records the
 sample rate and format, so a later switch to a smaller on-disk encoding (e.g. 16 kHz `i16`, ~6×
 smaller) is a metadata version bump rather than a format break.
+
+**Retained-recording disk cost.** Before the spill is deleted, transcription converts it into the
+session's retained recording — a 16-bit PCM stereo WAV at 48 kHz sharing the `.jsonl`'s filename
+stem (`kodabi_audio::wav`, see `FILENAME_SCHEME.md`) — at **~690 MB/hour** (~11.5 MB/min), half the
+spill's rate. Unlike the spill this persists, governed by the retention policy exactly as the
+transcript is: discard-after-distill deletes it with the `.jsonl` minutes later, keep-days prunes
+both on the same schedule, keep-all keeps both. A future downsample (16 kHz mono would be ~8×
+smaller) is an encoder change only — readers derive the pairing from the filename, not the format.
 
 **Durability boundary (fsync policy).** Each flush is a buffered write followed by `flush()` — the
 bytes reach the OS page cache, which **survives process death** (a crash or `kill -9`, the acceptance

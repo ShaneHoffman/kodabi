@@ -72,7 +72,7 @@ export const DEFAULT_KEEP_DAYS = 30;
 /** The retention choices, shared by the consent nudge and the Settings view so
  * the two surfaces never drift. */
 export const RETENTION_OPTIONS: { value: RetentionKind; label: string }[] = [
-  { value: "keep_all", label: "Keep all transcripts" },
+  { value: "keep_all", label: "Keep all transcripts and recordings" },
   { value: "keep_days", label: "Keep for a number of days" },
   { value: "discard_after_distill", label: "Discard after distilling" },
 ];

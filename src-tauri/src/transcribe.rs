@@ -46,6 +46,12 @@ const IN_MEMORY_CHUNK_SAMPLES: usize = ENGINE_SAMPLE_RATE_HZ as usize * 10;
 /// the retention schedule can piggyback the sweep on its cadence.
 pub(crate) const INFLIGHT_STALE_GRACE: Duration = Duration::from_secs(48 * 60 * 60);
 
+/// Staging filename for the retained recording while it is being written
+/// inside the in-flight spill directory, before its atomic rename into
+/// `sessions/`. The directory is exclusive to one session (and removed
+/// wholesale), so no uniquifier is needed.
+const AUDIO_STAGING_NAME: &str = ".audio.tmp";
+
 /// Event the frontend subscribes to for post-capture transcription progress.
 pub const TRANSCRIPTION_STATE_EVENT: &str = "transcription:state";
 
@@ -363,7 +369,25 @@ fn run_spilled(
         (Channel::You, &mut cleaned_mic),
         (Channel::Them, &mut system),
     ];
-    persist(app, &mut channels, captured_at)
+    let path = persist(app, &mut channels, captured_at)?;
+    // Retain the recording now, while the spill files still exist — the
+    // callers remove the in-flight directory only after this returns. The
+    // staging temp lives inside that directory, so a crash mid-write leaves
+    // it where the directory's own cleanup (or recovery's idempotency check)
+    // sweeps it. The WAV keeps the 48 kHz capture rate and the raw (pre-AEC)
+    // channels: it exists to check the summary against the source, not to
+    // feed an engine.
+    retain_audio(
+        kodabi_audio::write_stereo_wav_from_spills(
+            mic_path,
+            system_path,
+            source_rate,
+            &mic_path.with_file_name(AUDIO_STAGING_NAME),
+            &kodabi_core::naming::audio_sibling(&path),
+        ),
+        &path,
+    );
+    Ok(path)
 }
 
 /// The in-memory fallback (spill files couldn't be created): resample both
@@ -390,7 +414,38 @@ fn run_in_memory(
         (Channel::You, &mut cleaned_mic),
         (Channel::Them, &mut system),
     ];
-    persist(app, &mut channels, captured_at)
+    let path = persist(app, &mut channels, captured_at)?;
+    // Retain the recording from the resident 48 kHz channels (`channel`, not
+    // `channel_resampled` — the WAV keeps capture fidelity). The staging temp
+    // is a `.tmp` sibling in the sessions directory, invisible to both the
+    // retention sweep and the needs-attention list until the atomic rename.
+    retain_audio(
+        kodabi_audio::write_stereo_wav_from_channels(
+            session.channel(SessionChannel::Mic),
+            session.channel(SessionChannel::System),
+            session.sample_rate(),
+            &path.with_file_name(format!(".audio.{}.tmp", std::process::id())),
+            &kodabi_core::naming::audio_sibling(&path),
+        ),
+        &path,
+    );
+    Ok(path)
+}
+
+/// Logs a failed recording write and moves on: the transcript is the primary
+/// artifact and is already safely on disk, so audio retention is best-effort —
+/// a failure here must never fail the pipeline (the note simply shows no
+/// recording). One accepted gap, documented rather than closed: a crash after
+/// the `.jsonl` lands but before the WAV rename loses only the audio, because
+/// recovery's idempotency check sees the transcript and removes the spill
+/// without converting.
+fn retain_audio(result: io::Result<()>, session_path: &Path) {
+    if let Err(err) = result {
+        eprintln!(
+            "audio retention failed for {}: {err}",
+            session_path.display()
+        );
+    }
 }
 
 /// Load the glossary and device identity and run the core transcribe → clean →

@@ -55,7 +55,11 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' asset: data:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'"
+      "csp": "default-src 'self'; img-src 'self' asset: data:; font-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; media-src 'self' asset: http://asset.localhost",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/sessions/*.wav"]
+      }
     }
   },
   "bundle": {

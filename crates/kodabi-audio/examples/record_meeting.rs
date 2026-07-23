@@ -3,10 +3,9 @@
 //! and writes the result to WAV, for use as raw material for a benchmark
 //! fixture (see `crates/kodabi-transcribe/tests/data/benchmark/README.md`).
 //!
-//! An example rather than app code: it needs `hound`, a dev-dependency only
-//! (see this crate's `Cargo.toml` — runtime persistence is a separate,
-//! not-yet-built ticket), and driving it is a one-off human action during a
-//! real meeting, not a shipping feature.
+//! An example rather than app code: driving it is a one-off human action
+//! during a real meeting, not a shipping feature. (The app's own WAV
+//! persistence — the retained-recording artifact — lives in `src/wav.rs`.)
 //!
 //! Usage:
 //!   cargo run -p kodabi-audio --example record_meeting -- <output-prefix> [--max-secs N]
