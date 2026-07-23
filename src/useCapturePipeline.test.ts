@@ -19,6 +19,8 @@ function pipeline(overrides: Partial<CapturePipeline>): CapturePipeline {
     distill: { status: "idle" },
     handledFiledId: null,
     markFiledHandled: () => {},
+    stopPending: false,
+    markStopHandled: () => {},
     ...overrides,
   };
 }
@@ -94,7 +96,64 @@ describe("pipelineStage", () => {
     expect(pipelineStage(pipeline({ transcription: { status: "transcribing" } }))).toEqual({
       id: "transcribing",
       kind: "transcribing",
+      awaitingTranscribe: false,
     });
+  });
+
+  it("reports a synthetic transcribing stage the moment a stop is pending", () => {
+    // The backend announces `Transcribing` only once its worker holds the
+    // transcribe lock, so right after a stop every raw state still reads
+    // idle — the witnessed stop alone carries the placeholder.
+    expect(pipelineStage(pipeline({ stopPending: true }))).toEqual({
+      id: "stopped",
+      kind: "transcribing",
+      awaitingTranscribe: true,
+    });
+  });
+
+  it("stays null during an active capture even with a stop pending", () => {
+    // The provider clears the flag the render after a capture starts; this
+    // covers the one render in between.
+    expect(
+      pipelineStage(pipeline({ capture: LISTENING_CAPTURE, stopPending: true })),
+    ).toBeNull();
+  });
+
+  it("lets terminal failures outrank a pending stop", () => {
+    expect(
+      pipelineStage(
+        pipeline({ stopPending: true, transcription: { status: "error", message: "boom" } }),
+      ),
+    ).toBeNull();
+    expect(
+      pipelineStage(
+        pipeline({
+          stopPending: true,
+          distill: { status: "skipped", reason: "no speech", session_path: "s.jsonl" },
+        }),
+      ),
+    ).toBeNull();
+    expect(
+      pipelineStage(
+        pipeline({
+          stopPending: true,
+          distill: { status: "error", message: "boom", session_path: "s.jsonl" },
+        }),
+      ),
+    ).toBeNull();
+  });
+
+  it("lets a filed outcome outrank a pending stop", () => {
+    // `stopPending` clears only when the next capture starts, so a finished
+    // pipeline must never fall back to the synthetic stage.
+    expect(
+      pipelineStage(
+        pipeline({
+          stopPending: true,
+          distill: { status: "saved", path: "n.md", session_path: "s.jsonl" },
+        }),
+      ),
+    ).toEqual({ id: "filed:s.jsonl", kind: "filed", savedPath: "n.md" });
   });
 
   it("reports distilling as awaited once transcription saves, before distill starts", () => {
