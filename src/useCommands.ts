@@ -45,9 +45,14 @@ export function useCommands(): Command[] {
       run: () => navigate(entryView(entry)),
     }));
 
-    // Conditional, like the sidebar row it mirrors: a jump to a view whose only
-    // content is "all clear" is a command that wastes the one thing the palette
-    // sells, which is that everything in it is worth doing.
+    // Conditional on the *full* listing, dismissed sessions included — a
+    // deliberate divergence from the sidebar row, which counts only the
+    // undismissed. When everything is dismissed the sidebar stops nagging (as
+    // dismissal promises), and this jump becomes the way back to the dismissed
+    // shelf; without it, dismissed captures would be unreachable and dismissal
+    // would stop being reversible. A vault with no failed sessions at all still
+    // drops the command: a jump to a view whose only content is "all clear"
+    // wastes the one thing the palette sells.
     if (sessions.length > 0) {
       commands.push({
         id: "needs-attention",

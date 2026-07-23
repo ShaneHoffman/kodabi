@@ -90,6 +90,20 @@ name is derived from the claimed path (`audio_sibling` in `crates/kodabi-core/sr
 never re-composed — which is what keeps the stems identical even when a same-millisecond
 collision appended a numbered slug.
 
+### The dismissed-marker sibling
+
+A needs-attention session the user has dismissed carries a `.dismissed` marker under the same
+exact-stem rule (`dismissed_sibling` in `crates/kodabi-core/src/naming.rs`):
+
+```
+20260712T140335123Z-k4m2xp7q-paradise-golf-sync.dismissed
+```
+
+Presence is the whole signal — the content (one RFC 3339 UTC line, the dismissal instant) is
+never parsed. The marker is written and cleared by `crates/kodabi-core/src/sessions.rs`
+(`dismiss_session` / `restore_session`); a successful distill clears it, and deleting a session
+removes it with the transcript and recording.
+
 ---
 
 ## Consumers
@@ -103,9 +117,9 @@ Every component that names or reads a captured-session filename must follow this
   filenames sorting chronologically and never colliding across devices.
 - **Import/export (merge, never overwrite)** — import relies on timestamp+device-ID filenames to
   detect that two files from different devices are distinct, never overwriting one with the other.
-- **Retention** (`crates/kodabi-core/src/retention.rs`) — ages both a `.jsonl` transcript and its
-  `.wav` recording by the shared filename timestamp, so the pair expires together; the
-  post-distill discard removes both.
+- **Retention** (`crates/kodabi-core/src/retention.rs`) — ages a `.jsonl` transcript, its `.wav`
+  recording, and its `.dismissed` marker by the shared filename timestamp, so the trio expires
+  together; the post-distill discard removes all three.
 
 ## Reference implementation
 

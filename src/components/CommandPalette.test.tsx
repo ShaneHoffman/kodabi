@@ -91,6 +91,28 @@ describe("CommandPalette sections", () => {
     );
   });
 
+  it("offers the needs-attention jump while only dismissed captures remain", async () => {
+    // The sidebar row hides once everything is dismissed, so this jump is the
+    // one way back to the dismissed shelf — it keys on the full listing,
+    // dismissed included, or dismissal would stop being reversible.
+    serveVault();
+    onCommand("list_failed_sessions", () => [
+      {
+        path: "sessions/2026-07-01T10-00-00Z-team-sync.jsonl",
+        file_name: "2026-07-01T10-00-00Z-team-sync.jsonl",
+        slug: "team-sync",
+        captured_at: "2026-07-01T10:00:00Z",
+        dismissed: true,
+      },
+    ]);
+
+    await renderPalette();
+
+    expect(
+      await screen.findByRole("option", { name: "Needs attention" }),
+    ).toBeInTheDocument();
+  });
+
   it("walks the arrow keys straight across the section boundary", async () => {
     // The sections are visual only: the option ids stay one sequence over the
     // whole list, so the highlight must not stall or skip where they meet.

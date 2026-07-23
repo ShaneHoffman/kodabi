@@ -322,6 +322,7 @@ describe("InboxView", () => {
         file_name: "2026-07-01T10-00-00Z-team-sync.jsonl",
         slug: "team-sync",
         captured_at: "2026-07-01T10:00:00Z",
+        dismissed: false,
       },
     ]);
 

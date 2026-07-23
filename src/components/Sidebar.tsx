@@ -215,9 +215,11 @@ export function Sidebar({ onOpenPalette }: Props) {
  *
  * It stands beside the Inbox in the system rail rather than down in the
  * chrome, because it is the same kind of thing — a queue with a count that
- * someone has to clear. It still disappears at zero, so the sidebar carries no
- * permanent reminder of a problem nobody has, and the rail collapses to the
- * single Inbox row it started as.
+ * someone has to clear. A dismissed capture *is* cleared, so the row counts
+ * and gates on the undismissed only: dismissing the last one collapses the
+ * rail back to the single Inbox row it started as, which is the whole point
+ * of dismissing. (Dismissed captures stay reachable through the command
+ * palette's needs-attention jump, which keys on the full listing.)
  *
  * It also owns the distill-failure refetch. That listener used to live in the
  * Inbox, which meant a failure only reached the list while the Inbox happened
@@ -232,8 +234,10 @@ function NeedsAttentionRow() {
     if (payload.status === "error") notifyVaultChanged();
   });
 
+  const activeCount = sessions.filter((session) => !session.dismissed).length;
+
   // A failed listing must not masquerade as all clear, so it keeps the row.
-  if (sessions.length === 0 && !error) return null;
+  if (activeCount === 0 && !error) return null;
 
   const selected = view.kind === "needsAttention";
   return (
@@ -248,9 +252,9 @@ function NeedsAttentionRow() {
         }`}
       >
         <span>Needs attention</span>
-        {sessions.length > 0 && (
+        {activeCount > 0 && (
           <span className="ui-tnum font-mono text-cap font-normal text-text-faint">
-            {sessions.length}
+            {activeCount}
           </span>
         )}
       </Button>

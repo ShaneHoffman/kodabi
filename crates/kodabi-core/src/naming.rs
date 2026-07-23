@@ -72,6 +72,16 @@ pub fn audio_sibling(session_path: &Path) -> PathBuf {
     session_path.with_extension("wav")
 }
 
+/// The dismissed-marker sibling of a session transcript: the same path with a
+/// `dismissed` extension. Like [`audio_sibling`], the marker shares the *exact*
+/// stem of its `.jsonl` so the pairing is derivable from either file with no
+/// index. Presence is the whole signal — the file marks a needs-attention
+/// session the user has waved off (see [`crate::sessions`]); its content is
+/// never parsed.
+pub fn dismissed_sibling(session_path: &Path) -> PathBuf {
+    session_path.with_extension("dismissed")
+}
+
 /// Directory name for an in-flight capture session: `{timestamp}-{deviceID}`.
 /// Reuses the session timestamp format so the sweep can recover its start
 /// instant from the part before the first `-` (via [`parse_session_timestamp`]),
@@ -313,6 +323,16 @@ mod tests {
                 "sessions/20260712T140335123Z-k4m2xp7q-paradise-golf-sync-2.jsonl"
             )),
             Path::new("sessions/20260712T140335123Z-k4m2xp7q-paradise-golf-sync-2.wav")
+        );
+    }
+
+    #[test]
+    fn dismissed_sibling_swaps_only_the_extension() {
+        assert_eq!(
+            dismissed_sibling(Path::new(
+                "sessions/20260712T140335123Z-k4m2xp7q-paradise-golf-sync-2.jsonl"
+            )),
+            Path::new("sessions/20260712T140335123Z-k4m2xp7q-paradise-golf-sync-2.dismissed")
         );
     }
 
