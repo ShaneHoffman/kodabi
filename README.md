@@ -61,9 +61,15 @@ crates/kodabi-embed/    # Local embedding backend — bge-small-en-v1.5 via fast
                         # Runtime, fully offline at runtime; cargo-feature-gated.
 crates/kodabi-llm/      # The headless Claude Code runner every LLM call (cleanup, distill,
                         # routing) goes through.
+.claude/                # Agentic dev workflow — task skills, read-only auditor agents, and
+                        # the rules they enforce.
 Cargo.toml              # Cargo workspace manifest (src-tauri + every crates/kodabi-* member).
 package.json            # Frontend package manifest and scripts.
 vite.config.ts, tsconfig*.json, eslint.config.js   # Frontend build/lint config.
+CLAUDE.md, CONTRIBUTING.md, kangentic.json   # Agent guide, contributor guide, and the
+                        # Kangentic board/workflow definition.
+.github/                # CI workflows (GitHub Actions) — the gate matrix run on every PR.
+scripts/                # PowerShell dev/build helpers (tray icons, resource profiling).
 target/, dist/          # Build output (git-ignored).
 ```
 
@@ -108,13 +114,27 @@ Model download and settings wiring for end users is a later ticket. See
 why Parakeet is the shipping engine and
 [`docs/RESOURCE_BUDGET.md`](docs/RESOURCE_BUDGET.md) for the deferred Whisper fallback.
 
-Rust tests, lint, and format run from the repo root (the workspace covers both crates):
+Rust tests, lint, and format run from the repo root (the workspace covers all crates). A quick
+local loop before pushing:
 
 ```sh
-cargo test
-cargo clippy --all-targets
-cargo fmt --check
+# Quick local loop (frontend + Rust):
+pnpm test && pnpm lint
+cargo test --workspace
+cargo clippy --workspace --all-targets
+cargo fmt --all --check
 ```
+
+The full CI gates are stricter (`--locked`, `-D warnings`, and per-crate feature legs for
+`parakeet` / `whisper` / `vad` / `bge`). See [`CLAUDE.md`](CLAUDE.md) and
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the complete matrix.
+
+## Contributing
+
+Kodabi is pre-alpha and AGPL-3.0 licensed; issues and discussion are welcome. Development runs on
+a Kangentic board, with a `type/slug` branch-name convention and Conventional Commits. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the branch/commit rules and the board flow, and
+[`CLAUDE.md`](CLAUDE.md) for the full engineering gates.
 
 ## License
 

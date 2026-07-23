@@ -1247,7 +1247,7 @@ mod tests {
             "summary": "Talked through the Q3 budget.",
             "decisions": ["Approve the revised budget"],
             "action_items": [
-                {"owner": "Shane", "description": "send the memo", "due_date": "2026-07-15"},
+                {"owner": "Jane", "description": "send the memo", "due_date": "2026-07-15"},
                 {"owner": null, "description": "book the follow-up", "due_date": null}
             ],
             "open_questions": ["Who owns vendor outreach?"],
@@ -1328,7 +1328,7 @@ mod tests {
         assert_eq!(
             output.action_items,
             vec![
-                draft("send the memo", Some("Shane"), Some("2026-07-15")),
+                draft("send the memo", Some("Jane"), Some("2026-07-15")),
                 draft("book the follow-up", None, None),
             ]
         );
@@ -1414,13 +1414,13 @@ mod tests {
     fn action_item_description_loses_leading_to_and_trailing_period() {
         let output = parse_output(
             r#"{"summary": "s", "action_items": [
-                {"owner": "Shane", "description": "To send the memo."}]}"#,
+                {"owner": "Jane", "description": "To send the memo."}]}"#,
         )
         .unwrap();
 
         assert_eq!(
             output.action_items,
-            vec![draft("send the memo", Some("Shane"), None)]
+            vec![draft("send the memo", Some("Jane"), None)]
         );
     }
 
@@ -1428,7 +1428,7 @@ mod tests {
     fn duplicated_due_tail_in_description_is_stripped_and_adopted() {
         let output = parse_output(
             r#"{"summary": "s", "action_items": [
-                {"owner": "Shane", "description": "send the memo by 2026-07-15"},
+                {"owner": "Jane", "description": "send the memo by 2026-07-15"},
                 {"owner": "Priya", "description": "file the report by 2026-07-20", "due_date": "2026-07-18"}]}"#,
         )
         .unwrap();
@@ -1439,7 +1439,7 @@ mod tests {
         assert_eq!(
             output.action_items,
             vec![
-                draft("send the memo", Some("Shane"), Some("2026-07-15")),
+                draft("send the memo", Some("Jane"), Some("2026-07-15")),
                 draft("file the report", Some("Priya"), Some("2026-07-18")),
             ]
         );
@@ -1462,8 +1462,8 @@ mod tests {
     fn owner_that_would_break_the_grammar_is_demoted_to_unassigned() {
         let output = parse_output(
             r#"{"summary": "s", "action_items": [
-                {"owner": "Shane to Bob", "description": "hand off the report"},
-                {"owner": "Shane to", "description": "send the memo"},
+                {"owner": "Jane to Bob", "description": "hand off the report"},
+                {"owner": "Jane to", "description": "send the memo"},
                 {"owner": "  ", "description": "book the room"}]}"#,
         )
         .unwrap();
@@ -1510,8 +1510,8 @@ mod tests {
     fn empty_description_drops_the_item() {
         let output = parse_output(
             r#"{"summary": "s", "action_items": [
-                {"owner": "Shane", "description": "  "},
-                {"owner": "Shane", "description": "To ."},
+                {"owner": "Jane", "description": "  "},
+                {"owner": "Jane", "description": "To ."},
                 {"owner": "Priya", "description": "real work"}]}"#,
         )
         .unwrap();
@@ -1568,7 +1568,7 @@ mod tests {
             action_items: vec![
                 draft(
                     "send the signed budget memo to finance",
-                    Some("Shane"),
+                    Some("Jane"),
                     Some("2026-07-11"),
                 ),
                 draft(
@@ -1590,7 +1590,7 @@ mod tests {
              - Approved the revised irrigation budget of $42,000.\n\
              - Selected GreenFlow Systems as the lead contractor for bidding.\n\n\
              ## Action items\n\n\
-             - [ ] Shane to send the signed budget memo to finance by 2026-07-11.\n\
+             - [ ] Jane to send the signed budget memo to finance by 2026-07-11.\n\
              - [ ] Priya to request formal bids from GreenFlow and two alternates."
         );
     }
@@ -1635,8 +1635,8 @@ mod tests {
     #[test]
     fn every_grammar_shape_round_trips_through_the_documented_parse() {
         let drafts = [
-            draft("send the memo", Some("Shane"), Some("2026-07-15")),
-            draft("send the memo", Some("Shane"), None),
+            draft("send the memo", Some("Jane"), Some("2026-07-15")),
+            draft("send the memo", Some("Jane"), None),
             draft("send the memo", None, Some("2026-07-15")),
             draft("send the memo", None, None),
             // A description containing " to " and " by " mid-phrase must not
@@ -1793,7 +1793,7 @@ mod tests {
         assert!(note.body.contains("## Decisions"));
         assert!(note
             .body
-            .contains("- [ ] Shane to send the memo by 2026-07-15."));
+            .contains("- [ ] Jane to send the memo by 2026-07-15."));
         assert!(note
             .body
             .contains("- [ ] Unassigned to book the follow-up."));
@@ -2406,7 +2406,7 @@ mod tests {
     /// stays identifiable through the merge.
     fn chunk_json(summary: &str, description: &str) -> String {
         format!(
-            r#"{{"summary": "{summary}", "action_items": [{{"owner": "Shane", "description": "{description}", "due_date": null}}]}}"#
+            r#"{{"summary": "{summary}", "action_items": [{{"owner": "Jane", "description": "{description}", "due_date": null}}]}}"#
         )
     }
 
@@ -2542,7 +2542,7 @@ mod tests {
 
     #[test]
     fn exact_duplicates_dedup_across_chunks_first_wins() {
-        let repeated = draft("send the memo", Some("Shane"), None);
+        let repeated = draft("send the memo", Some("Jane"), None);
         let similar = draft("send the memo", Some("Ada"), None);
         let first = DistillOutput {
             action_items: vec![repeated.clone()],
@@ -2770,7 +2770,7 @@ mod tests {
         let segments = two_chunk_segments();
         let runner = SequenceRunner::ok(vec![
             // No summary, but a real commitment: the merge writes the prose.
-            r#"{"summary": "", "action_items": [{"owner": "Shane", "description": "file the permits", "due_date": null}]}"#
+            r#"{"summary": "", "action_items": [{"owner": "Jane", "description": "file the permits", "due_date": null}]}"#
                 .to_string(),
             chunk_json("The second half.", "send the memo"),
             chunk_json("The whole meeting.", "file the permits"),
@@ -2942,8 +2942,8 @@ mod tests {
                 "summary": "A long meeting about permits and the budget schedule.",
                 "decisions": ["Approve the revised schedule"],
                 "action_items": [
-                    {"owner": "Shane", "description": "send the memo", "due_date": null},
-                    {"owner": "Shane", "description": "file the permits", "due_date": "2026-07-20"}
+                    {"owner": "Jane", "description": "send the memo", "due_date": null},
+                    {"owner": "Jane", "description": "file the permits", "due_date": "2026-07-20"}
                 ],
                 "open_questions": [],
                 "tags": ["permits"]
@@ -2961,8 +2961,8 @@ mod tests {
         let written = std::fs::read_to_string(&distilled.path).unwrap();
         // One well-formed note, carrying the late chunk's action item.
         assert!(written.contains("# Summary"));
-        assert!(written.contains("- [ ] Shane to send the memo."));
-        assert!(written.contains("- [ ] Shane to file the permits by 2026-07-20."));
+        assert!(written.contains("- [ ] Jane to send the memo."));
+        assert!(written.contains("- [ ] Jane to file the permits by 2026-07-20."));
         assert!(written.contains("- Approve the revised schedule."));
     }
 

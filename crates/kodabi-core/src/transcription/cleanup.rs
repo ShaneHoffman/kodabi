@@ -229,12 +229,18 @@ mod tests {
 
     #[test]
     fn applies_only_the_corrected_segments_text() {
-        let glossary = glossary_with(&[("MERIDIAN", "A regional systems-migration project.", &["meridian"])]);
+        let glossary = glossary_with(&[(
+            "MERIDIAN",
+            "A regional systems-migration project.",
+            &["meridian"],
+        )]);
         let segments = vec![
             segment(0, "the meridian project"),
             segment(1, "unrelated line"),
         ];
-        let runner = MockRunner(Ok(r#"[{"index":0,"text":"the MERIDIAN project"}]"#.to_owned()));
+        let runner = MockRunner(Ok(
+            r#"[{"index":0,"text":"the MERIDIAN project"}]"#.to_owned()
+        ));
 
         let result = clean_transcript(&runner, segments.clone(), &glossary);
 
@@ -291,7 +297,9 @@ mod tests {
         let request = build_request(&segments, &glossary);
 
         assert!(request.prompt.contains("MERIDIAN"));
-        assert!(request.prompt.contains("A regional systems-migration project."));
+        assert!(request
+            .prompt
+            .contains("A regional systems-migration project."));
         assert!(request.prompt.contains("mer-idian"));
         assert!(request.prompt.contains("the meridian project"));
     }
