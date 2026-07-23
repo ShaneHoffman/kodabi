@@ -5,7 +5,7 @@
 //! in CI. Run them explicitly:
 //!
 //! ```powershell
-//! $env:KODABI_EMBED_MODEL_DIR = "C:\Users\shane\kodabi-models\bge-small-en-v1.5"
+//! $env:KODABI_EMBED_MODEL_DIR = "C:\models\bge-small-en-v1.5"
 //! cargo test -p kodabi-embed --features bge -- --ignored --nocapture
 //! ```
 #![cfg(feature = "bge")]

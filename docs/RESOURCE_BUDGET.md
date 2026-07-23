@@ -350,7 +350,7 @@ need to trade resampler quality or thread count for headroom; none was evident h
   by the agent directly; capturing (a real ~93s `Ctrl+Shift+K` session with a YouTube video
   as the system-audio channel) driven by the user with the agent running the profiler and
   reading results, since starting real audio capture and confirming fan behavior both need a
-  human. Debug build, real Parakeet models from `C:\Users\shane\kodabi-models\` (downloaded
+  human. Debug build, real Parakeet models from a local models directory (downloaded
   during task #37's engine benchmark). Hardware profile above.
 - **Whisper's production (VAD-gated) path:** blocked by a pre-existing `sherpa-onnx`
   dependency bug, tracked separately as board task #53 — not this ticket's default engine,
