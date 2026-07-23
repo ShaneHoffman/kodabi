@@ -50,7 +50,7 @@ use std::path::{Path, PathBuf};
 use chrono::{SecondsFormat, Utc};
 
 use crate::naming;
-use crate::note::NoteError;
+use crate::note::{NoteError, Source};
 use crate::raw_session::{self, RawSessionError, TranscriptSegment};
 use crate::retention;
 use crate::vault;
@@ -240,6 +240,35 @@ pub fn delete_session(session_path: &Path) -> Result<(), SessionsError> {
     remove_if_present(&naming::audio_sibling(session_path))?;
     remove_if_present(&naming::dismissed_sibling(session_path))?;
     remove_if_present(session_path)
+}
+
+/// Deletes the session artifacts a note's `source:` points at, if any — so
+/// deleting a distilled note leaves no orphaned recording or transcript (which
+/// would otherwise resurface as a session needing attention, per this module's
+/// docs).
+///
+/// A distilled note carries `source: sessions/<file>.jsonl`; this resolves that
+/// [`Source::RawArtifact`] through the same traversal-safe
+/// [`session_source_file_name`] gate [`read_session_artifacts`] uses, then calls
+/// [`delete_session`], returning `Ok(true)` when a session was targeted. A
+/// capture keyword (`manual`, `quick-capture`, …) or any raw-artifact value that
+/// does not name a `sessions/<file>.jsonl` artifact resolves to nothing and
+/// returns `Ok(false)` without touching disk. The underlying delete is
+/// idempotent, so a session whose transcript was already retention-pruned is a
+/// clean no-op (any surviving recording is still removed).
+pub fn delete_session_for_source(
+    vault_root: &Path,
+    source: &Source,
+) -> Result<bool, SessionsError> {
+    let Source::RawArtifact(raw) = source else {
+        return Ok(false);
+    };
+    let Some(file_name) = session_source_file_name(raw) else {
+        return Ok(false);
+    };
+    let path = vault_root.join(SESSIONS_DIR).join(file_name);
+    delete_session(&path)?;
+    Ok(true)
 }
 
 /// Refuses a path that is not a `.jsonl` session transcript, so a marker or
@@ -713,5 +742,71 @@ mod tests {
 
         let slugs: Vec<&str> = failed.iter().map(|s| s.slug.as_deref().unwrap()).collect();
         assert_eq!(slugs, ["latest", "middle", "earliest"]);
+    }
+
+    #[test]
+    fn delete_session_for_source_removes_a_notes_paired_artifacts() {
+        let vault = tempdir().unwrap();
+        let session = write_session(vault.path(), instant(14), Some("paired"), "spoken");
+        let recording = naming::audio_sibling(&session);
+        fs::write(&recording, "").unwrap();
+        dismiss_session(&session).unwrap();
+        let source = Source::parse(&source_value(
+            session.file_name().unwrap().to_str().unwrap(),
+        ))
+        .unwrap();
+
+        let removed = delete_session_for_source(vault.path(), &source).unwrap();
+
+        assert!(removed, "a resolvable session source reports a removal");
+        assert!(!session.exists());
+        assert!(!recording.exists());
+        assert!(!naming::dismissed_sibling(&session).exists());
+        assert_eq!(list_failed_sessions(vault.path()).unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn delete_session_for_source_ignores_a_keyword_source() {
+        let vault = tempdir().unwrap();
+        // An unrelated session on disk must survive a keyword-source cleanup.
+        let bystander = write_session(vault.path(), instant(14), Some("kept"), "spoken");
+
+        let removed =
+            delete_session_for_source(vault.path(), &Source::parse("manual").unwrap()).unwrap();
+
+        assert!(!removed, "a capture keyword names no artifact");
+        assert!(bystander.is_file());
+    }
+
+    #[test]
+    fn delete_session_for_source_ignores_a_non_session_raw_artifact() {
+        let vault = tempdir().unwrap();
+        let bystander = write_session(vault.path(), instant(14), Some("kept"), "spoken");
+
+        // A raw artifact that parses but does not name a `sessions/<file>.jsonl`
+        // resolves to nothing and touches no disk. (Traversal never reaches here
+        // at all: `Source::parse` rejects `.`/`..` segments up front.)
+        for source in ["sessions/recording.wav", "attachments/photo.png"] {
+            let removed =
+                delete_session_for_source(vault.path(), &Source::parse(source).unwrap()).unwrap();
+            assert!(!removed, "should not resolve: {source}");
+        }
+        assert!(bystander.is_file());
+    }
+
+    #[test]
+    fn delete_session_for_source_is_idempotent_when_already_pruned() {
+        let vault = tempdir().unwrap();
+        let session = write_session(vault.path(), instant(14), Some("gone"), "spoken");
+        let source = Source::parse(&source_value(
+            session.file_name().unwrap().to_str().unwrap(),
+        ))
+        .unwrap();
+        fs::remove_file(&session).unwrap();
+
+        // The session it named is already gone; resolving it still succeeds and
+        // reports the target as handled.
+        let removed = delete_session_for_source(vault.path(), &source).unwrap();
+        assert!(removed);
     }
 }

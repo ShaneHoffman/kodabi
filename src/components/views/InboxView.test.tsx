@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { InboxView } from "./InboxView";
@@ -9,7 +9,13 @@ import { DISTILL_STATE_EVENT } from "../../events";
 import type { NoteSummary } from "../../useNotes";
 import type { Project } from "../../useProjects";
 import { notifyVaultChanged } from "../../useVaultQuery";
-import { emitFromBackend, invoke, onCommand, resetTauriMocks } from "../../test/tauri";
+import {
+  emitFromBackend,
+  invoke,
+  invokedCommands,
+  onCommand,
+  resetTauriMocks,
+} from "../../test/tauri";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
@@ -183,9 +189,11 @@ describe("InboxView", () => {
     const navigate = renderInboxWithNavigateSpy();
     await screen.findByText("Quarterly planning");
 
-    // A regex, because the button's accessible name is the card's whole text
-    // (title, then meta). One tab stop, Enter — the entire keyboard path.
-    screen.getByRole("button", { name: /Quarterly planning/ }).focus();
+    // Anchored to the start: the card's accessible name is its whole text
+    // (title, then meta), so `^title` picks the card, not the row's own
+    // `Delete "Quarterly planning"` button. One tab stop, Enter — the entire
+    // keyboard path.
+    screen.getByRole("button", { name: /^Quarterly planning/ }).focus();
     await user.keyboard("{Enter}");
 
     expect(navigate).toHaveBeenCalledWith({
@@ -343,6 +351,113 @@ describe("InboxView", () => {
 
     expect(await screen.findByText(/the vault is unreadable/)).toBeInTheDocument();
     expect(screen.queryByText(/Nothing waiting/)).not.toBeInTheDocument();
+  });
+
+  describe("the delete affordance", () => {
+    it("offers delete even when there is no project to file into", async () => {
+      serveVault([PLANNING], []); // a project-less vault: nowhere to file
+      renderInbox();
+      await screen.findByText("Quarterly planning");
+
+      // No picker (nothing to file into), but an unwanted note must still be
+      // removable wherever it sits, so delete is always offered.
+      expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: 'Delete "Quarterly planning"' }),
+      ).toBeInTheDocument();
+    });
+
+    it("cancels without deleting", async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      serveVault([PLANNING]);
+      renderInbox();
+      await screen.findByText("Quarterly planning");
+
+      await user.click(
+        screen.getByRole("button", { name: 'Delete "Quarterly planning"' }),
+      );
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      expect(invokedCommands()).not.toContain("delete_note");
+    });
+
+    it("deletes by id, and the row leaves once the vault refetches", async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      serveVault([PLANNING, VENDOR]);
+      onCommand("delete_note", () => ({
+        id: "n_a1b2c3",
+        title: "Quarterly planning",
+        project: null,
+        session_deleted: false,
+      }));
+      renderInbox();
+      await screen.findByText("Quarterly planning");
+
+      await user.click(
+        screen.getByRole("button", { name: 'Delete "Quarterly planning"' }),
+      );
+      const dialog = screen.getByRole("dialog", { name: "Delete this note?" });
+      await user.click(within(dialog).getByRole("button", { name: "Delete note" }));
+
+      await waitFor(() => {
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+      });
+      expect(invoke).toHaveBeenCalledWith("delete_note", { id: "n_a1b2c3" });
+
+      // The backend broadcasts vault:changed; the list refetches without the
+      // deleted note, so its row (and the count) are gone.
+      serveVault([VENDOR]);
+      act(() => {
+        notifyVaultChanged();
+      });
+      await waitFor(() => {
+        expect(screen.queryByText("Quarterly planning")).not.toBeInTheDocument();
+      });
+      expect(screen.getByText("Vendor follow-up")).toBeInTheDocument();
+    });
+
+    it("warns that a session-backed note's recording is deleted too", async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const DISTILLED = makeNote({
+        id: "n_s1s2s3",
+        title: "Team sync",
+        source: "sessions/2026-07-01T10-00-00Z-team-sync.jsonl",
+      });
+      serveVault([DISTILLED]);
+      renderInbox();
+      await screen.findByText("Team sync");
+
+      await user.click(screen.getByRole("button", { name: 'Delete "Team sync"' }));
+
+      const dialog = screen.getByRole("dialog", { name: "Delete this note?" });
+      expect(
+        within(dialog).getByText(/recording and transcript/),
+      ).toBeInTheDocument();
+    });
+
+    it("keeps the row and shows the error when the delete fails", async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      serveVault([PLANNING]);
+      onCommand("delete_note", () => {
+        throw "the vault is read-only";
+      });
+      renderInbox();
+      await screen.findByText("Quarterly planning");
+
+      await user.click(
+        screen.getByRole("button", { name: 'Delete "Quarterly planning"' }),
+      );
+      const dialog = screen.getByRole("dialog", { name: "Delete this note?" });
+      await user.click(within(dialog).getByRole("button", { name: "Delete note" }));
+
+      expect(
+        await within(dialog).findByText(
+          "Couldn't delete the note: the vault is read-only",
+        ),
+      ).toBeInTheDocument();
+      expect(screen.getByText("Quarterly planning")).toBeInTheDocument();
+    });
   });
 
   describe("the pipeline placeholder", () => {

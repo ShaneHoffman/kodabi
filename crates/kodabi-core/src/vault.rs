@@ -600,6 +600,56 @@ fn walk_project_tree(dir: &Path, scan: &mut TreeScan) -> Result<()> {
     Ok(())
 }
 
+/// The outcome of a note deletion: the removed note's stable id, its former
+/// project (`None` when it sat in the Inbox), its path just before removal, its
+/// display title, and its `source:` — enough for the caller to clean up the
+/// note's paired session artifacts and drop its index rows without re-reading
+/// disk.
+#[derive(Debug)]
+pub struct DeletedNote {
+    pub id: NoteId,
+    pub former_project: Option<String>,
+    pub path: PathBuf,
+    pub title: String,
+    pub source: Source,
+}
+
+/// Permanently deletes the note carrying `id`, wherever it lives — the Inbox or
+/// any project. Locates it vault-wide ([`find_note_anywhere`], so a delete needs
+/// no source-project scope), removes its `.md` file, and returns a
+/// [`DeletedNote`] describing what was removed. `Ok(None)` when no note carries
+/// the id (mirroring [`file_note_to_project`] / [`save_note_edit`]); an id
+/// claimed by more than one file is [`NoteError::DuplicateNoteId`] and deletes
+/// nothing — an ambiguous pair is never nuked.
+///
+/// Only the note file is touched here: the derived index rows and any paired
+/// session artifacts (its retained recording and transcript) are the caller's
+/// to remove, keeping `vault` free of an `index` / `sessions` dependency. A file
+/// that vanished between the locate and the removal (a racing delete) is
+/// success — the note is already gone, which is the goal.
+pub fn delete_note(vault_root: &Path, id: &NoteId) -> Result<Option<DeletedNote>> {
+    let Some((project, listed)) = find_note_anywhere(vault_root, id)? else {
+        return Ok(None);
+    };
+    let deleted = DeletedNote {
+        id: id.clone(),
+        former_project: (project != INBOX).then_some(project),
+        path: listed.path.clone(),
+        title: listed.title,
+        source: listed.note.source.clone(),
+    };
+    match fs::remove_file(&listed.path) {
+        Ok(()) => Ok(Some(deleted)),
+        // A racing delete (retention sweep, another window) already removed it —
+        // the goal is met; report the same success.
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(Some(deleted)),
+        Err(source) => Err(NoteError::Io {
+            path: listed.path,
+            source,
+        }),
+    }
+}
+
 /// The files Kodabi itself plants in a project folder and may therefore delete
 /// with it: the glossary and routing-examples logs, plus their (and the note
 /// writer's) crash-leftover scratch temps.
@@ -1804,5 +1854,135 @@ mod tests {
             delete_project(vault.path(), "Nope"),
             Err(NoteError::MissingProject { project }) if project == "Nope"
         ));
+    }
+
+    // --- delete_note --------------------------------------------------------
+
+    /// Builds a note with an explicit `source:` value (the `note_in` helper
+    /// hard-codes `manual`), for the session-pairing assertions.
+    fn note_with_source(project: &str, id: &str, source: &str) -> Note {
+        Note::new(
+            NoteId::parse(id).unwrap(),
+            NoteType::Meeting,
+            Routing::Manual {
+                project: project.to_string(),
+            },
+            "2026-07-12",
+            Vec::new(),
+            Source::parse(source).unwrap(),
+            "Body.",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn delete_note_removes_an_inbox_note() {
+        let vault = tempdir().unwrap();
+        let path = write_inbox(vault.path(), "n_aaaaaa", "unfiled");
+
+        let deleted = delete_note(vault.path(), &NoteId::parse("n_aaaaaa").unwrap())
+            .unwrap()
+            .expect("the note exists");
+
+        assert_eq!(deleted.id.as_str(), "n_aaaaaa");
+        assert_eq!(deleted.former_project, None); // Inbox → None
+        assert_eq!(deleted.title, "unfiled");
+        assert_eq!(deleted.path, path);
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn delete_note_removes_a_filed_note_and_reports_its_project() {
+        let vault = tempdir().unwrap();
+        let path = write(vault.path(), "Ops", "n_bbbbbb", "2026-07-11", Some("filed"));
+
+        let deleted = delete_note(vault.path(), &NoteId::parse("n_bbbbbb").unwrap())
+            .unwrap()
+            .expect("the note exists");
+
+        assert_eq!(deleted.former_project.as_deref(), Some("Ops"));
+        assert_eq!(deleted.title, "filed");
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn delete_note_of_an_unknown_id_is_none() {
+        let vault = tempdir().unwrap();
+        write_inbox(vault.path(), "n_aaaaaa", "kept");
+
+        assert!(
+            delete_note(vault.path(), &NoteId::parse("n_zzzzzz").unwrap())
+                .unwrap()
+                .is_none()
+        );
+        // The unrelated note is untouched.
+        assert!(vault.path().join(INBOX).join("kept.md").is_file());
+    }
+
+    #[test]
+    fn delete_note_refuses_a_duplicate_id_without_removing_either() {
+        let vault = tempdir().unwrap();
+        // The same id in two folders — the vault-wide duplicate guard must fire
+        // and delete nothing rather than nuke an ambiguous pair.
+        let inbox_path = write_inbox(vault.path(), "n_aaaaaa", "one");
+        let ops_path = write(vault.path(), "Ops", "n_aaaaaa", "2026-07-11", Some("two"));
+
+        let result = delete_note(vault.path(), &NoteId::parse("n_aaaaaa").unwrap());
+        assert!(matches!(result, Err(NoteError::DuplicateNoteId { .. })));
+        assert!(inbox_path.is_file());
+        assert!(ops_path.is_file());
+    }
+
+    #[test]
+    fn delete_note_carries_the_notes_source() {
+        let vault = tempdir().unwrap();
+        // A distilled note pairs with a raw session artifact.
+        let session_source = "sessions/20260712T140335123Z-k4m2xp7q.jsonl";
+        note::write_note(
+            vault.path(),
+            &note_with_source("Ops", "n_cccccc", session_source),
+            Some("distilled"),
+        )
+        .unwrap();
+        // A manual note carries a capture keyword instead.
+        write_inbox(vault.path(), "n_dddddd", "typed");
+
+        let distilled = delete_note(vault.path(), &NoteId::parse("n_cccccc").unwrap())
+            .unwrap()
+            .expect("the note exists");
+        assert_eq!(distilled.source.as_yaml(), session_source);
+
+        let manual = delete_note(vault.path(), &NoteId::parse("n_dddddd").unwrap())
+            .unwrap()
+            .expect("the note exists");
+        assert_eq!(manual.source.as_yaml(), "manual");
+    }
+
+    #[test]
+    fn delete_note_leaves_sibling_notes_untouched() {
+        let vault = tempdir().unwrap();
+        write(
+            vault.path(),
+            "Ops",
+            "n_aaaaaa",
+            "2026-07-10",
+            Some("target"),
+        );
+        let kept = write(
+            vault.path(),
+            "Ops",
+            "n_bbbbbb",
+            "2026-07-11",
+            Some("sibling"),
+        );
+
+        delete_note(vault.path(), &NoteId::parse("n_aaaaaa").unwrap())
+            .unwrap()
+            .expect("the note exists");
+
+        assert!(kept.is_file());
+        let scan = scan_project_notes(vault.path(), "Ops").unwrap();
+        assert_eq!(scan.notes.len(), 1);
+        assert_eq!(scan.notes[0].note.id.as_str(), "n_bbbbbb");
     }
 }
