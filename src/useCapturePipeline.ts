@@ -22,14 +22,23 @@ export type CapturePipeline = {
    * vanish and the "Filed to <project>" toast for an outcome already seen. */
   handledFiledId: string | null;
   markFiledHandled: (id: string) => void;
-  /** True from the moment a running capture stops until the next one starts:
-   * the shell's own record that a pipeline is due. Held because the backend
-   * announces `Transcribing` only once its worker thread holds
-   * `TRANSCRIBE_LOCK` (`transcribe.rs`), so for a beat after every stop all
-   * three states above still read idle. Derived from the `capture:state`
+  /** True from the moment a running capture stops until the next one starts
+   * — or until the Inbox gives up on it (`markStopHandled`): the shell's own
+   * record that a pipeline is due. Held because the backend announces
+   * `Transcribing` only once its worker thread holds `TRANSCRIBE_LOCK`
+   * (`transcribe.rs`), so for a beat after every stop all three states above
+   * still read idle. Derived from the `capture:state`
    * listening|degraded → idle transition — the one signal every stop path
    * (tray, global shortcut, QuickCapture window) produces. */
   stopPending: boolean;
+  /** Retires a stop the backend never acknowledged. Shell-held for the same
+   * reason `handledFiledId` is: the Inbox's grace-timer waiver dies with the
+   * view, while `stopPending` would otherwise persist until the next capture
+   * — so without this, every later mount would replay the phantom
+   * "Transcribing" placeholder for another grace period. A genuine run that
+   * starts late (queued behind `TRANSCRIBE_LOCK`) still surfaces afterwards:
+   * its own `transcribing` event carries the stage, not this flag. */
+  markStopHandled: () => void;
 };
 
 export const CapturePipelineContext = createContext<CapturePipeline | undefined>(undefined);

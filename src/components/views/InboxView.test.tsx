@@ -360,6 +360,51 @@ describe("InboxView", () => {
       expect(await screen.findByText(/Nothing waiting/)).toBeInTheDocument();
     });
 
+    it("does not replay a given-up stop when the Inbox remounts", async () => {
+      serveVault([]);
+      onCommand("capture_phase", () => IDLE);
+      const { rerender } = render(
+        <NavigationProvider>
+          <CapturePipelineProvider>
+            <InboxView />
+          </CapturePipelineProvider>
+        </NavigationProvider>,
+      );
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, LISTENING);
+      });
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, IDLE);
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(10_000); // GRACE_MS
+      });
+      expect(screen.queryByTestId("pipeline-placeholder")).not.toBeInTheDocument();
+
+      // Navigate away and back. The provider — and `stopPending`, which
+      // would otherwise persist until the next capture — survive the view
+      // unmounting, so without the shell retiring the given-up stop, this
+      // would replay the phantom placeholder for another grace period.
+      rerender(
+        <NavigationProvider>
+          <CapturePipelineProvider>
+            <div />
+          </CapturePipelineProvider>
+        </NavigationProvider>,
+      );
+      rerender(
+        <NavigationProvider>
+          <CapturePipelineProvider>
+            <InboxView />
+          </CapturePipelineProvider>
+        </NavigationProvider>,
+      );
+      expect(await screen.findByText(/Nothing waiting/)).toBeInTheDocument();
+      expect(screen.queryByTestId("pipeline-placeholder")).not.toBeInTheDocument();
+    });
+
     it("keeps the placeholder when transcribing lands before the stop's own broadcast", async () => {
       serveVault([]);
       renderInbox();

@@ -288,7 +288,14 @@ function usePipelinePresence(
       (resolved.kind === "distilling" && resolved.awaitingDistill) ||
       resolved.kind === "awaitingInboxHandoff");
   useTimeout(
-    () => resolved && setWaivedId(resolved.id),
+    () => {
+      if (!resolved) return;
+      setWaivedId(resolved.id);
+      // A given-up synthetic stop is retired at the shell too: `stopPending`
+      // outlives this view's `waivedId`, and without clearing it every later
+      // mount would replay the phantom placeholder for another grace period.
+      if (resolved.id === "stopped") pipeline.markStopHandled();
+    },
     awaitingResolution ? GRACE_MS : null,
     resolved?.id ?? null,
   );
