@@ -142,7 +142,7 @@ export function SearchView({ query }: Props) {
                 <span className="block font-mono text-micro text-text-faint">
                   {crumb(hit.note)}
                 </span>
-                <span className="mt-3xs block text-lead font-semibold text-text">
+                <span className="mt-3xs block truncate text-lead font-semibold text-text">
                   {hit.note.title}
                 </span>
                 <span className="mt-3xs block font-serif text-snippet-sm leading-snippet text-text-soft">

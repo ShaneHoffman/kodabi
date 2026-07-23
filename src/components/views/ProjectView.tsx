@@ -102,7 +102,9 @@ export function ProjectView({ slug }: Props) {
               >
                 {/* Serif, because in a library a title is something you read
                     rather than a control you operate. */}
-                <span className="font-serif text-h3 text-text">{note.title}</span>
+                <span className="min-w-0 truncate font-serif text-h3 text-text">
+                  {note.title}
+                </span>
                 {/* A right rail, so the dates line up into their own column
                     and the titles keep a clean left edge to scan down. */}
                 <span className="flex-none whitespace-nowrap font-mono text-meta text-text-faint">

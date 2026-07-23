@@ -1140,6 +1140,10 @@ pub fn distill_session(
     let routing = route(&output, &body);
 
     let id = NoteId::generate().map_err(DistillError::Id)?;
+    // The model's title (already ≤120 chars) is stored whole in frontmatter, so
+    // it survives past the 40-char filename slug it also seeds. When the model
+    // gave none, the title stays unset (the display layer de-slugs the filename)
+    // — the parsed-name fallback below is a *slug* seed, not a display title.
     let note = Note::new(
         id.clone(),
         NoteType::Meeting,
@@ -1148,7 +1152,8 @@ pub fn distill_session(
         output.tags.clone(),
         source,
         body,
-    )?;
+    )?
+    .with_title(output.title.clone());
 
     let title_seed = output
         .title
@@ -2242,6 +2247,30 @@ mod tests {
                 .join("Inbox")
                 .join(format!("{}.md", distilled.id.as_str()))
         );
+    }
+
+    #[test]
+    fn distilled_note_stores_the_full_model_title_past_the_slug_cap() {
+        let vault = tempdir().unwrap();
+        let session_path = write_session(vault.path(), None);
+        // A model title well over the 40-char filename-slug cap.
+        let long_title = "kodabi recording distill flow walkthrough and open questions";
+        assert!(long_title.len() > 40);
+        let runner = MockRunner(Ok(format!(
+            r#"{{"title": "{long_title}", "summary": "s"}}"#
+        )));
+
+        let distilled = distill_session(&runner, vault.path(), &session_path, &|_, _| {
+            inbox_routing()
+        })
+        .unwrap();
+
+        // The filename slug is still capped for filesystem sanity...
+        let stem = distilled.path.file_stem().unwrap().to_str().unwrap();
+        assert!(stem.chars().count() <= 40);
+        // ...but the frontmatter carries the full title, uncut mid-word.
+        let note = Note::from_markdown(&std::fs::read_to_string(&distilled.path).unwrap()).unwrap();
+        assert_eq!(note.title.as_deref(), Some(long_title));
     }
 
     #[test]
