@@ -20,6 +20,7 @@ function pipeline(overrides: Partial<CapturePipeline>): CapturePipeline {
     handledFiledId: null,
     markFiledHandled: () => {},
     stopPending: false,
+    markStopHandled: () => {},
     ...overrides,
   };
 }

@@ -64,6 +64,7 @@ export function CapturePipelineProvider({ children }: { children: ReactNode }) {
       handledFiledId,
       markFiledHandled: setHandledFiledId,
       stopPending,
+      markStopHandled: () => setStopPending(false),
     }),
     [capture, transcription, distill, handledFiledId, stopPending],
   );
