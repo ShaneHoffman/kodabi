@@ -179,25 +179,31 @@ describe("NeedsAttentionView", () => {
     expect(await screen.findByText(/All clear/)).toBeInTheDocument();
   });
 
-  it("will not let the running row be discarded out from under its own retry", async () => {
+  it("holds every marker action while a retry is in flight", async () => {
     // Once a retry is queued the backend's in-flight filter drops the row from
-    // the listing, so the refetch a dismiss triggers would remove the row out
-    // from under `pendingPath`: every other Retry stays disabled, with nothing
-    // left on screen saying why, until a terminal event that may be minutes
-    // away.
+    // the listing, so the refetch that *any* dismiss/restore/delete triggers —
+    // not just the running row's own — would remove the running row out from
+    // under `pendingPath`: its spinner vanishes and every other Retry stays
+    // disabled, with nothing left on screen saying why, until a terminal event
+    // that may be minutes away. So the whole verb family waits the retry out.
     const user = userEvent.setup();
-    serveSessions([makeSession("team-sync"), makeSession("retro")]);
+    serveSessions([
+      makeSession("team-sync"),
+      makeSession("retro"),
+      makeSession("board-prep", true),
+    ]);
     onCommand("distill_session", () => null);
     renderView();
-    await screen.findByText("team sync");
+    await user.click(await screen.findByTestId("show-dismissed"));
 
     const [firstRetry] = screen.getAllByTestId("retry-distill");
-    const [firstDismiss] = screen.getAllByRole("button", { name: "Dismiss" });
     await user.click(firstRetry);
 
-    expect(firstDismiss).toBeDisabled();
-    // Its neighbour is still discardable: only the running row is held.
-    expect(screen.getAllByRole("button", { name: "Dismiss" })[1]).not.toBeDisabled();
+    for (const dismiss of screen.getAllByRole("button", { name: "Dismiss" })) {
+      expect(dismiss).toBeDisabled();
+    }
+    expect(screen.getByTestId("restore-session")).toBeDisabled();
+    expect(screen.getByTestId("delete-session")).toBeDisabled();
   });
 
   it("dismisses a card through the backend and moves it to the dismissed shelf", async () => {

@@ -296,14 +296,17 @@ export function NeedsAttentionView() {
                     </Button>
                     <Button
                       variant="quiet"
-                      // Disabled while this row's own retry is in flight, for a
-                      // sharper reason than before: once a retry is queued the
-                      // backend's in-flight filter drops the row from the
-                      // listing, so the refetch a dismiss triggers would remove
-                      // the row out from under `pendingPath` and leave every
-                      // other Retry disabled with nothing on screen to say why.
+                      // Disabled while *any* retry is in flight, not just this
+                      // row's own: once a retry is queued the backend's
+                      // in-flight filter drops that row from the listing, so
+                      // the refetch a dismiss triggers — whichever row it came
+                      // from — would remove the running row out from under
+                      // `pendingPath` and leave every other Retry disabled
+                      // with nothing on screen to say why. (Retry is already
+                      // disabled while a marker action runs; this is the same
+                      // exclusion in the other direction.)
                       disabled={
-                        pendingPath === session.path ||
+                        pendingPath !== null ||
                         (actionPending !== null && !isRunning("dismiss", session.path))
                       }
                       loading={isRunning("dismiss", session.path)}
@@ -361,7 +364,10 @@ export function NeedsAttentionView() {
                             <Button
                               variant="quiet"
                               data-testid="confirm-delete-session"
-                              disabled={actionPending !== null}
+                              // `pendingPath` for the same reason as Dismiss:
+                              // the refetch a delete triggers would drop the
+                              // retrying row from the listing mid-run.
+                              disabled={pendingPath !== null || actionPending !== null}
                               onClick={() => {
                                 setConfirmingDeletePath(null);
                                 runAction("delete", session.path, deleteSession);
@@ -384,8 +390,12 @@ export function NeedsAttentionView() {
                             <Button
                               variant="quiet"
                               data-testid="restore-session"
+                              // `pendingPath` for the same reason as Dismiss:
+                              // a restore's refetch would drop the retrying
+                              // row from the listing mid-run.
                               disabled={
-                                actionPending !== null && !isRunning("restore", session.path)
+                                pendingPath !== null ||
+                                (actionPending !== null && !isRunning("restore", session.path))
                               }
                               loading={isRunning("restore", session.path)}
                               loadingLabel="Restoring…"
@@ -397,8 +407,12 @@ export function NeedsAttentionView() {
                             <Button
                               variant="quiet"
                               data-testid="delete-session"
+                              // `pendingPath` too, even though this click only
+                              // opens the confirm: arming a delete whose
+                              // confirm is disabled would be a dead end.
                               disabled={
-                                actionPending !== null && !isRunning("delete", session.path)
+                                pendingPath !== null ||
+                                (actionPending !== null && !isRunning("delete", session.path))
                               }
                               loading={isRunning("delete", session.path)}
                               loadingLabel="Deleting…"
