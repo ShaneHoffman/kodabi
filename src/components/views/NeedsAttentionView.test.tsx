@@ -11,12 +11,13 @@ import { emitFromBackend, invoke, onCommand, resetTauriMocks } from "../../test/
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
 
-function makeSession(slug: string): FailedSession {
+function makeSession(slug: string, dismissed = false): FailedSession {
   return {
     path: `sessions/2026-07-01T10-00-00Z-${slug}.jsonl`,
     file_name: `2026-07-01T10-00-00Z-${slug}.jsonl`,
     slug,
     captured_at: "2026-07-01T10:00:00Z",
+    dismissed,
   };
 }
 
@@ -42,7 +43,9 @@ describe("NeedsAttentionView", () => {
     // could not bury the notes it sat above. Here the list is the subject of
     // the view, so holding any of it back would hide the only thing on screen.
     serveSessions(
-      ["team-sync", "vendor-call", "board-prep", "retro"].map(makeSession),
+      // Not `.map(makeSession)`: map's index would land in the `dismissed`
+      // parameter and mark every row after the first as dismissed.
+      ["team-sync", "vendor-call", "board-prep", "retro"].map((slug) => makeSession(slug)),
     );
 
     renderView();
@@ -52,6 +55,8 @@ describe("NeedsAttentionView", () => {
     });
     expect(screen.getByText("retro")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Show \d+ more/ })).not.toBeInTheDocument();
+    // And no dismissed shelf when nothing has been dismissed.
+    expect(screen.queryByTestId("show-dismissed")).not.toBeInTheDocument();
   });
 
   it("counts the work in the header", async () => {
@@ -175,9 +180,11 @@ describe("NeedsAttentionView", () => {
   });
 
   it("will not let the running row be discarded out from under its own retry", async () => {
-    // Dismiss is view-local, so dismissing the row that owns `pendingPath`
-    // would strand it: every other Retry stays disabled, with nothing left on
-    // screen saying why, until a terminal event that may be minutes away.
+    // Once a retry is queued the backend's in-flight filter drops the row from
+    // the listing, so the refetch a dismiss triggers would remove the row out
+    // from under `pendingPath`: every other Retry stays disabled, with nothing
+    // left on screen saying why, until a terminal event that may be minutes
+    // away.
     const user = userEvent.setup();
     serveSessions([makeSession("team-sync"), makeSession("retro")]);
     onCommand("distill_session", () => null);
@@ -193,27 +200,137 @@ describe("NeedsAttentionView", () => {
     expect(screen.getAllByRole("button", { name: "Dismiss" })[1]).not.toBeDisabled();
   });
 
-  it("brings a discarded card back on the next listing, so the sidebar cannot disagree", async () => {
-    // Dismiss clears the flag, not the data. Held any longer than the current
-    // listing it would let this view say "All clear" while the sidebar row
-    // beside it still counted the very same sessions.
+  it("dismisses a card through the backend and moves it to the dismissed shelf", async () => {
+    // Dismiss is a backend write now: the listing itself reports the session
+    // dismissed, so the sidebar (which reads the same listing) and this view
+    // change together and can never disagree.
     const user = userEvent.setup();
-    serveSessions([makeSession("team-sync")]);
+    const teamSync = makeSession("team-sync");
+    serveSessions([teamSync]);
+    onCommand("dismiss_session", () => {
+      // The marker is on disk: every listing from here on reports it.
+      serveSessions([makeSession("team-sync", true)]);
+      return null;
+    });
     renderView();
     await screen.findByText("team sync");
 
     await user.click(screen.getByRole("button", { name: "Dismiss" }));
-    expect(await screen.findByText(/All clear/)).toBeInTheDocument();
 
-    // The same session, listed again — the backend never stopped reporting it,
-    // because Dismiss touched nothing on disk.
-    serveSessions([makeSession("team-sync")]);
-    await act(async () => {
-      notifyVaultChanged();
+    expect(invoke).toHaveBeenCalledWith("dismiss_session", {
+      sessionPath: teamSync.path,
     });
+    // The card leaves the active list...
+    expect(await screen.findByText(/All clear/)).toBeInTheDocument();
+    // ...and reappears behind the dismissed shelf, one interaction away.
+    const shelf = await screen.findByTestId("show-dismissed");
+    expect(shelf).toHaveAttribute("aria-expanded", "false");
+    await user.click(shelf);
+    expect(shelf).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("team sync")).toBeInTheDocument();
+    expect(screen.getByTestId("restore-session")).toBeInTheDocument();
+  });
 
-    expect(await screen.findByText("team sync")).toBeInTheDocument();
-    expect(screen.queryByText(/All clear/)).not.toBeInTheDocument();
+  it("restores a dismissed capture and counts it again", async () => {
+    const user = userEvent.setup();
+    const teamSync = makeSession("team-sync", true);
+    serveSessions([teamSync]);
+    onCommand("restore_session", () => {
+      serveSessions([makeSession("team-sync")]);
+      return null;
+    });
+    renderView();
+
+    await user.click(await screen.findByTestId("show-dismissed"));
+    await user.click(screen.getByTestId("restore-session"));
+
+    expect(invoke).toHaveBeenCalledWith("restore_session", {
+      sessionPath: teamSync.path,
+    });
+    // Back in the active list, and the shelf leaves with its last card.
+    await waitFor(() => {
+      expect(screen.getByTestId("retry-distill")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("show-dismissed")).not.toBeInTheDocument();
+  });
+
+  it("keeps the card and says so when the dismiss call fails", async () => {
+    const user = userEvent.setup();
+    serveSessions([makeSession("team-sync")]);
+    onCommand("dismiss_session", () => {
+      throw "marker write failed";
+    });
+    renderView();
+    await screen.findByText("team sync");
+
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+
+    expect(
+      await screen.findByText(/Dismiss failed: marker write failed/),
+    ).toBeInTheDocument();
+    // Still listed, still actionable.
+    expect(screen.getByTestId("retry-distill")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Dismiss" })).not.toBeDisabled();
+  });
+
+  it("keeps dismissed captures reachable when everything is dismissed", async () => {
+    // The sidebar row hides at zero undismissed; this view (still reachable
+    // via the palette) owns the way back: all clear up top, the shelf below.
+    const user = userEvent.setup();
+    serveSessions([makeSession("team-sync", true), makeSession("retro", true)]);
+
+    renderView();
+
+    expect(await screen.findByText(/All clear/)).toBeInTheDocument();
+    const shelf = screen.getByTestId("show-dismissed");
+    expect(shelf).toHaveTextContent("Dismissed");
+    expect(shelf).toHaveTextContent("2");
+    await user.click(shelf);
+    expect(screen.getAllByTestId("restore-session")).toHaveLength(2);
+  });
+
+  it("deletes a dismissed capture only after its inline confirm", async () => {
+    const user = userEvent.setup();
+    const teamSync = makeSession("team-sync", true);
+    serveSessions([teamSync]);
+    onCommand("delete_session", () => {
+      serveSessions([]);
+      return null;
+    });
+    renderView();
+
+    await user.click(await screen.findByTestId("show-dismissed"));
+    await user.click(screen.getByTestId("delete-session"));
+
+    // The first click only asks; nothing has been invoked yet.
+    expect(screen.getByText("Delete for good?")).toBeInTheDocument();
+    expect(invoke).not.toHaveBeenCalledWith("delete_session", expect.anything());
+
+    await user.click(screen.getByTestId("confirm-delete-session"));
+
+    expect(invoke).toHaveBeenCalledWith("delete_session", {
+      sessionPath: teamSync.path,
+    });
+    // Gone for good: no shelf left, just the all-clear.
+    await waitFor(() => {
+      expect(screen.queryByTestId("show-dismissed")).not.toBeInTheDocument();
+    });
+    expect(screen.getByText(/All clear/)).toBeInTheDocument();
+  });
+
+  it("cancelling the delete confirm leaves the capture dismissed and calls nothing", async () => {
+    const user = userEvent.setup();
+    serveSessions([makeSession("team-sync", true)]);
+    renderView();
+
+    await user.click(await screen.findByTestId("show-dismissed"));
+    await user.click(screen.getByTestId("delete-session"));
+    await user.click(screen.getByTestId("cancel-delete-session"));
+
+    expect(invoke).not.toHaveBeenCalledWith("delete_session", expect.anything());
+    // The row's normal actions are back, untouched.
+    expect(screen.getByTestId("restore-session")).toBeInTheDocument();
+    expect(screen.getByTestId("delete-session")).toBeInTheDocument();
   });
 
   it("surfaces a failed listing instead of claiming all clear", async () => {

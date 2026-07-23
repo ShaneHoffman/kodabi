@@ -2,20 +2,24 @@
 //!
 //! Sessions are the `.jsonl` transcripts [`crate::raw_session::write_raw_session`]
 //! drops in the KB's `sessions/` directory, plus their retained `.wav`
-//! recordings (same filename stem — see [`crate::naming::audio_sibling`]).
-//! This module enforces the retention policy over them two ways:
+//! recordings and `.dismissed` needs-attention markers (same filename stem —
+//! see [`crate::naming::audio_sibling`] and
+//! [`crate::naming::dismissed_sibling`]). This module enforces the retention
+//! policy over them two ways:
 //!
 //! - [`prune_sessions`] — a sweep, for [`RetentionPolicy::KeepDays`]: delete
 //!   session artifacts older than the cutoff. Run on a schedule (startup +
 //!   periodically) and whenever the policy changes.
 //! - [`apply_post_distill`] — forward-only enforcement of
-//!   [`RetentionPolicy::DiscardAfterDistill`]: delete a single session (and
-//!   its recording) the moment it has been successfully distilled into a note.
+//!   [`RetentionPolicy::DiscardAfterDistill`]: delete a single session (its
+//!   recording and marker included) the moment it has been successfully
+//!   distilled into a note.
 //!
-//! Deletion is deliberately conservative: only regular `.jsonl` and `.wav`
-//! files directly in the sessions directory are ever touched (never the `.tmp`
-//! scratch files an in-flight write stages, subdirectories, or anything else),
-//! and a session whose age can't be determined is kept rather than guessed-at.
+//! Deletion is deliberately conservative: only regular `.jsonl`, `.wav`, and
+//! `.dismissed` files directly in the sessions directory are ever touched
+//! (never the `.tmp` scratch files an in-flight write stages, subdirectories,
+//! or anything else), and a session whose age can't be determined is kept
+//! rather than guessed-at.
 
 use std::fs;
 use std::io;
@@ -83,13 +87,15 @@ pub fn prune_sessions(
             continue;
         }
         let path = entry.path();
-        // Only `.jsonl` transcripts and their retained `.wav` recordings; this
-        // also excludes the `.tmp` scratch files an in-flight write stages
-        // before its atomic link/rename. Both artifacts share a filename stem,
-        // so they age identically and expire as a pair.
+        // Only `.jsonl` transcripts, their retained `.wav` recordings, and
+        // their `.dismissed` needs-attention markers; this also excludes the
+        // `.tmp` scratch files an in-flight write stages before its atomic
+        // link/rename. All three artifacts share a filename stem, so they age
+        // identically and expire as a trio — which is also what reaps a marker
+        // orphaned by a hand-deleted transcript.
         if !matches!(
             path.extension().and_then(|e| e.to_str()),
-            Some("jsonl" | "wav")
+            Some("jsonl" | "wav" | "dismissed")
         ) {
             continue;
         }
@@ -112,14 +118,15 @@ pub fn prune_sessions(
     Ok(report)
 }
 
-/// Deletes `session_path` and its retained `.wav` recording iff the policy is
-/// [`RetentionPolicy::DiscardAfterDistill`], returning whether the transcript
-/// was deleted. Called on the distill thread right after a session distilled
-/// successfully, so nothing is reading the files. Refuses any path that isn't
-/// a `.jsonl` file as a safety belt against ever deleting the wrong thing. A
-/// path already gone (e.g. deleted by a concurrent sweep) is `Ok(false)`, not
-/// an error, and a missing recording (audio was never retained, or already
-/// discarded) is the normal case — the sibling delete tolerates it.
+/// Deletes `session_path`, its retained `.wav` recording, and its `.dismissed`
+/// marker iff the policy is [`RetentionPolicy::DiscardAfterDistill`], returning
+/// whether the transcript was deleted. Called on the distill thread right after
+/// a session distilled successfully, so nothing is reading the files. Refuses
+/// any path that isn't a `.jsonl` file as a safety belt against ever deleting
+/// the wrong thing. A path already gone (e.g. deleted by a concurrent sweep) is
+/// `Ok(false)`, not an error, and a missing sibling (audio never retained, the
+/// session never dismissed, or either already discarded) is the normal case —
+/// both sibling deletes tolerate it.
 pub fn apply_post_distill(policy: RetentionPolicy, session_path: &Path) -> io::Result<bool> {
     if policy != RetentionPolicy::DiscardAfterDistill {
         return Ok(false);
@@ -136,6 +143,14 @@ pub fn apply_post_distill(policy: RetentionPolicy, session_path: &Path) -> io::R
     // discards the other — even when the transcript was already gone, a
     // lingering recording under DiscardAfterDistill is a leak, not a keeper.
     match fs::remove_file(naming::audio_sibling(session_path)) {
+        Ok(()) => {}
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err),
+    }
+    // Same for the dismissed marker: a discarded session has nothing left to
+    // wave off. (Usually already cleared by the distill success path; this
+    // keeps "discard removes every session artifact" true for any caller.)
+    match fs::remove_file(naming::dismissed_sibling(session_path)) {
         Ok(()) => {}
         Err(err) if err.kind() == io::ErrorKind::NotFound => {}
         Err(err) => return Err(err),
@@ -271,6 +286,37 @@ mod tests {
     }
 
     #[test]
+    fn keep_days_prunes_the_dismissed_marker_with_its_session() {
+        let dir = temp_dir("keep-days-dismissed");
+        let old = seed_session(&dir, now() - chrono::Duration::days(60));
+        let old_marker = naming::dismissed_sibling(&old);
+        fs::write(&old_marker, "2026-05-13T14:03:35Z").unwrap();
+        let fresh = seed_session(&dir, now() - chrono::Duration::days(1));
+        let fresh_marker = naming::dismissed_sibling(&fresh);
+        fs::write(&fresh_marker, "2026-07-11T14:03:35Z").unwrap();
+        // A marker orphaned by a hand-deleted transcript still expires: the
+        // sweep is what reaps it.
+        let orphan = seed_session(&dir, now() - chrono::Duration::days(90));
+        let orphan_marker = naming::dismissed_sibling(&orphan);
+        fs::write(&orphan_marker, "2026-04-13T14:03:35Z").unwrap();
+        fs::remove_file(&orphan).unwrap();
+
+        let report = prune_sessions(&dir, keep_days(7), now()).unwrap();
+
+        assert!(report.failed.is_empty());
+        assert!(!old.exists());
+        assert!(
+            !old_marker.exists(),
+            "expired marker expires with its session"
+        );
+        assert!(!orphan_marker.exists(), "expired orphaned marker is reaped");
+        assert!(fresh.exists());
+        assert!(fresh_marker.exists(), "in-window marker should be kept");
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn sweep_ignores_non_jsonl_scratch_and_subdirectories() {
         let dir = temp_dir("selective");
         // A non-session file, a scratch temp (the shape write_raw_session
@@ -365,19 +411,26 @@ mod tests {
         let session = seed_session(&dir, now());
         let recording = naming::audio_sibling(&session);
         fs::write(&recording, "").unwrap();
+        let marker = naming::dismissed_sibling(&session);
+        fs::write(&marker, "2026-07-12T14:03:35Z").unwrap();
 
-        // KeepAll / KeepDays leave the session and its recording in place.
+        // KeepAll / KeepDays leave the session and its siblings in place.
         assert!(!apply_post_distill(RetentionPolicy::KeepAll, &session).unwrap());
         assert!(!apply_post_distill(keep_days(30), &session).unwrap());
         assert!(session.exists());
         assert!(recording.exists());
+        assert!(marker.exists());
 
-        // DiscardAfterDistill removes both.
+        // DiscardAfterDistill removes all three.
         assert!(apply_post_distill(RetentionPolicy::DiscardAfterDistill, &session).unwrap());
         assert!(!session.exists());
         assert!(
             !recording.exists(),
             "the recording is discarded with its transcript"
+        );
+        assert!(
+            !marker.exists(),
+            "the dismissed marker is discarded with its transcript"
         );
         // Already-gone (both files) is Ok(false), not an error.
         assert!(!apply_post_distill(RetentionPolicy::DiscardAfterDistill, &session).unwrap());

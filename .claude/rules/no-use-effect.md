@@ -17,7 +17,7 @@ in `eslint.config.js` fail any non-blessed file at the
   handler. Resetting or pruning state when a prop changes is the
   adjust-state-during-render pattern — compare the previous prop to the current
   one in the render body and `setState` conditionally
-  (`NeedsAttentionSection`'s `rowErrors` prune and `SettingsView`'s one-time
+  (`NeedsAttentionView`'s `rowErrors` prune and `SettingsView`'s one-time
   day-field seed are the in-repo precedents).
 - **The blessed bridge hooks.** These files, and only these, may call
   `useEffect`. Backend events: [`useTauriEvent`](../../src/useTauriEvent.ts) (the
