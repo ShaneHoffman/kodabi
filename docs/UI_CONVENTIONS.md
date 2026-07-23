@@ -506,6 +506,32 @@ the consent nudge wraps Tab across several controls. Each passes its own `onKeyD
 <Overlay onDismiss={onClose} label="Command palette" className="overflow-hidden">{…}</Overlay>
 ```
 
+### `DestructiveConfirmDialog` — the destructive-confirmation shell
+
+The shared shape of a destructive confirmation (`docs/DESIGN_SYSTEM.md` §2): the action is marked by
+**confirmation, not colour**. It composes `Overlay` + `useDialogFocus` + `wrapDialogTab`, wires Escape and
+the Tab-trap, and renders the title, a body slot, an error slot (`StatusMessage`), and the footer — the
+`destructive` confirm beside a `primary` Cancel that holds initial focus. This is the boilerplate
+`DeleteProjectDialog` and the Needs Attention capture delete shared byte for byte, factored into one place.
+
+It is deliberately **presentational**: each caller keeps its own async handler, `busy`/`error` state,
+success behaviour, and error copy, and passes the results down. It never closes itself on confirm — the
+caller decides what success means (navigate away, refetch, unmount).
+
+```tsx
+<DestructiveConfirmDialog
+  title={`Delete ${slug}?`}
+  confirmLabel="Delete project"
+  busyLabel="Deleting…"
+  busy={deleting}
+  error={error}
+  onConfirm={confirm}
+  onClose={onClose}
+>
+  <p>Its notes will move back to the Inbox.</p>
+</DestructiveConfirmDialog>
+```
+
 ---
 
 ## Interaction conventions
@@ -539,10 +565,11 @@ new screen should find its shape here rather than inventing one.
 | --- | --- | --- |
 | `Sidebar` | `Button variant="quiet"` rows (including the needs-attention row), `StatusMessage` | the nav rows' geometry (`Sidebar.css`) |
 | `InboxView` | `ViewFrame variant="queue"`, `Select variant="token"`, `StatusMessage` | `.inbox__rowShell` + `.inbox__row` (one full-surface button with the File picker overlaid in `.inbox__rowActions`), the progress instrument, the pipeline placeholder row (which wears the same shell and row shape), and the filed toast (`.inbox__toast`) |
-| `NeedsAttentionView` | `ViewFrame variant="health"`, `Button` (with `loading`), `StatusMessage` | `.attention__card`, pre-lifted |
+| `NeedsAttentionView` | `ViewFrame variant="health"`, `Button` (with `loading`), `DestructiveConfirmDialog`, `StatusMessage` | `.attention__card`, pre-lifted |
 | `ProjectView` | `ViewFrame variant="library"`, `Button`, `StatusMessage` | `.project__row`, a hand-rolled index row |
 | `CreateProjectDialog` | `Overlay`, `TextField`, `Button` (`quiet` + `filled`) | — |
-| `DeleteProjectDialog` | `Overlay`, `Button` (`destructive` beside a `primary` Cancel), `StatusMessage` | — |
+| `DestructiveConfirmDialog` | `Overlay`, `Button` (`destructive` beside a `primary` Cancel), `StatusMessage` | — |
+| `DeleteProjectDialog` | `DestructiveConfirmDialog` | — |
 | `NoteEditorView` | `ViewFrame variant="doc"`, `Button`, `StatusMessage` | its own header, and raw `<textarea>` / `<input>` elements with `aria-label` + `ui-writing` |
 | `SettingsView` | `ViewFrame variant="panel"`, `Select`, `Button`, `StatusMessage` | a local `role="switch"` `Toggle`, and a raw number `<input>` (`.settings__chip`) |
 | `SearchView` | `ViewFrame variant="search"`, `StatusMessage` | its own query field (`.ui-focus-ring-within`) |

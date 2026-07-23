@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NeedsAttentionView } from "./NeedsAttentionView";
@@ -295,7 +295,7 @@ describe("NeedsAttentionView", () => {
     expect(screen.getAllByTestId("restore-session")).toHaveLength(2);
   });
 
-  it("deletes a dismissed capture only after its inline confirm", async () => {
+  it("deletes a dismissed capture only after confirming in the modal", async () => {
     const user = userEvent.setup();
     const teamSync = makeSession("team-sync", true);
     serveSessions([teamSync]);
@@ -308,11 +308,11 @@ describe("NeedsAttentionView", () => {
     await user.click(await screen.findByTestId("show-dismissed"));
     await user.click(screen.getByTestId("delete-session"));
 
-    // The first click only asks; nothing has been invoked yet.
-    expect(screen.getByText("Delete for good?")).toBeInTheDocument();
+    // Delete opens a confirmation modal; nothing has been invoked yet.
+    const dialog = screen.getByRole("dialog", { name: "Delete this capture?" });
     expect(invoke).not.toHaveBeenCalledWith("delete_session", expect.anything());
 
-    await user.click(screen.getByTestId("confirm-delete-session"));
+    await user.click(within(dialog).getByRole("button", { name: "Delete capture" }));
 
     expect(invoke).toHaveBeenCalledWith("delete_session", {
       sessionPath: teamSync.path,
@@ -324,19 +324,43 @@ describe("NeedsAttentionView", () => {
     expect(screen.getByText(/All clear/)).toBeInTheDocument();
   });
 
-  it("cancelling the delete confirm leaves the capture dismissed and calls nothing", async () => {
+  it("cancelling the delete modal leaves the capture dismissed and calls nothing", async () => {
     const user = userEvent.setup();
     serveSessions([makeSession("team-sync", true)]);
     renderView();
 
     await user.click(await screen.findByTestId("show-dismissed"));
     await user.click(screen.getByTestId("delete-session"));
-    await user.click(screen.getByTestId("cancel-delete-session"));
 
+    const dialog = screen.getByRole("dialog", { name: "Delete this capture?" });
+    await user.click(within(dialog).getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(invoke).not.toHaveBeenCalledWith("delete_session", expect.anything());
     // The row's normal actions are back, untouched.
     expect(screen.getByTestId("restore-session")).toBeInTheDocument();
     expect(screen.getByTestId("delete-session")).toBeInTheDocument();
+  });
+
+  it("shows a failed capture delete inside the modal and stays open", async () => {
+    const user = userEvent.setup();
+    serveSessions([makeSession("team-sync", true)]);
+    onCommand("delete_session", () => {
+      throw "session is locked";
+    });
+    renderView();
+
+    await user.click(await screen.findByTestId("show-dismissed"));
+    await user.click(screen.getByTestId("delete-session"));
+
+    const dialog = screen.getByRole("dialog", { name: "Delete this capture?" });
+    await user.click(within(dialog).getByRole("button", { name: "Delete capture" }));
+
+    expect(
+      await within(dialog).findByText("Couldn't delete the capture: session is locked"),
+    ).toBeInTheDocument();
+    // The modal stays open so the delete can be retried or cancelled.
+    expect(screen.getByRole("dialog", { name: "Delete this capture?" })).toBeInTheDocument();
   });
 
   it("surfaces a failed listing instead of claiming all clear", async () => {
