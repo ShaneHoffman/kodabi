@@ -17,8 +17,11 @@ import {
   type NoteSummary,
 } from "../../useNotes";
 import { useProjects } from "../../useProjects";
+import { isSessionSource } from "../../useSessions";
 import { formatElapsed, useElapsed } from "../../useElapsed";
 import { useTimeout } from "../../useTimeout";
+import { DeleteNoteDialog } from "../DeleteNoteDialog";
+import { Button } from "../ui/Button";
 import { Select, type SelectOption } from "../ui/Select";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
@@ -593,6 +596,7 @@ function InboxRow({
   const [pending, setPending] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const route = (slug: string) => {
     setPending(true);
@@ -640,14 +644,25 @@ function InboxRow({
               </span>
             )}
           </button>
-          {/* No picker at all when there is nothing to file into: a control
-              whose only outcome is a dead end should not be offered. No
-              substitute hint either — a static sentence repeated once per
-              row is N copies of one fact, and pointing at the fix is the
-              sidebar's job, where projects live and where task #84's
-              create-project affordance lands. */}
-          {options.length > 0 && (
-            <div className="inbox__rowActions">
+          {/* Delete is always offered — even in a project-less vault, where
+              there is nowhere to file — because an unwanted note must be
+              removable wherever it sits. The picker beside it is not: a control
+              whose only outcome is a dead end should not be offered, so it is
+              gated on there being a project to file into (the sidebar, where
+              task #84's create-project affordance lands, is where that fix
+              points). */}
+          <div className="inbox__rowActions">
+            <Button
+              variant="quiet"
+              aria-haspopup="dialog"
+              aria-label={`Delete "${note.title}"`}
+              disabled={pending || leaving}
+              onClick={() => setConfirmingDelete(true)}
+              className="py-3xs text-label text-text-soft"
+            >
+              Delete
+            </Button>
+            {options.length > 0 && (
               <Select
                 hideLabel
                 variant="token"
@@ -658,13 +673,27 @@ function InboxRow({
                 busy={pending}
                 onChange={route}
               />
-            </div>
-          )}
+            )}
+          </div>
         </div>
         {error && (
           <StatusMessage variant="error" compact>
             Couldn&apos;t file this note: {error}
           </StatusMessage>
+        )}
+        {confirmingDelete && (
+          <DeleteNoteDialog
+            id={note.id}
+            sessionBacked={isSessionSource(note.source)}
+            onClose={() => setConfirmingDelete(false)}
+            // Mirror the file flow: close, then play the row's exit. The delete
+            // command broadcasts `vault:changed`, which refetches the list and
+            // the sidebar Inbox count together and drops the row.
+            onDeleted={() => {
+              setConfirmingDelete(false);
+              setLeaving(true);
+            }}
+          />
         )}
       </div>
     </li>

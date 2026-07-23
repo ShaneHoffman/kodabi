@@ -92,6 +92,26 @@ export function saveNote(input: SaveNoteInput): Promise<NoteDetail> {
   return invoke<NoteDetail>("save_note", { input });
 }
 
+/** The `delete_note` outcome, mirroring `DeletedNoteDto` in
+ * `src-tauri/src/note_cmds.rs`: the removed note's id, its title and former
+ * project (both `null` when the note was already gone; `project: null` for an
+ * Inbox note), and whether a paired recording/transcript was deleted with it. */
+export type DeletedNote = {
+  id: string;
+  title: string | null;
+  project: string | null;
+  session_deleted: boolean;
+};
+
+/** Permanently deletes a note, wherever it lives. The backend also removes the
+ * note's paired session artifacts (recording + transcript, for a distilled
+ * note) and its index rows, then broadcasts `vault:changed`, so every view
+ * refreshes without caller wiring. Deleting an already-gone note is a no-op
+ * success. */
+export function deleteNote(id: string): Promise<DeletedNote> {
+  return invoke<DeletedNote>("delete_note", { id });
+}
+
 /** One-off read of a project's notes — the same `list_notes` command
  * `useProjectNotes` wraps, for a caller that needs a single lookup rather
  * than a live-refetching subscription (the filed-toast's click-to-open,
