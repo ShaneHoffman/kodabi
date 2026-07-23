@@ -65,6 +65,31 @@ type ProjectList = {
   projects: Project[];
 };
 
+/** Mirrors `DeletedProjectDto` in src-tauri/src/note_cmds.rs (`delete_project`). */
+export type DeletedProject = {
+  slug: string;
+  moved_note_count: number;
+};
+
+/**
+ * Creates an empty project folder, echoing the canonical (casing-adopted)
+ * project row (`ProjectDto` in src-tauri/src/note_cmds.rs) so the caller can
+ * navigate straight to it. List refreshes ride the backend's `vault:changed`
+ * broadcast.
+ */
+export function createProject(project: string): Promise<Project> {
+  return invoke<Project>("create_project", { project });
+}
+
+/**
+ * Deletes a project; its notes (including notes in child projects) move back
+ * to the Inbox first. The backend broadcasts `vault:changed` and queues an
+ * index reconcile, so every view refreshes without caller wiring.
+ */
+export function deleteProject(project: string): Promise<DeletedProject> {
+  return invoke<DeletedProject>("delete_project", { project });
+}
+
 /**
  * The sidebar's world, straight from disk: Inbox pinned first, projects in
  * backend slug order. Fetched (and response-sequenced) via `useVaultQuery`,

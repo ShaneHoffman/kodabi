@@ -35,7 +35,9 @@
 .ui-btn--primary:disabled,
 .ui-btn--primary[aria-disabled="true"],
 .ui-btn--quiet:disabled,
-.ui-btn--quiet[aria-disabled="true"] {
+.ui-btn--quiet[aria-disabled="true"],
+.ui-btn--destructive:disabled,
+.ui-btn--destructive[aria-disabled="true"] {
   color: var(--text-faint);
 }
 
@@ -109,11 +111,21 @@
    item), and those shapes differ by more than a step; each consumer sets its
    own in its co-located CSS. `primary` and `filled` are real control chips
    and do own their padding. */
-.ui-btn--quiet:hover:not(:disabled):not([aria-disabled="true"]) {
+.ui-btn--quiet:hover:not(:disabled):not([aria-disabled="true"]),
+.ui-btn--destructive:hover:not(:disabled):not([aria-disabled="true"]) {
   color: var(--text);
 }
 
-.ui-btn--quiet:active:not(:disabled):not([aria-disabled="true"]) {
+.ui-btn--quiet:active:not(:disabled):not([aria-disabled="true"]),
+.ui-btn--destructive:active:not(:disabled):not([aria-disabled="true"]) {
   background: var(--wash-active);
   transition: none;
 }
+
+/* ---------- destructive: the confirmed ghost ----------
+   Not a fourth look: it shares every quiet declaration above (one rule, two
+   selectors — never a second copy). There is no red token, and a destructive
+   action is marked by CONFIRMATION, not colour (docs/DESIGN_SYSTEM.md §2), so
+   the class exists purely so call sites state intent. It may only appear
+   inside a confirmation dialog, as the non-default control beside a primary
+   Cancel. */
