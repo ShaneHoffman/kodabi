@@ -22,6 +22,7 @@ const CAPTURE_STATE_EVENT = "capture:state";
 const TRANSCRIPTION_STATE_EVENT = "transcription:state";
 
 const IDLE = { phase: "idle", sources: { loopback: "off", microphone: "off" } };
+const STARTING = { phase: "starting", sources: { loopback: "off", microphone: "off" } };
 const LISTENING = {
   phase: "listening",
   sources: { loopback: "live", microphone: "live" },
@@ -280,6 +281,161 @@ describe("InboxView", () => {
   });
 
   describe("the pipeline placeholder", () => {
+    it("appears the instant a capture stops, before the backend says anything", async () => {
+      serveVault([]);
+      renderInbox();
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, LISTENING);
+      });
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, IDLE);
+      });
+
+      // Not a single transcription or distill event has fired: the witnessed
+      // stop alone mounts the placeholder.
+      expect(screen.getByTestId("pipeline-placeholder")).toBeInTheDocument();
+      expect(activeStatusText()).toBe("Transcribing the capture");
+      expect(announcedStatusText()).toBe("Transcribing the capture");
+    });
+
+    it("holds through the backend's own transcribing without being waived", async () => {
+      serveVault([]);
+      renderInbox();
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, LISTENING);
+      });
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, IDLE);
+      });
+      await act(async () => {
+        emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "transcribing" });
+      });
+      expect(activeStatusText()).toBe("Transcribing the capture");
+
+      // The real stage is not waiver-eligible: a genuine transcription can
+      // run for minutes.
+      await act(async () => {
+        vi.advanceTimersByTime(10_000); // GRACE_MS
+      });
+      expect(screen.getByTestId("pipeline-placeholder")).toBeInTheDocument();
+    });
+
+    it("stays hidden when a start fails without ever recording", async () => {
+      serveVault([]);
+      renderInbox();
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, STARTING);
+      });
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, IDLE);
+      });
+      expect(screen.queryByTestId("pipeline-placeholder")).not.toBeInTheDocument();
+    });
+
+    it("gives up on a stop the backend never acknowledges", async () => {
+      // A mis-tap: a session under the backend's minimum duration is dropped
+      // without a single event.
+      serveVault([]);
+      renderInbox();
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, LISTENING);
+      });
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, IDLE);
+      });
+      expect(screen.getByTestId("pipeline-placeholder")).toBeInTheDocument();
+
+      await act(async () => {
+        vi.advanceTimersByTime(10_000); // GRACE_MS
+      });
+      expect(screen.queryByTestId("pipeline-placeholder")).not.toBeInTheDocument();
+      expect(await screen.findByText(/Nothing waiting/)).toBeInTheDocument();
+    });
+
+    it("does not replay a given-up stop when the Inbox remounts", async () => {
+      serveVault([]);
+      onCommand("capture_phase", () => IDLE);
+      const { rerender } = render(
+        <NavigationProvider>
+          <CapturePipelineProvider>
+            <InboxView />
+          </CapturePipelineProvider>
+        </NavigationProvider>,
+      );
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, LISTENING);
+      });
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, IDLE);
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(10_000); // GRACE_MS
+      });
+      expect(screen.queryByTestId("pipeline-placeholder")).not.toBeInTheDocument();
+
+      // Navigate away and back. The provider — and `stopPending`, which
+      // would otherwise persist until the next capture — survive the view
+      // unmounting, so without the shell retiring the given-up stop, this
+      // would replay the phantom placeholder for another grace period.
+      rerender(
+        <NavigationProvider>
+          <CapturePipelineProvider>
+            <div />
+          </CapturePipelineProvider>
+        </NavigationProvider>,
+      );
+      rerender(
+        <NavigationProvider>
+          <CapturePipelineProvider>
+            <InboxView />
+          </CapturePipelineProvider>
+        </NavigationProvider>,
+      );
+      expect(await screen.findByText(/Nothing waiting/)).toBeInTheDocument();
+      expect(screen.queryByTestId("pipeline-placeholder")).not.toBeInTheDocument();
+    });
+
+    it("keeps the placeholder when transcribing lands before the stop's own broadcast", async () => {
+      serveVault([]);
+      renderInbox();
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, LISTENING);
+      });
+      // The worker's opening event beats the `capture:state idle` broadcast —
+      // it must not be dropped as a stale straggler.
+      await act(async () => {
+        emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "transcribing" });
+      });
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, IDLE);
+      });
+      expect(activeStatusText()).toBe("Transcribing the capture");
+
+      // On the real stage, not the synthetic one, so the grace timer never
+      // retires it mid-run.
+      await act(async () => {
+        vi.advanceTimersByTime(10_000); // GRACE_MS
+      });
+      expect(screen.getByTestId("pipeline-placeholder")).toBeInTheDocument();
+
+      await act(async () => {
+        emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "saved", path: "t.jsonl" });
+      });
+      expect(activeStatusText()).toBe("Distilling the meeting");
+    });
+
     it("wears a row's silhouette and advances as the pipeline does", async () => {
       serveVault([PLANNING]);
       renderInbox();

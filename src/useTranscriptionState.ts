@@ -23,12 +23,17 @@ const TRANSCRIPTION_STATE_EVENT = "transcription:state";
  *
  * The previous meeting's cleanup stage runs a headless Claude subprocess that
  * can take seconds, so its terminal `saved`/`error` event may not land until
- * the next recording is already under way. Any event that arrives while a
- * capture is engaged therefore belongs to that prior run and is dropped —
- * transcription itself only ever starts after a stop, so a genuine event for
- * the current session never arrives mid-capture. "Engaged" is every non-idle
- * phase, not just `listening`: a starting or degraded capture is still the
- * current meeting.
+ * the next recording is already under way. A terminal event that arrives
+ * while a capture is engaged therefore belongs to that prior run and is
+ * dropped — transcription only ever starts after a stop, so a genuine
+ * `saved`/`error` for the current session never arrives mid-capture.
+ * `transcribing` is exempt: a run's opening event can beat the stop's own
+ * `capture:state` broadcast (the worker emits the moment it holds
+ * `TRANSCRIBE_LOCK` in `transcribe.rs`, and the phase read here lags a
+ * render behind besides), and the one other `transcribing` that can land
+ * mid-capture — a lock-queued predecessor's — is still literally true.
+ * "Engaged" is every non-idle phase, not just `listening`: a starting or
+ * degraded capture is still the current meeting.
  */
 export function useTranscriptionState(capturePhase: CapturePhase): TranscriptionState {
   const [state, setState] = useState<TranscriptionState>({ status: "idle" });
@@ -44,7 +49,10 @@ export function useTranscriptionState(capturePhase: CapturePhase): Transcription
     let unlisten: (() => void) | undefined;
 
     listen<TranscriptionState>(TRANSCRIPTION_STATE_EVENT, (event) => {
-      if (active && !isCaptureActive(capturePhaseRef.current)) setState(event.payload);
+      if (!active) return;
+      if (event.payload.status === "transcribing" || !isCaptureActive(capturePhaseRef.current)) {
+        setState(event.payload);
+      }
     }).then((fn) => {
       if (active) {
         unlisten = fn;
