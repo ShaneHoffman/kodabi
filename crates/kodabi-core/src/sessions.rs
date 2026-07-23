@@ -31,6 +31,17 @@
 //!   stays tolerant so one bad file or ACL-denied folder can't blank the whole
 //!   list, and the cost of erring this way is a duplicate note if the user
 //!   retries, against a silently dropped meeting if it erred the other way.
+//!
+//! The one persisted bit is the **dismissed marker**: a `.dismissed` sibling
+//! of the `.jsonl` ([`naming::dismissed_sibling`]) recording that the user
+//! waved the session off. That is user *intent*, which no walk of the vault
+//! could re-derive — not a failure record: membership stays derived, and the
+//! marker is only read for sessions the derivation already surfaced, so it can
+//! never add a row or contradict what the markdown says. It self-heals with
+//! the rest: a successful distill clears it ([`restore_session`]), the
+//! retention sweep expires it alongside its session, and a marker orphaned by
+//! a hand-deleted `.jsonl` is invisible to every surface (and expires with the
+//! KeepDays sweep; under KeepAll it lingers harmlessly).
 
 use std::fs;
 use std::io;
@@ -62,6 +73,10 @@ pub struct FailedSession {
     /// Capture instant as RFC 3339 UTC (`Z`): the filename timestamp, else the
     /// file's mtime, else now.
     pub captured_at: String,
+    /// Whether the user has waved this session off (its
+    /// [`naming::dismissed_sibling`] marker exists). Membership is still
+    /// derived; only the wave-off is stored — see the module docs.
+    pub dismissed: bool,
 }
 
 /// Why deriving the needs-attention list failed outright. Per-file and
@@ -81,9 +96,11 @@ pub enum SessionsError {
     },
     #[error(transparent)]
     Notes(#[from] NoteError),
-    /// A `source:` value that does not name a session artifact — a capture
-    /// keyword (`manual`, `quick-capture`, …) or a path outside the
-    /// `sessions/<file>.jsonl` form. Rejected before any disk access.
+    /// A `source:` value or session path that does not name a session
+    /// artifact — a capture keyword (`manual`, `quick-capture`, …), a path
+    /// outside the `sessions/<file>.jsonl` form, or a non-`.jsonl` path handed
+    /// to the dismiss/restore/delete entry points. Rejected before any disk
+    /// access.
     #[error("not a session source: {0}")]
     InvalidSource(String),
     /// A session transcript that exists but cannot be read or parsed.
@@ -143,6 +160,7 @@ pub fn list_failed_sessions(vault_root: &Path) -> Result<Vec<FailedSession>, Ses
         failed.push(FailedSession {
             slug: naming::parse_session_filename(&file_name).and_then(|parsed| parsed.slug),
             captured_at: captured_at.to_rfc3339_opts(SecondsFormat::Secs, true),
+            dismissed: naming::dismissed_sibling(&path).is_file(),
             file_name,
             path,
         });
@@ -179,6 +197,75 @@ fn needs_attention(path: &Path) -> bool {
 /// [`crate::distill::distill_session`] writes.
 fn source_value(file_name: &str) -> String {
     format!("{SESSIONS_DIR}/{file_name}")
+}
+
+/// Marks a needs-attention session as dismissed by writing its
+/// [`naming::dismissed_sibling`] marker. Idempotent: dismissing an
+/// already-dismissed session rewrites the marker, and a session whose
+/// `.jsonl` is already gone (a retention sweep racing the click) is a no-op
+/// rather than an orphaned marker.
+pub fn dismiss_session(session_path: &Path) -> Result<(), SessionsError> {
+    ensure_jsonl_session(session_path)?;
+    if !session_path.is_file() {
+        return Ok(());
+    }
+    let marker = naming::dismissed_sibling(session_path);
+    // The dismissal instant, for a human inspecting the vault. Presence is
+    // the whole signal — nothing parses this back, so a torn write still
+    // reads as dismissed and plain `fs::write` suffices.
+    let dismissed_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    fs::write(&marker, dismissed_at).map_err(|source| SessionsError::Io {
+        path: marker,
+        source,
+    })
+}
+
+/// Clears a session's dismissed marker so it counts as needing attention
+/// again. Also the marker's exit on a successful distill: a session that
+/// became a note must never keep one. `NotFound` is success — restoring an
+/// undismissed session has nothing to undo.
+pub fn restore_session(session_path: &Path) -> Result<(), SessionsError> {
+    ensure_jsonl_session(session_path)?;
+    remove_if_present(&naming::dismissed_sibling(session_path))
+}
+
+/// Permanently deletes a session and everything derived from it: the retained
+/// recording, the dismissed marker, then the `.jsonl` transcript. The order is
+/// deliberate — a removal failing partway leaves the transcript on disk, so
+/// the session stays listed and the delete can be retried, rather than
+/// stranding an invisible orphaned recording. Every `NotFound` is tolerated,
+/// so the call is idempotent.
+pub fn delete_session(session_path: &Path) -> Result<(), SessionsError> {
+    ensure_jsonl_session(session_path)?;
+    remove_if_present(&naming::audio_sibling(session_path))?;
+    remove_if_present(&naming::dismissed_sibling(session_path))?;
+    remove_if_present(session_path)
+}
+
+/// Refuses a path that is not a `.jsonl` session transcript, so a marker or
+/// delete can never target an arbitrary file. The Tauri layer already confines
+/// the path to `<vault>/sessions/`; this is core's own safety belt, mirroring
+/// the `.jsonl` gate in [`retention::apply_post_distill`].
+fn ensure_jsonl_session(session_path: &Path) -> Result<(), SessionsError> {
+    if session_path.extension().and_then(|e| e.to_str()) == Some("jsonl") {
+        Ok(())
+    } else {
+        Err(SessionsError::InvalidSource(
+            session_path.display().to_string(),
+        ))
+    }
+}
+
+/// Removes a file, treating an already-gone target as success.
+fn remove_if_present(path: &Path) -> Result<(), SessionsError> {
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(source) if source.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(source) => Err(SessionsError::Io {
+            path: path.to_path_buf(),
+            source,
+        }),
+    }
 }
 
 /// What a distilled note's `source:` field pairs it with: the raw transcript
@@ -430,6 +517,115 @@ mod tests {
         fs::remove_file(&session).unwrap();
 
         assert_eq!(list_failed_sessions(vault.path()).unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn dismissed_session_is_listed_with_its_marker_flag() {
+        let vault = tempdir().unwrap();
+        let waved = write_session(vault.path(), instant(9), Some("waved"), "spoken");
+        write_session(vault.path(), instant(14), Some("active"), "spoken");
+        dismiss_session(&waved).unwrap();
+
+        let failed = list_failed_sessions(vault.path()).unwrap();
+
+        assert_eq!(
+            failed.len(),
+            2,
+            "dismissal must not drop a session from the listing"
+        );
+        assert_eq!(failed[0].slug.as_deref(), Some("active"));
+        assert!(!failed[0].dismissed);
+        assert_eq!(failed[1].slug.as_deref(), Some("waved"));
+        assert!(failed[1].dismissed);
+    }
+
+    #[test]
+    fn dismiss_and_restore_round_trip_the_marker() {
+        let vault = tempdir().unwrap();
+        let session = write_session(vault.path(), instant(14), Some("waved"), "spoken");
+        let marker = naming::dismissed_sibling(&session);
+
+        dismiss_session(&session).unwrap();
+        assert!(marker.is_file());
+        // Dismissing again is a rewrite, not an error.
+        dismiss_session(&session).unwrap();
+
+        restore_session(&session).unwrap();
+        assert!(!marker.exists());
+        // Restoring an undismissed session has nothing to undo.
+        restore_session(&session).unwrap();
+    }
+
+    #[test]
+    fn dismissing_a_missing_session_creates_no_orphan_marker() {
+        let vault = tempdir().unwrap();
+        let session = write_session(vault.path(), instant(14), Some("gone"), "spoken");
+        fs::remove_file(&session).unwrap();
+
+        dismiss_session(&session).unwrap();
+
+        assert!(!naming::dismissed_sibling(&session).exists());
+    }
+
+    #[test]
+    fn dismiss_restore_and_delete_refuse_a_non_jsonl_path() {
+        let vault = tempdir().unwrap();
+        let sessions = vault.path().join(SESSIONS_DIR);
+        fs::create_dir_all(&sessions).unwrap();
+        let recording = sessions.join("keep.wav");
+        fs::write(&recording, "").unwrap();
+
+        for result in [
+            dismiss_session(&recording),
+            restore_session(&recording),
+            delete_session(&recording),
+        ] {
+            assert!(matches!(result, Err(SessionsError::InvalidSource(_))));
+        }
+        assert!(recording.is_file(), "a refused delete must not touch disk");
+        assert_eq!(
+            fs::read_dir(&sessions).unwrap().count(),
+            1,
+            "a refused dismiss must not write a marker"
+        );
+    }
+
+    #[test]
+    fn a_dismissed_marker_never_lists_as_a_session_itself() {
+        // An orphaned marker (its `.jsonl` hand-deleted) is inert: the
+        // jsonl-only filter keeps it out of the needs-attention list.
+        let vault = tempdir().unwrap();
+        let session = write_session(vault.path(), instant(14), Some("orphan"), "spoken");
+        dismiss_session(&session).unwrap();
+        fs::remove_file(&session).unwrap();
+
+        assert_eq!(list_failed_sessions(vault.path()).unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn delete_session_removes_transcript_recording_and_marker() {
+        let vault = tempdir().unwrap();
+        let session = write_session(vault.path(), instant(14), Some("doomed"), "spoken");
+        let recording = naming::audio_sibling(&session);
+        fs::write(&recording, "").unwrap();
+        dismiss_session(&session).unwrap();
+
+        delete_session(&session).unwrap();
+
+        assert!(!session.exists());
+        assert!(!recording.exists());
+        assert!(!naming::dismissed_sibling(&session).exists());
+        assert_eq!(list_failed_sessions(vault.path()).unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn delete_session_is_idempotent_when_already_gone() {
+        let vault = tempdir().unwrap();
+        let session = write_session(vault.path(), instant(14), Some("gone"), "spoken");
+
+        delete_session(&session).unwrap();
+        // A second delete finds nothing left and still succeeds.
+        delete_session(&session).unwrap();
     }
 
     #[test]

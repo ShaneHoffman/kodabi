@@ -25,6 +25,19 @@
   margin-top: var(--lead-footnote);
 }
 
+/* The dismissed shelf takes the footnote's lead-in, not the list's: it is a
+   register below the live cards, related but no longer asking. */
+.attention__dismissed {
+  margin-top: var(--lead-footnote);
+}
+
+.attention__dismissed-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-card);
+  margin-top: var(--space-sm);
+}
+
 .attention__card {
   display: flex;
   align-items: center;
