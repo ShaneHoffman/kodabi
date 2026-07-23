@@ -56,3 +56,68 @@ export function useFailedSessions(): {
 export function retryDistill(sessionPath: string): Promise<void> {
   return invoke("distill_session", { sessionPath });
 }
+
+/** One transcript segment of a raw session. Mirrors `TranscriptSegmentDto` in
+ * `src-tauri/src/session_cmds.rs` (and the MCP `TranscriptSegment` shape):
+ * timestamps are millisecond offsets from session start, `speaker` is always
+ * null in v1. */
+export type TranscriptSegment = {
+  index: number;
+  channel: "you" | "them" | "unknown";
+  speaker: string | null;
+  start_ms: number;
+  end_ms: number;
+  text: string;
+};
+
+/** What a note's session source resolves to. Mirrors `SessionArtifactsDto` in
+ * `src-tauri/src/session_cmds.rs`. `transcript_available: false` is the
+ * retention-pruned state, not an error; `audio_path` is the absolute path of
+ * the retained recording (fed to `convertFileSrc` for playback and handed
+ * back to `revealSessionAudio`), or null when none exists. */
+export type SessionArtifacts = {
+  transcript_available: boolean;
+  segments: TranscriptSegment[];
+  audio_path: string | null;
+};
+
+/**
+ * Whether a note's `source:` value names a raw session artifact — the
+ * `sessions/<file>.jsonl` form distill writes — rather than a capture keyword
+ * (`manual`, `quick-capture`, …). The guard the note view uses to decide the
+ * source-pairing section exists at all, so keyword-sourced notes never invoke
+ * the artifact read.
+ */
+export function isSessionSource(source: string): boolean {
+  return source.startsWith("sessions/") && source.endsWith(".jsonl");
+}
+
+/**
+ * The raw transcript and retained recording behind a distilled note's
+ * `source:` field. Refetched via `useVaultQuery` on every vault change, which
+ * the sessions-changed bridge also feeds — so a retention prune that deletes
+ * the artifacts while the note is open flips the view live.
+ */
+export function useSessionArtifacts(source: string): {
+  artifacts: SessionArtifacts | null;
+  loading: boolean;
+  error: string | null;
+} {
+  const { data, loading, error } = useVaultQuery(
+    useCallback(
+      () => invoke<SessionArtifacts>("read_session_artifacts", { source }),
+      [source],
+    ),
+  );
+  return { artifacts: data, loading, error };
+}
+
+/**
+ * Opens Explorer with the retained recording selected. Mirrors
+ * `session_cmds::reveal_session_audio`; Tauri exposes its `audio_path`
+ * argument as `audioPath` on the wire. Rejects when the file has since been
+ * discarded (retention racing the open note view).
+ */
+export function revealSessionAudio(audioPath: string): Promise<void> {
+  return invoke("reveal_session_audio", { audioPath });
+}

@@ -242,9 +242,10 @@ pub(crate) fn spawn_distill(app: &AppHandle, session_path: PathBuf) -> bool {
 
 /// Applies the retention policy to a just-distilled session: under
 /// [`kodabi_core::settings::RetentionPolicy::DiscardAfterDistill`] the raw
-/// `.jsonl` is deleted now that its note exists. A no-op under every other
-/// policy. Missing settings state (very early startup) or a delete failure is
-/// logged and swallowed — the distill already succeeded.
+/// `.jsonl` and its retained `.wav` recording are deleted now that the note
+/// exists. A no-op under every other policy. Missing settings state (very
+/// early startup) or a delete failure is logged and swallowed — the distill
+/// already succeeded.
 fn apply_retention_after_distill(app: &AppHandle, session_path: &Path) {
     let Some(state) = app.try_state::<SettingsState>() else {
         return;

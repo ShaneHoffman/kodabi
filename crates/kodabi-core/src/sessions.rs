@@ -1,5 +1,7 @@
-//! Deriving the "needs attention" list: captured sessions that never became a
-//! note.
+//! Reading the `sessions/` store from a note's point of view: the "needs
+//! attention" list of captured sessions that never became a note, and
+//! [`read_session_artifacts`] — resolving a distilled note's `source:` back to
+//! its raw transcript and retained recording.
 //!
 //! A distill failure leaves the raw `.jsonl` untouched on disk so the run can
 //! be retried (see [`crate::distill`]'s module docs), but nothing on disk marks
@@ -38,7 +40,7 @@ use chrono::{SecondsFormat, Utc};
 
 use crate::naming;
 use crate::note::NoteError;
-use crate::raw_session::{self, RawSessionError};
+use crate::raw_session::{self, RawSessionError, TranscriptSegment};
 use crate::retention;
 use crate::vault;
 
@@ -79,6 +81,14 @@ pub enum SessionsError {
     },
     #[error(transparent)]
     Notes(#[from] NoteError),
+    /// A `source:` value that does not name a session artifact — a capture
+    /// keyword (`manual`, `quick-capture`, …) or a path outside the
+    /// `sessions/<file>.jsonl` form. Rejected before any disk access.
+    #[error("not a session source: {0}")]
+    InvalidSource(String),
+    /// A session transcript that exists but cannot be read or parsed.
+    #[error(transparent)]
+    RawSession(#[from] RawSessionError),
 }
 
 /// Lists the sessions needing attention, newest capture first.
@@ -169,6 +179,74 @@ fn needs_attention(path: &Path) -> bool {
 /// [`crate::distill::distill_session`] writes.
 fn source_value(file_name: &str) -> String {
     format!("{SESSIONS_DIR}/{file_name}")
+}
+
+/// What a distilled note's `source:` field pairs it with: the raw transcript
+/// (when the `.jsonl` still exists) and the retained recording (when its
+/// `.wav` sibling does). The two are independent — retention can prune the
+/// transcript while a recording survives a failed sibling delete, and a
+/// recording whose write failed leaves the transcript alone — so presence is
+/// reported separately and every combination is representable.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SessionArtifacts {
+    /// Whether the raw transcript is still on disk. `false` is the
+    /// retention-pruned state, not an error.
+    pub transcript_available: bool,
+    /// The transcript's segments, in order; empty when unavailable.
+    pub segments: Vec<TranscriptSegment>,
+    /// Absolute path to the retained recording, when it exists.
+    pub audio_path: Option<PathBuf>,
+}
+
+/// Resolves a note's `source:` value to its session artifacts.
+///
+/// `source` must be the raw-artifact form [`crate::distill::distill_session`]
+/// writes — `sessions/<file>.jsonl` — anything else (a capture keyword, a
+/// traversal attempt) is [`SessionsError::InvalidSource`]. A missing
+/// transcript yields `transcript_available: false` with empty segments; a
+/// transcript that exists but can't be parsed is a real error, matching what
+/// a distill retry would hit.
+pub fn read_session_artifacts(
+    vault_root: &Path,
+    source: &str,
+) -> Result<SessionArtifacts, SessionsError> {
+    let file_name = session_source_file_name(source)
+        .ok_or_else(|| SessionsError::InvalidSource(source.to_string()))?;
+    let path = vault_root.join(SESSIONS_DIR).join(file_name);
+
+    let (transcript_available, segments) = match raw_session::read_raw_session(&path) {
+        Ok(segments) => (true, segments),
+        Err(RawSessionError::Io { ref source, .. }) if source.kind() == io::ErrorKind::NotFound => {
+            (false, Vec::new())
+        }
+        Err(err) => return Err(err.into()),
+    };
+
+    let audio = naming::audio_sibling(&path);
+    let audio_path = audio.is_file().then_some(audio);
+
+    Ok(SessionArtifacts {
+        transcript_available,
+        segments,
+        audio_path,
+    })
+}
+
+/// Lexically validates a `source:` value as a session reference and returns
+/// the bare file name. The joined `<vault>/sessions/<file_name>` must stay
+/// inside the sessions directory, so the name must be a single plain path
+/// component: no separators, no drive/ADS colon, no dot segments. Only the
+/// `.jsonl` form distill writes qualifies.
+fn session_source_file_name(source: &str) -> Option<&str> {
+    let file_name = source.strip_prefix(SESSIONS_DIR)?.strip_prefix('/')?;
+    if file_name.is_empty()
+        || file_name.contains(['/', '\\', ':'])
+        || file_name == "."
+        || file_name == ".."
+    {
+        return None;
+    }
+    file_name.ends_with(".jsonl").then_some(file_name)
 }
 
 #[cfg(test)]
@@ -339,6 +417,93 @@ mod tests {
             failed[0].captured_at
         );
         assert!(DateTime::parse_from_rfc3339(&failed[0].captured_at).is_ok());
+    }
+
+    #[test]
+    fn retained_recording_never_lists_as_a_failed_session() {
+        // A `.wav` sibling is a recording, not a session: the jsonl-only
+        // filter must keep it out of the needs-attention list even when its
+        // transcript has been pruned out from under it.
+        let vault = tempdir().unwrap();
+        let session = write_session(vault.path(), instant(14), Some("kept"), "spoken");
+        fs::write(naming::audio_sibling(&session), "").unwrap();
+        fs::remove_file(&session).unwrap();
+
+        assert_eq!(list_failed_sessions(vault.path()).unwrap(), Vec::new());
+    }
+
+    #[test]
+    fn artifacts_resolve_transcript_and_recording() {
+        let vault = tempdir().unwrap();
+        let session = write_session(vault.path(), instant(14), Some("sync"), "hello there");
+        let recording = naming::audio_sibling(&session);
+        fs::write(&recording, "").unwrap();
+        let source = source_value(session.file_name().unwrap().to_str().unwrap());
+
+        let artifacts = read_session_artifacts(vault.path(), &source).unwrap();
+
+        assert!(artifacts.transcript_available);
+        assert_eq!(artifacts.segments.len(), 1);
+        assert_eq!(artifacts.segments[0].text, "hello there");
+        assert_eq!(artifacts.audio_path, Some(recording));
+    }
+
+    #[test]
+    fn artifacts_report_a_pruned_transcript_without_error() {
+        let vault = tempdir().unwrap();
+        let session = write_session(vault.path(), instant(14), Some("gone"), "spoken");
+        // Retention pruned the transcript but a recording survives — the note
+        // still resolves what remains.
+        let recording = naming::audio_sibling(&session);
+        fs::write(&recording, "").unwrap();
+        let source = source_value(session.file_name().unwrap().to_str().unwrap());
+        fs::remove_file(&session).unwrap();
+
+        let artifacts = read_session_artifacts(vault.path(), &source).unwrap();
+
+        assert!(!artifacts.transcript_available);
+        assert!(artifacts.segments.is_empty());
+        assert_eq!(artifacts.audio_path, Some(recording));
+    }
+
+    #[test]
+    fn artifacts_omit_a_missing_recording() {
+        let vault = tempdir().unwrap();
+        let session = write_session(vault.path(), instant(14), Some("no-audio"), "spoken");
+        let source = source_value(session.file_name().unwrap().to_str().unwrap());
+
+        let artifacts = read_session_artifacts(vault.path(), &source).unwrap();
+
+        assert!(artifacts.transcript_available);
+        assert_eq!(artifacts.audio_path, None);
+    }
+
+    #[test]
+    fn artifacts_reject_non_session_sources() {
+        let vault = tempdir().unwrap();
+        for source in [
+            // Capture keywords are valid `source:` values but name no artifact.
+            "manual",
+            "quick-capture",
+            "transcript",
+            // Traversal and separator injection must never reach the disk.
+            "sessions/../secrets.jsonl",
+            "sessions/nested/deep.jsonl",
+            "sessions/nested\\deep.jsonl",
+            "sessions/C:evil.jsonl",
+            "sessions/",
+            // Only the `.jsonl` raw-artifact form resolves.
+            "sessions/recording.wav",
+            "raw/20260712T140335123Z-k4m2xp7q.jsonl",
+        ] {
+            assert!(
+                matches!(
+                    read_session_artifacts(vault.path(), source),
+                    Err(SessionsError::InvalidSource(_))
+                ),
+                "should reject: {source}"
+            );
+        }
     }
 
     #[test]

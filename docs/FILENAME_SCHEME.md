@@ -74,6 +74,22 @@ Because neither the timestamp nor the device ID ever contains `-`, splitting the
 `[timestamp, deviceID, slug]` — the slug, if present, may itself contain `-`. See
 `parse_session_filename` in `crates/kodabi-core/src/naming.rs`.
 
+### The recording sibling
+
+A session's retained recording is a `.wav` (16-bit PCM stereo, 48 kHz, left = mic/you,
+right = system/them) sharing the **exact** stem of its `.jsonl` transcript — numeric
+disambiguator included — so the pairing is derivable from either filename with no index:
+
+```
+20260712T140335123Z-k4m2xp7q-briarwood-golf-sync.jsonl   the transcript
+20260712T140335123Z-k4m2xp7q-briarwood-golf-sync.wav     its recording
+```
+
+The recording is written *after* the transcript's atomic link claims its final name, and its own
+name is derived from the claimed path (`audio_sibling` in `crates/kodabi-core/src/naming.rs`),
+never re-composed — which is what keeps the stems identical even when a same-millisecond
+collision appended a numbered slug.
+
 ---
 
 ## Consumers
@@ -87,6 +103,9 @@ Every component that names or reads a captured-session filename must follow this
   filenames sorting chronologically and never colliding across devices.
 - **Import/export (merge, never overwrite)** — import relies on timestamp+device-ID filenames to
   detect that two files from different devices are distinct, never overwriting one with the other.
+- **Retention** (`crates/kodabi-core/src/retention.rs`) — ages both a `.jsonl` transcript and its
+  `.wav` recording by the shared filename timestamp, so the pair expires together; the
+  post-distill discard removes both.
 
 ## Reference implementation
 

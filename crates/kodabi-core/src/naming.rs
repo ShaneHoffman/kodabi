@@ -14,6 +14,8 @@
 //! Neither the timestamp nor the device ID ever contains `-`, so
 //! [`parse_session_filename`] can losslessly split the pieces back apart.
 
+use std::path::{Path, PathBuf};
+
 use chrono::{DateTime, NaiveDateTime, Utc};
 
 use crate::device::DeviceId;
@@ -58,6 +60,16 @@ pub fn numbered_slug(base: Option<&str>, n: u32) -> String {
         Some(base) => format!("{base}-{suffix}"),
         None => suffix,
     }
+}
+
+/// The retained-recording sibling of a session transcript: the same path with
+/// a `wav` extension. Per `docs/FILENAME_SCHEME.md`, a session's recording
+/// shares the *exact* stem of its `.jsonl` — numbered disambiguator included —
+/// so the pairing is derivable from either file with no index. Callers derive
+/// the recording's name from the transcript path the writer actually claimed,
+/// never by re-composing a filename.
+pub fn audio_sibling(session_path: &Path) -> PathBuf {
+    session_path.with_extension("wav")
 }
 
 /// Directory name for an in-flight capture session: `{timestamp}-{deviceID}`.
@@ -292,6 +304,16 @@ mod tests {
         let parsed = parse_session_filename(&name).expect("should parse");
         assert_eq!(parse_session_timestamp(&parsed.timestamp), Some(when));
         assert_eq!(parse_session_timestamp("not-a-timestamp"), None);
+    }
+
+    #[test]
+    fn audio_sibling_swaps_only_the_extension() {
+        assert_eq!(
+            audio_sibling(Path::new(
+                "sessions/20260712T140335123Z-k4m2xp7q-briarwood-golf-sync-2.jsonl"
+            )),
+            Path::new("sessions/20260712T140335123Z-k4m2xp7q-briarwood-golf-sync-2.wav")
+        );
     }
 
     #[test]

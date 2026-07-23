@@ -1,20 +1,21 @@
-//! Pruning raw session transcripts per the user's [`RetentionPolicy`].
+//! Pruning raw session artifacts per the user's [`RetentionPolicy`].
 //!
-//! Sessions are the `.jsonl` files [`crate::raw_session::write_raw_session`]
-//! drops in the KB's `sessions/` directory. This module enforces the retention
-//! policy over them two ways:
+//! Sessions are the `.jsonl` transcripts [`crate::raw_session::write_raw_session`]
+//! drops in the KB's `sessions/` directory, plus their retained `.wav`
+//! recordings (same filename stem — see [`crate::naming::audio_sibling`]).
+//! This module enforces the retention policy over them two ways:
 //!
 //! - [`prune_sessions`] — a sweep, for [`RetentionPolicy::KeepDays`]: delete
-//!   sessions older than the cutoff. Run on a schedule (startup + periodically)
-//!   and whenever the policy changes.
+//!   session artifacts older than the cutoff. Run on a schedule (startup +
+//!   periodically) and whenever the policy changes.
 //! - [`apply_post_distill`] — forward-only enforcement of
-//!   [`RetentionPolicy::DiscardAfterDistill`]: delete a single session the
-//!   moment it has been successfully distilled into a note.
+//!   [`RetentionPolicy::DiscardAfterDistill`]: delete a single session (and
+//!   its recording) the moment it has been successfully distilled into a note.
 //!
-//! Deletion is deliberately conservative: only regular `.jsonl` files directly
-//! in the sessions directory are ever touched (never the `.tmp` scratch files
-//! an in-flight write stages, subdirectories, or anything else), and a session
-//! whose age can't be determined is kept rather than guessed-at.
+//! Deletion is deliberately conservative: only regular `.jsonl` and `.wav`
+//! files directly in the sessions directory are ever touched (never the `.tmp`
+//! scratch files an in-flight write stages, subdirectories, or anything else),
+//! and a session whose age can't be determined is kept rather than guessed-at.
 
 use std::fs;
 use std::io;
@@ -82,9 +83,14 @@ pub fn prune_sessions(
             continue;
         }
         let path = entry.path();
-        // Only `.jsonl` session files; this also excludes the `.tmp` scratch
-        // files an in-flight `write_raw_session` stages before its atomic link.
-        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+        // Only `.jsonl` transcripts and their retained `.wav` recordings; this
+        // also excludes the `.tmp` scratch files an in-flight write stages
+        // before its atomic link/rename. Both artifacts share a filename stem,
+        // so they age identically and expire as a pair.
+        if !matches!(
+            path.extension().and_then(|e| e.to_str()),
+            Some("jsonl" | "wav")
+        ) {
             continue;
         }
         let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
@@ -106,12 +112,14 @@ pub fn prune_sessions(
     Ok(report)
 }
 
-/// Deletes `session_path` iff the policy is
-/// [`RetentionPolicy::DiscardAfterDistill`], returning whether it deleted.
-/// Called on the distill thread right after a session distilled successfully,
-/// so nothing is reading the file. Refuses any path that isn't a `.jsonl` file
-/// as a safety belt against ever deleting the wrong thing. A path already gone
-/// (e.g. deleted by a concurrent sweep) is `Ok(false)`, not an error.
+/// Deletes `session_path` and its retained `.wav` recording iff the policy is
+/// [`RetentionPolicy::DiscardAfterDistill`], returning whether the transcript
+/// was deleted. Called on the distill thread right after a session distilled
+/// successfully, so nothing is reading the files. Refuses any path that isn't
+/// a `.jsonl` file as a safety belt against ever deleting the wrong thing. A
+/// path already gone (e.g. deleted by a concurrent sweep) is `Ok(false)`, not
+/// an error, and a missing recording (audio was never retained, or already
+/// discarded) is the normal case — the sibling delete tolerates it.
 pub fn apply_post_distill(policy: RetentionPolicy, session_path: &Path) -> io::Result<bool> {
     if policy != RetentionPolicy::DiscardAfterDistill {
         return Ok(false);
@@ -119,11 +127,20 @@ pub fn apply_post_distill(policy: RetentionPolicy, session_path: &Path) -> io::R
     if session_path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
         return Ok(false);
     }
-    match fs::remove_file(session_path) {
-        Ok(()) => Ok(true),
-        Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(err) => Err(err),
+    let deleted = match fs::remove_file(session_path) {
+        Ok(()) => true,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => false,
+        Err(err) => return Err(err),
+    };
+    // The recording pairs with the transcript, so the policy that discards one
+    // discards the other — even when the transcript was already gone, a
+    // lingering recording under DiscardAfterDistill is a leak, not a keeper.
+    match fs::remove_file(naming::audio_sibling(session_path)) {
+        Ok(()) => {}
+        Err(err) if err.kind() == io::ErrorKind::NotFound => {}
+        Err(err) => return Err(err),
     }
+    Ok(deleted)
 }
 
 /// Whether a session file is older than `cutoff`. Dates the session from its
@@ -228,6 +245,32 @@ mod tests {
     }
 
     #[test]
+    fn keep_days_prunes_expired_recordings_alongside_transcripts() {
+        let dir = temp_dir("keep-days-wav");
+        let old = seed_session(&dir, now() - chrono::Duration::days(60));
+        let old_wav = naming::audio_sibling(&old);
+        fs::write(&old_wav, "").unwrap();
+        let fresh = seed_session(&dir, now() - chrono::Duration::days(1));
+        let fresh_wav = naming::audio_sibling(&fresh);
+        fs::write(&fresh_wav, "").unwrap();
+
+        let report = prune_sessions(&dir, keep_days(7), now()).unwrap();
+
+        assert!(report.failed.is_empty());
+        assert_eq!(
+            report.deleted.len(),
+            2,
+            "transcript and recording expire as a pair"
+        );
+        assert!(!old.exists());
+        assert!(!old_wav.exists(), "expired recording should be pruned");
+        assert!(fresh.exists());
+        assert!(fresh_wav.exists(), "in-window recording should be kept");
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn sweep_ignores_non_jsonl_scratch_and_subdirectories() {
         let dir = temp_dir("selective");
         // A non-session file, a scratch temp (the shape write_raw_session
@@ -320,17 +363,37 @@ mod tests {
     fn apply_post_distill_deletes_only_under_discard_policy() {
         let dir = temp_dir("post-distill");
         let session = seed_session(&dir, now());
+        let recording = naming::audio_sibling(&session);
+        fs::write(&recording, "").unwrap();
 
-        // KeepAll / KeepDays leave the session in place.
+        // KeepAll / KeepDays leave the session and its recording in place.
         assert!(!apply_post_distill(RetentionPolicy::KeepAll, &session).unwrap());
         assert!(!apply_post_distill(keep_days(30), &session).unwrap());
         assert!(session.exists());
+        assert!(recording.exists());
 
-        // DiscardAfterDistill removes it.
+        // DiscardAfterDistill removes both.
         assert!(apply_post_distill(RetentionPolicy::DiscardAfterDistill, &session).unwrap());
         assert!(!session.exists());
-        // Already-gone is Ok(false), not an error.
+        assert!(
+            !recording.exists(),
+            "the recording is discarded with its transcript"
+        );
+        // Already-gone (both files) is Ok(false), not an error.
         assert!(!apply_post_distill(RetentionPolicy::DiscardAfterDistill, &session).unwrap());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn apply_post_distill_tolerates_a_missing_recording() {
+        // Audio may never have been retained (WAV write failed, or a pre-audio
+        // session): the transcript still discards cleanly on its own.
+        let dir = temp_dir("post-distill-no-wav");
+        let session = seed_session(&dir, now());
+
+        assert!(apply_post_distill(RetentionPolicy::DiscardAfterDistill, &session).unwrap());
+        assert!(!session.exists());
 
         fs::remove_dir_all(&dir).unwrap();
     }
