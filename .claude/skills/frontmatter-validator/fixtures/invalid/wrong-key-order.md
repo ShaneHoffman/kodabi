@@ -11,4 +11,4 @@ confidence: 0.94
 # Summary
 
 `type` appears before `id`, breaking the canonical key order
-(id, type, project, date, tags, source, confidence) — the validator must flag it.
+(id, type, title, project, date, tags, source, confidence) — the validator must flag it.

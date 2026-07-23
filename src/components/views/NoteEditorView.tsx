@@ -131,7 +131,7 @@ function ReadNote({
 
         <header className="note__title-row">
           <div className="flex items-start justify-between gap-md">
-            <h2 className="font-serif text-title-doc font-semibold leading-title-doc tracking-title text-text">
+            <h2 className="ui-balance font-serif text-title-doc font-semibold leading-title-doc tracking-title text-text">
               {note.title}
             </h2>
             <Button

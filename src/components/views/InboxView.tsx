@@ -628,7 +628,7 @@ function InboxRow({
               })
             }
           >
-            <span className="block text-row font-semibold tracking-row text-text">
+            <span className="block truncate text-row font-semibold tracking-row text-text">
               {note.title}
             </span>
             <span className="mt-2xs block font-mono text-cap text-text-faint">

@@ -17,7 +17,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ---- Schema the validator encodes (source of truth: docs/FRONTMATTER_SCHEMA.md) ----
-const CANONICAL = ['id', 'type', 'project', 'date', 'tags', 'source', 'confidence'];
+const CANONICAL = ['id', 'type', 'title', 'project', 'date', 'tags', 'source', 'confidence'];
 const REQUIRED = ['id', 'type', 'project', 'date', 'source'];
 const TYPE_ENUM = ['meeting', 'note', 'chat'];
 const ID_RE = /^n_[0-9a-z]{6,}$/;
@@ -453,13 +453,16 @@ function checkSchema() {
       if (missing.length) bad(`NoteSummary is missing mirrored field(s): ${missing.join(', ')}`);
       else ok(`NoteSummary mirrors fields: ${CANONICAL.join(', ')}`);
 
-      const allowedExtras = new Set([...CANONICAL, 'path', 'title']);
+      // `path` is the one NoteSummary field with no frontmatter counterpart
+      // (the note's current location, not stored content). `title` is now a
+      // real frontmatter field, so it is covered by CANONICAL above.
+      const allowedExtras = new Set([...CANONICAL, 'path']);
       const extras = props.filter((p) => !allowedExtras.has(p));
       if (extras.length)
         bad(
           `NoteSummary has unmirrored field(s) that may need adding to the frontmatter schema: ${extras.join(', ')}`,
         );
-      else ok('no unmirrored NoteSummary fields (besides path, title)');
+      else ok('no unmirrored NoteSummary fields (besides path)');
 
       const idPat = defs.NoteId?.pattern;
       if (idPat === ID_RE.source) ok(`NoteId pattern ${idPat}`);

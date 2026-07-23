@@ -149,12 +149,12 @@ fn write_note_impl(app: &AppHandle, mut input: NewNoteInput) -> Result<WrittenNo
     let rel = path.strip_prefix(&kb).unwrap_or(&path);
 
     // Keep the index in step with the disk write. Best-effort: the file is the
-    // source of truth, so a failed index never fails the write. The title is
-    // derived from the on-disk stem (not the caller's title) so a later edit —
-    // which re-derives it the same way — sees no spurious title change.
+    // source of truth, so a failed index never fails the write. The title comes
+    // from `effective_title` (the stored frontmatter title, else the de-slugged
+    // stem) — the same source a later read/edit uses, so no spurious change.
     let indexed = IndexedNote::from_note(
         &note,
-        &vault::display_title(&path),
+        &vault::effective_title(&note, &path),
         &rel.to_string_lossy().replace('\\', "/"),
     );
     app.state::<IndexState>().index_note_best_effort(indexed);
@@ -172,7 +172,11 @@ fn note_from_input(input: NewNoteInput, id: NoteId) -> Result<Note, String> {
     let routing = Routing::from_project_and_confidence(input.project, input.confidence)
         .map_err(|err| err.to_string())?;
 
+    // The caller's title is stored in frontmatter (normalized by `with_title`),
+    // so it survives past the 40-char filename slug it also seeds.
+    let title = input.title;
     Note::new(id, note_type, routing, input.date, tags, source, input.body)
+        .map(|note| note.with_title(title))
         .map_err(|err| err.to_string())
 }
 
@@ -206,9 +210,9 @@ fn written_note(note: &Note, title: Option<String>, rel_path: &Path) -> WrittenN
 }
 
 /// A note listed from or read off the disk, in the MCP `NoteSummary`
-/// projection. Unlike [`WrittenNote`] (which echoes the caller-supplied title
-/// that seeded the filename), `title` here is derived from the filename stem —
-/// the only faithful source, since the title is not frontmatter.
+/// projection. `title` is the note's effective title (`vault::effective_title`):
+/// its stored frontmatter `title` when present, else the de-slugged filename
+/// stem for a legacy or hand-made note.
 ///
 /// `snippet` is a UI-only extension beyond the doc'd `NoteSummary` (which is
 /// deliberately schema-open); it gives list rows a body preview without a
