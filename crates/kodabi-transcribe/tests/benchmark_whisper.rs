@@ -33,12 +33,12 @@ use kodabi_transcribe::{whisper_with_vad, VadConfig, WhisperConfig};
 
 const SAMPLE_RATE: u32 = 16_000;
 
-/// Feed audio in ~1-second chunks. The VAD gate's internal circular buffer
-/// holds only ~30 s (see `silero::build_silero_vad`), so handing it the whole
-/// 3-minute recording in one `accept` overflows the buffer and drops nearly
-/// every finalised segment before it can be drained — chunking (and draining
-/// after each `accept`, as the trait does) mirrors how real capture streams
-/// audio and keeps each feed well under that buffer.
+/// Feed audio in ~1-second chunks, mirroring how real capture streams audio.
+/// The VAD gate windows each `accept` down to the VAD's 512-sample
+/// granularity internally (see `silero::feed_windowed`) and finalised
+/// segments free their VAD buffer space as they are queued, so chunk size no
+/// longer risks overflowing the ~30 s circular buffer — chunking here just
+/// keeps the finalised-segment queue drained at a realistic streaming cadence.
 const CHUNK_SAMPLES: usize = SAMPLE_RATE as usize;
 
 fn env_path(var: &str) -> PathBuf {

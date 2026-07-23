@@ -13,7 +13,7 @@ use kodabi_core::transcription::{
     AudioChunk, Result, Segment, TranscriptionEngine, TranscriptionError,
 };
 
-use crate::silero::{build_silero_vad, SileroParams};
+use crate::silero::{build_silero_vad, feed_windowed, SileroParams};
 use crate::validate::{
     apply_nonnegative_f32_override, apply_positive_i32_override, apply_probability_f32_override,
     clamp_threads, path_to_string, require_file, segment_ms, validate_chunk, SAMPLE_RATE_HZ,
@@ -177,10 +177,11 @@ impl TranscriptionEngine for ParakeetEngine {
             return Ok(Vec::new());
         }
 
-        // The VAD buffers input internally and windows it itself, so the whole
-        // chunk goes in at once; any complete speech segments it finalises are
-        // then drained.
-        self.vad.accept_waveform(chunk.samples);
+        // Feed the VAD one window at a time (see `silero::feed_windowed`):
+        // fed whole pipeline chunks, its per-call segment state machine loses
+        // all speech but the chunk tail. Any complete speech segments it
+        // finalises are then drained, still once per chunk.
+        feed_windowed(&self.vad, chunk.samples);
 
         let mut segments = Vec::new();
         self.drain_speech(&mut segments);
