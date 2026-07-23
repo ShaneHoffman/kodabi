@@ -309,8 +309,13 @@ export function NeedsAttentionView() {
                         pendingPath !== null ||
                         (actionPending !== null && !isRunning("dismiss", session.path))
                       }
+                      // `loading` with no `loadingLabel`: the marker write is
+                      // a near-instant filesystem op, done before "Dismissing…"
+                      // would even be readable — swapping the label just to
+                      // swap it back a frame later read as a glitch, not
+                      // feedback. `loading` alone still buys the inert,
+                      // still-focusable treatment while it's in flight.
                       loading={isRunning("dismiss", session.path)}
-                      loadingLabel="Dismissing…"
                       onClick={() => runAction("dismiss", session.path, dismissSession)}
                       className="py-3xs text-label text-text-soft"
                     >
@@ -397,8 +402,10 @@ export function NeedsAttentionView() {
                                 pendingPath !== null ||
                                 (actionPending !== null && !isRunning("restore", session.path))
                               }
+                              // Same reasoning as Dismiss: no `loadingLabel`,
+                              // since the swap would resolve before it could
+                              // be read.
                               loading={isRunning("restore", session.path)}
-                              loadingLabel="Restoring…"
                               onClick={() => runAction("restore", session.path, restoreSession)}
                               className="py-3xs text-label font-semibold text-text"
                             >
@@ -414,8 +421,8 @@ export function NeedsAttentionView() {
                                 pendingPath !== null ||
                                 (actionPending !== null && !isRunning("delete", session.path))
                               }
+                              // Same reasoning as Dismiss.
                               loading={isRunning("delete", session.path)}
-                              loadingLabel="Deleting…"
                               onClick={() => setConfirmingDeletePath(session.path)}
                               className="py-3xs text-label text-text-soft"
                             >
