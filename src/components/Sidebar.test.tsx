@@ -12,12 +12,13 @@ import { emitFromBackend, onCommand, resetTauriMocks } from "../test/tauri";
 vi.mock("@tauri-apps/api/core", () => import("../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../test/tauri"));
 
-function makeSession(slug: string): FailedSession {
+function makeSession(slug: string, dismissed = false): FailedSession {
   return {
     path: `sessions/2026-07-01T10-00-00Z-${slug}.jsonl`,
     file_name: `2026-07-01T10-00-00Z-${slug}.jsonl`,
     slug,
     captured_at: "2026-07-01T10:00:00Z",
+    dismissed,
   };
 }
 
@@ -71,6 +72,37 @@ describe("Sidebar needs-attention row", () => {
     const row = await screen.findByTestId("needs-attention-nav");
     expect(row).toHaveTextContent("Needs attention");
     expect(row).toHaveTextContent("2");
+  });
+
+  it("counts only captures that still need attention", async () => {
+    // A dismissed capture is cleared: it stays in the listing (the view's
+    // dismissed shelf reads it) but must not keep the row's count inflated.
+    serveVault([
+      makeSession("team-sync"),
+      makeSession("retro", true),
+      makeSession("board-prep", true),
+    ]);
+
+    renderShell();
+
+    const row = await screen.findByTestId("needs-attention-nav");
+    expect(row).toHaveTextContent("Needs attention");
+    expect(row).toHaveTextContent("1");
+    expect(row).not.toHaveTextContent("3");
+  });
+
+  it("disappears when every capture is dismissed", async () => {
+    // Dismissing the last capture is what collapses the rail: that quiet is
+    // the whole point of dismissing. The way back is the palette jump, which
+    // keys on the full listing.
+    serveVault([makeSession("team-sync", true)]);
+
+    renderShell();
+
+    await waitFor(() => {
+      expect(screen.getByText(/No projects yet\./)).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("needs-attention-nav")).not.toBeInTheDocument();
   });
 
   it("still appears when the listing itself failed", async () => {

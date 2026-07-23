@@ -12,6 +12,10 @@ export type FailedSession = {
   slug: string | null;
   /** Capture instant, RFC 3339 UTC (`Z`). */
   captured_at: string;
+  /** Whether the user has waved this session off (`dismissSession`). Dismissed
+   * sessions stay in the listing so every consumer partitions on the same
+   * flag; the sidebar counts only the undismissed. */
+  dismissed: boolean;
 };
 
 /**
@@ -27,9 +31,10 @@ const NO_SESSIONS: FailedSession[] = [];
 /**
  * Captured sessions that never became a note: a distill that failed, or one the
  * app died in the middle of. Derived from disk on every read (no failure record
- * is persisted), so the list survives a restart and self-heals when a session is
- * retried or pruned. Refetched via `useVaultQuery` on every vault change, which
- * the sessions-changed bridge also feeds.
+ * is persisted; only a dismissal leaves its marker file), so the list survives
+ * a restart and self-heals when a session is retried or pruned. Refetched via
+ * `useVaultQuery` on every vault change, which the sessions-changed bridge also
+ * feeds.
  */
 export function useFailedSessions(): {
   sessions: FailedSession[];
@@ -55,6 +60,45 @@ export function useFailedSessions(): {
  */
 export function retryDistill(sessionPath: string): Promise<void> {
   return invoke("distill_session", { sessionPath });
+}
+
+/**
+ * Persists a dismissed marker for a failed session, so the needs-attention
+ * listing reports it `dismissed: true` across refreshes and restarts. Touches
+ * nothing else on disk: the transcript and recording stay put. No backend
+ * event follows; the caller announces the change with `notifyVaultChanged()`
+ * once this resolves.
+ *
+ * Mirrors `distill_cmds::dismiss_session`; Tauri exposes its `session_path`
+ * argument as `sessionPath` on the wire.
+ */
+export function dismissSession(sessionPath: string): Promise<void> {
+  return invoke("dismiss_session", { sessionPath });
+}
+
+/**
+ * Clears a session's dismissed marker so it counts as needing attention
+ * again. Same contract as `dismissSession`: the caller announces the change
+ * with `notifyVaultChanged()` once this resolves.
+ *
+ * Mirrors `distill_cmds::restore_session`; `session_path` is `sessionPath` on
+ * the wire.
+ */
+export function restoreSession(sessionPath: string): Promise<void> {
+  return invoke("restore_session", { sessionPath });
+}
+
+/**
+ * Permanently deletes a failed session: transcript, retained recording, and
+ * dismissed marker. Rejects while a distill run holds the session. The caller
+ * confirms with the user first and announces the change with
+ * `notifyVaultChanged()` once this resolves.
+ *
+ * Mirrors `distill_cmds::delete_session`; `session_path` is `sessionPath` on
+ * the wire.
+ */
+export function deleteSession(sessionPath: string): Promise<void> {
+  return invoke("delete_session", { sessionPath });
 }
 
 /** One transcript segment of a raw session. Mirrors `TranscriptSegmentDto` in

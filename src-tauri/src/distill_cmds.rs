@@ -137,6 +137,7 @@ pub struct FailedSessionDto {
     file_name: String,
     slug: Option<String>,
     captured_at: String,
+    dismissed: bool,
 }
 
 /// Lists captured sessions that never became a note: a distill that failed, or
@@ -157,8 +158,44 @@ pub async fn list_failed_sessions(app: AppHandle) -> Result<Vec<FailedSessionDto
             file_name: session.file_name,
             slug: session.slug,
             captured_at: session.captured_at,
+            dismissed: session.dismissed,
         })
         .collect())
+}
+
+/// Marks a needs-attention session as dismissed: its listing row gains
+/// `dismissed: true` and the sidebar stops counting it. The transcript and
+/// recording stay on disk untouched. No event is emitted — both listing
+/// consumers live in the main webview, so the caller refetches after this
+/// resolves.
+#[tauri::command]
+pub fn dismiss_session(app: AppHandle, session_path: String) -> Result<(), String> {
+    let kb = knowledge_base_dir(&app)?;
+    let path = validate_session_path(&kb, &session_path)?;
+    kodabi_core::sessions::dismiss_session(&path).map_err(|e| e.to_string())
+}
+
+/// Clears a session's dismissed marker so it counts as needing attention
+/// again. Same no-event contract as [`dismiss_session`].
+#[tauri::command]
+pub fn restore_session(app: AppHandle, session_path: String) -> Result<(), String> {
+    let kb = knowledge_base_dir(&app)?;
+    let path = validate_session_path(&kb, &session_path)?;
+    kodabi_core::sessions::restore_session(&path).map_err(|e| e.to_string())
+}
+
+/// Permanently deletes a failed session: transcript, retained recording, and
+/// dismissed marker. Refused while a distill run holds the session, so a
+/// delete can never yank the file out from under the run about to turn it
+/// into a note.
+#[tauri::command]
+pub fn delete_session(app: AppHandle, session_path: String) -> Result<(), String> {
+    let kb = knowledge_base_dir(&app)?;
+    let path = validate_session_path(&kb, &session_path)?;
+    if in_flight().contains(&path) {
+        return Err("That session is being distilled.".to_string());
+    }
+    kodabi_core::sessions::delete_session(&path).map_err(|e| e.to_string())
 }
 
 /// Spawns the distill on a background thread and returns immediately, so
@@ -204,6 +241,16 @@ pub(crate) fn spawn_distill(app: &AppHandle, session_path: PathBuf) -> bool {
                 // still holding DISTILL_LOCK so nothing is reading the file.
                 // Best-effort: a failed delete never turns a successful distill
                 // into an error the user sees.
+                //
+                // A note claims the session now, so a dismissed marker left
+                // behind would be an orphan; clear it first, same best-effort
+                // posture, whatever the retention policy.
+                if let Err(err) = kodabi_core::sessions::restore_session(&session_path) {
+                    eprintln!(
+                        "failed to clear dismissed marker for {}: {err}",
+                        session_path.display()
+                    );
+                }
                 apply_retention_after_distill(&app, &session_path);
                 // The distill wrote its note straight through kodabi-core
                 // rather than the note commands, so this is the only in-app
