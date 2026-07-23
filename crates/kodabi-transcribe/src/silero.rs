@@ -1,8 +1,9 @@
-//! Shared construction of sherpa-onnx's bundled Silero VAD. Both
+//! Shared construction and feeding of sherpa-onnx's bundled Silero VAD. Both
 //! [`ParakeetEngine`](crate::engine) (which gates its recognizer on a VAD) and
 //! [`VadGate`](crate::vad) (which fronts an arbitrary engine with one) build
-//! the *same* VAD the same way; this is the single place that knows how, so
-//! the window size, buffer sizing and thread clamp can't drift between them.
+//! the *same* VAD the same way and feed it through [`feed_windowed`]; this is
+//! the single place that knows how, so the window size, feeding discipline,
+//! buffer sizing and thread clamp can't drift between them.
 //!
 //! Compiled whenever either native-engine feature that needs a Silero VAD is
 //! on (`parakeet` builds its own; `whisper` co-enables `vad`).
@@ -14,8 +15,16 @@ use kodabi_core::transcription::{Result, TranscriptionError};
 use crate::validate::{clamp_threads, path_to_string, require_file, SAMPLE_RATE_HZ};
 
 /// Silero VAD processing window, in samples. Handed to sherpa-onnx as its
-/// `window_size`; the VAD buffers input internally and slices it into windows
-/// itself, so callers may feed arbitrary-length chunks.
+/// `window_size`, and the granularity [`feed_windowed`] slices audio down to.
+///
+/// sherpa-onnx evaluates the Silero model per window internally, but its
+/// segment state machine — speech-start estimation and finalisation — advances
+/// only once per `accept_waveform` call, with "was speech" OR-ed across all of
+/// the call's windows. Fed multi-second chunks it therefore estimates every
+/// segment start near the chunk *tail* and finalises nothing until a fully
+/// silent call, losing all speech but the tail (each capture "began" ~9.6 s
+/// in). One window per call keeps the state machine at its designed
+/// per-window granularity.
 const WINDOW_SIZE: usize = 512;
 
 /// Head-room added to `max_speech_duration` when sizing the VAD's internal
@@ -79,4 +88,20 @@ pub(crate) fn build_silero_vad(
         .max(VAD_BUFFER_MIN_SECONDS);
     sherpa_onnx::VoiceActivityDetector::create(&vad_config, vad_buffer_seconds)
         .ok_or_else(|| TranscriptionError::ModelLoad("failed to initialise VAD".to_owned()))
+}
+
+/// Feed `samples` to `vad` one [`WINDOW_SIZE`]-sample slice per
+/// `accept_waveform` call — the granularity the VAD's per-call segment state
+/// machine requires (see [`WINDOW_SIZE`]). Every accept site must go through
+/// here; feeding a whole pipeline chunk directly reintroduces the lost-speech
+/// bug.
+///
+/// The trailing sub-window slice goes in too: `chunks` (never `chunks_exact`)
+/// is load-bearing, because sherpa-onnx buffers a partial window internally
+/// across calls, so dropping the remainder would lose samples and drift the
+/// VAD's sample clock away from the session clock.
+pub(crate) fn feed_windowed(vad: &sherpa_onnx::VoiceActivityDetector, samples: &[f32]) {
+    for window in samples.chunks(WINDOW_SIZE) {
+        vad.accept_waveform(window);
+    }
 }

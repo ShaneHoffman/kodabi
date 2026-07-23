@@ -121,6 +121,78 @@ fn transcribes_a_real_recording_through_the_trait() {
 
 #[test]
 #[ignore = "requires real Parakeet + Silero VAD model files (set PARAKEET_* env vars)"]
+fn chunked_feed_recovers_speech_after_leading_silence() {
+    let mut engine = ParakeetEngine::new(real_config()).expect("engine should load");
+    let speech = read_speech_wav();
+
+    // 3s silence + speech + 1s silence + speech (~16.2s): an utterance that
+    // starts well before the end of the first 10s pipeline chunk, plus a
+    // second one in the next chunk. Regression coverage for the window-feed
+    // bug where whole-chunk `accept_waveform` calls collapsed the VAD's
+    // per-window segment state machine into per-call decisions: every capture
+    // "started" near the tail of the first chunk (~9.7s) and nothing
+    // finalised before flush (see `silero::feed_windowed`).
+    let silence_3s = vec![0.0f32; SAMPLE_RATE as usize * 3];
+    let silence_1s = vec![0.0f32; SAMPLE_RATE as usize];
+    let mut samples = silence_3s;
+    samples.extend_from_slice(&speech);
+    samples.extend_from_slice(&silence_1s);
+    samples.extend_from_slice(&speech);
+
+    // Feed 10s chunks, exactly like the capture pipeline
+    // (`IN_MEMORY_CHUNK_SAMPLES` in `src-tauri/src/transcribe.rs`). 160,000
+    // is not a multiple of the VAD's 512-sample window, so this also
+    // exercises the partial-window carry across `accept` calls.
+    const CHUNK_SAMPLES: usize = 10 * SAMPLE_RATE as usize;
+    let mut segments = Vec::new();
+    for chunk in samples.chunks(CHUNK_SAMPLES) {
+        segments.extend(
+            engine
+                .accept(AudioChunk {
+                    samples: chunk,
+                    sample_rate: SAMPLE_RATE,
+                })
+                .expect("accept succeeds"),
+        );
+    }
+    segments.extend(engine.finish().expect("finish succeeds"));
+
+    assert!(
+        segments.len() >= 2,
+        "both utterances should finalise as separate segments, got {segments:?}"
+    );
+    let first_start = segments[0].start_ms;
+    assert!(
+        (2000..=5000).contains(&first_start),
+        "the first segment should start near the 3s speech onset, got {first_start}ms"
+    );
+    assert!(
+        segments.iter().any(|s| s.start_ms >= 9800),
+        "the second utterance (from ~10.1s) should be found, got {segments:?}"
+    );
+    let last_end = segments.last().expect("segments is non-empty").end_ms;
+    assert!(
+        last_end > 15_000,
+        "the last segment should reach the end of the second utterance, got {last_end}ms"
+    );
+
+    let mut prev_end = 0u64;
+    for segment in &segments {
+        assert!(
+            !segment.text.trim().is_empty(),
+            "segment text should not be empty"
+        );
+        assert!(
+            segment.start_ms < segment.end_ms,
+            "segment timestamps should be ordered"
+        );
+        assert!(segment.start_ms >= prev_end, "segments should not overlap");
+        prev_end = segment.end_ms;
+    }
+}
+
+#[test]
+#[ignore = "requires real Parakeet + Silero VAD model files (set PARAKEET_* env vars)"]
 fn silence_yields_no_segments() {
     let mut engine = ParakeetEngine::new(real_config()).expect("engine should load");
 
