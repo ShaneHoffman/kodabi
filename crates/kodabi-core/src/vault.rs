@@ -13,6 +13,7 @@ use std::time::SystemTime;
 
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 
+use crate::glossary;
 use crate::note::{
     self, Note, NoteEdit, NoteError, NoteId, NoteType, Result, Routing, Source, INBOX,
 };
@@ -385,10 +386,237 @@ fn routing_example_err(err: RoutingExamplesError) -> NoteError {
     }
 }
 
+/// Creates an empty project folder (and any missing parents) under the vault
+/// root — the explicit sibling of [`file_note_to_project`]'s `create_project`
+/// flag, for creating a project *before* any note exists to file into it.
+///
+/// The slug is validated and adopts the on-disk casing of existing segments
+/// ([`canonicalize_project`]), which also rejects reserved and hidden names.
+/// An already-existing target — in any casing — is
+/// [`NoteError::ProjectExists`]: creation is an explicit user action, so
+/// silently succeeding on a duplicate would hide a name collision.
+pub fn create_project(vault_root: &Path, project: &str) -> Result<ProjectInfo> {
+    // The exact sentinel slips past `validate_project`; every other casing is
+    // rejected inside `canonicalize_project` (mirrors `file_note_to_project` ①).
+    if project == INBOX {
+        return Err(NoteError::InvalidField {
+            field: "project",
+            detail: "the Inbox is built in and cannot be created as a project".to_string(),
+        });
+    }
+    let canonical = canonicalize_project(vault_root, project)?;
+    let dir = note::project_dir(vault_root, &canonical);
+    if dir.exists() {
+        return Err(NoteError::ProjectExists { project: canonical });
+    }
+    fs::create_dir_all(&dir).map_err(|source| NoteError::Io {
+        path: dir.clone(),
+        source,
+    })?;
+    Ok(ProjectInfo {
+        slug: canonical,
+        note_count: 0,
+        meeting_count: 0,
+        last_activity: None,
+    })
+}
+
+/// The outcome of a project deletion: the canonical slug removed, and every
+/// contained note (direct and descendant) relocated into the Inbox at its new
+/// path, so the caller can re-index the moves.
+#[derive(Debug)]
+pub struct DeletedProject {
+    pub slug: String,
+    pub moved_notes: Vec<ListedNote>,
+}
+
+/// Deletes a project: every parseable contained note — direct and in child
+/// projects — is moved back to the Inbox, the per-project infra files
+/// (`_glossary.yml`, `_routing_examples.yml`, writer scratch temps) are
+/// removed, and the folder tree is deleted.
+///
+/// **No-data-loss guard:** the tree is walked *before* anything is touched, and
+/// any item Kodabi does not manage (an attachment, an unparseable `.md`, a
+/// hidden directory) fails the whole call up front. Removal then deletes only
+/// the classified infra files and the emptied directories — never a recursive
+/// `remove_dir_all` — so nothing unclassified can be destroyed even if the tree
+/// changes mid-flight.
+///
+/// Moved notes keep every field and their filename stem (numbered suffix on an
+/// Inbox collision), and land as `Routed { Inbox, 0.0 }` — the same shape
+/// routing writes for a note with no routing evidence. Leaving the project is
+/// not a correction, so no routing example is recorded; the deleted project's
+/// own log dies with its folder, and `previous_project` strings in other
+/// projects' logs stay as historical provenance.
+///
+/// **Failure consistency:** the note files are the source of truth. A failure
+/// mid-move leaves the already-moved notes validly in the Inbox and the rest
+/// untouched in the still-existing project; a retry converges. Reconcile keeps
+/// the index truthful in every intermediate state.
+pub fn delete_project(vault_root: &Path, project: &str) -> Result<DeletedProject> {
+    // Mirrors `file_note_to_project` ①: the exact sentinel slips past
+    // `validate_project`; other casings are rejected by `canonicalize_project`.
+    if project == INBOX {
+        return Err(NoteError::InvalidField {
+            field: "project",
+            detail: "the Inbox is built in and cannot be deleted".to_string(),
+        });
+    }
+    let canonical = canonicalize_project(vault_root, project)?;
+    let dir = note::project_dir(vault_root, &canonical);
+    if !dir.is_dir() {
+        return Err(NoteError::MissingProject { project: canonical });
+    }
+
+    // ① Pre-flight: classify the whole tree before touching anything.
+    let mut scan = TreeScan::default();
+    walk_project_tree(&dir, &mut scan)?;
+    if let Some(first) = scan.unmanaged.first() {
+        let example = first
+            .file_name()
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| first.display().to_string());
+        return Err(NoteError::InvalidField {
+            field: "project",
+            detail: format!(
+                "project {canonical:?} contains {} item(s) Kodabi does not manage \
+                 (e.g. {example:?}); move or remove them first",
+                scan.unmanaged.len()
+            ),
+        });
+    }
+
+    // ② Move every note into the Inbox, preserving its stem and every field
+    // but the routing. `Note::new` re-validates; `relocate_note_file` creates
+    // the Inbox dir, disambiguates collisions, and rolls back on failure.
+    let inbox_dir = note::project_dir(vault_root, INBOX);
+    let mut moved_notes = Vec::with_capacity(scan.notes.len());
+    for (path, found) in scan.notes {
+        let moved = Note::new(
+            found.id,
+            found.note_type,
+            Routing::Routed {
+                project: INBOX.to_string(),
+                confidence: 0.0,
+            },
+            found.date,
+            found.tags,
+            found.source,
+            found.body,
+        )?;
+        let new_path = note::relocate_note_file(&moved, &path, &inbox_dir)?;
+        moved_notes.push(ListedNote {
+            title: display_title(&new_path),
+            path: new_path,
+            note: moved,
+        });
+    }
+
+    // ③ Remove the infra files, then the directories deepest-first (`dirs` is
+    // in pre-order, so reverse iteration removes children before parents). The
+    // non-recursive `remove_dir` is the guard made real: a directory holding
+    // an unexpected new file fails rather than deletes it.
+    for file in &scan.infra_files {
+        fs::remove_file(file).map_err(|source| NoteError::Io {
+            path: file.clone(),
+            source,
+        })?;
+    }
+    for tree_dir in scan.dirs.iter().rev() {
+        fs::remove_dir(tree_dir).map_err(|source| NoteError::Io {
+            path: tree_dir.clone(),
+            source,
+        })?;
+    }
+
+    Ok(DeletedProject {
+        slug: canonical,
+        moved_notes,
+    })
+}
+
+/// One project tree classified for [`delete_project`]. `dirs` is in pre-order
+/// (parent before child), so reverse iteration removes children first.
+#[derive(Debug, Default)]
+struct TreeScan {
+    notes: Vec<(PathBuf, Note)>,
+    infra_files: Vec<PathBuf>,
+    dirs: Vec<PathBuf>,
+    unmanaged: Vec<PathBuf>,
+}
+
+/// Depth-first classification for [`delete_project`]: parseable `.md` files
+/// are notes to move, the per-project infra files are removable, and anything
+/// else — an unparseable `.md`, an attachment, a hidden or infra directory, a
+/// non-file-non-dir entry — is unmanaged and blocks deletion. Unlike
+/// enumeration's tolerant walks, an unreadable entry here is an error:
+/// deletion must account for every item it is about to disturb.
+fn walk_project_tree(dir: &Path, scan: &mut TreeScan) -> Result<()> {
+    scan.dirs.push(dir.to_path_buf());
+    let entries = fs::read_dir(dir).map_err(|source| NoteError::Io {
+        path: dir.to_path_buf(),
+        source,
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|source| NoteError::Io {
+            path: dir.to_path_buf(),
+            source,
+        })?;
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|source| NoteError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            scan.unmanaged.push(path);
+            continue;
+        };
+        if file_type.is_dir() {
+            if is_project_segment(name) {
+                walk_project_tree(&path, scan)?;
+            } else {
+                scan.unmanaged.push(path);
+            }
+        } else if file_type.is_file() {
+            if is_md_file(&path) {
+                match fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|contents| Note::from_markdown(&contents).ok())
+                {
+                    Some(found) => scan.notes.push((path, found)),
+                    None => scan.unmanaged.push(path),
+                }
+            } else if is_removable_infra(name) {
+                scan.infra_files.push(path);
+            } else {
+                scan.unmanaged.push(path);
+            }
+        } else {
+            scan.unmanaged.push(path);
+        }
+    }
+    Ok(())
+}
+
+/// The files Kodabi itself plants in a project folder and may therefore delete
+/// with it: the glossary and routing-examples logs, plus their (and the note
+/// writer's) crash-leftover scratch temps.
+fn is_removable_infra(name: &str) -> bool {
+    name == glossary::GLOSSARY_FILE
+        || name == routing_examples::ROUTING_EXAMPLES_FILE
+        || (name.ends_with(".tmp")
+            && (name.starts_with(".note.")
+                || name.starts_with(glossary::GLOSSARY_FILE)
+                || name.starts_with(routing_examples::ROUTING_EXAMPLES_FILE)))
+}
+
 /// Discovers project folders under the KB root, sorted by slug (so a parent
-/// precedes its children). A directory is a project iff it or a descendant
-/// holds ≥ 1 parseable direct `.md` note; ancestors of a qualifying folder are
-/// included with their own (possibly zero) direct counts. Excluded outright:
+/// precedes its children). Every directory whose name passes the filters is a
+/// project, including a note-free one (zero counts, no activity) — so a
+/// freshly created empty project ([`create_project`]) is enumerable and
+/// filable immediately, matching routing's project discovery and the MCP
+/// `list_projects` default (`include_empty: true`). Excluded outright:
 /// the Inbox sentinel and the reserved root dirs (`note::RESERVED_ROOT_DIRS`,
 /// any casing), and at any depth dirs starting with `.` or `_` or whose name
 /// is not a legal project segment. A missing root yields an empty list. An
@@ -424,21 +652,21 @@ pub fn list_projects(vault_root: &Path) -> Result<Vec<ProjectInfo>> {
     Ok(projects)
 }
 
-/// Depth-first walk of one candidate project folder. Appends the folder (and
-/// qualifying descendants) to `out`; returns whether the subtree holds any
-/// parseable note, so note-free ancestors of a real project still qualify.
+/// Depth-first walk of one candidate project folder. Appends the folder and
+/// every name-qualifying descendant to `out` with their direct note counts —
+/// existence is what makes a directory a project, not its contents.
 /// An unreadable directory (ACL-denied, a cloud-sync placeholder) skips just
 /// that subtree — the directory-level mirror of the "one bad file must not
 /// make the whole project unbrowsable" contract, so one locked folder can't
 /// blank the entire sidebar.
-fn collect_project(dir: &Path, slug: String, out: &mut Vec<ProjectInfo>) -> bool {
+fn collect_project(dir: &Path, slug: String, out: &mut Vec<ProjectInfo>) {
     let mut note_count = 0u32;
     let mut meeting_count = 0u32;
     let mut latest: Option<SystemTime> = None;
     let mut child_dirs = Vec::new();
 
     let Ok(entries) = fs::read_dir(dir) else {
-        return false;
+        return;
     };
     for entry in entries {
         let Ok(entry) = entry else { continue };
@@ -473,22 +701,17 @@ fn collect_project(dir: &Path, slug: String, out: &mut Vec<ProjectInfo>) -> bool
         }
     }
 
-    let mut child_qualifies = false;
     for (path, child_slug) in child_dirs {
-        child_qualifies |= collect_project(&path, child_slug, out);
+        collect_project(&path, child_slug, out);
     }
 
-    let qualifies = note_count > 0 || child_qualifies;
-    if qualifies {
-        out.push(ProjectInfo {
-            slug,
-            note_count,
-            meeting_count,
-            last_activity: latest
-                .map(|time| DateTime::<Utc>::from(time).to_rfc3339_opts(SecondsFormat::Secs, true)),
-        });
-    }
-    qualifies
+    out.push(ProjectInfo {
+        slug,
+        note_count,
+        meeting_count,
+        last_activity: latest
+            .map(|time| DateTime::<Utc>::from(time).to_rfc3339_opts(SecondsFormat::Secs, true)),
+    });
 }
 
 /// Every raw-artifact `source:` value claimed by a note anywhere in the vault,
@@ -1294,7 +1517,7 @@ mod tests {
     }
 
     #[test]
-    fn list_projects_excludes_reserved_hidden_and_note_free_dirs() {
+    fn list_projects_excludes_reserved_and_hidden_but_lists_note_free_dirs() {
         let vault = tempdir().unwrap();
         write(vault.path(), "Ops", "n_aaaaaa", "2026-07-10", Some("real"));
         note::write_note(
@@ -1311,11 +1534,17 @@ mod tests {
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join("decoy.md"), &decoy).unwrap();
         }
+        // A note-free dir with a legal name IS a project (existence is the
+        // rule) — an empty project must be enumerable to be filed into.
         fs::create_dir(vault.path().join("Empty")).unwrap();
 
         let projects = list_projects(vault.path()).unwrap();
         let slugs: Vec<&str> = projects.iter().map(|p| p.slug.as_str()).collect();
-        assert_eq!(slugs, ["Ops"]);
+        assert_eq!(slugs, ["Empty", "Ops"]);
+
+        let empty = &projects[0];
+        assert_eq!((empty.note_count, empty.meeting_count), (0, 0));
+        assert!(empty.last_activity.is_none());
     }
 
     #[test]
@@ -1323,5 +1552,224 @@ mod tests {
         let vault = tempdir().unwrap();
         let missing = vault.path().join("never-created");
         assert!(list_projects(&missing).unwrap().is_empty());
+    }
+
+    // --- create_project -----------------------------------------------------
+
+    #[test]
+    fn create_project_creates_an_empty_listed_project() {
+        let vault = tempdir().unwrap();
+
+        let info = create_project(vault.path(), "Ops").unwrap();
+        assert_eq!(info.slug, "Ops");
+        assert_eq!((info.note_count, info.meeting_count), (0, 0));
+        assert!(info.last_activity.is_none());
+
+        assert!(vault.path().join("Ops").is_dir());
+        let projects = list_projects(vault.path()).unwrap();
+        let slugs: Vec<&str> = projects.iter().map(|p| p.slug.as_str()).collect();
+        assert_eq!(slugs, ["Ops"]);
+    }
+
+    #[test]
+    fn create_project_nested_slug_creates_parents() {
+        let vault = tempdir().unwrap();
+
+        let info = create_project(vault.path(), "Growth/Q3").unwrap();
+        assert_eq!(info.slug, "Growth/Q3");
+
+        let projects = list_projects(vault.path()).unwrap();
+        let slugs: Vec<&str> = projects.iter().map(|p| p.slug.as_str()).collect();
+        assert_eq!(slugs, ["Growth", "Growth/Q3"]);
+    }
+
+    #[test]
+    fn create_project_adopts_on_disk_casing() {
+        let vault = tempdir().unwrap();
+        create_project(vault.path(), "Growth").unwrap();
+
+        let info = create_project(vault.path(), "growth/Q3").unwrap();
+        assert_eq!(info.slug, "Growth/Q3");
+        assert!(vault.path().join("Growth").join("Q3").is_dir());
+    }
+
+    #[test]
+    fn create_project_rejects_reserved_hidden_and_invalid_names() {
+        let vault = tempdir().unwrap();
+        for name in [
+            "Inbox",
+            "inbox",
+            "Inbox/x",
+            "sessions",
+            "raw",
+            "EBWebView",
+            "_x",
+            ".x",
+            "con",
+            "a:b",
+        ] {
+            let result = create_project(vault.path(), name);
+            assert!(
+                matches!(result, Err(NoteError::InvalidField { .. })),
+                "{name:?} should be rejected"
+            );
+        }
+        // Nothing was created by any rejected attempt.
+        assert_eq!(fs::read_dir(vault.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn create_project_duplicate_in_any_casing_is_project_exists() {
+        let vault = tempdir().unwrap();
+        create_project(vault.path(), "Ops").unwrap();
+
+        let exact = create_project(vault.path(), "Ops");
+        assert!(matches!(
+            exact,
+            Err(NoteError::ProjectExists { project }) if project == "Ops"
+        ));
+        // A differently-cased duplicate reports the canonical on-disk slug.
+        let cased = create_project(vault.path(), "ops");
+        assert!(matches!(
+            cased,
+            Err(NoteError::ProjectExists { project }) if project == "Ops"
+        ));
+    }
+
+    // --- delete_project -----------------------------------------------------
+
+    #[test]
+    fn delete_project_removes_an_empty_project() {
+        let vault = tempdir().unwrap();
+        create_project(vault.path(), "Ops").unwrap();
+
+        let deleted = delete_project(vault.path(), "Ops").unwrap();
+        assert_eq!(deleted.slug, "Ops");
+        assert!(deleted.moved_notes.is_empty());
+        assert!(!vault.path().join("Ops").exists());
+        assert!(list_projects(vault.path()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn delete_project_moves_all_notes_to_inbox_and_removes_tree() {
+        let vault = tempdir().unwrap();
+        write(
+            vault.path(),
+            "Growth",
+            "n_aaaaaa",
+            "2026-07-10",
+            Some("plan"),
+        );
+        write(
+            vault.path(),
+            "Growth/Q4",
+            "n_bbbbbb",
+            "2026-07-11",
+            Some("kickoff"),
+        );
+
+        let deleted = delete_project(vault.path(), "Growth").unwrap();
+        assert_eq!(deleted.slug, "Growth");
+        assert_eq!(deleted.moved_notes.len(), 2);
+        assert!(!vault.path().join("Growth").exists());
+
+        // Both notes landed in the Inbox, stems intact, every field preserved
+        // but the routing, which is the zero-evidence Inbox landing.
+        for (stem, id) in [("plan", "n_aaaaaa"), ("kickoff", "n_bbbbbb")] {
+            let path = vault.path().join(INBOX).join(format!("{stem}.md"));
+            let note = read_note_at(&path);
+            assert_eq!(note.id.as_str(), id);
+            assert_eq!(
+                note.routing,
+                Routing::Routed {
+                    project: INBOX.to_string(),
+                    confidence: 0.0,
+                }
+            );
+            assert_eq!(note.body, "Body.");
+            assert!(deleted.moved_notes.iter().any(|listed| listed.path == path));
+        }
+    }
+
+    #[test]
+    fn delete_project_disambiguates_inbox_stem_collisions() {
+        let vault = tempdir().unwrap();
+        write_inbox(vault.path(), "n_aaaaaa", "kickoff");
+        write(
+            vault.path(),
+            "Growth",
+            "n_bbbbbb",
+            "2026-07-11",
+            Some("kickoff"),
+        );
+
+        delete_project(vault.path(), "Growth").unwrap();
+
+        let original = read_note_at(&vault.path().join(INBOX).join("kickoff.md"));
+        let moved = read_note_at(&vault.path().join(INBOX).join("kickoff-2.md"));
+        assert_eq!(original.id.as_str(), "n_aaaaaa");
+        assert_eq!(moved.id.as_str(), "n_bbbbbb");
+    }
+
+    #[test]
+    fn delete_project_removes_infra_files_with_the_folder() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Ops", "n_aaaaaa", "2026-07-10", Some("real"));
+        let dir = vault.path().join("Ops");
+        fs::write(dir.join(glossary::GLOSSARY_FILE), "terms: []\n").unwrap();
+        fs::write(
+            dir.join(routing_examples::ROUTING_EXAMPLES_FILE),
+            "examples: []\n",
+        )
+        .unwrap();
+        fs::write(dir.join(".note.123.0.tmp"), "half-written scratch").unwrap();
+
+        delete_project(vault.path(), "Ops").unwrap();
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn delete_project_blocks_on_unmanaged_files_without_touching_anything() {
+        let vault = tempdir().unwrap();
+        let note_path = write(vault.path(), "Ops", "n_aaaaaa", "2026-07-10", Some("real"));
+        let dir = vault.path().join("Ops");
+        fs::write(dir.join("photo.png"), [0u8; 4]).unwrap();
+        fs::write(dir.join("broken.md"), "no frontmatter here").unwrap();
+
+        let result = delete_project(vault.path(), "Ops");
+        assert!(matches!(result, Err(NoteError::InvalidField { .. })));
+
+        // Nothing moved, nothing deleted: the guard fires before any mutation.
+        assert!(note_path.is_file());
+        assert!(dir.join("photo.png").is_file());
+        assert!(!vault.path().join(INBOX).exists());
+    }
+
+    #[test]
+    fn delete_project_blocks_on_hidden_subdirectories() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Ops", "n_aaaaaa", "2026-07-10", Some("real"));
+        fs::create_dir(vault.path().join("Ops").join(".obsidian")).unwrap();
+
+        let result = delete_project(vault.path(), "Ops");
+        assert!(matches!(result, Err(NoteError::InvalidField { .. })));
+        assert!(vault.path().join("Ops").is_dir());
+    }
+
+    #[test]
+    fn delete_project_rejects_inbox_and_missing_project() {
+        let vault = tempdir().unwrap();
+        assert!(matches!(
+            delete_project(vault.path(), INBOX),
+            Err(NoteError::InvalidField { .. })
+        ));
+        assert!(matches!(
+            delete_project(vault.path(), "inbox"),
+            Err(NoteError::InvalidField { .. })
+        ));
+        assert!(matches!(
+            delete_project(vault.path(), "Nope"),
+            Err(NoteError::MissingProject { project }) if project == "Nope"
+        ));
     }
 }
