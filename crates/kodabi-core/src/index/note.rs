@@ -115,7 +115,8 @@ pub struct IndexedNote {
     pub id: String,
     /// Current KB-relative path. Informational — changes when the note moves.
     pub path: String,
-    /// Display title (derived; not a frontmatter field).
+    /// Effective display title: the note's stored frontmatter `title`, or the
+    /// de-slugged filename stem for a legacy/hand-made note without one.
     pub title: String,
     pub note_type: NoteType,
     /// Owning project, or `None` when unfiled (Inbox).
@@ -135,11 +136,11 @@ impl IndexedNote {
     /// Builds an index record from a parsed [`Note`](crate::note::Note), its
     /// KB-relative path, and a display title.
     ///
-    /// The title is not a frontmatter field, so the caller derives it from the
-    /// on-disk filename stem (via [`crate::vault::display_title`]); `path`
-    /// should already be KB-relative with forward slashes. The `Inbox` sentinel
-    /// project collapses to `None`, matching how `NoteSummary` represents an
-    /// unfiled note.
+    /// The caller passes the effective title (via [`crate::vault::effective_title`]):
+    /// the note's stored frontmatter `title`, or the de-slugged filename stem as
+    /// a fallback. `path` should already be KB-relative with forward slashes. The
+    /// `Inbox` sentinel project collapses to `None`, matching how `NoteSummary`
+    /// represents an unfiled note.
     pub fn from_note(note: &crate::note::Note, title: &str, path: &str) -> Self {
         let project = note.routing.project();
         IndexedNote {

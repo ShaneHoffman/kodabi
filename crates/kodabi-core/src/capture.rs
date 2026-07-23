@@ -60,7 +60,9 @@ pub struct QuickCaptured {
 /// confidence clears `config`'s threshold, else into [`INBOX`](note::INBOX) with
 /// the score recorded. The body is written verbatim; the filename is seeded from
 /// its first non-empty line (falling back to the note id when that line has no
-/// slug-safe characters), so an Inbox listing shows a readable title.
+/// slug-safe characters), so an Inbox listing shows a readable title. That same
+/// first line is also stored as the note's frontmatter `title`, so a long first
+/// line shows in full rather than being cut at the 40-char filename slug.
 pub fn quick_capture(
     vault_root: &Path,
     body: &str,
@@ -80,6 +82,11 @@ pub fn quick_capture(
     let routing = routing::route(NoteText { title: None, body }, &loaded.signals, config);
 
     let id = NoteId::generate().map_err(QuickCaptureError::IdGeneration)?;
+    // The first body line seeds both the filename slug and the stored title.
+    // Storing it (normalized, ≤120 chars) means a long first line shows in full
+    // instead of being cut at the 40-char slug. This is a *display* title, not a
+    // routing signal — routing still saw `title: None` above, on purpose.
+    let seed = filename_seed(body);
     let note = Note::new(
         id,
         NoteType::Note,
@@ -88,8 +95,9 @@ pub fn quick_capture(
         Vec::new(),
         Source::Keyword(SourceKeyword::QuickCapture),
         body,
-    )?;
-    let path = note::write_note(vault_root, &note, filename_seed(body))?;
+    )?
+    .with_title(seed.map(str::to_string));
+    let path = note::write_note(vault_root, &note, seed)?;
     Ok(QuickCaptured {
         note,
         path,
@@ -153,6 +161,28 @@ mod tests {
                 confidence: 0.0,
             }
         );
+    }
+
+    #[test]
+    fn stores_the_full_first_line_as_title_past_the_slug_cap() {
+        let vault = tempdir().unwrap();
+        let long_first_line =
+            "remember to ask priya about the clubhouse drainage contractor next sync";
+        assert!(long_first_line.len() > 40);
+        let captured = quick_capture(
+            vault.path(),
+            &format!("{long_first_line}\n\nmore detail below"),
+            "2026-07-18",
+            &RoutingConfig::default(),
+        )
+        .unwrap();
+
+        // Filename slug is still capped for the filesystem...
+        let stem = captured.path.file_stem().unwrap().to_str().unwrap();
+        assert!(stem.chars().count() <= 40);
+        // ...but the stored title is the full first line, uncut.
+        let note = read_back(&captured);
+        assert_eq!(note.title.as_deref(), Some(long_first_line));
     }
 
     #[test]

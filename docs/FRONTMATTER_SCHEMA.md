@@ -24,12 +24,13 @@ base depends on Kodabi continuing to exist).
 
 ## Fields
 
-Canonical key order the writer emits: **`id, type, project, date, tags, source, confidence`**.
+Canonical key order the writer emits: **`id, type, title, project, date, tags, source, confidence`**.
 
 | Field | Type | Required | Allowed values / format |
 | --- | --- | --- | --- |
 | `id` | string | yes | `n_` + base36 (`^n_[0-9a-z]{6,}$`), e.g. `n_a1b2c3`; generated once at creation, **never rewritten** on move or re-route |
 | `type` | string enum | yes | `meeting` \| `note` \| `chat` (closed set) |
+| `title` | string | no | The human display title; free text, capped at 120 characters. Omit the key for a note without one — the display layer then de-slugs the filename |
 | `project` | string | yes | A project name; the sentinel `Inbox` when unrouted |
 | `date` | string (ISO 8601) | yes | Timestamp with offset when a time is known (`2026-07-09T14:00:00-07:00`); date-only (`2026-07-11`) otherwise |
 | `tags` | list of strings | no | Lowercase kebab-case, no leading `#`; omit the key entirely when there are no tags |
@@ -46,6 +47,15 @@ Canonical key order the writer emits: **`id, type, project, date, tags, source, 
   generates `n_` + **8** random base36 characters (the regex permits any length ≥ 6; 8 is chosen so
   an id collision stays negligible even when import/merge pools several devices' notes into one
   vault, since — unlike a filename clash — an id collision is unrecoverable).
+- **`title`** — the note's human display label, shown in every list and the note editor. It is
+  stored so it survives past the filename slug: the filename `{slug}.md` caps the title at 40
+  characters (filesystem sanity), but the frontmatter `title` keeps the full string (capped at 120,
+  whitespace collapsed to a single line). **Optional and derived-fallback:** a note without the key
+  — a hand-written note, or any note created before this field existed — has its display title
+  de-slugged from the filename stem (`weekly-sync` → `weekly sync`) exactly as before, so nothing
+  regresses. The writers that have a real title (distill, the create-note command, and quick
+  capture, whose title is its first body line) emit the key; the title is set once at creation and
+  preserved verbatim across edits, like the filename.
 - **`project`** — `Inbox` is not a real project; it is the sentinel value confidence-split routing
   uses when a note's score is too low to auto-file. The Inbox UI's one-click re-route corrects
   `project` and re-scores `confidence` for the chosen project, in place. Because a project maps to
@@ -114,6 +124,7 @@ One example per `type`, each exercising a different combination of field states.
 ---
 id: n_a1b2c3
 type: meeting
+title: Paradise Golf Q3 budget and irrigation contractor shortlist
 project: Paradise Golf
 date: 2026-07-09T14:00:00-07:00
 tags: [budgeting, phase-2]
@@ -143,6 +154,7 @@ contractor shortlist.
 ---
 id: n_d4e5f6
 type: note
+title: Check if the irrigation contractor also handles clubhouse drainage
 project: Inbox
 date: 2026-07-10
 tags: [idea]
@@ -162,6 +174,7 @@ drainage — ask Priya next sync.
 ---
 id: n_g7h8i9
 type: chat
+title: Chat: irrigation contractor comparison
 project: Paradise Golf
 date: 2026-07-10T09:15:00-07:00
 tags: [research]
@@ -188,21 +201,23 @@ are the placement and byte-level rules it establishes.
 - **Folder.** A note lives at `<vault>/<project>/<slug>.md`. A hierarchical `project` nests folders
   (`Growth/Q3` → `<vault>/Growth/Q3/`), creating any missing parents; an `Inbox` note lives in
   `<vault>/Inbox/`. The vault root is the KB root (`sessions/…` in `source` is relative to it).
-- **Filename.** `{slug}.md`, where `slug` comes from a human-readable title under the same slug
-  rules the session scheme uses (lowercase, non-alphanumeric runs → `-`, 40-char cap). This is the
+- **Filename.** `{slug}.md`, where `slug` comes from the note's title under the same slug rules the
+  session scheme uses (lowercase, non-alphanumeric runs → `-`, 40-char cap). This is the
   distilled-note filename and is **distinct** from the timestamp+device *raw/session* scheme in
-  [`FILENAME_SCHEME.md`](FILENAME_SCHEME.md). When the title slugifies to empty (blank, emoji-only,
-  punctuation-only), the filename falls back to `{id}.md`. A name clash gets an increasing numeric
-  suffix (`weekly-sync-2.md`) and never overwrites. The path is informational and changes on move;
-  the `id` never does.
-- **Serialization contract.** Opening `---` fence line, the seven keys in the canonical order above,
+  [`FILENAME_SCHEME.md`](FILENAME_SCHEME.md). The 40-char cap is a filesystem concern only — the
+  full title is kept in the `title` frontmatter field, so a long title is not lost when its slug is
+  truncated. When the title slugifies to empty (blank, emoji-only, punctuation-only), the filename
+  falls back to `{id}.md`. A name clash gets an increasing numeric suffix (`weekly-sync-2.md`) and
+  never overwrites. The path is informational and changes on move; the `id` never does.
+- **Serialization contract.** Opening `---` fence line, then the present keys in the canonical order
+  above (`title` and the two conditional keys `tags`/`confidence` are emitted only when present),
   closing `---` fence line, then one blank separator line, the body, and a single trailing newline.
   An empty body ends the file at the closing `---`. The body is stored trimmed of surrounding blank
   lines. Only the **first** `---`-on-its-own-line after the opening fence closes the frontmatter, so
   a `---` horizontal rule inside the body is preserved verbatim. Scalar values that would otherwise
   re-resolve as a non-string (a project literally named `true`, `null`, or `123`) are quoted so they
   round-trip as strings. Unknown frontmatter keys are tolerated on read but **not** preserved on
-  rewrite — round-trip fidelity is guaranteed for the seven canonical keys.
+  rewrite — round-trip fidelity is guaranteed for the canonical keys above.
 
 ---
 
@@ -212,10 +227,12 @@ are the placement and byte-level rules it establishes.
   every note it produces — end-of-meeting notes, quick-capture notes, and (later) distilled chat
   sessions. **Implemented** in `kodabi-core::note` (struct → md → struct round-trip), wrapped by the
   thin `write_note` Tauri command.
-- **→ Phase 2 file watcher & full rebuild command:** parses `id`, `project`, `date`, `tags`,
-  `type`, and `confidence` out of frontmatter to populate the SQLite FTS5 + `sqlite-vec` index (`date` is
-  indexed so results can be ordered and range-filtered by recency without re-reading files); because the
-  files are the source of truth, a full rebuild can always reconstruct the index from them alone.
+- **→ Phase 2 file watcher & full rebuild command:** parses `id`, `type`, `title`, `project`,
+  `date`, `tags`, and `confidence` out of frontmatter to populate the SQLite FTS5 + `sqlite-vec` index
+  (`date` is indexed so results can be ordered and range-filtered by recency without re-reading files;
+  `title` is indexed for full-text search and falls back to the de-slugged filename when absent);
+  because the files are the source of truth, a full rebuild can always reconstruct the index from them
+  alone.
 - **→ Phase 3 MCP tools:** `search_notes`, `file_note_to_project`, `list_projects`, and
   `get_project_context` all route and filter over these fields (ticket P0-10, the MCP tool
   surface, is explicitly informed by this schema).

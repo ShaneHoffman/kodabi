@@ -29,11 +29,12 @@ It prints one `PASS`/`FAIL` line per file, indented findings under each, then a 
 
 ## 2. What it checks
 
-Against the canonical field set `id, type, project, date, tags, source, confidence`:
+Against the canonical field set `id, type, title, project, date, tags, source, confidence`:
 
 - **Required** — `id`, `type`, `project`, `date`, `source` must be present.
 - **`id`** — matches `^n_[0-9a-z]{6,}$`.
 - **`type`** — one of `meeting | note | chat`.
+- **`title`** — optional free-text display title; omit the key when absent.
 - **`date`** — ISO-8601: either date-only `YYYY-MM-DD` or a timestamp with offset
   (`2026-07-09T14:00:00-07:00` / `…Z`); a real calendar date/time.
 - **`tags`** — omit the key when empty (an empty `tags:` / `tags: []` is an error); otherwise a
