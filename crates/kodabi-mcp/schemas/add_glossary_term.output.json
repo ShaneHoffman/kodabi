@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["term", "created"],
+  "properties": {
+    "term": { "$ref": "#/$defs/GlossaryTerm", "description": "The stored term after the upsert." },
+    "created": { "type": "boolean", "description": "True if a new term was created; false if an existing term was updated." }
+  },
+  "$defs": {
+    "ProjectSlug": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "pattern": "^[^/\\\\]+(?:/[^/\\\\]+)*$",
+      "description": "Hierarchical project path/slug relative to the KB root, e.g. \"Growth/Q3\". Segments are folder names; no leading/trailing or empty segments. Each segment must also be a legal Windows folder name (no reserved device names such as CON/PRN/NUL, no trailing dot or space, none of the characters Windows forbids in a path segment), and may not start with \".\" or \"_\" — those prefixes mark infra folders (\".obsidian\", \"_assets\") that routing discovery skips, so such a project would be writable yet invisible to routing. The Phase 2 writer rejects violations. \"Inbox\" (any casing) is a reserved folder name — a real project may not use it — and \"sessions\" and \"raw\" (any casing) are reserved as first segments: <KB root>/sessions/ holds raw session artifacts, never notes (\"raw\" stays reserved alongside it; a nested segment like \"Data/raw\" is fine). This is the canonical project handle accepted by tools. Because no real project can be named \"Inbox\", read tools that filter by project reuse it as a sentinel meaning \"unfiled\" — see search_notes's project field."
+    },
+    "GlossaryTerm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["term", "definition", "aliases", "project"],
+      "properties": {
+        "term": { "type": "string", "description": "The term or phrase." },
+        "definition": { "type": "string", "description": "Definition or expansion." },
+        "aliases": { "type": "array", "items": { "type": "string" }, "description": "Alternative forms that map to this term." },
+        "project": { "$ref": "#/$defs/ProjectSlug", "description": "Project this term is scoped to." }
+      },
+      "description": "A project-scoped glossary term."
+    }
+  }
+}

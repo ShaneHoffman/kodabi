@@ -503,6 +503,138 @@ pub fn create_project(vault_root: &Path, project: &str) -> Result<ProjectInfo> {
     })
 }
 
+/// Maximum length (in `char`s) of a glossary term — mirrors the MCP
+/// `add_glossary_term` `term` `maxLength`.
+pub const GLOSSARY_TERM_MAX_CHARS: usize = 200;
+/// Maximum length (in `char`s) of a glossary definition — mirrors the MCP
+/// `add_glossary_term` `definition` `maxLength`.
+pub const GLOSSARY_DEFINITION_MAX_CHARS: usize = 2000;
+
+/// The outcome of [`add_glossary_term`]: the stored term and whether it was new.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlossaryUpsert {
+    /// The canonical (casing-adopted) project slug the term was stored under.
+    pub project: String,
+    /// The term as persisted (its own text trimmed, blank aliases dropped).
+    pub term: glossary::GlossaryTerm,
+    /// `true` when a new term was created; `false` when an existing normalized
+    /// term was updated in place.
+    pub created: bool,
+}
+
+/// Why [`add_glossary_term`] could not store a term. Kept distinct from
+/// [`NoteError`] and [`glossary::GlossaryError`] so a shell can route each case
+/// to the right channel: a malformed slug or field is a caller bug, a missing
+/// project or an `on_conflict: "error"` hit are actionable business faults, and
+/// storage failures are internal.
+#[derive(Debug, thiserror::Error)]
+pub enum AddGlossaryTermError {
+    /// The project slug is malformed (shape or reserved-name violation).
+    #[error(transparent)]
+    InvalidProject(NoteError),
+    /// `term` or `definition` is blank or over its length bound.
+    #[error("invalid glossary {field}: {detail}")]
+    InvalidInput { field: &'static str, detail: String },
+    /// The target project folder does not exist (this tool never creates one).
+    #[error("project {project:?} does not exist")]
+    MissingProject { project: String },
+    /// `on_conflict: "error"` and the normalized term already exists.
+    #[error("glossary term {term:?} already exists")]
+    Conflict { term: String },
+    /// Reading or writing the glossary file failed (I/O, YAML, or a duplicate
+    /// term already on disk).
+    #[error(transparent)]
+    Storage(glossary::GlossaryError),
+}
+
+/// Adds or updates a glossary term for `project` — the MCP `add_glossary_term`
+/// tool's shared body (`docs/MCP_TOOL_SURFACE.md` §8). Resolves the project slug
+/// to its folder (adopting on-disk casing), requires the project to already
+/// exist (unlike [`file_note_to_project`], this never creates one), then loads,
+/// upserts by normalized term, and saves the project's `_glossary.yml`.
+///
+/// Returns the stored term (as persisted) and whether it was newly created.
+/// `on_conflict` decides an existing normalized term: [`OnConflict::Update`]
+/// overwrites it, [`OnConflict::Error`] leaves it untouched and returns
+/// [`AddGlossaryTermError::Conflict`].
+///
+/// [`OnConflict::Update`]: glossary::OnConflict::Update
+/// [`OnConflict::Error`]: glossary::OnConflict::Error
+pub fn add_glossary_term(
+    vault_root: &Path,
+    project: &str,
+    term: glossary::GlossaryTerm,
+    on_conflict: glossary::OnConflict,
+) -> std::result::Result<GlossaryUpsert, AddGlossaryTermError> {
+    // Mirror the input schema's bounds server-side: a term that trims to empty
+    // would persist as a blank key, and both fields are length-capped.
+    if term.term.trim().is_empty() {
+        return Err(AddGlossaryTermError::InvalidInput {
+            field: "term",
+            detail: "term must not be blank".to_string(),
+        });
+    }
+    if term.term.chars().count() > GLOSSARY_TERM_MAX_CHARS {
+        return Err(AddGlossaryTermError::InvalidInput {
+            field: "term",
+            detail: format!("term must be at most {GLOSSARY_TERM_MAX_CHARS} characters"),
+        });
+    }
+    if term.definition.trim().is_empty() {
+        return Err(AddGlossaryTermError::InvalidInput {
+            field: "definition",
+            detail: "definition must not be blank".to_string(),
+        });
+    }
+    if term.definition.chars().count() > GLOSSARY_DEFINITION_MAX_CHARS {
+        return Err(AddGlossaryTermError::InvalidInput {
+            field: "definition",
+            detail: format!(
+                "definition must be at most {GLOSSARY_DEFINITION_MAX_CHARS} characters"
+            ),
+        });
+    }
+
+    // Validate the slug shape and adopt on-disk casing (rejects reserved/hidden
+    // names and the Inbox). A malformed slug is a caller bug, not a missing
+    // project.
+    let canonical =
+        canonicalize_project(vault_root, project).map_err(AddGlossaryTermError::InvalidProject)?;
+    let dir = note::project_dir(vault_root, &canonical);
+    if !dir.is_dir() {
+        return Err(AddGlossaryTermError::MissingProject { project: canonical });
+    }
+
+    let lookup = term.term.clone();
+    let mut glossary = glossary::Glossary::load(&dir).map_err(glossary_upsert_err)?;
+    let created = glossary
+        .upsert(term, on_conflict)
+        .map_err(glossary_upsert_err)?;
+    glossary.save(&dir).map_err(glossary_upsert_err)?;
+
+    // Echo exactly what landed on disk. `upsert` just inserted/updated this
+    // term, so the lookup is guaranteed to hit.
+    let stored = glossary
+        .get(&lookup)
+        .cloned()
+        .expect("the just-upserted term is present in the glossary");
+    Ok(GlossaryUpsert {
+        project: canonical,
+        term: stored,
+        created,
+    })
+}
+
+/// Routes a [`glossary::GlossaryError`] into [`AddGlossaryTermError`]: an
+/// `on_conflict: "error"` hit is a distinct business fault the shell surfaces
+/// differently from an I/O or YAML failure.
+fn glossary_upsert_err(err: glossary::GlossaryError) -> AddGlossaryTermError {
+    match err {
+        glossary::GlossaryError::Conflict { term } => AddGlossaryTermError::Conflict { term },
+        other => AddGlossaryTermError::Storage(other),
+    }
+}
+
 /// The outcome of a project deletion: the canonical slug removed, and every
 /// contained note (direct and descendant) relocated into the Inbox at its new
 /// path, so the caller can re-index the moves.
@@ -2556,5 +2688,157 @@ mod tests {
                 "should reject {bad:?}"
             );
         }
+    }
+
+    // --- add_glossary_term -------------------------------------------------
+
+    fn glossary_term(term: &str, definition: &str, aliases: &[&str]) -> glossary::GlossaryTerm {
+        glossary::GlossaryTerm {
+            term: term.to_string(),
+            definition: definition.to_string(),
+            aliases: aliases.iter().map(|a| a.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn add_glossary_term_creates_then_updates_in_place() {
+        let vault = tempdir().unwrap();
+        fs::create_dir(vault.path().join("Growth")).unwrap();
+
+        let created = add_glossary_term(
+            vault.path(),
+            "Growth",
+            glossary_term("MERIDIAN", "A systems-migration project.", &["meridian"]),
+            glossary::OnConflict::Update,
+        )
+        .unwrap();
+        assert!(created.created);
+        assert_eq!(created.project, "Growth");
+        assert_eq!(created.term.term, "MERIDIAN");
+        assert_eq!(created.term.aliases, vec!["meridian".to_string()]);
+
+        // The same normalized term (different casing) updates in place.
+        let updated = add_glossary_term(
+            vault.path(),
+            "Growth",
+            glossary_term("meridian", "Updated definition.", &[]),
+            glossary::OnConflict::Update,
+        )
+        .unwrap();
+        assert!(!updated.created);
+        assert_eq!(updated.term.definition, "Updated definition.");
+
+        // One collapsed entry persisted on disk.
+        let loaded = glossary::Glossary::load(&vault.path().join("Growth")).unwrap();
+        assert_eq!(loaded.terms().len(), 1);
+        assert_eq!(
+            loaded.get("MERIDIAN").unwrap().definition,
+            "Updated definition."
+        );
+    }
+
+    #[test]
+    fn add_glossary_term_on_conflict_error_rejects_and_preserves() {
+        let vault = tempdir().unwrap();
+        fs::create_dir(vault.path().join("Growth")).unwrap();
+        add_glossary_term(
+            vault.path(),
+            "Growth",
+            glossary_term("TeeTrack", "Tee-sheet vendor.", &[]),
+            glossary::OnConflict::Update,
+        )
+        .unwrap();
+
+        let err = add_glossary_term(
+            vault.path(),
+            "Growth",
+            glossary_term("teetrack", "Different.", &[]),
+            glossary::OnConflict::Error,
+        )
+        .unwrap_err();
+        assert!(matches!(err, AddGlossaryTermError::Conflict { .. }));
+
+        // The original definition is untouched.
+        let loaded = glossary::Glossary::load(&vault.path().join("Growth")).unwrap();
+        assert_eq!(
+            loaded.get("TeeTrack").unwrap().definition,
+            "Tee-sheet vendor."
+        );
+    }
+
+    #[test]
+    fn add_glossary_term_missing_project_is_an_error() {
+        let vault = tempdir().unwrap();
+        // No "Growth" folder — this tool never creates one.
+        let err = add_glossary_term(
+            vault.path(),
+            "Growth",
+            glossary_term("MERIDIAN", "x.", &[]),
+            glossary::OnConflict::Update,
+        )
+        .unwrap_err();
+        assert!(matches!(err, AddGlossaryTermError::MissingProject { .. }));
+        assert!(!glossary::glossary_path(&vault.path().join("Growth")).exists());
+    }
+
+    #[test]
+    fn add_glossary_term_adopts_on_disk_project_casing() {
+        let vault = tempdir().unwrap();
+        fs::create_dir(vault.path().join("Growth")).unwrap();
+
+        let outcome = add_glossary_term(
+            vault.path(),
+            "growth", // lower-case request against the existing `Growth/`
+            glossary_term("MERIDIAN", "x.", &[]),
+            glossary::OnConflict::Update,
+        )
+        .unwrap();
+        assert_eq!(outcome.project, "Growth");
+        // The term landed in the existing folder, not a new lower-case one.
+        assert!(glossary::glossary_path(&vault.path().join("Growth")).exists());
+    }
+
+    #[test]
+    fn add_glossary_term_rejects_blank_and_oversized_fields() {
+        let vault = tempdir().unwrap();
+        fs::create_dir(vault.path().join("Growth")).unwrap();
+
+        let blank = add_glossary_term(
+            vault.path(),
+            "Growth",
+            glossary_term("   ", "def", &[]),
+            glossary::OnConflict::Update,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            blank,
+            AddGlossaryTermError::InvalidInput { field: "term", .. }
+        ));
+
+        let long_term = "a".repeat(GLOSSARY_TERM_MAX_CHARS + 1);
+        let too_long = add_glossary_term(
+            vault.path(),
+            "Growth",
+            glossary_term(&long_term, "def", &[]),
+            glossary::OnConflict::Update,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            too_long,
+            AddGlossaryTermError::InvalidInput { field: "term", .. }
+        ));
+    }
+
+    #[test]
+    fn add_glossary_term_invalid_slug_is_invalid_project() {
+        let vault = tempdir().unwrap();
+        let err = add_glossary_term(
+            vault.path(),
+            "", // empty slug — a caller bug, not a missing project
+            glossary_term("MERIDIAN", "x.", &[]),
+            glossary::OnConflict::Update,
+        )
+        .unwrap_err();
+        assert!(matches!(err, AddGlossaryTermError::InvalidProject(_)));
     }
 }
