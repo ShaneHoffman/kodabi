@@ -5,8 +5,9 @@ use std::collections::HashMap;
 
 use rusqlite::{params, params_from_iter, OptionalExtension, Row};
 
-use super::note::{normalize_date_to_utc, IndexedNote, NoteRow};
+use super::note::{normalize_date_to_utc, ActionItemRow, IndexedNote, MeetingFactsRow, NoteRow};
 use super::{NoteIndex, Result};
+use crate::meeting::MeetingFacts;
 
 /// The columns [`map_row`] reads, in order — shared by the by-id and by-project
 /// queries so the two stay in lockstep.
@@ -97,6 +98,22 @@ impl NoteIndex {
                 insert_tag.execute(params![pk, tag])?;
             }
         }
+        // Replace the meeting facts wholesale, mirroring the tag set: they are a
+        // derived cache of the body + session file, and `None` (a non-meeting
+        // note, or one whose facts the caller did not derive) clears any prior
+        // rows.
+        write_meeting_facts(&tx, &note.id, note.meeting.as_ref())?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Writes (or clears, with `None`) a note's meeting facts in its own
+    /// transaction. The meeting-facts backfill's entry point: it derives facts
+    /// for an already-indexed meeting note (`note_ids_missing_meeting_facts`)
+    /// without re-running a full [`upsert_note`](NoteIndex::upsert_note).
+    pub fn set_meeting_facts(&mut self, note_id: &str, facts: Option<&MeetingFacts>) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        write_meeting_facts(&tx, note_id, facts)?;
         tx.commit()?;
         Ok(())
     }
@@ -105,13 +122,17 @@ impl NoteIndex {
     ///
     /// The reconcile pass calls this for ids whose file has left the vault. The
     /// `notes_ad` trigger clears the FTS row and the `note_tags` foreign key
-    /// cascades, but `notes_vec`/`note_chunks` are *not* keyed to `notes`, so
-    /// their rows are cleared explicitly (by the `note_id` metadata column) in
+    /// cascades, but `notes_vec`/`note_chunks` and the meeting-facts tables
+    /// (`note_meetings`/`note_decisions`/`note_action_items`) are *not* keyed to
+    /// `notes`, so their rows are cleared explicitly (by the `note_id` column) in
     /// the same transaction — a partial delete is impossible.
     pub fn delete_note(&mut self, id: &str) -> Result<bool> {
         let tx = self.conn.transaction()?;
         tx.execute("DELETE FROM notes_vec WHERE note_id = ?1", [id])?;
         tx.execute("DELETE FROM note_chunks WHERE note_id = ?1", [id])?;
+        tx.execute("DELETE FROM note_meetings WHERE note_id = ?1", [id])?;
+        tx.execute("DELETE FROM note_decisions WHERE note_id = ?1", [id])?;
+        tx.execute("DELETE FROM note_action_items WHERE note_id = ?1", [id])?;
         let removed = tx.execute("DELETE FROM notes WHERE id = ?1", [id])?;
         tx.commit()?;
         Ok(removed > 0)
@@ -133,14 +154,18 @@ impl NoteIndex {
         Ok(rows)
     }
 
-    /// Empties the whole index — notes, tags, FTS, vectors, and chunk text — so
-    /// a rebuild can repopulate it from files alone. Truncates the tables in one
-    /// transaction; it never deletes or reopens the database file (WAL and
-    /// Windows file locks make that fragile, and the schema is already correct).
+    /// Empties the whole index — notes, tags, FTS, vectors, chunk text, and
+    /// meeting facts — so a rebuild can repopulate it from files alone. Truncates
+    /// the tables in one transaction; it never deletes or reopens the database
+    /// file (WAL and Windows file locks make that fragile, and the schema is
+    /// already correct).
     pub fn clear(&mut self) -> Result<()> {
         let tx = self.conn.transaction()?;
         tx.execute("DELETE FROM notes_vec", [])?;
         tx.execute("DELETE FROM note_chunks", [])?;
+        tx.execute("DELETE FROM note_meetings", [])?;
+        tx.execute("DELETE FROM note_decisions", [])?;
+        tx.execute("DELETE FROM note_action_items", [])?;
         // Clearing `notes` fires `notes_ad` per row (FTS) and cascades tags.
         tx.execute("DELETE FROM notes", [])?;
         tx.commit()?;
@@ -245,6 +270,142 @@ impl NoteIndex {
         }
         Ok(tags_by_id)
     }
+
+    /// Fetches a meeting note's scalar facts (`duration_seconds`,
+    /// `speaker_count`) plus its ordered decisions, or `None` when the note has
+    /// no `note_meetings` row — a non-meeting note, or a meeting note not yet
+    /// backfilled after the v3 migration. The action items are a separate read
+    /// ([`get_action_items`](NoteIndex::get_action_items)), so `search` and
+    /// `notes_by_project` never join these tables.
+    pub fn get_meeting_facts(&self, id: &str) -> Result<Option<MeetingFactsRow>> {
+        let scalars = self
+            .conn
+            .query_row(
+                "SELECT duration_seconds, speaker_count FROM note_meetings WHERE note_id = ?1",
+                [id],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<i64>>(0)?.map(|v| v as u32),
+                        row.get::<_, Option<i64>>(1)?.map(|v| v as u32),
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((duration_seconds, speaker_count)) = scalars else {
+            return Ok(None);
+        };
+
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT text FROM note_decisions WHERE note_id = ?1 ORDER BY seq")?;
+        let decisions = stmt
+            .query_map([id], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+
+        Ok(Some(MeetingFactsRow {
+            duration_seconds,
+            speaker_count,
+            decisions,
+        }))
+    }
+
+    /// Fetches a note's action items in body order (empty when none). `overdue`
+    /// is not stored — the caller derives it from `done` + `due_date`.
+    pub fn get_action_items(&self, id: &str) -> Result<Vec<ActionItemRow>> {
+        let mut stmt = self.conn.prepare_cached(
+            "SELECT item_id, description, owner, due_date, done, extracted_date
+             FROM note_action_items WHERE note_id = ?1 ORDER BY seq",
+        )?;
+        let items = stmt
+            .query_map([id], |row| {
+                Ok(ActionItemRow {
+                    id: row.get("item_id")?,
+                    description: row.get("description")?,
+                    owner: row.get("owner")?,
+                    due_date: row.get("due_date")?,
+                    done: row.get("done")?,
+                    extracted_date: row.get("extracted_date")?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<ActionItemRow>>>()?;
+        Ok(items)
+    }
+
+    /// Every meeting note id with no `note_meetings` row yet, ordered by `id` —
+    /// the meeting-facts backfill's work list, mirroring
+    /// [`note_ids_missing_embeddings`](NoteIndex::note_ids_missing_embeddings).
+    /// The v3 migration adds the meeting tables empty, so every existing meeting
+    /// note appears here until the backfill derives its facts.
+    pub fn note_ids_missing_meeting_facts(&self) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id FROM notes
+             WHERE type = 'meeting'
+               AND id NOT IN (SELECT note_id FROM note_meetings)
+             ORDER BY id",
+        )?;
+        let ids = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        Ok(ids)
+    }
+}
+
+/// Replaces a note's meeting-facts rows across all three tables in the caller's
+/// transaction. `None` clears them without inserting — a non-meeting note, or a
+/// note whose facts were not derived — mirroring how the tag set is replaced
+/// wholesale so a re-index reflects removed decisions/items too.
+fn write_meeting_facts(
+    tx: &rusqlite::Transaction<'_>,
+    note_id: &str,
+    facts: Option<&MeetingFacts>,
+) -> rusqlite::Result<()> {
+    tx.execute("DELETE FROM note_meetings WHERE note_id = ?1", [note_id])?;
+    tx.execute("DELETE FROM note_decisions WHERE note_id = ?1", [note_id])?;
+    tx.execute(
+        "DELETE FROM note_action_items WHERE note_id = ?1",
+        [note_id],
+    )?;
+
+    let Some(facts) = facts else {
+        return Ok(());
+    };
+
+    tx.execute(
+        "INSERT INTO note_meetings (note_id, duration_seconds, speaker_count)
+         VALUES (?1, ?2, ?3)",
+        params![
+            note_id,
+            facts.duration_seconds.map(i64::from),
+            facts.speaker_count.map(i64::from),
+        ],
+    )?;
+    {
+        let mut insert_decision =
+            tx.prepare("INSERT INTO note_decisions (note_id, seq, text) VALUES (?1, ?2, ?3)")?;
+        for (seq, text) in facts.decisions.iter().enumerate() {
+            insert_decision.execute(params![note_id, seq as i64, text])?;
+        }
+    }
+    {
+        let mut insert_item = tx.prepare(
+            "INSERT INTO note_action_items
+                 (note_id, seq, item_id, description, owner, due_date, done, extracted_date)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        )?;
+        for (seq, item) in facts.action_items.iter().enumerate() {
+            insert_item.execute(params![
+                note_id,
+                seq as i64,
+                item.id,
+                item.description,
+                item.owner,
+                item.due_date,
+                item.done,
+                item.extracted_date,
+            ])?;
+        }
+    }
+    Ok(())
 }
 
 /// Builds a [`NoteRow`] from a `SELECT` of [`NOTE_COLUMNS`]. `tags` are filled
@@ -269,6 +430,35 @@ fn map_row(row: &Row<'_>) -> rusqlite::Result<NoteRow> {
 mod tests {
     use super::*;
     use crate::index::{NoteIndex, NoteType};
+    use crate::meeting::ActionItemFact;
+
+    /// A couple of decisions and two action items (one open+due, one done) for
+    /// the meeting-facts tests.
+    fn meeting_facts() -> MeetingFacts {
+        MeetingFacts {
+            duration_seconds: Some(1800),
+            speaker_count: Some(2),
+            decisions: vec!["Ship it".to_string(), "Freeze the API".to_string()],
+            action_items: vec![
+                ActionItemFact {
+                    id: "a_send01".to_string(),
+                    description: "send the memo".to_string(),
+                    owner: "Jane".to_string(),
+                    due_date: Some("2026-07-15".to_string()),
+                    done: false,
+                    extracted_date: Some("2026-07-10".to_string()),
+                },
+                ActionItemFact {
+                    id: "a_book02".to_string(),
+                    description: "book the room".to_string(),
+                    owner: "Unassigned".to_string(),
+                    due_date: None,
+                    done: true,
+                    extracted_date: Some("2026-07-10".to_string()),
+                },
+            ],
+        }
+    }
 
     fn note(id: &str, project: Option<&str>, date: &str) -> IndexedNote {
         IndexedNote {
@@ -282,6 +472,7 @@ mod tests {
             source: "transcript".to_string(),
             confidence: Some(0.9),
             body: format!("body of {id}"),
+            meeting: None,
         }
     }
 
@@ -322,6 +513,109 @@ mod tests {
     fn get_missing_note_is_none() {
         let index = NoteIndex::open_in_memory().unwrap();
         assert!(index.get_note("n_nope00").unwrap().is_none());
+    }
+
+    #[test]
+    fn meeting_facts_round_trip_through_upsert() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        let mut input = note("n_meet01", Some("Growth"), "2026-07-10");
+        input.meeting = Some(meeting_facts());
+        index.upsert_note(&input).unwrap();
+
+        let scalars = index.get_meeting_facts("n_meet01").unwrap().unwrap();
+        assert_eq!(scalars.duration_seconds, Some(1800));
+        assert_eq!(scalars.speaker_count, Some(2));
+        assert_eq!(scalars.decisions, vec!["Ship it", "Freeze the API"]);
+
+        let items = index.get_action_items("n_meet01").unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].id, "a_send01");
+        assert_eq!(items[0].owner, "Jane");
+        assert_eq!(items[0].due_date.as_deref(), Some("2026-07-15"));
+        assert!(!items[0].done);
+        assert_eq!(items[1].id, "a_book02");
+        assert!(items[1].done);
+        assert_eq!(items[1].due_date, None);
+    }
+
+    #[test]
+    fn a_note_with_no_meeting_facts_reads_back_none() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        // A meeting note upserted without derived facts.
+        index
+            .upsert_note(&note("n_bare01", Some("Growth"), "2026-07-10"))
+            .unwrap();
+        assert!(index.get_meeting_facts("n_bare01").unwrap().is_none());
+        assert!(index.get_action_items("n_bare01").unwrap().is_empty());
+    }
+
+    #[test]
+    fn re_upsert_replaces_meeting_facts_wholesale() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        let mut first = note("n_meet01", Some("Growth"), "2026-07-10");
+        first.meeting = Some(meeting_facts());
+        index.upsert_note(&first).unwrap();
+
+        // Re-index the same note with emptied facts: the prior rows must go.
+        let mut second = first.clone();
+        second.meeting = Some(MeetingFacts {
+            duration_seconds: None,
+            speaker_count: None,
+            decisions: Vec::new(),
+            action_items: Vec::new(),
+        });
+        index.upsert_note(&second).unwrap();
+
+        let scalars = index.get_meeting_facts("n_meet01").unwrap().unwrap();
+        assert_eq!(scalars.duration_seconds, None);
+        assert!(scalars.decisions.is_empty());
+        assert!(index.get_action_items("n_meet01").unwrap().is_empty());
+    }
+
+    #[test]
+    fn note_ids_missing_meeting_facts_lists_only_unbackfilled_meetings() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        // A meeting note with no facts derived yet — the backfill's target.
+        index
+            .upsert_note(&note("n_bare01", Some("Growth"), "2026-07-10"))
+            .unwrap();
+        // A meeting note that already carries facts.
+        let mut filled = note("n_full01", Some("Growth"), "2026-07-10");
+        filled.meeting = Some(meeting_facts());
+        index.upsert_note(&filled).unwrap();
+        // A non-meeting note is never in the list.
+        let mut plain = note("n_note01", Some("Growth"), "2026-07-10");
+        plain.note_type = NoteType::Note;
+        index.upsert_note(&plain).unwrap();
+
+        assert_eq!(
+            index.note_ids_missing_meeting_facts().unwrap(),
+            vec!["n_bare01".to_string()]
+        );
+    }
+
+    #[test]
+    fn delete_and_clear_remove_meeting_facts() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        let mut input = note("n_meet01", Some("Growth"), "2026-07-10");
+        input.meeting = Some(meeting_facts());
+        index.upsert_note(&input).unwrap();
+
+        index.delete_note("n_meet01").unwrap();
+        assert!(index.get_meeting_facts("n_meet01").unwrap().is_none());
+        assert!(index.get_action_items("n_meet01").unwrap().is_empty());
+
+        // `clear` empties the meeting-facts tables too.
+        let mut again = note("n_meet02", Some("Growth"), "2026-07-10");
+        again.meeting = Some(meeting_facts());
+        index.upsert_note(&again).unwrap();
+        index.clear().unwrap();
+        assert!(index.get_meeting_facts("n_meet02").unwrap().is_none());
+        let remaining: i64 = index
+            .conn
+            .query_row("SELECT count(*) FROM note_action_items", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(remaining, 0);
     }
 
     #[test]
@@ -612,6 +906,7 @@ mod tests {
         let mut index = NoteIndex::open_in_memory().unwrap();
         let mut input = note("n_clr001", Some("Acme"), "2026-07-11");
         input.tags = vec!["t".to_string()];
+        input.meeting = Some(meeting_facts());
         index.upsert_note(&input).unwrap();
         index
             .set_note_chunks(
@@ -630,6 +925,9 @@ mod tests {
             ("note_tags", 0),
             ("notes_vec", 0),
             ("note_chunks", 0),
+            ("note_meetings", 0),
+            ("note_decisions", 0),
+            ("note_action_items", 0),
         ] {
             let got: i64 = index
                 .conn

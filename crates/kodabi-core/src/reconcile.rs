@@ -104,13 +104,18 @@ pub fn reconcile(
                 continue;
             }
 
-            let indexed = IndexedNote::from_note(&listed.note, &listed.title, &rel);
+            let mut indexed = IndexedNote::from_note(&listed.note, &listed.title, &rel);
             // Fast path: an unchanged note skips the write entirely, so a
             // redundant reconcile touches no rows (no FTS trigger churn, no
             // spurious chunk invalidation).
             match index.get_note(&indexed.id)? {
                 Some(row) if row_matches(&row, &indexed) => report.unchanged += 1,
                 _ => {
+                    // Derive meeting facts only on the write path — reading the
+                    // session JSONL is real I/O, and the fast path above must
+                    // stay free of it. `meeting_facts_for` is `None` for a
+                    // non-meeting note.
+                    indexed.meeting = crate::meeting::meeting_facts_for(&listed.note, vault_root);
                     index.upsert_note(&indexed)?;
                     report.upserted += 1;
                 }
@@ -138,6 +143,38 @@ pub fn reconcile(
     }
 
     Ok(report)
+}
+
+/// Derives and stores meeting facts for every meeting note the index has not
+/// backfilled yet, returning how many were filled. The meeting-facts counterpart
+/// to the caller's embedding backfill (`note_ids_missing_embeddings` then
+/// `reconcile_missing`): the v3 migration adds the meeting tables empty, and
+/// `reconcile`'s fast path skips an unchanged note, so existing meeting notes
+/// carry no facts until this runs.
+///
+/// Works from the stored row (`body`, `source`, `date`) plus the session file —
+/// it never re-reads the `.md`. A row that vanished between the scan and now, or
+/// whose stored `source` no longer parses, is skipped. Like `reconcile`, this is
+/// rows-only and holds no embedder.
+pub fn reconcile_missing_meeting_facts(
+    vault_root: &Path,
+    index: &mut NoteIndex,
+) -> Result<usize, ReconcileError> {
+    let mut backfilled = 0;
+    for id in index.note_ids_missing_meeting_facts()? {
+        let Some(row) = index.get_note(&id)? else {
+            continue;
+        };
+        let Ok(source) = crate::note::Source::parse(&row.source) else {
+            continue;
+        };
+        let facts = crate::meeting::derive_meeting_facts(
+            &row.id, &row.date, &source, &row.body, vault_root,
+        );
+        index.set_meeting_facts(&row.id, Some(&facts))?;
+        backfilled += 1;
+    }
+    Ok(backfilled)
 }
 
 /// The KB-relative, forward-slashed path the index stores for a note — the same
@@ -247,6 +284,95 @@ mod tests {
         assert_eq!(deep.project.as_deref(), Some("Growth/Q3"));
         assert!(deep.path.starts_with("Growth/Q3/"), "{}", deep.path);
         assert!(!deep.path.contains('\\'), "{}", deep.path);
+    }
+
+    /// Writes a two-channel session transcript to `<vault>/sessions/x.jsonl` and
+    /// returns its repo-relative path (a valid note `source`). Duration ≈ 60 s,
+    /// two distinct channels.
+    fn write_session_jsonl(vault: &Path) -> String {
+        use crate::raw_session::TranscriptSegment;
+        use crate::transcription::Channel;
+
+        let segments = [
+            TranscriptSegment {
+                index: 0,
+                channel: Channel::You,
+                speaker: None,
+                start_ms: 0,
+                end_ms: 4_000,
+                text: "hello".to_string(),
+            },
+            TranscriptSegment {
+                index: 1,
+                channel: Channel::Them,
+                speaker: None,
+                start_ms: 4_000,
+                end_ms: 60_000,
+                text: "hi".to_string(),
+            },
+        ];
+        let dir = vault.join("sessions");
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut contents = String::new();
+        for segment in &segments {
+            contents.push_str(&serde_json::to_string(segment).unwrap());
+            contents.push('\n');
+        }
+        std::fs::write(dir.join("x.jsonl"), contents).unwrap();
+        "sessions/x.jsonl".to_string()
+    }
+
+    #[test]
+    fn backfill_fills_missing_meeting_facts_from_body_and_session() {
+        let dir = tempdir().unwrap();
+        let vault = dir.path();
+        let source = write_session_jsonl(vault);
+
+        // A meeting note indexed WITHOUT facts (an old row / fast-path skip):
+        // upsert an `IndexedNote` whose `meeting` is `None` but that carries the
+        // body + session source the backfill derives from.
+        let note = Note::new(
+            NoteId::parse("n_meet01").unwrap(),
+            NoteType::Meeting,
+            Routing::Routed {
+                project: "Growth".to_string(),
+                confidence: 0.9,
+            },
+            "2026-07-10",
+            Vec::<Tag>::new(),
+            Source::parse(&source).unwrap(),
+            "## Decisions\n\n- Ship it\n\n## Action items\n\n- [ ] Jane to send the memo by 2026-07-15.",
+        )
+        .unwrap();
+        let indexed = IndexedNote::from_note(&note, "Kickoff", "Growth/kickoff.md");
+
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        index.upsert_note(&indexed).unwrap();
+
+        // Pre-condition: the meeting is on the backfill's work list.
+        assert_eq!(
+            index.note_ids_missing_meeting_facts().unwrap(),
+            vec!["n_meet01".to_string()]
+        );
+
+        let filled = reconcile_missing_meeting_facts(vault, &mut index).unwrap();
+        assert_eq!(filled, 1);
+
+        let facts = index.get_meeting_facts("n_meet01").unwrap().unwrap();
+        assert_eq!(facts.duration_seconds, Some(60));
+        assert_eq!(facts.speaker_count, Some(2));
+        assert_eq!(facts.decisions, vec!["Ship it"]);
+        let items = index.get_action_items("n_meet01").unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].owner, "Jane");
+        assert_eq!(items[0].due_date.as_deref(), Some("2026-07-15"));
+
+        // And the note is no longer missing, so a second backfill is a no-op.
+        assert!(index.note_ids_missing_meeting_facts().unwrap().is_empty());
+        assert_eq!(
+            reconcile_missing_meeting_facts(vault, &mut index).unwrap(),
+            0
+        );
     }
 
     #[test]

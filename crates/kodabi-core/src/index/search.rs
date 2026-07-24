@@ -930,6 +930,7 @@ mod tests {
             source: "manual".to_string(),
             confidence: None,
             body: body.to_string(),
+            meeting: None,
         }
     }
 

@@ -30,6 +30,7 @@ fn stdio_server_handshakes_and_lists_projects_with_clean_stdout() {
                 source: "manual".to_string(),
                 confidence: None,
                 body: "The quarterly plan.".to_string(),
+                meeting: None,
             })
             .unwrap();
     }

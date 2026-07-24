@@ -13,6 +13,7 @@ pub mod glossary;
 pub mod index;
 pub mod inflight;
 pub mod llm;
+pub mod meeting;
 pub mod metrics;
 pub mod naming;
 pub mod note;

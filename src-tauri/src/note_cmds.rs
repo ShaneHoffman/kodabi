@@ -9,6 +9,7 @@
 use std::path::Path;
 
 use kodabi_core::index::IndexedNote;
+use kodabi_core::meeting;
 use kodabi_core::note::{self, Note, NoteEdit, NoteId, NoteType, Routing, Source, Tag};
 use kodabi_core::sessions;
 use kodabi_core::vault::{self, FileNoteOptions, ListedNote, ProjectInfo, RoutedNote};
@@ -153,11 +154,14 @@ fn write_note_impl(app: &AppHandle, mut input: NewNoteInput) -> Result<WrittenNo
     // source of truth, so a failed index never fails the write. The title comes
     // from `effective_title` (the stored frontmatter title, else the de-slugged
     // stem) — the same source a later read/edit uses, so no spurious change.
-    let indexed = IndexedNote::from_note(
+    let mut indexed = IndexedNote::from_note(
         &note,
         &vault::effective_title(&note, &path),
         &rel.to_string_lossy().replace('\\', "/"),
     );
+    // Derive structured meeting facts (`None` for a non-meeting note) so the
+    // index can serve `get_note`'s `meeting`/`action_items` without re-reading.
+    indexed.meeting = meeting::meeting_facts_for(&note, &kb);
     app.state::<IndexState>().index_note_best_effort(indexed);
     broadcast_vault_changed(app);
 
@@ -332,11 +336,12 @@ pub async fn save_note(app: AppHandle, input: SaveNoteInput) -> Result<NoteDetai
     // Re-index the edited note (best-effort; see `write_note_impl`). Editing the
     // body drops its stale vectors in `upsert_note`, so this re-embeds them.
     let rel = listed.path.strip_prefix(&kb).unwrap_or(&listed.path);
-    let indexed = IndexedNote::from_note(
+    let mut indexed = IndexedNote::from_note(
         &listed.note,
         &listed.title,
         &rel.to_string_lossy().replace('\\', "/"),
     );
+    indexed.meeting = meeting::meeting_facts_for(&listed.note, &kb);
     app.state::<IndexState>().index_note_best_effort(indexed);
     broadcast_vault_changed(&app);
 
@@ -407,11 +412,12 @@ pub async fn file_note_to_project(
         .path
         .strip_prefix(&kb)
         .unwrap_or(&routed.note.path);
-    let indexed = IndexedNote::from_note(
+    let mut indexed = IndexedNote::from_note(
         &routed.note.note,
         &routed.note.title,
         &rel.to_string_lossy().replace('\\', "/"),
     );
+    indexed.meeting = meeting::meeting_facts_for(&routed.note.note, &kb);
     app.state::<IndexState>().index_note_best_effort(indexed);
     broadcast_vault_changed(&app);
 
@@ -488,11 +494,12 @@ pub async fn delete_project(app: AppHandle, project: String) -> Result<DeletedPr
     let index = app.state::<IndexState>();
     for listed in &deleted.moved_notes {
         let rel = listed.path.strip_prefix(&kb).unwrap_or(&listed.path);
-        let indexed = IndexedNote::from_note(
+        let mut indexed = IndexedNote::from_note(
             &listed.note,
             &listed.title,
             &rel.to_string_lossy().replace('\\', "/"),
         );
+        indexed.meeting = meeting::meeting_facts_for(&listed.note, &kb);
         index.index_note_best_effort(indexed);
     }
     index.request_reconcile();

@@ -35,7 +35,7 @@ post-pass pulled forward into Phase 1.
 **Milestone:** "What's outstanding on Briarwood Golf?" answered correctly in-app from real meeting history. **← Dogfood daily from here.**
 
 - [ ] MCP server (stdio) exposing the v1 tool surface
-  - [x] `crates/kodabi-mcp` stands up the stdio server (hand-rolled JSON-RPC) with the first three read tools: `search_notes`, `get_note`, `list_projects` (`get_note`'s meeting/action-item fields stubbed pending index backing)
+  - [x] `crates/kodabi-mcp` stands up the stdio server (hand-rolled JSON-RPC) with the first three read tools: `search_notes`, `get_note`, `list_projects` (`get_note`'s `meeting`/`action_items` fields backed by the note index: decisions + action items parsed from the body, duration + speaker count from the session transcript)
 - [ ] Routing reads recorded corrections as an additive scoring signal — a correction must measurably change future routing (#56 `feat/routing-examples-signal`)
 - [ ] Embedded xterm.js terminal running Claude Code with the MCP server preconfigured
 - [ ] Chat sessions distilled + filed + indexed as first-class documents
