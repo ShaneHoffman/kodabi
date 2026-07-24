@@ -1,4 +1,8 @@
-//! The three tools' static metadata and their committed JSON Schemas.
+//! The five tools' static metadata and their committed JSON Schemas.
+//!
+//! Three read tools (`search_notes`, `get_note`, `list_projects`) and two write
+//! tools (`file_note_to_project`, `add_glossary_term`); the write tools differ
+//! only in carrying `readOnlyHint: false`.
 //!
 //! Each schema is a verbatim copy of the matching block in
 //! `docs/MCP_TOOL_SURFACE.md` (one file per tool per direction, under
@@ -16,10 +20,14 @@ use std::sync::OnceLock;
 const SEARCH_NOTES_DESCRIPTION: &str = "Hybrid full-text + semantic search across all notes. Returns ranked hits with snippets. Filter by project (and subtree), note type, tags, and date range; page with limit + cursor.";
 const GET_NOTE_DESCRIPTION: &str = "Fetch a note's full distilled content by stable id: frontmatter metadata plus the rendered markdown body. For meetings, also returns extracted decisions and action items. Use after search_notes to read a hit in full.";
 const LIST_PROJECTS_DESCRIPTION: &str = "Enumerate routing-target projects with hierarchy (parent + slug), display name, note/meeting counts, and last activity. Use to resolve a project name to its slug before filtering other tools.";
+const FILE_NOTE_TO_PROJECT_DESCRIPTION: &str = "Route or re-route a note to a project (the human correction loop). Moves the file, updates its frontmatter project + confidence, preserves the stable id, and returns the new path. Mutating but reversible.";
+const ADD_GLOSSARY_TERM_DESCRIPTION: &str = "Add or update a glossary term (term, definition, aliases) for a project. Upsert by normalized term. Used for transcription biasing and post-pass cleanup.";
 
 const _: () = assert!(SEARCH_NOTES_DESCRIPTION.len() < 2048);
 const _: () = assert!(GET_NOTE_DESCRIPTION.len() < 2048);
 const _: () = assert!(LIST_PROJECTS_DESCRIPTION.len() < 2048);
+const _: () = assert!(FILE_NOTE_TO_PROJECT_DESCRIPTION.len() < 2048);
+const _: () = assert!(ADD_GLOSSARY_TERM_DESCRIPTION.len() < 2048);
 
 /// One tool's immutable definition.
 struct ToolSpec {
@@ -28,6 +36,9 @@ struct ToolSpec {
     description: &'static str,
     input_schema: &'static str,
     output_schema: &'static str,
+    /// Drives the `readOnlyHint` annotation: `true` for the read tools, `false`
+    /// for the two write tools (`file_note_to_project`, `add_glossary_term`).
+    read_only: bool,
 }
 
 const TOOLS: &[ToolSpec] = &[
@@ -37,6 +48,7 @@ const TOOLS: &[ToolSpec] = &[
         description: SEARCH_NOTES_DESCRIPTION,
         input_schema: include_str!("../schemas/search_notes.input.json"),
         output_schema: include_str!("../schemas/search_notes.output.json"),
+        read_only: true,
     },
     ToolSpec {
         name: "get_note",
@@ -44,6 +56,7 @@ const TOOLS: &[ToolSpec] = &[
         description: GET_NOTE_DESCRIPTION,
         input_schema: include_str!("../schemas/get_note.input.json"),
         output_schema: include_str!("../schemas/get_note.output.json"),
+        read_only: true,
     },
     ToolSpec {
         name: "list_projects",
@@ -51,14 +64,33 @@ const TOOLS: &[ToolSpec] = &[
         description: LIST_PROJECTS_DESCRIPTION,
         input_schema: include_str!("../schemas/list_projects.input.json"),
         output_schema: include_str!("../schemas/list_projects.output.json"),
+        read_only: true,
+    },
+    ToolSpec {
+        name: "file_note_to_project",
+        title: "File note to project",
+        description: FILE_NOTE_TO_PROJECT_DESCRIPTION,
+        input_schema: include_str!("../schemas/file_note_to_project.input.json"),
+        output_schema: include_str!("../schemas/file_note_to_project.output.json"),
+        read_only: false,
+    },
+    ToolSpec {
+        name: "add_glossary_term",
+        title: "Add glossary term",
+        description: ADD_GLOSSARY_TERM_DESCRIPTION,
+        input_schema: include_str!("../schemas/add_glossary_term.input.json"),
+        output_schema: include_str!("../schemas/add_glossary_term.output.json"),
+        read_only: false,
     },
 ];
 
-/// The `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint` block
-/// shared by all three read tools.
-fn read_tool_annotations() -> Value {
+/// The `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint` block.
+/// `readOnlyHint` tracks the tool's `read_only` flag; the other three hints are
+/// uniform across all five tools (both write tools are reversible upserts, so
+/// neither is destructive — see `docs/MCP_TOOL_SURFACE.md` §7/§8).
+fn tool_annotations(read_only: bool) -> Value {
     json!({
-        "readOnlyHint": true,
+        "readOnlyHint": read_only,
         "destructiveHint": false,
         "idempotentHint": true,
         "openWorldHint": false
@@ -78,7 +110,7 @@ pub fn tools_list() -> &'static Value {
                     "description": spec.description,
                     "inputSchema": parse_schema(spec.input_schema),
                     "outputSchema": parse_schema(spec.output_schema),
-                    "annotations": read_tool_annotations()
+                    "annotations": tool_annotations(spec.read_only)
                 })
             })
             .collect();
@@ -184,23 +216,41 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_has_the_three_tools_with_annotations_and_bounded_descriptions() {
+    fn tools_list_has_the_five_tools_with_annotations_and_bounded_descriptions() {
         let list = tools_list();
         let tools = list["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 3);
+        assert_eq!(tools.len(), 5);
 
         let names: Vec<&str> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names, ["search_notes", "get_note", "list_projects"]);
+        assert_eq!(
+            names,
+            [
+                "search_notes",
+                "get_note",
+                "list_projects",
+                "file_note_to_project",
+                "add_glossary_term",
+            ]
+        );
 
+        // The two write tools carry readOnlyHint: false; the reads carry true.
+        // Every other hint is uniform across the five.
+        let write_tools = ["file_note_to_project", "add_glossary_term"];
         for tool in tools {
+            let name = tool["name"].as_str().unwrap();
+            let expected_read_only = !write_tools.contains(&name);
             assert!(tool["title"].is_string());
             assert!(tool["description"].as_str().unwrap().len() < 2048);
             assert!(tool["inputSchema"].is_object());
             assert!(tool["outputSchema"].is_object());
-            assert_eq!(tool["annotations"]["readOnlyHint"], Value::Bool(true));
+            assert_eq!(
+                tool["annotations"]["readOnlyHint"],
+                Value::Bool(expected_read_only),
+                "{name}: unexpected readOnlyHint"
+            );
             assert_eq!(tool["annotations"]["destructiveHint"], Value::Bool(false));
             assert_eq!(tool["annotations"]["idempotentHint"], Value::Bool(true));
             assert_eq!(tool["annotations"]["openWorldHint"], Value::Bool(false));
