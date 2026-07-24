@@ -21,5 +21,5 @@ contractor shortlist.
 
 ## Action items
 
-- [ ] Shane to send the signed budget memo to finance by 2026-07-11.
+- [ ] Jane to send the signed budget memo to finance by 2026-07-11.
 - [ ] Priya to request formal bids from GreenFlow and two alternates.

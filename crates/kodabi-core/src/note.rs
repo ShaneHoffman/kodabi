@@ -1158,7 +1158,7 @@ contractor shortlist.
 
 ## Action items
 
-- [ ] Shane to send the signed budget memo to finance by 2026-07-11.
+- [ ] Jane to send the signed budget memo to finance by 2026-07-11.
 - [ ] Priya to request formal bids from GreenFlow and two alternates.
 ";
 
@@ -1173,7 +1173,7 @@ contractor shortlist.
             "2026-07-09T14:00:00-07:00",
             tags(&["budgeting", "phase-2"]),
             source("raw/20260709T210000000Z-k4m2xp7q-briarwood-golf-sync.jsonl"),
-            "# Summary\n\nReviewed Q3 budget allocation for the course renovation and agreed on the irrigation\ncontractor shortlist.\n\n## Decisions\n\n- Approved the revised irrigation budget of $42,000.\n- Selected GreenFlow Systems as the lead contractor for bidding.\n\n## Action items\n\n- [ ] Shane to send the signed budget memo to finance by 2026-07-11.\n- [ ] Priya to request formal bids from GreenFlow and two alternates.",
+            "# Summary\n\nReviewed Q3 budget allocation for the course renovation and agreed on the irrigation\ncontractor shortlist.\n\n## Decisions\n\n- Approved the revised irrigation budget of $42,000.\n- Selected GreenFlow Systems as the lead contractor for bidding.\n\n## Action items\n\n- [ ] Jane to send the signed budget memo to finance by 2026-07-11.\n- [ ] Priya to request formal bids from GreenFlow and two alternates.",
         )
         .unwrap()
         .with_title(Some(

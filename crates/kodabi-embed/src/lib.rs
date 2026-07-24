@@ -14,8 +14,8 @@
 //! (`tokenizer.json`, `config.json`, `special_tokens_map.json`,
 //! `tokenizer_config.json`), as published at e.g. Hugging Face
 //! `Xenova/bge-small-en-v1.5`. Download-on-first-run and settings-driven paths
-//! are a later ticket; today the directory is provided out of band (the local
-//! benchmark models live under `C:\Users\shane\kodabi-models\`).
+//! are a later ticket; today the directory is provided out of band (the
+//! benchmark models live in a local models directory).
 //!
 //! Without the `bge` feature the crate is an empty shell, so the default
 //! workspace build pulls in no ONNX toolchain.

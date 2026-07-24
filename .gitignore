@@ -1,6 +1,9 @@
+# Local-only config & secrets — never committed
 .kangentic/
 .claude/settings.local.json
 kangentic.local.json
+.env
+.env.*
 
 # dependencies
 /node_modules
@@ -26,3 +29,7 @@ kangentic.local.json
 # manifest describing the fixture's shape is versioned.
 /crates/kodabi-transcribe/tests/data/benchmark/*
 !/crates/kodabi-transcribe/tests/data/benchmark/README.md
+
+# OS cruft
+.DS_Store
+Thumbs.db

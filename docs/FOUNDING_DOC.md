@@ -250,10 +250,9 @@ Shipped: license (**AGPL-3.0-only**), design system ([`DESIGN.md`](DESIGN.md),
 `design/tokens.css`, [`SPIRIT_MARK.md`](SPIRIT_MARK.md)), Tauri + Rust workspace scaffold with CI,
 the frontmatter schema ([`FRONTMATTER_SCHEMA.md`](FRONTMATTER_SCHEMA.md)), and the MCP tool
 surface ([`MCP_TOOL_SURFACE.md`](MCP_TOOL_SURFACE.md)). One item still open, tracked in the
-backlog: reserve the domain variant (kodabi.app / kodabi.dev) + crates.io/npm names, and backorder
-kodabi.com (parked at GoDaddy, renew-prohibited, expires 2026-10-04). The GitHub repo/org rename to
-`kodabi` happens after this rename branch merges, so tooling isn't disrupted mid-task (currently
-`github.com/ShaneHoffman/kodama`).
+backlog: reserve the domain and package names (kodabi.app / kodabi.dev, plus the crates.io / npm
+names) and secure kodabi.com. The GitHub repo has since been renamed from `kodama` to
+[`github.com/ShaneHoffman/kodabi`](https://github.com/ShaneHoffman/kodabi).
 
 ### Phase 1 — Capture & transcribe (the hard 20%)
 
@@ -304,7 +303,7 @@ order of expected value — each earns its place only after the core loop proves
 - **Meeting auto-detection** (opt-in per app: Teams, Meet, Zoom…):
   - Primary signal: mic-in-use by process (Windows audio session APIs / ConsentStore) — `ms-teams.exe` grabs mic = meeting started; mic released = ended
   - Disambiguator: window/tab title patterns (browser mic use → confirm "Meet – …" title). Each enabled app = one (process + title) rule; new apps are config, not features
-  - Calendar cross-reference labels the capture ("MERIDIAN standup") and primes the categorizer — labeling, not detection
+  - Calendar cross-reference labels the capture ("Monday standup") and primes the categorizer — labeling, not detection
   - UX rule: **auto-detect, never auto-silently-record** — detection fires a "Meeting detected — capturing" notification with one-tap cancel (or ask-first mode). This is the §3.7 capture-start toast in its richer actionable form: auto-detected captures earn a cancellable notification, where a manual/hotkey capture only owes the brief self-dismissing one
 - **Speaker identity** (staged; each stage stands alone):
   1. *Active-speaker scraping:* UI Automation reads who's highlighted in the Teams/Meet window, timestamped and aligned with the transcript → real names, zero audio ML. Brittle per app-redesign (scraper rules), but beats diarization when it works
