@@ -28,7 +28,7 @@ post-pass pulled forward into Phase 1.
 - [ ] SQLite schema: FTS5 + sqlite-vec; local embedding pipeline; file watcher; full rebuild command
 - [ ] Hybrid retrieval (RRF merge) exposed as `search_notes` MCP tool
 - [ ] Retention policy setting + consent nudge
-- [ ] Document (and where possible disable) transcript retention inside Claude Code's own session logs, so the in-app retention policy's promise is complete
+- [x] Document (and where possible disable) transcript retention inside Claude Code's own session logs, so the in-app retention policy's promise is complete — both the headless distill runner (`kodabi-llm`) and the embedded terminal (`terminal_cmds`) set `CLAUDE_CODE_SKIP_PROMPT_HISTORY` on the spawned `claude`, disabling its own transcript/prompt-history writing; documented in FOUNDING_DOC §3.7
 
 ## Phase 3 — The brain (MCP + Claude Code)
 **Goal:** Wire Claude Code into the knowledge base via the MCP server; deliver chat over real history.
@@ -37,7 +37,7 @@ post-pass pulled forward into Phase 1.
 - [ ] MCP server (stdio) exposing the v1 tool surface
   - [x] `crates/kodabi-mcp` stands up the stdio server (hand-rolled JSON-RPC) with the first three read tools: `search_notes`, `get_note`, `list_projects` (`get_note`'s meeting/action-item fields stubbed pending index backing)
 - [ ] Routing reads recorded corrections as an additive scoring signal — a correction must measurably change future routing (#56 `feat/routing-examples-signal`)
-- [ ] Embedded xterm.js terminal running Claude Code with the MCP server preconfigured
+- [x] Embedded xterm.js terminal running Claude Code with the MCP server preconfigured — an in-app xterm.js view over a ConPTY PTY (`portable-pty`) hosting interactive `claude`, wired to the `kodabi` MCP server via a generated machine-local `.mcp.json` (read tools pre-approved, writes still prompt); KB root and index resolved from app config. `kodabi-mcp` resolves from a sibling of the app exe in dev/release-from-source; bundling it into the packaged installer is a Phase 4 follow-up (`tauri-build` validates `bundle.resources` at every compile, so it needs CI's Rust jobs to stage the binary first)
 - [ ] Chat sessions distilled + filed + indexed as first-class documents
 - [ ] Designed chat UI driving Claude Code headless (same stack, second skin)
 

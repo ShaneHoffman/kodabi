@@ -169,6 +169,18 @@ export function Sidebar({ onOpenPalette }: Props) {
             <li>
               <Button
                 variant="quiet"
+                aria-current={view.kind === "terminal" ? "page" : undefined}
+                onClick={() => navigate({ kind: "terminal" })}
+                className={`sidebar__row flex w-full text-left text-body ${
+                  view.kind === "terminal" ? "is-selected text-text" : "text-text-soft"
+                }`}
+              >
+                <span>Terminal</span>
+              </Button>
+            </li>
+            <li>
+              <Button
+                variant="quiet"
                 aria-current={view.kind === "settings" ? "page" : undefined}
                 onClick={() => navigate({ kind: "settings" })}
                 className={`sidebar__row flex w-full text-left text-body ${

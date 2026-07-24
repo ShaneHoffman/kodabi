@@ -43,3 +43,14 @@ export const SETTINGS_CHANGED_EVENT = "settings:changed";
 /** Sent to the quick-capture window when it comes forward, so its UI can refocus
  * and reset. Mirrors `quick_capture`'s `SHOWN_EVENT`. */
 export const QUICK_CAPTURE_SHOWN_EVENT = "quick-capture:shown";
+
+/** A batch of raw terminal (PTY) output, base64-encoded — a per-chunk UTF-8
+ * decode would corrupt multibyte sequences split across reads, so the bytes
+ * cross the boundary encoded and xterm's own decoder reassembles them. Mirrors
+ * `terminal_cmds::TERMINAL_OUTPUT_EVENT`. */
+export const TERMINAL_OUTPUT_EVENT = "terminal:output";
+
+/** The hosted `claude` process exited (a deliberate restart or app-exit reap is
+ * silent), carrying its exit code if known, so the terminal can offer a restart.
+ * Mirrors `terminal_cmds::TERMINAL_EXIT_EVENT`. */
+export const TERMINAL_EXIT_EVENT = "terminal:exit";

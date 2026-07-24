@@ -118,6 +118,7 @@ export default tseslint.config(
       "src/useTimeout.ts",
       "src/useTranscriptionState.ts",
       "src/useVaultQuery.ts",
+      "src/useXterm.ts",
     ],
     rules: {
       "no-restricted-imports": "off",

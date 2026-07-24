@@ -25,6 +25,7 @@ pub mod routing;
 pub mod routing_examples;
 pub mod sessions;
 pub mod settings;
+pub mod terminal;
 pub mod transcription;
 pub mod vault;
 pub mod watch;

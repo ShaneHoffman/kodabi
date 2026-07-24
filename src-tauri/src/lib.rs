@@ -12,6 +12,7 @@ mod retention;
 mod routing_env;
 mod session_cmds;
 mod settings_cmds;
+mod terminal_cmds;
 mod transcribe;
 mod tray_promotion;
 
@@ -140,6 +141,9 @@ pub fn run() {
         // Managed at builder level so it exists before the first capture-state
         // broadcast can reach `overlay::sync`.
         .manage(overlay::OverlayController::default())
+        // The embedded terminal's single live PTY session (Phase 3). Reaped on
+        // true app exit by the `RunEvent` hook below — never on hide-to-tray.
+        .manage(terminal_cmds::TerminalState::default())
         .invoke_handler(tauri::generate_handler![
             device_id,
             audio_cmds::start_capture,
@@ -173,6 +177,10 @@ pub fn run() {
             settings_cmds::set_capture_overlay,
             settings_cmds::set_appearance,
             settings_cmds::acknowledge_consent,
+            terminal_cmds::terminal_open,
+            terminal_cmds::terminal_write,
+            terminal_cmds::terminal_resize,
+            terminal_cmds::terminal_restart,
         ])
         .on_window_event(|window, event| match event {
             // Hide instead of exit: the tray + global hotkey must stay
@@ -198,8 +206,21 @@ pub fn run() {
             }
             _ => {}
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        // Build then run (rather than `.run(context)`) so we get a `RunEvent`
+        // callback: the embedded terminal's child tree (`cmd.exe → claude →
+        // kodabi-mcp`) must be reaped on true app exit. `CloseRequested` above
+        // only hides to tray, so reaping there would kill the session on every
+        // close; the only true-exit path is the tray's Quit item (`app.exit`).
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
+            ) {
+                terminal_cmds::reap(app_handle);
+            }
+        });
 }
 
 // Proves src-tauri actually links kodabi-core (the data-layer dependency),
