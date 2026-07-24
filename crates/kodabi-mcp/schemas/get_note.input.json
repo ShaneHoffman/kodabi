@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id"],
+  "properties": {
+    "id": { "$ref": "#/$defs/NoteId", "description": "Stable id of the note to read." },
+    "include_body": { "type": "boolean", "default": true, "description": "Include the full distilled markdown body. Set false for metadata + decisions + action items only." },
+    "include_action_items": { "type": "boolean", "default": true, "description": "Include extracted action items (meetings only)." }
+  },
+  "$defs": {
+    "NoteId": {
+      "type": "string",
+      "pattern": "^n_[0-9a-z]{6,}$",
+      "description": "Stable note identifier, e.g. \"n_a1b2c3\". Generated at creation, never rewritten on move/re-route. This is the write handle."
+    }
+  }
+}

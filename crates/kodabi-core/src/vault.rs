@@ -52,6 +52,87 @@ pub struct ProjectInfo {
     pub last_activity: Option<String>,
 }
 
+/// Sort order for [`list_projects_page`] — the `sort` input of the
+/// `list_projects` MCP tool. Serde renders the three lowercase spellings the
+/// tool's `inputSchema` enum accepts (`name` | `last_activity` | `note_count`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectSort {
+    /// Ascending by display name (the contract default).
+    #[default]
+    Name,
+    /// Most recent activity first; never-active projects last.
+    LastActivity,
+    /// Most notes first.
+    NoteCount,
+}
+
+/// The `list_projects` inputs — mirrors the tool's `inputSchema` field-for-field,
+/// including its defaults, so an MCP wrapper can deserialize tool arguments
+/// straight into it. `deny_unknown_fields` matches the schema's
+/// `additionalProperties: false`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProjectQuery {
+    /// List projects under this parent slug; the parent itself is excluded.
+    /// Omit to start from the top level.
+    #[serde(default)]
+    pub parent: Option<String>,
+    /// When set, include the full subtree (`true`) or only direct children.
+    /// With no `parent`, chooses all projects (`true`) or only top-level ones.
+    /// Default `true`.
+    #[serde(default = "default_true")]
+    pub include_descendants: bool,
+    /// Include projects with zero notes. Default `true`.
+    #[serde(default = "default_true")]
+    pub include_empty: bool,
+    /// Sort order. Default [`ProjectSort::Name`].
+    #[serde(default)]
+    pub sort: ProjectSort,
+    /// Max projects per page, clamped to `1..=200`. Default `100`.
+    #[serde(default = "default_projects_limit")]
+    pub limit: u32,
+    /// Opaque pagination token from a prior response's `page.next_cursor`.
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+/// A routing-target project with hierarchy and counts — the `Project` `$def` of
+/// `docs/MCP_TOOL_SURFACE.md`. Field names/order match that schema so an MCP
+/// wrapper can serialize it straight out. `id` is a stable, informational
+/// identifier derived from the slug ([`project_id`]); the slug is the handle
+/// tools accept.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProjectSummary {
+    pub id: String,
+    pub slug: String,
+    pub display_name: String,
+    pub parent: Option<String>,
+    pub note_count: u32,
+    pub meeting_count: u32,
+    pub last_activity: Option<String>,
+}
+
+/// The `list_projects` output — the matching `projects` plus the pagination
+/// `page`.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProjectPage {
+    pub projects: Vec<ProjectSummary>,
+    pub page: ProjectPageInfo,
+}
+
+/// Cursor-based pagination envelope for `list_projects`, mirroring the `PageInfo`
+/// `$def`. The cursor names the boundary project by id (keyset, not an offset),
+/// so a project added or removed elsewhere in the ordering between pages never
+/// re-serves or skips the rows around that boundary. `total_estimate` is always
+/// exact here — the disk scan exhausts the candidate set.
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ProjectPageInfo {
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
+    pub total_estimate: Option<u64>,
+}
+
 /// Scans `<vault>/<project>` for direct `.md` notes. The [`INBOX`] sentinel is
 /// a valid target. A missing folder is an empty scan, not an error — a project
 /// the UI knows about may simply not exist on disk yet.
@@ -763,6 +844,197 @@ fn collect_project(dir: &Path, slug: String, out: &mut Vec<ProjectInfo>) {
         last_activity: latest
             .map(|time| DateTime::<Utc>::from(time).to_rfc3339_opts(SecondsFormat::Secs, true)),
     });
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_projects_limit() -> u32 {
+    DEFAULT_PROJECTS_LIMIT
+}
+
+/// `list_projects` page-size bounds, from the tool's `inputSchema`.
+const MIN_PROJECTS_LIMIT: u32 = 1;
+const MAX_PROJECTS_LIMIT: u32 = 200;
+const DEFAULT_PROJECTS_LIMIT: u32 = 100;
+
+/// A decoded [`list_projects_page`] cursor: which project the prior page ended
+/// on, and how many positions prior pages consumed.
+struct ProjectCursor {
+    /// Positions served by prior pages. Only a fallback when the boundary id is
+    /// gone; never trusted to locate the boundary, so a stale value costs a
+    /// little work and cannot misplace a page.
+    served: usize,
+    id: String,
+}
+
+/// A stable, informational project id derived from the slug: `p_` followed by
+/// the 64-bit FNV-1a hash of the slug bytes as 16 lowercase hex digits. Hex is a
+/// subset of `[0-9a-z]`, so this always satisfies the `Project.id` pattern
+/// `^p_[0-9a-z]{6,}$`; it is deterministic across runs and collision-negligible
+/// for a personal knowledge base. The slug — not this id — is the handle every
+/// tool accepts, so a non-cryptographic hash is sufficient.
+fn project_id(slug: &str) -> String {
+    const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+    let mut hash = FNV_OFFSET;
+    for byte in slug.as_bytes() {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    format!("p_{hash:016x}")
+}
+
+/// Splits a slug into (`parent`, `display_name`): the last path segment is the
+/// display name, everything before it the parent slug (`None` at top level).
+/// Mirrors the desktop shell's `project_dto`.
+fn split_slug(slug: &str) -> (Option<String>, String) {
+    match slug.rsplit_once('/') {
+        Some((parent, name)) => (Some(parent.to_string()), name.to_string()),
+        None => (None, slug.to_string()),
+    }
+}
+
+/// Encodes a [`list_projects_page`] cursor: the positions consumed so far and
+/// the boundary project's id. A project id never contains `:`, so it can occupy
+/// the unbounded last field.
+fn encode_projects_cursor(served: usize, id: &str) -> String {
+    format!("v1:{served}:{id}")
+}
+
+/// Decodes a [`list_projects_page`] cursor, rejecting anything this function did
+/// not produce. A malformed token is a caller error, surfaced as
+/// [`NoteError::InvalidField`] on the `cursor` field.
+fn decode_projects_cursor(raw: &str) -> Result<ProjectCursor> {
+    let bad = || NoteError::InvalidField {
+        field: "cursor",
+        detail: format!("malformed pagination cursor {raw:?}"),
+    };
+    let mut parts = raw.splitn(3, ':');
+    let version = parts.next().ok_or_else(bad)?;
+    let served = parts.next().ok_or_else(bad)?;
+    let id = parts.next().ok_or_else(bad)?;
+    if version != "v1" || id.is_empty() {
+        return Err(bad());
+    }
+    let served: usize = served.parse().map_err(|_| bad())?;
+    Ok(ProjectCursor {
+        served,
+        id: id.to_string(),
+    })
+}
+
+/// Enumerates routing-target projects with hierarchy and counts, paginated —
+/// the disk-backed engine behind the `list_projects` MCP tool.
+///
+/// Wraps [`list_projects`] (a full vault scan: sorted by slug, empty folders
+/// included, Inbox and reserved roots excluded) and layers on the tool's
+/// `parent` filter, the `include_descendants`/`include_empty` toggles, `sort`,
+/// and keyset cursor pagination, synthesizing each project's
+/// `id`/`display_name`/`parent` from its slug. A `parent` that matches nothing
+/// yields an empty page — absence is a valid answer. `total_estimate` is always
+/// the exact matched count, since the scan exhausts the candidate set. A
+/// malformed `cursor` is a [`NoteError::InvalidField`].
+pub fn list_projects_page(vault_root: &Path, query: &ProjectQuery) -> Result<ProjectPage> {
+    let limit = query.limit.clamp(MIN_PROJECTS_LIMIT, MAX_PROJECTS_LIMIT) as usize;
+    // Validate the cursor before the scan, so a malformed token is rejected the
+    // same way whatever the disk holds.
+    let cursor = query
+        .cursor
+        .as_deref()
+        .map(decode_projects_cursor)
+        .transpose()?;
+
+    let mut infos = list_projects(vault_root)?;
+
+    // Parent filter. A `parent/` prefix (with the trailing slash) matches only
+    // true descendants — never a sibling like `Growthx` under `Growth` — and
+    // excludes the parent folder itself.
+    if let Some(parent) = query.parent.as_deref() {
+        let prefix = format!("{parent}/");
+        infos.retain(|info| match info.slug.strip_prefix(&prefix) {
+            Some(rest) => query.include_descendants || !rest.contains('/'),
+            None => false,
+        });
+    } else if !query.include_descendants {
+        infos.retain(|info| !info.slug.contains('/'));
+    }
+
+    if !query.include_empty {
+        infos.retain(|info| info.note_count > 0);
+    }
+
+    let mut projects: Vec<ProjectSummary> = infos
+        .into_iter()
+        .map(|info| {
+            let (parent, display_name) = split_slug(&info.slug);
+            ProjectSummary {
+                id: project_id(&info.slug),
+                slug: info.slug,
+                display_name,
+                parent,
+                note_count: info.note_count,
+                meeting_count: info.meeting_count,
+                last_activity: info.last_activity,
+            }
+        })
+        .collect();
+
+    // Total order with `slug` (globally unique) as the tiebreaker, so keyset
+    // pagination by id stays deterministic even when the primary key ties.
+    match query.sort {
+        ProjectSort::Name => projects.sort_by(|a, b| {
+            a.display_name
+                .cmp(&b.display_name)
+                .then_with(|| a.slug.cmp(&b.slug))
+        }),
+        ProjectSort::LastActivity => projects.sort_by(|a, b| {
+            // Descending: `Some` (active) outranks `None`, and among timestamps a
+            // lexical compare of the UTC RFC 3339 strings is a chronological one.
+            b.last_activity
+                .cmp(&a.last_activity)
+                .then_with(|| a.slug.cmp(&b.slug))
+        }),
+        ProjectSort::NoteCount => projects.sort_by(|a, b| {
+            b.note_count
+                .cmp(&a.note_count)
+                .then_with(|| a.slug.cmp(&b.slug))
+        }),
+    }
+
+    let total = projects.len();
+
+    // Resume by boundary id (keyset). A project inserted above the boundary
+    // since the prior page is simply not re-served; a boundary project that has
+    // since vanished falls back to the served count so the walk still advances.
+    let start = match &cursor {
+        Some(key) => projects
+            .iter()
+            .position(|project| project.id == key.id)
+            .map_or_else(|| key.served.min(total), |index| index + 1),
+        None => 0,
+    };
+    let end = start.saturating_add(limit).min(total);
+    let has_more = end < total;
+    let next_cursor = has_more
+        .then(|| {
+            projects
+                .get(end.saturating_sub(1))
+                .map(|boundary| encode_projects_cursor(end, &boundary.id))
+        })
+        .flatten();
+
+    let page = projects.get(start..end).unwrap_or(&[]).to_vec();
+
+    Ok(ProjectPage {
+        projects: page,
+        page: ProjectPageInfo {
+            has_more,
+            next_cursor,
+            total_estimate: Some(total as u64),
+        },
+    })
 }
 
 /// Every raw-artifact `source:` value claimed by a note anywhere in the vault,
@@ -1984,5 +2256,305 @@ mod tests {
         let scan = scan_project_notes(vault.path(), "Ops").unwrap();
         assert_eq!(scan.notes.len(), 1);
         assert_eq!(scan.notes[0].note.id.as_str(), "n_bbbbbb");
+    }
+
+    // --- list_projects_page -----------------------------------------------
+
+    fn write_typed(
+        vault: &Path,
+        project: &str,
+        id: &str,
+        date: &str,
+        note_type: NoteType,
+    ) -> PathBuf {
+        note::write_note(vault, &note_in(project, id, date, note_type), None).unwrap()
+    }
+
+    fn base_query() -> ProjectQuery {
+        ProjectQuery {
+            parent: None,
+            include_descendants: true,
+            include_empty: true,
+            sort: ProjectSort::Name,
+            limit: 100,
+            cursor: None,
+        }
+    }
+
+    fn slugs(page: &ProjectPage) -> Vec<String> {
+        page.projects.iter().map(|p| p.slug.clone()).collect()
+    }
+
+    /// Matches the `Project.id` pattern `^p_[0-9a-z]{6,}$` without a regex dep.
+    fn id_is_wellformed(id: &str) -> bool {
+        id.strip_prefix("p_").is_some_and(|rest| {
+            rest.len() >= 6
+                && rest
+                    .chars()
+                    .all(|c| c.is_ascii_digit() || c.is_ascii_lowercase())
+        })
+    }
+
+    #[test]
+    fn list_projects_page_synthesizes_id_display_name_parent_and_counts() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Growth/Q3", "n_a00001", "2026-07-10", None);
+        write_typed(
+            vault.path(),
+            "Growth/Q3",
+            "n_a00002",
+            "2026-07-11",
+            NoteType::Meeting,
+        );
+
+        let page = list_projects_page(vault.path(), &base_query()).unwrap();
+        let q3 = page
+            .projects
+            .iter()
+            .find(|p| p.slug == "Growth/Q3")
+            .expect("Growth/Q3 is listed");
+
+        assert_eq!(q3.display_name, "Q3");
+        assert_eq!(q3.parent.as_deref(), Some("Growth"));
+        assert_eq!(q3.note_count, 2);
+        assert_eq!(q3.meeting_count, 1);
+        assert!(q3.last_activity.is_some());
+        assert!(
+            id_is_wellformed(&q3.id),
+            "id {:?} must match ^p_[0-9a-z]{{6,}}$",
+            q3.id
+        );
+
+        // Deterministic across runs.
+        let again = list_projects_page(vault.path(), &base_query()).unwrap();
+        let q3_again = again
+            .projects
+            .iter()
+            .find(|p| p.slug == "Growth/Q3")
+            .unwrap();
+        assert_eq!(q3.id, q3_again.id);
+    }
+
+    #[test]
+    fn list_projects_page_parent_filter_excludes_siblings_and_the_parent_itself() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Growth", "n_a00001", "2026-07-10", None);
+        write(vault.path(), "Growth/Q3", "n_a00002", "2026-07-10", None);
+        write(vault.path(), "Growthx", "n_a00003", "2026-07-10", None);
+
+        let query = ProjectQuery {
+            parent: Some("Growth".to_string()),
+            ..base_query()
+        };
+        let page = list_projects_page(vault.path(), &query).unwrap();
+        // Only the true descendant — never the `Growthx` sibling, never `Growth`.
+        assert_eq!(slugs(&page), vec!["Growth/Q3".to_string()]);
+    }
+
+    #[test]
+    fn list_projects_page_direct_children_only_when_descendants_off() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Growth/Q3", "n_a00001", "2026-07-10", None);
+        write(
+            vault.path(),
+            "Growth/Q3/Week1",
+            "n_a00002",
+            "2026-07-10",
+            None,
+        );
+
+        let query = ProjectQuery {
+            parent: Some("Growth".to_string()),
+            include_descendants: false,
+            ..base_query()
+        };
+        let page = list_projects_page(vault.path(), &query).unwrap();
+        assert_eq!(slugs(&page), vec!["Growth/Q3".to_string()]);
+    }
+
+    #[test]
+    fn list_projects_page_top_level_only_when_descendants_off_and_no_parent() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Alpha", "n_a00001", "2026-07-10", None);
+        write(vault.path(), "Alpha/Nested", "n_a00002", "2026-07-10", None);
+        write(vault.path(), "Beta", "n_a00003", "2026-07-10", None);
+
+        let query = ProjectQuery {
+            include_descendants: false,
+            ..base_query()
+        };
+        let page = list_projects_page(vault.path(), &query).unwrap();
+        assert_eq!(slugs(&page), vec!["Alpha".to_string(), "Beta".to_string()]);
+    }
+
+    #[test]
+    fn list_projects_page_include_empty_toggle() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Ops", "n_a00001", "2026-07-10", None);
+        fs::create_dir(vault.path().join("Empty")).unwrap();
+
+        let with_empty = list_projects_page(vault.path(), &base_query()).unwrap();
+        assert_eq!(
+            slugs(&with_empty),
+            vec!["Empty".to_string(), "Ops".to_string()]
+        );
+
+        let query = ProjectQuery {
+            include_empty: false,
+            ..base_query()
+        };
+        let without_empty = list_projects_page(vault.path(), &query).unwrap();
+        assert_eq!(slugs(&without_empty), vec!["Ops".to_string()]);
+    }
+
+    #[test]
+    fn list_projects_page_sorts_by_name_and_note_count() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Beta", "n_a00001", "2026-07-10", None);
+        write(vault.path(), "Beta", "n_a00002", "2026-07-10", None);
+        write(vault.path(), "Alpha", "n_a00003", "2026-07-10", None);
+
+        let by_name = list_projects_page(vault.path(), &base_query()).unwrap();
+        assert_eq!(
+            slugs(&by_name),
+            vec!["Alpha".to_string(), "Beta".to_string()]
+        );
+
+        let by_count = list_projects_page(
+            vault.path(),
+            &ProjectQuery {
+                sort: ProjectSort::NoteCount,
+                ..base_query()
+            },
+        )
+        .unwrap();
+        // Beta (2 notes) outranks Alpha (1 note).
+        assert_eq!(by_count.projects[0].slug, "Beta");
+        assert_eq!(by_count.projects[1].slug, "Alpha");
+    }
+
+    #[test]
+    fn list_projects_page_last_activity_sort_is_non_increasing_with_empty_last() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Active", "n_a00001", "2026-07-10", None);
+        write(vault.path(), "AlsoActive", "n_a00002", "2026-07-10", None);
+        fs::create_dir(vault.path().join("Empty")).unwrap();
+
+        let page = list_projects_page(
+            vault.path(),
+            &ProjectQuery {
+                sort: ProjectSort::LastActivity,
+                ..base_query()
+            },
+        )
+        .unwrap();
+
+        // Whatever the filesystem mtimes are, the order is non-increasing and a
+        // never-active project (last_activity: None) sorts last.
+        for pair in page.projects.windows(2) {
+            assert!(
+                pair[0].last_activity >= pair[1].last_activity,
+                "expected non-increasing last_activity, got {:?} then {:?}",
+                pair[0].last_activity,
+                pair[1].last_activity
+            );
+        }
+        assert_eq!(page.projects.last().unwrap().slug, "Empty");
+        assert!(page.projects.last().unwrap().last_activity.is_none());
+    }
+
+    #[test]
+    fn list_projects_page_cursor_walks_disjoint_pages_covering_the_whole_set() {
+        let vault = tempdir().unwrap();
+        for (index, name) in ["A", "B", "C", "D", "E"].iter().enumerate() {
+            write(
+                vault.path(),
+                name,
+                &format!("n_a0000{index}"),
+                "2026-07-10",
+                None,
+            );
+        }
+
+        let mut seen = Vec::new();
+        let mut cursor = None;
+        loop {
+            let page = list_projects_page(
+                vault.path(),
+                &ProjectQuery {
+                    limit: 2,
+                    cursor: cursor.clone(),
+                    ..base_query()
+                },
+            )
+            .unwrap();
+            assert_eq!(page.page.total_estimate, Some(5));
+            seen.extend(slugs(&page));
+            match page.page.next_cursor {
+                Some(next) => {
+                    assert!(page.page.has_more);
+                    cursor = Some(next);
+                }
+                None => {
+                    assert!(!page.page.has_more);
+                    break;
+                }
+            }
+        }
+
+        assert_eq!(seen, vec!["A", "B", "C", "D", "E"]);
+    }
+
+    #[test]
+    fn list_projects_page_missing_parent_is_empty_success() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Ops", "n_a00001", "2026-07-10", None);
+
+        let page = list_projects_page(
+            vault.path(),
+            &ProjectQuery {
+                parent: Some("Nope".to_string()),
+                ..base_query()
+            },
+        )
+        .unwrap();
+        assert!(page.projects.is_empty());
+        assert!(!page.page.has_more);
+        assert_eq!(page.page.next_cursor, None);
+        assert_eq!(page.page.total_estimate, Some(0));
+    }
+
+    #[test]
+    fn list_projects_page_rejects_a_malformed_cursor() {
+        let vault = tempdir().unwrap();
+        let result = list_projects_page(
+            vault.path(),
+            &ProjectQuery {
+                cursor: Some("not-a-real-cursor".to_string()),
+                ..base_query()
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(NoteError::InvalidField {
+                field: "cursor",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn projects_cursor_round_trips_and_rejects_garbage() {
+        let encoded = encode_projects_cursor(4, "p_00000000deadbeef");
+        let decoded = decode_projects_cursor(&encoded).unwrap();
+        assert_eq!(decoded.served, 4);
+        assert_eq!(decoded.id, "p_00000000deadbeef");
+
+        for bad in ["", "v1", "v2:4:p_x", "v1::p_x", "v1:notnum:p_x", "v1:4:"] {
+            assert!(
+                decode_projects_cursor(bad).is_err(),
+                "should reject {bad:?}"
+            );
+        }
     }
 }
