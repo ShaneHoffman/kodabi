@@ -1,17 +1,20 @@
 //! Kodabi's stdio MCP server — a hand-rolled JSON-RPC 2.0 shell exposing the
-//! read tool surface of `docs/MCP_TOOL_SURFACE.md` over `kodabi-core`.
+//! tool surface of `docs/MCP_TOOL_SURFACE.md` over `kodabi-core`.
 //!
 //! The server name is `kodabi`; it speaks newline-delimited JSON-RPC on
-//! stdin/stdout and exposes three read tools: `search_notes`, `get_note`, and
-//! `list_projects`. Tool logic lives in `kodabi-core` (the core-vs-shell rule);
-//! this crate is protocol plumbing plus per-tool schema/envelope handling.
+//! stdin/stdout and exposes five tools: three read (`search_notes`, `get_note`,
+//! `list_projects`) and two write (`file_note_to_project`, `add_glossary_term`,
+//! the human correction loop). Tool logic lives in `kodabi-core` (the
+//! core-vs-shell rule); this crate is protocol plumbing plus per-tool
+//! schema/envelope handling.
 //!
 //! # Configuration
 //!
 //! Two paths are read from the environment at startup:
 //!
 //! - `KODABI_INDEX_DB` — the SQLite note index (backs `search_notes`/`get_note`).
-//! - `KODABI_KB_ROOT` — the knowledge-base (vault) root (backs `list_projects`).
+//! - `KODABI_KB_ROOT` — the knowledge-base (vault) root (backs `list_projects`
+//!   and the two write tools, which read and mutate the vault files directly).
 //!
 //! They are distinct by design: the index is a machine-local cache that must not
 //! live inside the syncable knowledge base. The future Tauri shell injects both

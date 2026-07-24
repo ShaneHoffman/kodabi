@@ -36,6 +36,7 @@ post-pass pulled forward into Phase 1.
 
 - [ ] MCP server (stdio) exposing the v1 tool surface
   - [x] `crates/kodabi-mcp` stands up the stdio server (hand-rolled JSON-RPC) with the first three read tools: `search_notes`, `get_note`, `list_projects` (`get_note`'s meeting/action-item fields stubbed pending index backing)
+  - [x] Write tools `file_note_to_project` and `add_glossary_term` close the human correction loop from chat, wrapping the same `vault::file_note_to_project` path the Inbox UI uses (open windows converge via the file watcher's reconcile)
 - [ ] Routing reads recorded corrections as an additive scoring signal — a correction must measurably change future routing (#56 `feat/routing-examples-signal`)
 - [ ] Embedded xterm.js terminal running Claude Code with the MCP server preconfigured
 - [ ] Chat sessions distilled + filed + indexed as first-class documents

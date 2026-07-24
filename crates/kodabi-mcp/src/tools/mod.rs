@@ -1,20 +1,27 @@
-//! The `tools/call` router and the three read-tool handlers.
+//! The `tools/call` router and the five tool handlers (three read, two write).
 //!
 //! Each handler deserializes its arguments into a kodabi-core param type, calls
 //! one core function, and wraps the result in the success/business-error
 //! envelope. A handler returns `Err(RpcError)` for a protocol-level fault
 //! (malformed arguments, unavailable backend) and `Ok(business_error(..))` for a
-//! business fault the model should reason about (a missing note id).
+//! business fault the model should reason about (a missing note id, a missing
+//! target project, an `on_conflict: "error"` glossary hit).
 
+mod add_glossary_term;
+mod file_note_to_project;
 mod get_note;
 mod list_projects;
 mod search_notes;
+
+use std::path::Path;
 
 use serde_json::Value;
 
 use kodabi_core::index::{IndexError, NoteRow, NoteType};
 use kodabi_core::note::NoteError;
+use kodabi_core::vault::{AddGlossaryTermError, ListedNote};
 
+use crate::envelope;
 use crate::protocol::RpcError;
 use crate::server::Server;
 
@@ -34,6 +41,8 @@ pub fn call(server: &Server, params: Option<&Value>) -> Result<Value, RpcError> 
         "search_notes" => search_notes::call(server, arguments),
         "get_note" => get_note::call(server, arguments),
         "list_projects" => list_projects::call(server, arguments),
+        "file_note_to_project" => file_note_to_project::call(server, arguments),
+        "add_glossary_term" => add_glossary_term::call(server, arguments),
         other => Err(RpcError::invalid_params(format!("unknown tool: {other}"))),
     }
 }
@@ -58,6 +67,37 @@ fn map_note_error(error: NoteError) -> RpcError {
     match error {
         NoteError::InvalidField { .. } => RpcError::invalid_params(error.to_string()),
         other => RpcError::internal(other.to_string()),
+    }
+}
+
+/// Routes a `file_note_to_project` [`NoteError`] to the right channel. Unlike
+/// [`map_note_error`], a missing target project or a vault-wide duplicate id are
+/// business faults (`isError`) the model should reason about, not internal
+/// errors: a malformed field (Inbox target, over-long reason, bad slug, or a
+/// confidence out of range) stays `invalid_params`; I/O and the routing-examples
+/// log stay internal.
+fn map_file_note_error(error: NoteError) -> Result<Value, RpcError> {
+    match error {
+        NoteError::InvalidField { .. } => Err(RpcError::invalid_params(error.to_string())),
+        NoteError::MissingProject { .. } | NoteError::DuplicateNoteId { .. } => {
+            Ok(envelope::business_error(error.to_string()))
+        }
+        other => Err(RpcError::internal(other.to_string())),
+    }
+}
+
+/// Routes an [`AddGlossaryTermError`] to the right channel: an invalid slug or
+/// field is `invalid_params`; a missing project or an `on_conflict: "error"` hit
+/// are business faults (`isError`); a storage failure is internal.
+fn map_add_glossary_term_error(error: AddGlossaryTermError) -> Result<Value, RpcError> {
+    match error {
+        AddGlossaryTermError::InvalidProject(_) | AddGlossaryTermError::InvalidInput { .. } => {
+            Err(RpcError::invalid_params(error.to_string()))
+        }
+        AddGlossaryTermError::MissingProject { .. } | AddGlossaryTermError::Conflict { .. } => {
+            Ok(envelope::business_error(error.to_string()))
+        }
+        AddGlossaryTermError::Storage(_) => Err(RpcError::internal(error.to_string())),
     }
 }
 
@@ -90,5 +130,43 @@ impl From<&NoteRow> for NoteSummaryDto {
             source: row.source.clone(),
             confidence: row.confidence,
         }
+    }
+}
+
+impl NoteSummaryDto {
+    /// Builds the summary from a vault-side note (e.g. the result of a re-route),
+    /// mirroring `src-tauri`'s `written_note`/`note_summary`: the Inbox sentinel
+    /// becomes `project: null`, `path` is KB-relative with forward slashes, and
+    /// routing supplies project + confidence. Distinct from [`From<&NoteRow>`]
+    /// because a fresh vault write has no index row yet.
+    fn from_listed_note(listed: &ListedNote, kb_root: &Path) -> Self {
+        let note = &listed.note;
+        let project = note.routing.project();
+        let relative = listed.path.strip_prefix(kb_root).unwrap_or(&listed.path);
+        Self {
+            id: note.id.as_str().to_string(),
+            path: relative.to_string_lossy().replace('\\', "/"),
+            title: listed.title.clone(),
+            note_type: map_note_type(note.note_type),
+            project: (project != kodabi_core::note::INBOX).then(|| project.to_string()),
+            date: note.date.clone(),
+            tags: note
+                .tags
+                .iter()
+                .map(|tag| tag.as_str().to_string())
+                .collect(),
+            source: note.source.as_yaml().to_string(),
+            confidence: note.routing.confidence(),
+        }
+    }
+}
+
+/// Bridges the vault-side note type to the index-side [`NoteType`] the wire DTO
+/// serializes. Both are the same closed `meeting | note | chat` set.
+fn map_note_type(note_type: kodabi_core::note::NoteType) -> NoteType {
+    match note_type {
+        kodabi_core::note::NoteType::Meeting => NoteType::Meeting,
+        kodabi_core::note::NoteType::Note => NoteType::Note,
+        kodabi_core::note::NoteType::Chat => NoteType::Chat,
     }
 }

@@ -8,7 +8,7 @@ use std::process::{Command, Stdio};
 use kodabi_core::index::{IndexedNote, NoteIndex, NoteType};
 
 #[test]
-fn stdio_server_handshakes_and_lists_projects_with_clean_stdout() {
+fn stdio_server_handshakes_reads_and_writes_with_clean_stdout() {
     let dir = tempfile::tempdir().unwrap();
     let index_path = dir.path().join("index.db");
     let vault = dir.path().join("vault");
@@ -47,6 +47,7 @@ fn stdio_server_handshakes_and_lists_projects_with_clean_stdout() {
         "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{}}\n",
         "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
         "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"list_projects\",\"arguments\":{}}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"add_glossary_term\",\"arguments\":{\"project\":\"Growth\",\"term\":\"MERIDIAN\",\"definition\":\"A migration project.\"}}}\n",
     );
     {
         // Dropping stdin closes the pipe, so the server hits EOF and exits.
@@ -73,9 +74,9 @@ fn stdio_server_handshakes_and_lists_projects_with_clean_stdout() {
         })
         .collect();
 
-    // Two responses: initialize (id 1) and list_projects (id 2). The
-    // notification draws none.
-    assert_eq!(responses.len(), 2);
+    // Three responses: initialize (id 1), list_projects (id 2), and
+    // add_glossary_term (id 3). The notification draws none.
+    assert_eq!(responses.len(), 3);
 
     let init = responses.iter().find(|r| r["id"] == 1).unwrap();
     assert_eq!(init["result"]["serverInfo"]["name"], "kodabi");
@@ -86,4 +87,17 @@ fn stdio_server_handshakes_and_lists_projects_with_clean_stdout() {
         .as_array()
         .unwrap();
     assert!(projects.iter().any(|project| project["slug"] == "Growth"));
+
+    // The write tool round-trips over stdio: a new glossary term is created.
+    let added = responses.iter().find(|r| r["id"] == 3).unwrap();
+    assert_eq!(added["result"]["isError"], serde_json::Value::Bool(false));
+    assert_eq!(added["result"]["structuredContent"]["created"], true);
+    assert_eq!(
+        added["result"]["structuredContent"]["term"]["term"],
+        "MERIDIAN"
+    );
+
+    // The write landed on disk in the project's glossary file.
+    let glossary = std::fs::read_to_string(vault.join("Growth").join("_glossary.yml")).unwrap();
+    assert!(glossary.contains("MERIDIAN"));
 }
