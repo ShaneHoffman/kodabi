@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "kodabi": {
+      "command": "<path-to-kodabi-mcp-binary>",
+      "args": [],
+      "env": {
+        "KODABI_INDEX_DB": "<path-to-app-data>/index.db",
+        "KODABI_KB_ROOT": "<path-to-knowledge-base-root>"
+      }
+    }
+  }
+}

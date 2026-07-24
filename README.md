@@ -61,6 +61,8 @@ crates/kodabi-embed/    # Local embedding backend — bge-small-en-v1.5 via fast
                         # Runtime, fully offline at runtime; cargo-feature-gated.
 crates/kodabi-llm/      # The headless Claude Code runner every LLM call (cleanup, distill,
                         # routing) goes through.
+crates/kodabi-mcp/      # Stdio MCP server (hand-rolled JSON-RPC) exposing the read tool
+                        # surface (search_notes, get_note, list_projects) over kodabi-core.
 .claude/                # Agentic dev workflow — task skills, read-only auditor agents, and
                         # the rules they enforce.
 Cargo.toml              # Cargo workspace manifest (src-tauri + every crates/kodabi-* member).

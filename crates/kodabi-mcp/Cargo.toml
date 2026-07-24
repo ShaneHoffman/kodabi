@@ -1,0 +1,15 @@
+[package]
+name = "kodabi-mcp"
+description = "Kodabi's stdio MCP server — hand-rolled JSON-RPC 2.0 exposing the read tool surface over kodabi-core."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+kodabi-core = { path = "../kodabi-core" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[dev-dependencies]
+tempfile = "3"

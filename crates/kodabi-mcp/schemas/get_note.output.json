@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["note", "meeting", "body_markdown", "action_items"],
+  "properties": {
+    "note": { "$ref": "#/$defs/NoteSummary", "description": "Note metadata (frontmatter-derived)." },
+    "meeting": { "oneOf": [ { "$ref": "#/$defs/MeetingMeta" }, { "type": "null" } ], "description": "Meeting metadata (including extracted decisions) when type is meeting; null otherwise. Always present." },
+    "body_markdown": { "type": ["string", "null"], "description": "The note's distilled markdown body, or null when include_body is false." },
+    "action_items": { "type": "array", "items": { "$ref": "#/$defs/ActionItem" }, "description": "Extracted action items (empty for non-meetings or when include_action_items is false)." }
+  },
+  "$defs": {
+    "NoteId": {
+      "type": "string",
+      "pattern": "^n_[0-9a-z]{6,}$",
+      "description": "Stable note identifier, e.g. \"n_a1b2c3\". Generated at creation, never rewritten on move/re-route. This is the write handle."
+    },
+    "ProjectSlug": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "pattern": "^[^/\\\\]+(?:/[^/\\\\]+)*$",
+      "description": "Hierarchical project path/slug relative to the KB root, e.g. \"Growth/Q3\". Segments are folder names; no leading/trailing or empty segments. Each segment must also be a legal Windows folder name (no reserved device names such as CON/PRN/NUL, no trailing dot or space, none of the characters Windows forbids in a path segment), and may not start with \".\" or \"_\" — those prefixes mark infra folders (\".obsidian\", \"_assets\") that routing discovery skips, so such a project would be writable yet invisible to routing. The Phase 2 writer rejects violations. \"Inbox\" (any casing) is a reserved folder name — a real project may not use it — and \"sessions\" and \"raw\" (any casing) are reserved as first segments: <KB root>/sessions/ holds raw session artifacts, never notes (\"raw\" stays reserved alongside it; a nested segment like \"Data/raw\" is fine). This is the canonical project handle accepted by tools. Because no real project can be named \"Inbox\", read tools that filter by project reuse it as a sentinel meaning \"unfiled\" — see search_notes's project field."
+    },
+    "IsoDate": {
+      "type": "string",
+      "format": "date",
+      "description": "Calendar date, ISO 8601 / RFC 3339 full-date, e.g. \"2026-07-11\"."
+    },
+    "IsoDateTime": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp, RFC 3339 date-time with offset (\"Z\" or numeric), e.g. \"2026-07-11T14:03:00Z\" or \"2026-07-09T14:00:00-07:00\"."
+    },
+    "NoteType": {
+      "type": "string",
+      "enum": ["meeting", "note", "chat"],
+      "description": "The note's frontmatter type."
+    },
+    "ActionItemStatus": {
+      "type": "string",
+      "enum": ["open", "overdue", "done"],
+      "description": "Action-item status. 'overdue' is derived server-side from 'open' + a past due date."
+    },
+    "NoteRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path"],
+      "properties": {
+        "id": { "$ref": "#/$defs/NoteId" },
+        "path": { "type": "string", "description": "Current note path relative to the KB root, e.g. \"Growth/Q3/weekly-sync.md\". Informational; changes on move." }
+      },
+      "description": "Minimal stable reference to a note: stable id plus current path."
+    },
+    "NoteSummary": {
+      "type": "object",
+      "required": ["id", "path", "title", "type", "project", "date", "tags", "source"],
+      "properties": {
+        "id": { "$ref": "#/$defs/NoteId" },
+        "path": { "type": "string", "description": "Current note path relative to the KB root, e.g. \"Growth/Q3/weekly-sync.md\"; an unfiled (Inbox) note's path begins with \"Inbox/\". The filename is a slug of the title (or the id when the title slugifies to empty)." },
+        "title": { "type": "string", "description": "Note display title. The frontmatter `title` when the note carries one (kept in full, past the 40-char filename slug); otherwise the de-slugged filename stem for a legacy or hand-made note without the key." },
+        "type": { "$ref": "#/$defs/NoteType" },
+        "project": { "oneOf": [ { "$ref": "#/$defs/ProjectSlug" }, { "type": "null" } ], "description": "Owning project slug, or null if unfiled (Inbox). Frontmatter stores the sentinel string \"Inbox\" for the null case." },
+        "date": { "oneOf": [ { "$ref": "#/$defs/IsoDateTime" }, { "$ref": "#/$defs/IsoDate" } ], "description": "Frontmatter date, verbatim as stored: full timestamp with the device's local offset (not UTC) when a time is known, local calendar date otherwise. The writer accepts only these two shapes and rejects a naive timestamp with no offset." },
+        "tags": { "type": "array", "items": { "type": "string" }, "description": "Frontmatter tags; empty array when the frontmatter key is absent (the writer omits the key for untagged notes, and normalizes a hand-edited empty list to an omitted key). Each tag is lowercase kebab-case." },
+        "source": { "type": "string", "description": "Frontmatter source: a capture keyword (transcript | quick-capture | chat | import | manual) or a repo-relative path to the raw artifact. Disambiguation: a value exactly equal to a keyword is that keyword; anything else is the path." },
+        "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1, "description": "Routing confidence 0..1, or null when no routing score exists (hand-filed or imported notes)." }
+      },
+      "description": "Core note metadata shared by search hits, recent-notes lists, and routing results. Deliberately open (no unevaluatedProperties) because SearchHit and MeetingMeta extend it — see Conventions."
+    },
+    "MeetingMeta": {
+      "allOf": [ { "$ref": "#/$defs/NoteSummary" } ],
+      "unevaluatedProperties": false,
+      "required": ["duration_seconds", "speaker_count", "decisions", "action_item_count"],
+      "properties": {
+        "duration_seconds": { "type": ["integer", "null"], "minimum": 0, "description": "Meeting duration in seconds, or null if unknown." },
+        "speaker_count": { "type": ["integer", "null"], "minimum": 0, "description": "Distinct speaker count (channel-based; names not resolved in v1), or null." },
+        "decisions": { "type": "array", "items": { "type": "string" }, "description": "Extracted decisions from the meeting." },
+        "action_item_count": { "type": "integer", "minimum": 0, "description": "Number of action items extracted from this meeting." }
+      },
+      "description": "Meeting-specific metadata: a NoteSummary plus meeting fields."
+    },
+    "ActionItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description", "owner", "due_date", "status", "source"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^a_[0-9a-z]{6,}$", "description": "Stable action-item id, e.g. \"a_9f8e7d\"." },
+        "description": { "type": "string", "description": "What is to be done." },
+        "owner": { "type": "string", "description": "Who owns it (e.g. \"you\" or a person's name)." },
+        "due_date": { "oneOf": [ { "$ref": "#/$defs/IsoDate" }, { "type": "null" } ], "description": "Due date, or null if none." },
+        "status": { "$ref": "#/$defs/ActionItemStatus" },
+        "source": { "$ref": "#/$defs/NoteRef", "description": "The meeting note this item was extracted from." },
+        "extracted_date": { "oneOf": [ { "$ref": "#/$defs/IsoDate" }, { "type": "null" } ], "description": "Date the item was extracted (usually the meeting date)." }
+      },
+      "description": "An extracted action / outstanding item linked to its source note."
+    }
+  }
+}

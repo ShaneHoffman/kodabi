@@ -8,6 +8,7 @@ members = [
     "crates/kodabi-transcribe",
     "crates/kodabi-embed",
     "crates/kodabi-llm",
+    "crates/kodabi-mcp",
 ]
 
 [workspace.package]
