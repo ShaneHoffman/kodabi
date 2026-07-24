@@ -18,6 +18,18 @@ if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
 
+// jsdom has no ResizeObserver either. `useXterm` observes its mount to keep the
+// PTY grid matched to the viewport; a no-op stub lets the terminal view mount
+// under test (the fit/resize is asserted at the IPC boundary, not via layout).
+if (!("ResizeObserver" in globalThis)) {
+  class ResizeObserverStub {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
+}
+
 // Testing Library only self-registers its cleanup when a global `afterEach`
 // exists, and this suite runs with `globals: false` (explicit imports, per the
 // repo's TypeScript style). Without this, rendered trees pile up across tests

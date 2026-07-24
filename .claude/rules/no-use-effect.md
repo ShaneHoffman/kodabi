@@ -26,7 +26,9 @@ in `eslint.config.js` fail any non-blessed file at the
   `useDistillState`, `useTranscriptionState`, `useSettings`, `useConsentNudge`.
   DOM: `useCommandPalette` (global ⌘K/Ctrl-K keydown), `useDialogFocus` (dialog
   focus hand-off), `useScrollIntoView` (active-descendant row visibility),
-  `useOutsidePointerDown` (dismiss on outside press). Timers:
+  `useOutsidePointerDown` (dismiss on outside press), `useXterm` (the embedded
+  terminal's xterm.js `Terminal` + `ResizeObserver`, streaming to the PTY).
+  Timers:
   `useDebouncedValue`, `useTimeout`, `useElapsed` (the one-second
   recording clock). The list is duplicated as the override
   block in `eslint.config.js` — **the two must stay in lockstep.**

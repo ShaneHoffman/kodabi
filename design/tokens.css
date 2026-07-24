@@ -179,6 +179,46 @@
   --lift-palette-night: 0 0 0 1px var(--k-paper-08-night), 0 40px 90px -20px var(--k-shade-75-night), 0 12px 30px var(--k-shade-50-night);
   --lift-capture-night: 0 0 0 1px var(--k-paper-08-night), 0 30px 70px -18px var(--k-shade-70-night), 0 10px 24px var(--k-shade-45-night);
 
+  /* ---------- Layer 1 — pigments: terminal ANSI palette ----------
+     The 16 ANSI colours the embedded terminal renders `claude`'s TUI in
+     (Phase 3). Terminal-only: consumed by nothing but the xterm theme in
+     src/useXterm.ts, which reads the Layer-2 `--ansi-*` tokens below through
+     getComputedStyle so the palette re-themes with the app. Day values are
+     tuned to read on the washi planes, night values on the sumi planes.
+     Earthy and muted to sit with the rest of the system, not a stock palette. */
+  --k-ansi-black-day: #2e2c24;
+  --k-ansi-red-day: #a23b2c;
+  --k-ansi-green-day: #4e7a3e;
+  --k-ansi-yellow-day: #8a6d1a;
+  --k-ansi-blue-day: #3b6699;
+  --k-ansi-magenta-day: #86487f;
+  --k-ansi-cyan-day: #3b7377;
+  --k-ansi-white-day: #6b685e; /* ANSI 'white' on a light plane reads as mid ink */
+  --k-ansi-bright-black-day: #8b8879;
+  --k-ansi-bright-red-day: #c05038;
+  --k-ansi-bright-green-day: #5f9147;
+  --k-ansi-bright-yellow-day: #a6841f;
+  --k-ansi-bright-blue-day: #4a7bb0;
+  --k-ansi-bright-magenta-day: #9c5c94;
+  --k-ansi-bright-cyan-day: #47898d;
+  --k-ansi-bright-white-day: #211f17; /* strongest ink, so 'bright white' text stays legible on light */
+  --k-ansi-black-night: #3a362a;
+  --k-ansi-red-night: #d77a68;
+  --k-ansi-green-night: #86ae6b;
+  --k-ansi-yellow-night: #d4b36a;
+  --k-ansi-blue-night: #82a8d6;
+  --k-ansi-magenta-night: #c79ac0;
+  --k-ansi-cyan-night: #82bec0;
+  --k-ansi-white-night: #b3afa1;
+  --k-ansi-bright-black-night: #7b7768;
+  --k-ansi-bright-red-night: #e8968a;
+  --k-ansi-bright-green-night: #a0c888;
+  --k-ansi-bright-yellow-night: #e4c98a;
+  --k-ansi-bright-blue-night: #9fc0e8;
+  --k-ansi-bright-magenta-night: #d8b4d2;
+  --k-ansi-bright-cyan-night: #9fd4d6;
+  --k-ansi-bright-white-night: #efede3;
+
   /* ---------- Layer 3 — type ---------- */
 
   /* families — chosen faces first, system stand-ins retained as fallback.
@@ -602,6 +642,23 @@
   --lift-toolbar: var(--lift-toolbar-day);
   --lift-palette: var(--lift-palette-day);
   --lift-capture: var(--lift-capture-day);
+  /* terminal ANSI palette (day) — read in JS by src/useXterm.ts */
+  --ansi-black: var(--k-ansi-black-day);
+  --ansi-red: var(--k-ansi-red-day);
+  --ansi-green: var(--k-ansi-green-day);
+  --ansi-yellow: var(--k-ansi-yellow-day);
+  --ansi-blue: var(--k-ansi-blue-day);
+  --ansi-magenta: var(--k-ansi-magenta-day);
+  --ansi-cyan: var(--k-ansi-cyan-day);
+  --ansi-white: var(--k-ansi-white-day);
+  --ansi-bright-black: var(--k-ansi-bright-black-day);
+  --ansi-bright-red: var(--k-ansi-bright-red-day);
+  --ansi-bright-green: var(--k-ansi-bright-green-day);
+  --ansi-bright-yellow: var(--k-ansi-bright-yellow-day);
+  --ansi-bright-blue: var(--k-ansi-bright-blue-day);
+  --ansi-bright-magenta: var(--k-ansi-bright-magenta-day);
+  --ansi-bright-cyan: var(--k-ansi-bright-cyan-day);
+  --ansi-bright-white: var(--k-ansi-bright-white-day);
 }
 
 /* ---------- Layer 2 — dark (night sumi): auto when the OS asks and not forced light ---------- */
@@ -642,6 +699,23 @@
     --lift-toolbar: var(--lift-toolbar-night);
     --lift-palette: var(--lift-palette-night);
     --lift-capture: var(--lift-capture-night);
+    /* terminal ANSI palette (night) — read in JS by src/useXterm.ts */
+    --ansi-black: var(--k-ansi-black-night);
+    --ansi-red: var(--k-ansi-red-night);
+    --ansi-green: var(--k-ansi-green-night);
+    --ansi-yellow: var(--k-ansi-yellow-night);
+    --ansi-blue: var(--k-ansi-blue-night);
+    --ansi-magenta: var(--k-ansi-magenta-night);
+    --ansi-cyan: var(--k-ansi-cyan-night);
+    --ansi-white: var(--k-ansi-white-night);
+    --ansi-bright-black: var(--k-ansi-bright-black-night);
+    --ansi-bright-red: var(--k-ansi-bright-red-night);
+    --ansi-bright-green: var(--k-ansi-bright-green-night);
+    --ansi-bright-yellow: var(--k-ansi-bright-yellow-night);
+    --ansi-bright-blue: var(--k-ansi-bright-blue-night);
+    --ansi-bright-magenta: var(--k-ansi-bright-magenta-night);
+    --ansi-bright-cyan: var(--k-ansi-bright-cyan-night);
+    --ansi-bright-white: var(--k-ansi-bright-white-night);
   }
 }
 
@@ -682,6 +756,23 @@
   --lift-toolbar: var(--lift-toolbar-night);
   --lift-palette: var(--lift-palette-night);
   --lift-capture: var(--lift-capture-night);
+  /* terminal ANSI palette (night) — read in JS by src/useXterm.ts */
+  --ansi-black: var(--k-ansi-black-night);
+  --ansi-red: var(--k-ansi-red-night);
+  --ansi-green: var(--k-ansi-green-night);
+  --ansi-yellow: var(--k-ansi-yellow-night);
+  --ansi-blue: var(--k-ansi-blue-night);
+  --ansi-magenta: var(--k-ansi-magenta-night);
+  --ansi-cyan: var(--k-ansi-cyan-night);
+  --ansi-white: var(--k-ansi-white-night);
+  --ansi-bright-black: var(--k-ansi-bright-black-night);
+  --ansi-bright-red: var(--k-ansi-bright-red-night);
+  --ansi-bright-green: var(--k-ansi-bright-green-night);
+  --ansi-bright-yellow: var(--k-ansi-bright-yellow-night);
+  --ansi-bright-blue: var(--k-ansi-bright-blue-night);
+  --ansi-bright-magenta: var(--k-ansi-bright-magenta-night);
+  --ansi-bright-cyan: var(--k-ansi-bright-cyan-night);
+  --ansi-bright-white: var(--k-ansi-bright-white-night);
 }
 
 /* ---------- Layer 2 — light (day washi): forced (wins over OS dark) ---------- */
@@ -721,4 +812,21 @@
   --lift-toolbar: var(--lift-toolbar-day);
   --lift-palette: var(--lift-palette-day);
   --lift-capture: var(--lift-capture-day);
+  /* terminal ANSI palette (day) — read in JS by src/useXterm.ts */
+  --ansi-black: var(--k-ansi-black-day);
+  --ansi-red: var(--k-ansi-red-day);
+  --ansi-green: var(--k-ansi-green-day);
+  --ansi-yellow: var(--k-ansi-yellow-day);
+  --ansi-blue: var(--k-ansi-blue-day);
+  --ansi-magenta: var(--k-ansi-magenta-day);
+  --ansi-cyan: var(--k-ansi-cyan-day);
+  --ansi-white: var(--k-ansi-white-day);
+  --ansi-bright-black: var(--k-ansi-bright-black-day);
+  --ansi-bright-red: var(--k-ansi-bright-red-day);
+  --ansi-bright-green: var(--k-ansi-bright-green-day);
+  --ansi-bright-yellow: var(--k-ansi-bright-yellow-day);
+  --ansi-bright-blue: var(--k-ansi-bright-blue-day);
+  --ansi-bright-magenta: var(--k-ansi-bright-magenta-day);
+  --ansi-bright-cyan: var(--k-ansi-bright-cyan-day);
+  --ansi-bright-white: var(--k-ansi-bright-white-day);
 }

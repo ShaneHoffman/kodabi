@@ -21,20 +21,29 @@ Claude Code MCP reference (`code.claude.com/docs/en/mcp`) and the MCP tool speci
   shell and preconfigured for the embedded Claude Code terminal (Phase 3).
 - Tools are callable as **`mcp__kodabi__<tool>`** — Claude Code's namespacing for a server named
   `kodabi` with no plugin wrapper.
-- Example project-scoped `.mcp.json` entry (committed, shared with the team):
+- The `.mcp.json` shape (the embedded terminal generates this machine-local at runtime — see
+  `src-tauri/src/terminal_cmds.rs`; the repo's `.mcp.json.example` is the template):
 
   ```json
   {
     "mcpServers": {
-      "kodabi": { "command": "<path-to-kodabi-mcp-binary>", "args": [], "env": {} }
+      "kodabi": {
+        "command": "<path-to-kodabi-mcp-binary>",
+        "args": [],
+        "env": {
+          "KODABI_INDEX_DB": "<app-data>/index.db",
+          "KODABI_KB_ROOT": "<knowledge-base-root>"
+        }
+      }
     }
   }
   ```
 
-  An entry with no `type`/`url` field is read by Claude Code as a stdio server. Claude Code sets
-  `CLAUDE_PROJECT_DIR` in the spawned process's environment; the server resolves the knowledge-base
-  root from its own config (not from the working directory), and may implement the MCP `roots/list`
-  request if it wants to bound its own filesystem access to Claude Code's granted directories.
+  An entry with no `type`/`url` field is read by Claude Code as a stdio server. The server resolves
+  the knowledge-base root and the index from its own config — the two env vars above, injected by the
+  Tauri shell from app config (not from the working directory), read by `crates/kodabi-mcp/src/config.rs`.
+  It may implement the MCP `roots/list` request if it wants to bound its own filesystem access to
+  Claude Code's granted directories.
 - **Permissions.** The two write tools should be allow-listed explicitly — e.g.
   `"mcp__kodabi__file_note_to_project"`, `"mcp__kodabi__add_glossary_term"` — so Claude Code's
   permission prompt is meaningful per-tool; the six read tools can be granted as a group. The server

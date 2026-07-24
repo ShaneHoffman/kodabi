@@ -1,0 +1,37 @@
+/* ============================================================
+   TerminalView — the embedded Claude Code terminal.
+
+   Geometry only. The xterm canvas colours (background, foreground, the 16 ANSI
+   colours, cursor) are set in JS from the design tokens (src/useXterm.ts), so no
+   colour literal lives here; xterm.js also injects its own stylesheet for the
+   rows/cursor, which we do not restyle.
+   ============================================================ */
+
+.terminal-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  margin-top: var(--space-sm);
+}
+
+/* The xterm mount fills the pane and clips its own overflow — the terminal
+   scrolls inside itself, never the page. `min-height: 0` is what lets it shrink
+   below xterm's content so it can size to real pixels. Its surface matches the
+   raised plane so it reads as a panel before xterm paints. */
+.terminal-view__mount {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+}
+
+/* The "session ended / Restart" bar under the pane, shown only after `claude`
+   exits. */
+.terminal-view__ended {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding-top: var(--space-2xs);
+}

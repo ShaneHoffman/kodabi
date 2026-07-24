@@ -165,6 +165,12 @@ impl HeadlessClaude for ClaudeRunner {
 /// denied action fails immediately instead of blocking on a prompt with no
 /// TTY to answer it. Every flag here was verified against a live `claude`
 /// invocation, including that this combination preserves subscription auth.
+///
+/// `CLAUDE_CODE_SKIP_PROMPT_HISTORY` disables Claude Code's own session-log and
+/// prompt-history writing for this run. That closes the retention gap
+/// FOUNDING_DOC §3.7 names: the transcript text passed here would otherwise
+/// linger in `~/.claude`, outside the in-app retention policy's reach. Scoped to
+/// this spawn's environment, so it never touches the user's global config.
 fn invoke(config: &ClaudeConfig, request: &LlmRequest) -> Result<String, LlmRunError> {
     let program = config
         .binary
@@ -189,6 +195,9 @@ fn invoke(config: &ClaudeConfig, request: &LlmRequest) -> Result<String, LlmRunE
         .arg("")
         .arg("--permission-mode")
         .arg("dontAsk")
+        // Disable Claude Code's own transcript/prompt-history logging for this
+        // run (FOUNDING_DOC §3.7). See the fn doc.
+        .env("CLAUDE_CODE_SKIP_PROMPT_HISTORY", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -246,7 +255,7 @@ fn wait_with_timeout(
         Ok(Ok(output)) => Ok(output),
         Ok(Err(err)) => Err(LlmRunError::Spawn(err.to_string())),
         Err(_) => {
-            kill_process(pid);
+            kill_process_tree(pid);
             Err(LlmRunError::Spawn(format!(
                 "headless Claude Code did not exit within {timeout:?}"
             )))
@@ -254,15 +263,22 @@ fn wait_with_timeout(
     }
 }
 
+/// Kills a process and its whole descendant tree, best-effort and quiet (no
+/// console window pops). On Windows that is `taskkill /T /F`, which reaps the
+/// subtree — exactly what the embedded terminal needs to reap
+/// `claude → kodabi-mcp` on app exit, so `src-tauri`'s `terminal_cmds` reuses
+/// this rather than duplicating the platform split.
 #[cfg(windows)]
-fn kill_process(pid: u32) {
+pub fn kill_process_tree(pid: u32) {
     let _ = hidden_command("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .output();
 }
 
+/// See the Windows variant. `kill -9` on the pid (no tree flag; the callers here
+/// spawn no descendants worth reaping on non-Windows).
 #[cfg(not(windows))]
-fn kill_process(pid: u32) {
+pub fn kill_process_tree(pid: u32) {
     let _ = hidden_command("kill")
         .arg("-9")
         .arg(pid.to_string())
@@ -281,7 +297,7 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 /// directly.
 ///
 /// The platform split lives in `hide_console_window` (mirroring
-/// [`kill_process`]) rather than an inline `#[cfg(windows)]` block, so the
+/// [`kill_process_tree`]) rather than an inline `#[cfg(windows)]` block, so the
 /// non-Windows expansion doesn't strip every use of the binding and trip
 /// `unused_mut`/`let_and_return` under `-D warnings`.
 fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> Command {
