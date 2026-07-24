@@ -15,9 +15,10 @@ mod search_notes;
 
 use std::path::Path;
 
+use chrono::NaiveDate;
 use serde_json::Value;
 
-use kodabi_core::index::{IndexError, NoteRow, NoteType};
+use kodabi_core::index::{ActionItemRow, IndexError, NoteRow, NoteType};
 use kodabi_core::note::NoteError;
 use kodabi_core::vault::{AddGlossaryTermError, ListedNote};
 
@@ -130,6 +131,76 @@ impl From<&NoteRow> for NoteSummaryDto {
             source: row.source.clone(),
             confidence: row.confidence,
         }
+    }
+}
+
+/// The `MeetingMeta` `$def` — a `NoteSummary` (flattened) plus the meeting-only
+/// fields. `duration_seconds`/`speaker_count` are `null` when the transcript is
+/// unavailable; `action_item_count` counts the note's action items regardless of
+/// whether the list itself is included in the response.
+#[derive(serde::Serialize)]
+struct MeetingMetaDto {
+    #[serde(flatten)]
+    note: NoteSummaryDto,
+    duration_seconds: Option<u32>,
+    speaker_count: Option<u32>,
+    decisions: Vec<String>,
+    action_item_count: u32,
+}
+
+/// The `NoteRef` `$def`: a back-reference to the note an action item was
+/// extracted from.
+#[derive(serde::Serialize)]
+struct NoteRefDto {
+    id: String,
+    path: String,
+}
+
+/// The `ActionItem` `$def`. `status` is derived server-side (see
+/// [`effective_status`]); `extracted_date` is omitted when absent, matching its
+/// optional status in the schema.
+#[derive(serde::Serialize)]
+struct ActionItemDto {
+    id: String,
+    description: String,
+    owner: String,
+    due_date: Option<String>,
+    status: &'static str,
+    source: NoteRefDto,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extracted_date: Option<String>,
+}
+
+impl ActionItemDto {
+    /// Projects a stored [`ActionItemRow`] to the wire shape, resolving `source`
+    /// from the owning note and `status` against `today`.
+    fn from_row(item: &ActionItemRow, note: &NoteRow, today: NaiveDate) -> Self {
+        Self {
+            id: item.id.clone(),
+            description: item.description.clone(),
+            owner: item.owner.clone(),
+            due_date: item.due_date.clone(),
+            status: effective_status(item.done, item.due_date.as_deref(), today),
+            source: NoteRefDto {
+                id: note.id.clone(),
+                path: note.path.clone(),
+            },
+            extracted_date: item.extracted_date.clone(),
+        }
+    }
+}
+
+/// The wire `status` for an action item: a checked item is `done`; otherwise it
+/// is `overdue` once its due date is strictly before `today`, else `open`.
+/// Derived here rather than stored so it stays correct as the clock advances (an
+/// item with no due date is never overdue).
+fn effective_status(done: bool, due_date: Option<&str>, today: NaiveDate) -> &'static str {
+    if done {
+        return "done";
+    }
+    match due_date.and_then(|due| NaiveDate::parse_from_str(due, "%Y-%m-%d").ok()) {
+        Some(due) if due < today => "overdue",
+        _ => "open",
     }
 }
 

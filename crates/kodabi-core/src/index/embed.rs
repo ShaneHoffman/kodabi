@@ -173,6 +173,7 @@ mod tests {
             source: "manual".to_string(),
             confidence: None,
             body: format!("body of {id}"),
+            meeting: None,
         }
     }
 

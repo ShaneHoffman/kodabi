@@ -22,7 +22,10 @@ mod search;
 
 pub use embed::{ChunkHit, EmbeddedChunk};
 
-pub use note::{normalize_date_to_utc, IndexedNote, NoteRow, NoteType, UnknownNoteType};
+pub use note::{
+    normalize_date_to_utc, ActionItemRow, IndexedNote, MeetingFactsRow, NoteRow, NoteType,
+    UnknownNoteType,
+};
 
 pub use search::{PageInfo, SearchHit, SearchParams, SearchResults, TagMatch};
 
@@ -212,6 +215,7 @@ mod tests {
                     source: "manual".to_string(),
                     confidence: None,
                     body: "durable body".to_string(),
+                    meeting: None,
                 })
                 .unwrap();
         }

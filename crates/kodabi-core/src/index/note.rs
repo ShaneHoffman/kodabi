@@ -130,6 +130,13 @@ pub struct IndexedNote {
     pub confidence: Option<f64>,
     /// Note body (frontmatter stripped) — the full-text search content.
     pub body: String,
+    /// Structured meeting facts (decisions, action items, duration, speaker
+    /// count) for a meeting note, or `None` for a non-meeting note (or when the
+    /// caller has not derived them). Populated by the write path via
+    /// [`crate::meeting::meeting_facts_for`]; [`from_note`](IndexedNote::from_note)
+    /// leaves it `None`, since deriving it reads the session file the note's
+    /// `source` points at, which the plain frontmatter/body mapping does not do.
+    pub meeting: Option<crate::meeting::MeetingFacts>,
 }
 
 impl IndexedNote {
@@ -154,8 +161,35 @@ impl IndexedNote {
             source: note.source.as_yaml().to_string(),
             confidence: note.routing.confidence(),
             body: note.body.clone(),
+            meeting: None,
         }
     }
+}
+
+/// The meeting-scalar row read back for a meeting note: the two session-derived
+/// counts (nullable) and the ordered decisions. The action items are a separate
+/// read ([`NoteRow`]'s query surface exposes `get_action_items`), keeping the
+/// `search`/`notes_by_project` paths free of any meeting joins.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MeetingFactsRow {
+    pub duration_seconds: Option<u32>,
+    pub speaker_count: Option<u32>,
+    pub decisions: Vec<String>,
+}
+
+/// One stored action item, read back in body order. Mirrors
+/// [`crate::meeting::ActionItemFact`] (the derivation-side shape) the way
+/// [`NoteRow`] mirrors [`IndexedNote`]: a distinct read type for the query
+/// surface. `overdue` is not stored — it is derived server-side at read time
+/// from `done` + `due_date`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ActionItemRow {
+    pub id: String,
+    pub description: String,
+    pub owner: String,
+    pub due_date: Option<String>,
+    pub done: bool,
+    pub extracted_date: Option<String>,
 }
 
 /// A note row read back from the index. Carries both the verbatim `date` and

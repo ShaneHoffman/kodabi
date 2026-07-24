@@ -231,6 +231,9 @@ fn run_reconcile(
                     report.upserted, report.unchanged, report.deleted
                 );
             }
+            // Meeting notes skipped by the fast path (unchanged on disk) still
+            // need their facts derived after the v3 migration — backfill them.
+            backfill_meeting_facts(index, root);
             if let Some(embedder) = embedder {
                 reconcile_missing(index, embedder);
             }
@@ -269,6 +272,7 @@ fn run_rebuild(
     };
     match report {
         Ok(report) => {
+            backfill_meeting_facts(index, root);
             if let Some(embedder) = embedder {
                 reconcile_missing(index, embedder);
             }
@@ -288,6 +292,21 @@ fn run_rebuild(
                 },
             );
         }
+    }
+}
+
+/// Derives meeting facts for any meeting note the index has not backfilled yet.
+/// Independent of embeddings (needs no embedder): the v3 migration adds the
+/// meeting tables empty and a reconcile fast-path skips unchanged notes, so a
+/// field database's existing meetings need one derive pass. Best-effort — a
+/// failure is logged and the next sweep retries. Fast (each note is one small
+/// JSONL read), so it runs under the index lock like `reconcile` itself.
+fn backfill_meeting_facts(index: &Mutex<NoteIndex>, vault_root: &Path) {
+    let mut idx = lock(index);
+    match reconcile::reconcile_missing_meeting_facts(vault_root, &mut idx) {
+        Ok(0) => {}
+        Ok(count) => eprintln!("backfilled meeting facts for {count} note(s)"),
+        Err(err) => eprintln!("meeting-facts backfill failed: {err}"),
     }
 }
 

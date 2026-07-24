@@ -20,6 +20,7 @@ fn migrations() -> Vec<fn() -> String> {
     vec![
         migration_0001_initial_schema,
         migration_0002_chunked_embeddings,
+        migration_0003_meeting_facts,
     ]
 }
 
@@ -135,6 +136,58 @@ CREATE TABLE note_chunks (
     )
 }
 
+/// v3 — structured meeting facts for the MCP `get_note` tool. Adds three tables
+/// holding what a meeting note's Markdown body (decisions, action items) and its
+/// raw session transcript (duration, distinct speaker channels) contain, so
+/// `get_note` can serve `MeetingMeta` + `ActionItem` without re-parsing the body
+/// or re-reading the JSONL on every call.
+///
+/// - `note_meetings` — one row per meeting note: the two session-derived scalars
+///   (`duration_seconds`, `speaker_count`), both nullable because a note whose
+///   `source` is a keyword (e.g. `manual`) or whose transcript was pruned by
+///   retention has no transcript to measure.
+/// - `note_decisions` — the ordered `## Decisions` bullets.
+/// - `note_action_items` — the ordered `## Action items` lines, parsed into the
+///   grammar's fields; `item_id` is a deterministic hash of the note id + the
+///   line's content, so it is stable across reindexes (see `crate::meeting`).
+///   `done` is the checkbox state; `overdue` is derived server-side and not
+///   stored.
+///
+/// All three are keyed by `note_id TEXT` (not the `notes.pk` foreign key), so
+/// they sit beside `notes_vec`/`note_chunks` as a body/session-derived cache and
+/// are cleared explicitly in `delete_note`/`clear`. Because the whole index is a
+/// rebuildable cache (FOUNDING_DOC §3.6), a field database gains three empty
+/// tables on upgrade and repopulates them via the meeting-facts backfill pass
+/// (`reconcile::reconcile_missing_meeting_facts`) — nothing is lost.
+fn migration_0003_meeting_facts() -> String {
+    r#"
+CREATE TABLE note_meetings (
+    note_id          TEXT PRIMARY KEY,
+    duration_seconds INTEGER CHECK (duration_seconds IS NULL OR duration_seconds >= 0),
+    speaker_count    INTEGER CHECK (speaker_count IS NULL OR speaker_count >= 0)
+);
+CREATE TABLE note_decisions (
+    note_id TEXT NOT NULL,
+    seq     INTEGER NOT NULL,
+    text    TEXT NOT NULL,
+    PRIMARY KEY (note_id, seq)
+);
+CREATE TABLE note_action_items (
+    note_id        TEXT NOT NULL,
+    seq            INTEGER NOT NULL,
+    item_id        TEXT NOT NULL,
+    description    TEXT NOT NULL,
+    owner          TEXT NOT NULL,
+    due_date       TEXT,
+    done           INTEGER NOT NULL CHECK (done IN (0, 1)),
+    extracted_date TEXT,
+    PRIMARY KEY (note_id, seq)
+);
+CREATE INDEX idx_note_action_items_item_id ON note_action_items (item_id);
+"#
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::NoteIndex;
@@ -167,11 +220,14 @@ mod tests {
             "notes_fts",
             "notes_vec",
             "note_chunks",
+            "note_meetings",
+            "note_decisions",
+            "note_action_items",
         ] {
             assert!(table_exists(&index, table), "missing table {table}");
         }
 
-        assert_eq!(user_version(&index), 2);
+        assert_eq!(user_version(&index), 3);
     }
 
     #[test]
@@ -181,23 +237,27 @@ mod tests {
         // would if it tried to re-create existing tables).
         super::apply(&mut index.conn).unwrap();
 
-        assert_eq!(user_version(&index), 2);
+        assert_eq!(user_version(&index), 3);
     }
 
     #[test]
-    fn a_v1_database_upgrades_to_v2_on_open() {
+    fn a_v1_database_upgrades_to_the_latest_schema_on_open() {
         use super::super::EMBEDDING_DIM;
 
         // Reconstruct a genuine v1 database. The v1 `notes_vec` was a
-        // single-row-per-note vec0 table at 768 dimensions, and `note_chunks`
-        // did not exist. Roll the freshly-opened (v2) database back to exactly
-        // that shape so `apply` performs the real 768 -> EMBEDDING_DIM recreate a
-        // field upgrade would — not a same-dimension no-op.
+        // single-row-per-note vec0 table at 768 dimensions; `note_chunks` (v2) and
+        // the meeting-facts tables (v3) did not exist. Roll the freshly-opened
+        // (latest) database back to exactly that shape so `apply` runs the real
+        // chain — including the 768 -> EMBEDDING_DIM recreate — a field upgrade
+        // would, not a same-dimension no-op.
         let mut index = NoteIndex::open_in_memory().unwrap();
         index
             .conn
             .execute_batch(
-                "DROP TABLE note_chunks;
+                "DROP TABLE note_action_items;
+                 DROP TABLE note_decisions;
+                 DROP TABLE note_meetings;
+                 DROP TABLE note_chunks;
                  DROP TABLE notes_vec;
                  CREATE VIRTUAL TABLE notes_vec USING vec0(note_id TEXT PRIMARY KEY, embedding FLOAT[768]);
                  PRAGMA user_version = 1;",
@@ -217,8 +277,15 @@ mod tests {
 
         super::apply(&mut index.conn).unwrap();
 
-        assert_eq!(user_version(&index), 2);
-        assert!(table_exists(&index, "note_chunks"));
+        assert_eq!(user_version(&index), 3);
+        for table in [
+            "note_chunks",
+            "note_meetings",
+            "note_decisions",
+            "note_action_items",
+        ] {
+            assert!(table_exists(&index, table), "missing table {table}");
+        }
 
         // The recreate actually changed the dimension: the upgraded table takes
         // an EMBEDDING_DIM (384) chunk vector and rejects the old 768-dim width.
@@ -240,6 +307,50 @@ mod tests {
             old_width.is_err(),
             "the upgraded table must reject the old 768-dim width"
         );
+    }
+
+    #[test]
+    fn a_v2_database_upgrades_to_v3_on_open() {
+        // Reconstruct a genuine v2 database: the meeting-facts tables did not
+        // exist yet. Roll the freshly-opened (v3) database back to exactly that
+        // shape so `apply` performs the real additive upgrade a field database
+        // would, with a note already present (the migration must cope with data).
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        index
+            .conn
+            .execute_batch(
+                "DROP TABLE note_action_items;
+                 DROP TABLE note_decisions;
+                 DROP TABLE note_meetings;
+                 PRAGMA user_version = 2;",
+            )
+            .unwrap();
+        index
+            .conn
+            .execute_batch(
+                "INSERT INTO notes (id, path, title, type, project, date_raw, date_utc, source, body)
+                 VALUES ('n_old', 'n_old.md', 'Old', 'meeting', NULL, '2026-01-01', '2026-01-01T00:00:00Z', 'manual', 'body');",
+            )
+            .expect("a v2 note row inserts");
+
+        super::apply(&mut index.conn).unwrap();
+
+        assert_eq!(user_version(&index), 3);
+        for table in ["note_meetings", "note_decisions", "note_action_items"] {
+            assert!(table_exists(&index, table), "missing table {table}");
+        }
+        // The upgraded tables accept rows keyed by the note id.
+        index
+            .conn
+            .execute_batch(
+                "INSERT INTO note_meetings (note_id, duration_seconds, speaker_count)
+                     VALUES ('n_old', 900, 2);
+                 INSERT INTO note_decisions (note_id, seq, text) VALUES ('n_old', 0, 'Ship it');
+                 INSERT INTO note_action_items
+                     (note_id, seq, item_id, description, owner, due_date, done, extracted_date)
+                     VALUES ('n_old', 0, 'a_abc123', 'send the deck', 'You', NULL, 0, '2026-01-01');",
+            )
+            .expect("the upgraded meeting-facts tables accept rows");
     }
 
     #[test]

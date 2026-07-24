@@ -617,7 +617,7 @@ fn split_due_tail(description: &str) -> Option<(String, String)> {
 /// check and the `chrono` parse matter: `chrono` alone would accept
 /// `2026-7-1`, which the grammar (and the MCP `IsoDate` format) must never
 /// emit.
-fn valid_iso_date(s: &str) -> Option<String> {
+pub(crate) fn valid_iso_date(s: &str) -> Option<String> {
     let s = s.trim();
     let b = s.as_bytes();
     let shaped = s.len() == 10
@@ -663,6 +663,33 @@ fn render_action_item(item: &ActionItemDraft) -> String {
         Some(due) => format!("{owner} to {} by {due}.", item.description),
         None => format!("{owner} to {}.", item.description),
     }
+}
+
+/// Parses one rendered action-item line back into `(owner, description,
+/// due_date)` — the inverse of [`render_action_item`] and the exact parse the
+/// meeting-facts extractor ([`crate::meeting`]) runs against a note body.
+///
+/// Accepts either checkbox state (`- [ ] ` / `- [x] `); the caller inspects the
+/// prefix itself when it needs the done/open distinction. Returns `None` for a
+/// line that does not fit the grammar. The owner is the prefix before the
+/// *first* `" to "`; a trailing `" by {YYYY-MM-DD}"` immediately before the
+/// terminal `.` is peeled off as the due date only when it is a valid calendar
+/// date, so a description ending in a date-like phrase is not misread.
+pub(crate) fn parse_action_line(line: &str) -> Option<(String, String, Option<String>)> {
+    let rest = line
+        .strip_prefix("- [ ] ")
+        .or_else(|| line.strip_prefix("- [x] "))?;
+    let rest = rest.strip_suffix('.')?;
+    let (owner, rest) = rest.split_once(" to ")?;
+    // An optional " by YYYY-MM-DD" tail: 4 marker chars + 10 date chars.
+    if let Some(idx) = rest.len().checked_sub(14) {
+        if rest.is_char_boundary(idx) && rest[idx..].starts_with(" by ") {
+            if let Some(date) = valid_iso_date(&rest[idx + 4..]) {
+                return Some((owner.to_string(), rest[..idx].to_string(), Some(date)));
+            }
+        }
+    }
+    Some((owner.to_string(), rest.to_string(), None))
 }
 
 /// Renders the note's Markdown body: `# Summary`, then `## Decisions`,
@@ -1610,26 +1637,6 @@ mod tests {
             render_body(&output),
             "# Summary\n\nNothing was decided.\n\n## Open questions\n\n- Should we meet again?"
         );
-    }
-
-    /// Test-local implementation of the module-doc grammar — the same parse
-    /// Phase 3's `ActionItem` extractor performs. Returns
-    /// `(owner, description, due_date)`.
-    fn parse_action_line(line: &str) -> Option<(String, String, Option<String>)> {
-        let rest = line
-            .strip_prefix("- [ ] ")
-            .or_else(|| line.strip_prefix("- [x] "))?;
-        let rest = rest.strip_suffix('.')?;
-        let (owner, rest) = rest.split_once(" to ")?;
-        // An optional " by YYYY-MM-DD" tail: 4 marker chars + 10 date chars.
-        if let Some(idx) = rest.len().checked_sub(14) {
-            if rest.is_char_boundary(idx) && rest[idx..].starts_with(" by ") {
-                if let Some(date) = valid_iso_date(&rest[idx + 4..]) {
-                    return Some((owner.to_string(), rest[..idx].to_string(), Some(date)));
-                }
-            }
-        }
-        Some((owner.to_string(), rest.to_string(), None))
     }
 
     #[test]

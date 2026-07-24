@@ -67,12 +67,14 @@ mod tests {
     use std::path::PathBuf;
 
     use kodabi_core::index::{IndexedNote, NoteIndex, NoteType};
+    use kodabi_core::meeting::{ActionItemFact, MeetingFacts};
 
     use crate::config::ServerConfig;
 
-    /// A server backed by an in-memory index seeded with one meeting note, plus a
-    /// temp vault holding one project folder on disk (for `list_projects`). The
-    /// returned `TempDir` must be kept alive for the vault to exist.
+    /// A server backed by an in-memory index seeded with one meeting note (with
+    /// structured meeting facts) and one plain note, plus a temp vault holding one
+    /// project folder on disk (for `list_projects`). The returned `TempDir` must
+    /// be kept alive for the vault to exist.
     fn seeded_server() -> (Server, tempfile::TempDir) {
         let vault = tempfile::tempdir().unwrap();
         fs::create_dir(vault.path().join("Growth")).unwrap();
@@ -90,6 +92,46 @@ mod tests {
                 source: "transcript".to_string(),
                 confidence: Some(0.9),
                 body: "We agreed to ship Phase 3. Action: send the recap.".to_string(),
+                meeting: Some(MeetingFacts {
+                    duration_seconds: Some(1800),
+                    speaker_count: Some(2),
+                    decisions: vec!["Ship Phase 3".to_string()],
+                    action_items: vec![
+                        ActionItemFact {
+                            id: "a_recap1".to_string(),
+                            description: "send the recap".to_string(),
+                            owner: "You".to_string(),
+                            // A due date safely in the past → `overdue` regardless
+                            // of when the test runs.
+                            due_date: Some("2020-01-01".to_string()),
+                            done: false,
+                            extracted_date: Some("2026-07-10".to_string()),
+                        },
+                        ActionItemFact {
+                            id: "a_room01".to_string(),
+                            description: "book the room".to_string(),
+                            owner: "Priya".to_string(),
+                            due_date: None,
+                            done: true,
+                            extracted_date: Some("2026-07-10".to_string()),
+                        },
+                    ],
+                }),
+            })
+            .unwrap();
+        index
+            .upsert_note(&IndexedNote {
+                id: "n_plain1".to_string(),
+                path: "Growth/idea.md".to_string(),
+                title: "Idea".to_string(),
+                note_type: NoteType::Note,
+                project: Some("Growth".to_string()),
+                date: "2026-07-11".to_string(),
+                tags: vec![],
+                source: "quick-capture".to_string(),
+                confidence: None,
+                body: "A standalone thought.".to_string(),
+                meeting: None,
             })
             .unwrap();
 
@@ -186,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn get_note_returns_metadata_and_body_with_stubbed_meeting_fields() {
+    fn get_note_returns_meeting_metadata_and_action_items() {
         let (server, _vault) = seeded_server();
         let response = call_tool(&server, "get_note", json!({ "id": "n_meet01" }));
         let structured = &response["result"]["structuredContent"];
@@ -194,14 +236,61 @@ mod tests {
         assert_eq!(response["result"]["isError"], Value::Bool(false));
         assert_eq!(structured["note"]["id"], "n_meet01");
         assert_eq!(structured["note"]["type"], "meeting");
-        assert_eq!(structured["note"]["project"], "Growth");
         assert!(structured["body_markdown"]
             .as_str()
             .unwrap()
             .contains("Phase 3"));
-        // Stubbed until the index carries meeting metadata.
+
+        // `meeting` carries the index-backed MeetingMeta, extending NoteSummary.
+        let meeting = &structured["meeting"];
+        assert_eq!(meeting["id"], "n_meet01");
+        assert_eq!(meeting["type"], "meeting");
+        assert_eq!(meeting["duration_seconds"], 1800);
+        assert_eq!(meeting["speaker_count"], 2);
+        assert_eq!(meeting["decisions"], json!(["Ship Phase 3"]));
+        assert_eq!(meeting["action_item_count"], 2);
+
+        // Both action items are returned, in body order, with server-derived
+        // status: the open item with a past due date is `overdue`, the checked
+        // item is `done`.
+        let items = structured["action_items"].as_array().unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0]["id"], "a_recap1");
+        assert_eq!(items[0]["owner"], "You");
+        assert_eq!(items[0]["status"], "overdue");
+        assert_eq!(items[0]["source"]["id"], "n_meet01");
+        assert_eq!(items[0]["source"]["path"], "Growth/kickoff.md");
+        assert_eq!(items[0]["extracted_date"], "2026-07-10");
+        assert_eq!(items[1]["id"], "a_room01");
+        assert_eq!(items[1]["status"], "done");
+        assert_eq!(items[1]["due_date"], Value::Null);
+    }
+
+    #[test]
+    fn get_note_returns_null_meeting_and_no_action_items_for_a_plain_note() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(&server, "get_note", json!({ "id": "n_plain1" }));
+        let structured = &response["result"]["structuredContent"];
+
+        assert_eq!(response["result"]["isError"], Value::Bool(false));
+        assert_eq!(structured["note"]["type"], "note");
         assert_eq!(structured["meeting"], Value::Null);
         assert_eq!(structured["action_items"], json!([]));
+    }
+
+    #[test]
+    fn get_note_include_action_items_false_omits_the_list_but_keeps_the_count() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(
+            &server,
+            "get_note",
+            json!({ "id": "n_meet01", "include_action_items": false }),
+        );
+        let structured = &response["result"]["structuredContent"];
+
+        // The list is empty, but the meeting metadata still reports the true count.
+        assert_eq!(structured["action_items"], json!([]));
+        assert_eq!(structured["meeting"]["action_item_count"], 2);
     }
 
     #[test]
