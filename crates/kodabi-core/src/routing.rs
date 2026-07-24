@@ -1147,8 +1147,8 @@ mod tests {
         // Equal weights order by project name; the tie itself lands in Inbox
         // even with the threshold floored, because a tie's confidence is 0.0
         // and the effective threshold can never be 0.0.
-        assert_eq!(scores[0].project, "Growth/Q3");
-        assert_eq!(scores[1].project, "Briarwood Golf");
+        assert_eq!(scores[0].project, "Briarwood Golf");
+        assert_eq!(scores[1].project, "Growth/Q3");
         assert_eq!(scores[0].weight, scores[1].weight);
 
         let routing = route(body(tied), &fixture(), &RoutingConfig { threshold: 0.0 });
@@ -1198,7 +1198,8 @@ mod tests {
     fn invalid_threshold_falls_back_to_default() {
         // 5/7 ≈ 0.714 clears the default; 0.5 does not. Every invalid
         // threshold must behave exactly like the default on both sides.
-        let strong = "MERIDIAN rollout: TeeTrack sync for the tee sheet, GreenFlow irrigation checks.";
+        let strong =
+            "MERIDIAN rollout: TeeTrack sync for the tee sheet, GreenFlow irrigation checks.";
         let weak = "mentioned Briarwood Golf in passing";
         for threshold in [f64::NAN, f64::INFINITY, 0.0, -1.0, 1.5] {
             let config = RoutingConfig { threshold };
@@ -1226,7 +1227,7 @@ mod tests {
         let projects = discover_projects(vault.path()).unwrap();
         assert_eq!(
             projects,
-            ["Data", "Data/raw", "Growth", "Growth/Q3", "Briarwood Golf"]
+            ["Briarwood Golf", "Data", "Data/raw", "Growth", "Growth/Q3"]
         );
     }
 
@@ -1293,10 +1294,10 @@ mod tests {
         assert!(loaded.example_failures.is_empty());
         let signals = &loaded.signals;
         assert_eq!(signals.len(), 2);
-        assert_eq!(signals[0].project, "Growth");
-        assert!(signals[0].glossary.is_empty());
-        assert_eq!(signals[1].project, "Briarwood Golf");
-        assert!(signals[1].glossary.get("meridian").is_some());
+        assert_eq!(signals[0].project, "Briarwood Golf");
+        assert!(signals[0].glossary.get("meridian").is_some());
+        assert_eq!(signals[1].project, "Growth");
+        assert!(signals[1].glossary.is_empty());
 
         // A malformed glossary is contained, not fatal: the project loads with
         // an empty glossary and the error rides out in the failures list,
@@ -1311,9 +1312,10 @@ mod tests {
         assert_eq!(signals.len(), 2);
         assert_eq!(loaded.glossary_failures.len(), 1);
         assert_eq!(loaded.glossary_failures[0].project, "Growth");
-        assert_eq!(signals[0].project, "Growth");
-        assert!(signals[0].glossary.is_empty());
-        assert!(signals[1].glossary.get("meridian").is_some());
+        assert_eq!(signals[0].project, "Briarwood Golf");
+        assert!(signals[0].glossary.get("meridian").is_some());
+        assert_eq!(signals[1].project, "Growth");
+        assert!(signals[1].glossary.is_empty());
     }
 
     // -- examples signal ---------------------------------------------------
@@ -1429,8 +1431,9 @@ mod tests {
                 &[example("clubhouse", "clubhouse migration cutover plan")],
             ),
         ];
-        let text =
-            body("MERIDIAN TeeTrack GreenFlow irrigation tee sheet clubhouse migration cutover plan");
+        let text = body(
+            "MERIDIAN TeeTrack GreenFlow irrigation tee sheet clubhouse migration cutover plan",
+        );
         assert_eq!(
             route(text, &five_terms, &RoutingConfig::default()),
             Routing::Routed {
@@ -1677,7 +1680,10 @@ mod tests {
 
         assert_eq!(
             path,
-            vault.path().join("Briarwood Golf").join("meridian-rollout.md")
+            vault
+                .path()
+                .join("Briarwood Golf")
+                .join("meridian-rollout.md")
         );
         let reparsed = Note::from_markdown(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(reparsed.routing, routing);
@@ -1784,7 +1790,10 @@ mod tests {
         );
         assert_eq!(
             followup_path,
-            vault.path().join("Briarwood Golf").join("follow-up-sync.md")
+            vault
+                .path()
+                .join("Briarwood Golf")
+                .join("follow-up-sync.md")
         );
 
         // (iv) An unrelated note shares nothing with the example and is

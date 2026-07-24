@@ -76,7 +76,7 @@ mod tests {
     fn normalize_tokens_splits_on_hyphens() {
         assert_eq!(
             normalize_tokens("Tee-Track"),
-            vec!["fore".to_owned(), "up".to_owned()]
+            vec!["tee".to_owned(), "track".to_owned()]
         );
     }
 

@@ -38,7 +38,11 @@ fn meridian_and_teetrack_glossary() -> Glossary {
     let mut glossary = Glossary::default();
     glossary
         .upsert(
-            term("MERIDIAN", "A regional systems-migration project.", &["meridian"]),
+            term(
+                "MERIDIAN",
+                "A regional systems-migration project.",
+                &["meridian"],
+            ),
             OnConflict::Error,
         )
         .expect("upsert succeeds");

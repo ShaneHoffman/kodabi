@@ -10,6 +10,7 @@ use std::path::Path;
 
 use kodabi_core::index::IndexedNote;
 use kodabi_core::note::{self, Note, NoteEdit, NoteId, NoteType, Routing, Source, Tag};
+use kodabi_core::sessions;
 use kodabi_core::vault::{self, FileNoteOptions, ListedNote, ProjectInfo, RoutedNote};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -500,6 +501,63 @@ pub async fn delete_project(app: AppHandle, project: String) -> Result<DeletedPr
     Ok(DeletedProjectDto {
         slug: deleted.slug,
         moved_note_count: deleted.moved_notes.len() as u32,
+    })
+}
+
+/// The `delete_note` outcome echoed to the frontend: the removed note's id, its
+/// display title and former project (both `null` when the note was already
+/// gone), and whether a paired session (retained recording + transcript) was
+/// removed with it. Enough for a closing toast; the lists refresh off
+/// `vault:changed`. `project` is `null` for an Inbox note (the [`note_summary`]
+/// convention).
+#[derive(serde::Serialize)]
+pub struct DeletedNoteDto {
+    id: String,
+    title: Option<String>,
+    project: Option<String>,
+    session_deleted: bool,
+}
+
+/// Permanently deletes the note carrying `id`, wherever it lives, via
+/// `vault::delete_note`, then cleans up what the note leaves behind: its paired
+/// session artifacts (the retained recording and transcript, for a distilled
+/// note) and its derived index rows. Both cleanups are best-effort — the `.md`
+/// removal already succeeded and is the source of truth, so neither may fail the
+/// command.
+///
+/// An unknown or already-deleted id is idempotent success (`title` / `project`
+/// `null`): a destructive confirm plus cross-window `vault:changed` races make
+/// "already gone" a real path, and the caller's success handling (close, then
+/// navigate or refetch) is correct for it.
+#[tauri::command]
+pub async fn delete_note(app: AppHandle, id: String) -> Result<DeletedNoteDto, String> {
+    let kb = knowledge_base_dir(&app)?;
+    let note_id = parse_note_id(&id)?;
+
+    let Some(deleted) = vault::delete_note(&kb, &note_id).map_err(|err| err.to_string())? else {
+        return Ok(DeletedNoteDto {
+            id,
+            title: None,
+            project: None,
+            session_deleted: false,
+        });
+    };
+
+    // Best-effort cleanup: the note file is already gone.
+    let session_deleted =
+        sessions::delete_session_for_source(&kb, &deleted.source).unwrap_or_else(|err| {
+            eprintln!("failed to clean up the session for note {id}: {err}");
+            false
+        });
+    app.state::<IndexState>()
+        .delete_note_best_effort(note_id.as_str());
+    broadcast_vault_changed(&app);
+
+    Ok(DeletedNoteDto {
+        id,
+        title: Some(deleted.title),
+        project: deleted.former_project,
+        session_deleted,
     })
 }
 

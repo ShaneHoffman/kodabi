@@ -759,6 +759,11 @@ Out of scope for this spec, listed so Phase 3+ doesn't rediscover the gap from s
   unreliable in practice.
 - **Glossary `list` / `remove` / `update`-beyond-add** — reads are already covered by
   `get_project_context`'s `glossary` section; standalone edit/delete tools are minor and deferred.
+- **`delete_note`** (remove a note and everything derived from it) — now exists at the vault/Tauri
+  layer (`vault::delete_note`, the `delete_note` command): it deletes the `.md` file, its index
+  rows, and any paired session artifacts. An `mcp__kodabi__delete_note` tool would be the surface's
+  first **destructive** write (`destructiveHint: true`), reusing the `NoteId` `$def` as its input
+  handle; deferred to the Phase 3 server rather than added to this v1 spec.
 - **MCP resources** (`@kodabi:note://...`) **and prompts** (`/mcp__kodabi__...`) — separate MCP
   surfaces from tools; not addressed by this ticket.
 

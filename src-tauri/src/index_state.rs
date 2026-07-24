@@ -41,6 +41,11 @@ enum Job {
     /// Upsert and re-embed a single note after an in-app write. Boxed because it
     /// dwarfs the other variants, which carry no data.
     Note(Box<IndexedNote>),
+    /// Drop a single note's rows after it was deleted from disk — the delete
+    /// analogue of `Note`. The `.md` file (the source of truth) is already gone,
+    /// so this only converges the derived index; reconcile's stale sweep is the
+    /// safety net if the job is ever dropped.
+    DeleteNote(String),
     /// Sync the whole index to the vault on disk — a watcher burst or the
     /// startup scan.
     Reconcile,
@@ -128,6 +133,15 @@ impl IndexState {
         self.send(Job::Note(Box::new(note)));
     }
 
+    /// Hands a deleted note's id to the worker so its rows (note, full-text,
+    /// tags, and vectors) leave the index promptly — the delete counterpart to
+    /// [`index_note_best_effort`]. Called after the `.md` file was removed; the
+    /// removal is what mattered, so like every index write it never fails or
+    /// delays the command, and reconcile would eventually sweep the row anyway.
+    pub fn delete_note_best_effort(&self, id: &str) {
+        self.send(Job::DeleteNote(id.to_string()));
+    }
+
     /// Requests a full rebuild of the index from files alone, returning whether
     /// the worker accepted it (false when the index is unavailable this session).
     /// Progress arrives on the `index:state` event.
@@ -171,11 +185,23 @@ fn run_worker(
     for job in jobs {
         match job {
             Job::Note(note) => process_note(&index, embedder.as_deref(), &note),
+            Job::DeleteNote(id) => process_delete(&index, &id),
             Job::Reconcile => {
                 run_reconcile(&app, &index, embedder.as_deref(), vault_root.as_deref())
             }
             Job::Rebuild => run_rebuild(&app, &index, embedder.as_deref(), vault_root.as_deref()),
         }
+    }
+}
+
+/// Removes a deleted note's rows from the index, embeddings included (the
+/// transactional `delete_note`, `crates/kodabi-core/src/index/query.rs`).
+/// Best-effort like every write here: a failure just leaves a stale row the
+/// next reconcile sweep drops, since the `.md` file is already gone.
+fn process_delete(index: &Mutex<NoteIndex>, id: &str) {
+    let mut idx = lock(index);
+    if let Err(err) = idx.delete_note(id) {
+        eprintln!("failed to remove note {id} from the index: {err}");
     }
 }
 

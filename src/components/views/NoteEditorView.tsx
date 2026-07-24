@@ -15,6 +15,7 @@ import {
 import { useProjects } from "../../useProjects";
 import { isSessionSource } from "../../useSessions";
 import { applyMarkup, selectionAnchor } from "../../textareaCaret";
+import { DeleteNoteDialog } from "../DeleteNoteDialog";
 import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
@@ -124,6 +125,9 @@ function ReadNote({
   project: string;
   onEdit: () => void;
 }) {
+  const { navigate } = useNavigation();
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
   return (
     <ViewFrame variant="doc">
       <article>
@@ -134,13 +138,23 @@ function ReadNote({
             <h2 className="ui-balance font-serif text-title-doc font-semibold leading-title-doc tracking-title text-text">
               {note.title}
             </h2>
-            <Button
-              variant="quiet"
-              onClick={onEdit}
-              className="flex-none py-3xs text-label text-text-soft"
-            >
-              Edit
-            </Button>
+            <div className="flex flex-none items-center gap-sm">
+              <Button
+                variant="quiet"
+                onClick={onEdit}
+                className="py-3xs text-label text-text-soft"
+              >
+                Edit
+              </Button>
+              <Button
+                variant="quiet"
+                aria-haspopup="dialog"
+                onClick={() => setConfirmingDelete(true)}
+                className="py-3xs text-label text-text-soft"
+              >
+                Delete note
+              </Button>
+            </div>
           </div>
           <p className="mt-xs font-mono text-meta text-text-faint">
             {noteMeta(note, note.type)}
@@ -174,6 +188,18 @@ function ReadNote({
             artifact, so the section (and its fetch) never exists for those. */}
         {isSessionSource(note.source) && (
           <SessionArtifactsSection source={note.source} />
+        )}
+
+        {confirmingDelete && (
+          <DeleteNoteDialog
+            id={note.id}
+            sessionBacked={isSessionSource(note.source)}
+            onClose={() => setConfirmingDelete(false)}
+            // Navigate away before the delete's `vault:changed` refetch can run:
+            // reading the just-deleted note would otherwise flash the not-found
+            // state. The note's "back" and its "after-delete" are the same place.
+            onDeleted={() => navigate(backTarget(project).view)}
+          />
         )}
       </article>
     </ViewFrame>

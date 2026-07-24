@@ -223,7 +223,10 @@ mod tests {
     #[test]
     fn terms_join_with_comma_space() {
         let terms = ["MERIDIAN".to_owned(), "TeeTrack".to_owned()];
-        assert_eq!(build_bias_prompt(&terms), Some("MERIDIAN, TeeTrack".to_owned()));
+        assert_eq!(
+            build_bias_prompt(&terms),
+            Some("MERIDIAN, TeeTrack".to_owned())
+        );
     }
 
     #[test]
@@ -234,7 +237,10 @@ mod tests {
             "   ".to_owned(),
             " TeeTrack ".to_owned(),
         ];
-        assert_eq!(build_bias_prompt(&terms), Some("MERIDIAN, TeeTrack".to_owned()));
+        assert_eq!(
+            build_bias_prompt(&terms),
+            Some("MERIDIAN, TeeTrack".to_owned())
+        );
     }
 
     #[test]
