@@ -15,7 +15,7 @@ pub const PROTOCOL_VERSION: &str = "2025-06-18";
 /// The server instructions surfaced at `initialize`. Must stay under 2 KB —
 /// Claude Code truncates this (and every tool description) at that size, which
 /// would silently drop the "when to use this" guidance a client relies on.
-const INSTRUCTIONS: &str = "Kodabi tools over your local knowledge base of distilled, routed Markdown notes. Read: search_notes for hybrid full-text and semantic retrieval (ranked snippets), get_note to read a hit in full by its stable id, get_meeting_transcript for a meeting's per-channel transcript segments, and list_projects to resolve a project name to its slug before filtering. Write (the human correction loop): file_note_to_project re-files a note to a project while preserving its stable id, and add_glossary_term adds or updates a project glossary term (upsert by normalized term). Ids and slugs are the handles: a note id looks like n_a1b2c3, a project slug is a folder path like Growth/Q3, and the reserved slug Inbox means unfiled. Lists paginate with limit plus an opaque cursor; an empty result is a valid answer, while a lookup by an id that does not exist is an error.";
+const INSTRUCTIONS: &str = "Kodabi tools over your local knowledge base of distilled, routed Markdown notes. Read: search_notes for hybrid full-text and semantic retrieval (ranked snippets), get_note to read a hit in full by its stable id, get_meeting_transcript for a meeting's per-channel transcript segments, list_outstanding_items for not-done action items linked to their source meeting, and list_projects to resolve a project name to its slug before filtering. Write (the human correction loop): file_note_to_project re-files a note to a project while preserving its stable id, and add_glossary_term adds or updates a project glossary term (upsert by normalized term). Ids and slugs are the handles: a note id looks like n_a1b2c3, a project slug is a folder path like Growth/Q3, and the reserved slug Inbox means unfiled. Lists paginate with limit plus an opaque cursor; an empty result is a valid answer, while a lookup by an id that does not exist is an error.";
 
 const _: () = assert!(INSTRUCTIONS.len() < 2048);
 
@@ -158,6 +158,39 @@ mod tests {
                     speaker_count: Some(2),
                     decisions: vec!["Keep the retro weekly".to_string()],
                     action_items: Vec::new(),
+                }),
+            })
+            .unwrap();
+
+        // A meeting in a sub-project, so `list_outstanding_items` has a subtree
+        // to filter on. Its body avoids "recap" so the search ranking tests are
+        // unaffected.
+        fs::create_dir(vault.path().join("Growth").join("Q3")).unwrap();
+        index
+            .upsert_note(&IndexedNote {
+                id: "n_meet03".to_string(),
+                path: "Growth/Q3/planning.md".to_string(),
+                title: "Planning".to_string(),
+                note_type: NoteType::Meeting,
+                project: Some("Growth/Q3".to_string()),
+                date: "2026-07-13".to_string(),
+                tags: vec![],
+                source: "transcript".to_string(),
+                confidence: None,
+                body: "Quarterly planning.".to_string(),
+                meeting: Some(MeetingFacts {
+                    duration_seconds: None,
+                    speaker_count: None,
+                    decisions: vec![],
+                    action_items: vec![ActionItemFact {
+                        id: "a_plan01".to_string(),
+                        description: "draft the plan".to_string(),
+                        owner: "Priya".to_string(),
+                        // Far enough out to stay `open` however late this runs.
+                        due_date: Some("2099-12-31".to_string()),
+                        done: false,
+                        extracted_date: Some("2026-07-13".to_string()),
+                    }],
                 }),
             })
             .unwrap();
@@ -521,6 +554,168 @@ mod tests {
             &server,
             "get_meeting_transcript",
             json!({ "id": "n_meet02", "cursor": "not-a-cursor" }),
+        );
+        assert_eq!(response["error"]["code"], -32602);
+    }
+
+    // --- list_outstanding_items ---------------------------------------------
+
+    #[test]
+    fn list_outstanding_items_returns_not_done_items_linked_to_their_source() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(&server, "list_outstanding_items", json!({}));
+        let structured = &response["result"]["structuredContent"];
+
+        assert_eq!(response["result"]["isError"], Value::Bool(false));
+        let items = structured["items"].as_array().unwrap();
+        // The overdue 2020 item sorts before the 2099 one; the done item and
+        // the undated-but-done one are excluded by the default status set.
+        let ids: Vec<&str> = items
+            .iter()
+            .map(|item| item["id"].as_str().unwrap())
+            .collect();
+        assert_eq!(ids, ["a_recap1", "a_plan01"]);
+
+        assert_eq!(items[0]["status"], "overdue");
+        assert_eq!(items[0]["owner"], "You");
+        assert_eq!(items[0]["due_date"], "2020-01-01");
+        // Each item carries a NoteRef back to the meeting it came from.
+        assert_eq!(items[0]["source"]["id"], "n_meet01");
+        assert_eq!(items[0]["source"]["path"], "Growth/kickoff.md");
+        assert_eq!(items[1]["status"], "open");
+
+        assert_eq!(structured["summary"]["open"], 1);
+        assert_eq!(structured["summary"]["overdue"], 1);
+        assert_eq!(structured["summary"]["done"], 0);
+        assert_eq!(structured["page"]["has_more"], Value::Bool(false));
+        assert_eq!(structured["page"]["total_estimate"], 2);
+    }
+
+    #[test]
+    fn list_outstanding_items_filters_by_project_subtree() {
+        let (server, _vault) = seeded_server();
+
+        // The subtree reaches the sub-project's item.
+        let response = call_tool(
+            &server,
+            "list_outstanding_items",
+            json!({ "project": "Growth", "include_descendants": true }),
+        );
+        let items = response["result"]["structuredContent"]["items"]
+            .as_array()
+            .unwrap();
+        assert_eq!(items.len(), 2);
+
+        // Restricted to the project itself, the nested item drops out.
+        let response = call_tool(
+            &server,
+            "list_outstanding_items",
+            json!({ "project": "Growth", "include_descendants": false }),
+        );
+        let items = response["result"]["structuredContent"]["items"]
+            .as_array()
+            .unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["id"], "a_recap1");
+    }
+
+    #[test]
+    fn list_outstanding_items_matches_an_owner_case_insensitively() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(&server, "list_outstanding_items", json!({ "owner": "you" }));
+        let items = response["result"]["structuredContent"]["items"]
+            .as_array()
+            .unwrap();
+
+        // Stored as "You"; the caller wrote "you".
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["id"], "a_recap1");
+    }
+
+    #[test]
+    fn list_outstanding_items_empty_match_is_a_successful_empty_page() {
+        let (server, _vault) = seeded_server();
+        for arguments in [
+            json!({ "owner": "nobody-by-that-name" }),
+            json!({ "project": "NoSuchProject" }),
+            json!({ "source_note_id": "n_absent" }),
+        ] {
+            let response = call_tool(&server, "list_outstanding_items", arguments.clone());
+            let structured = &response["result"]["structuredContent"];
+
+            // A list that matches nothing is a valid answer, never `isError`.
+            assert_eq!(
+                response["result"]["isError"],
+                Value::Bool(false),
+                "{arguments}"
+            );
+            assert!(structured["items"].as_array().unwrap().is_empty());
+            assert_eq!(structured["page"]["has_more"], Value::Bool(false));
+            assert_eq!(structured["summary"]["open"], 0);
+        }
+    }
+
+    #[test]
+    fn list_outstanding_items_reports_done_only_when_requested() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(
+            &server,
+            "list_outstanding_items",
+            json!({ "status": ["done"] }),
+        );
+        let structured = &response["result"]["structuredContent"];
+        let items = structured["items"].as_array().unwrap();
+
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["id"], "a_room01");
+        assert_eq!(items[0]["status"], "done");
+        assert_eq!(items[0]["due_date"], Value::Null);
+        assert_eq!(structured["summary"]["done"], 1);
+        assert_eq!(structured["summary"]["open"], 0);
+    }
+
+    #[test]
+    fn list_outstanding_items_pages_with_a_cursor() {
+        let (server, _vault) = seeded_server();
+
+        let mut seen = Vec::new();
+        let mut arguments = json!({ "limit": 1 });
+        loop {
+            let response = call_tool(&server, "list_outstanding_items", arguments.clone());
+            let structured = &response["result"]["structuredContent"];
+            for item in structured["items"].as_array().unwrap() {
+                seen.push(item["id"].as_str().unwrap().to_string());
+            }
+            // The totals hold across every page, not just the first.
+            assert_eq!(structured["summary"]["open"], 1);
+            assert_eq!(structured["summary"]["overdue"], 1);
+            match structured["page"]["next_cursor"].as_str() {
+                Some(cursor) => arguments["cursor"] = json!(cursor),
+                None => break,
+            }
+        }
+
+        assert_eq!(seen, ["a_recap1", "a_plan01"]);
+    }
+
+    #[test]
+    fn list_outstanding_items_rejects_a_tampered_cursor() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(
+            &server,
+            "list_outstanding_items",
+            json!({ "cursor": "not-a-cursor" }),
+        );
+        assert_eq!(response["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn list_outstanding_items_rejects_an_unknown_argument() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(
+            &server,
+            "list_outstanding_items",
+            json!({ "assignee": "You" }),
         );
         assert_eq!(response["error"]["code"], -32602);
     }

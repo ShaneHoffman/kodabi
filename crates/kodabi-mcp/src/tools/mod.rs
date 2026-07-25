@@ -11,6 +11,7 @@ mod add_glossary_term;
 mod file_note_to_project;
 mod get_meeting_transcript;
 mod get_note;
+mod list_outstanding_items;
 mod list_projects;
 mod search_notes;
 
@@ -44,6 +45,7 @@ pub fn call(server: &Server, params: Option<&Value>) -> Result<Value, RpcError> 
         "search_notes" => search_notes::call(server, arguments),
         "get_note" => get_note::call(server, arguments),
         "get_meeting_transcript" => get_meeting_transcript::call(server, arguments),
+        "list_outstanding_items" => list_outstanding_items::call(server, arguments),
         "list_projects" => list_projects::call(server, arguments),
         "file_note_to_project" => file_note_to_project::call(server, arguments),
         "add_glossary_term" => add_glossary_term::call(server, arguments),

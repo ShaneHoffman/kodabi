@@ -17,15 +17,21 @@
 mod embed;
 mod migrations;
 mod note;
+mod outstanding;
 mod query;
+mod scope;
 mod search;
 
 pub use embed::{ChunkHit, EmbeddedChunk};
 
 pub use note::{
-    normalize_date_to_utc, ActionItemRow, ActionItemStatus, IndexedNote, MeetingFactsRow, NoteRow,
-    NoteType, UnknownNoteType,
+    normalize_date_to_utc, ActionItemRow, ActionItemStatus, IndexedNote, MeetingFactsRow, NoteRef,
+    NoteRow, NoteType, UnknownNoteType,
 };
+
+pub use outstanding::{OutstandingItem, OutstandingParams, OutstandingResults, OutstandingSummary};
+
+pub use scope::ProjectScope;
 
 pub use search::{PageInfo, SearchHit, SearchParams, SearchResults, TagMatch};
 

@@ -192,6 +192,17 @@ pub struct ActionItemRow {
     pub extracted_date: Option<String>,
 }
 
+/// A minimal stable reference to a note — the `NoteRef` `$def` of
+/// `docs/MCP_TOOL_SURFACE.md`. Carried by a cross-note read (an action item's
+/// `source`) so the caller can follow the row back to `get_note` without a
+/// second lookup. `path` is informational and changes on move; `id` is the
+/// handle.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct NoteRef {
+    pub id: String,
+    pub path: String,
+}
+
 /// An action item's read-time status — the `ActionItemStatus` `$def` of
 /// `docs/MCP_TOOL_SURFACE.md`. The serde spellings match that enum
 /// (`open | overdue | done`) so it both deserializes the `status` filter of

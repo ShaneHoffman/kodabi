@@ -20,6 +20,7 @@ use std::sync::OnceLock;
 const SEARCH_NOTES_DESCRIPTION: &str = "Hybrid full-text + semantic search across all notes. Returns ranked hits with snippets. Filter by project (and subtree), note type, tags, and date range; page with limit + cursor.";
 const GET_NOTE_DESCRIPTION: &str = "Fetch a note's full distilled content by stable id: frontmatter metadata plus the rendered markdown body. For meetings, also returns extracted decisions and action items. Use after search_notes to read a hit in full.";
 const GET_MEETING_TRANSCRIPT_DESCRIPTION: &str = "Fetch the per-channel transcript (you/them attribution, millisecond offsets) and metadata for a meeting note by stable id. Returns transcript_available=false with empty segments when no transcript is stored; errors if the id is not a meeting note.";
+const LIST_OUTSTANDING_ITEMS_DESCRIPTION: &str = "List action items that are not done (open/overdue), extracted from meetings and linked to their source note. Filter by project subtree, owner, status, due-before date, or source meeting.";
 const LIST_PROJECTS_DESCRIPTION: &str = "Enumerate routing-target projects with hierarchy (parent + slug), display name, note/meeting counts, and last activity. Use to resolve a project name to its slug before filtering other tools.";
 const FILE_NOTE_TO_PROJECT_DESCRIPTION: &str = "Route or re-route a note to a project (the human correction loop). Moves the file, updates its frontmatter project + confidence, preserves the stable id, and returns the new path. Mutating but reversible.";
 const ADD_GLOSSARY_TERM_DESCRIPTION: &str = "Add or update a glossary term (term, definition, aliases) for a project. Upsert by normalized term. Used for transcription biasing and post-pass cleanup.";
@@ -27,6 +28,7 @@ const ADD_GLOSSARY_TERM_DESCRIPTION: &str = "Add or update a glossary term (term
 const _: () = assert!(SEARCH_NOTES_DESCRIPTION.len() < 2048);
 const _: () = assert!(GET_NOTE_DESCRIPTION.len() < 2048);
 const _: () = assert!(GET_MEETING_TRANSCRIPT_DESCRIPTION.len() < 2048);
+const _: () = assert!(LIST_OUTSTANDING_ITEMS_DESCRIPTION.len() < 2048);
 const _: () = assert!(LIST_PROJECTS_DESCRIPTION.len() < 2048);
 const _: () = assert!(FILE_NOTE_TO_PROJECT_DESCRIPTION.len() < 2048);
 const _: () = assert!(ADD_GLOSSARY_TERM_DESCRIPTION.len() < 2048);
@@ -66,6 +68,14 @@ const TOOLS: &[ToolSpec] = &[
         description: GET_MEETING_TRANSCRIPT_DESCRIPTION,
         input_schema: include_str!("../schemas/get_meeting_transcript.input.json"),
         output_schema: include_str!("../schemas/get_meeting_transcript.output.json"),
+        read_only: true,
+    },
+    ToolSpec {
+        name: "list_outstanding_items",
+        title: "List outstanding items",
+        description: LIST_OUTSTANDING_ITEMS_DESCRIPTION,
+        input_schema: include_str!("../schemas/list_outstanding_items.input.json"),
+        output_schema: include_str!("../schemas/list_outstanding_items.output.json"),
         read_only: true,
     },
     ToolSpec {
@@ -273,6 +283,7 @@ mod tests {
                 "search_notes",
                 "get_note",
                 "get_meeting_transcript",
+                "list_outstanding_items",
                 "list_projects",
                 "file_note_to_project",
                 "add_glossary_term",

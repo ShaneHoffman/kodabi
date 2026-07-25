@@ -26,10 +26,11 @@ pub const MCP_SERVER_KEY: &str = "kodabi";
 /// Must list every `read_only` entry of `crates/kodabi-mcp/src/schemas.rs`'s
 /// `TOOLS` table: a read tool missing here still works, but prompts on every
 /// call, which is exactly the friction the embedded terminal exists to remove.
-pub const READ_TOOL_PERMISSIONS: [&str; 4] = [
+pub const READ_TOOL_PERMISSIONS: [&str; 5] = [
     "mcp__kodabi__search_notes",
     "mcp__kodabi__get_note",
     "mcp__kodabi__get_meeting_transcript",
+    "mcp__kodabi__list_outstanding_items",
     "mcp__kodabi__list_projects",
 ];
 
