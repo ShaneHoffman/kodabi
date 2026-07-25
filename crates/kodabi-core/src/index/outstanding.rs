@@ -145,13 +145,22 @@ pub struct OutstandingResults {
     pub page: PageInfo,
 }
 
-/// A due date this server will parse — exactly the shapes
+/// A due date this server will parse — exactly the values
 /// [`ActionItemStatus::derive`] accepts, so SQL and Rust classify every row
 /// identically. Unreachable today (the distill grammar only writes valid dates),
 /// but it makes the equivalence a property of this query rather than of a
 /// distant writer.
+///
+/// Both halves are load-bearing. The `GLOB` pins the literal `YYYY-MM-DD` shape,
+/// which `date()` alone would not (it also reads `2026-7-4` and a `T`-suffixed
+/// timestamp). The `date(x) = x` round-trip then rejects a shape-valid non-day:
+/// SQLite normalizes `2026-02-30` to `2026-03-02` and returns NULL for
+/// `2026-13-01`, so neither compares equal to the stored text — matching
+/// `NaiveDate::parse_from_str`, which rejects both. Without it, `2026-02-30`
+/// would be *overdue* to this filter and *open* to the rendered status.
 const DATED: &str = "(note_action_items.due_date IS NOT NULL \
-     AND note_action_items.due_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]')";
+     AND note_action_items.due_date GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]' \
+     AND date(note_action_items.due_date) = note_action_items.due_date)";
 
 /// The per-status SQL predicates. `?` binds `today`.
 fn status_predicate(status: ActionItemStatus) -> String {
@@ -741,6 +750,54 @@ mod tests {
         assert_eq!(results.summary.open, 1);
 
         // And `due_before` excludes it, like any other undated item.
+        let filtered = index
+            .list_outstanding_items(
+                &OutstandingParams {
+                    due_before: Some("2030-01-01".to_string()),
+                    ..OutstandingParams::default()
+                },
+                today(),
+            )
+            .unwrap();
+        assert!(filtered.items.is_empty());
+    }
+
+    #[test]
+    fn a_calendar_invalid_due_date_is_undated_on_both_sides_too() {
+        // `2026-02-30` has the right *shape* but is not a real day, so
+        // `NaiveDate::parse_from_str` rejects it. A shape-only SQL guard would
+        // call it dated and — being lexically before `today()` — overdue, which
+        // would serve an item under `status: ["overdue"]` that renders `open`.
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        index
+            .upsert_note(&meeting(
+                "n_feb300",
+                Some("Growth"),
+                vec![item("a_feb301", "You", Some("2026-02-30"), false)],
+            ))
+            .unwrap();
+
+        let results = index
+            .list_outstanding_items(&OutstandingParams::default(), today())
+            .unwrap();
+        assert_eq!(results.items.len(), 1);
+        assert_eq!(results.items[0].status, ActionItemStatus::Open);
+        assert_eq!(results.summary.open, 1);
+        assert_eq!(results.summary.overdue, 0);
+
+        // The invariant that matters: a status filter never serves a row whose
+        // rendered status the caller did not ask for.
+        let overdue_only = OutstandingParams {
+            status: vec![ActionItemStatus::Overdue],
+            ..OutstandingParams::default()
+        };
+        assert!(index
+            .list_outstanding_items(&overdue_only, today())
+            .unwrap()
+            .items
+            .is_empty());
+
+        // And it drops out of `due_before`, like any other undated item.
         let filtered = index
             .list_outstanding_items(
                 &OutstandingParams {

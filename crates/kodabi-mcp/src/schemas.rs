@@ -24,7 +24,7 @@ const GET_MEETING_TRANSCRIPT_DESCRIPTION: &str = "Fetch the per-channel transcri
 const LIST_OUTSTANDING_ITEMS_DESCRIPTION: &str = "List action items that are not done (open/overdue), extracted from meetings and linked to their source note. Filter by project subtree, owner, status, due-before date, or source meeting.";
 const LIST_PROJECTS_DESCRIPTION: &str = "Enumerate routing-target projects with hierarchy (parent + slug), display name, note/meeting counts, and last activity. Use to resolve a project name to its slug before filtering other tools.";
 const GET_PROJECT_CONTEXT_DESCRIPTION: &str = "Aggregate context for one project in a single call: description, glossary, recent notes, outstanding items, and counts. Toggle and limit each section. Ideal for grounding a chat about a project.";
-const FILE_NOTE_TO_PROJECT_DESCRIPTION: &str ="Route or re-route a note to a project (the human correction loop). Moves the file, updates its frontmatter project + confidence, preserves the stable id, and returns the new path. Mutating but reversible.";
+const FILE_NOTE_TO_PROJECT_DESCRIPTION: &str = "Route or re-route a note to a project (the human correction loop). Moves the file, updates its frontmatter project + confidence, preserves the stable id, and returns the new path. Mutating but reversible.";
 const ADD_GLOSSARY_TERM_DESCRIPTION: &str = "Add or update a glossary term (term, definition, aliases) for a project. Upsert by normalized term. Used for transcription biasing and post-pass cleanup.";
 
 const _: () = assert!(SEARCH_NOTES_DESCRIPTION.len() < 2048);

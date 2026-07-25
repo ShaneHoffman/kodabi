@@ -1018,9 +1018,6 @@ fn project_id(slug: &str) -> String {
     format!("p_{hash:016x}")
 }
 
-/// Splits a slug into (`parent`, `display_name`): the last path segment is the
-/// display name, everything before it the parent slug (`None` at top level).
-/// Mirrors the desktop shell's `project_dto`.
 /// Projects a scanned [`ProjectInfo`] to the wire [`ProjectSummary`] (the
 /// `Project` `$def`). Shared by `list_projects_page` and
 /// [`crate::project_context`] so the same project reads identically through
@@ -1038,6 +1035,9 @@ pub(crate) fn project_summary(info: ProjectInfo) -> ProjectSummary {
     }
 }
 
+/// Splits a slug into (`parent`, `display_name`): the last path segment is the
+/// display name, everything before it the parent slug (`None` at top level).
+/// Mirrors the desktop shell's `project_dto`.
 fn split_slug(slug: &str) -> (Option<String>, String) {
     match slug.rsplit_once('/') {
         Some((parent, name)) => (Some(parent.to_string()), name.to_string()),

@@ -245,6 +245,9 @@ impl ActionItemStatus {
     /// clock (`.claude/rules/utc-timestamps.md`), and the shell supplies the
     /// device's local date because due dates are local calendar dates.
     ///
+    /// A due date this function cannot read as a real `YYYY-MM-DD` day counts as
+    /// undated (see [`parse_due_date`]), never as an error.
+    ///
     /// [`Done`]: ActionItemStatus::Done
     /// [`Overdue`]: ActionItemStatus::Overdue
     /// [`Open`]: ActionItemStatus::Open
@@ -252,11 +255,37 @@ impl ActionItemStatus {
         if done {
             return ActionItemStatus::Done;
         }
-        match due_date.and_then(|due| NaiveDate::parse_from_str(due, "%Y-%m-%d").ok()) {
+        match due_date.and_then(parse_due_date) {
             Some(due) if due < today => ActionItemStatus::Overdue,
             _ => ActionItemStatus::Open,
         }
     }
+}
+
+/// Parses a stored `due_date` as a real calendar day in the literal
+/// `YYYY-MM-DD` shape, or `None`.
+///
+/// The shape is checked before handing the string to `chrono` because `%Y`
+/// alone is looser than the shape suggests — it takes a signed, variable-width
+/// year, so `-0001-07-24` parses. That matters beyond tidiness: the index's
+/// `list_outstanding_items` filters `open`/`overdue` in SQL and re-derives the
+/// rendered status here, and the two must classify every row identically. Its
+/// `DATED` guard accepts exactly this set (a fixed-width digit shape plus a
+/// real day), so any looseness on either side would let a status filter serve
+/// an item whose rendered status the caller never asked for.
+pub(crate) fn parse_due_date(due: &str) -> Option<NaiveDate> {
+    let bytes = due.as_bytes();
+    let shaped = bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && [0, 1, 2, 3, 5, 6, 8, 9]
+            .iter()
+            .all(|&i| bytes[i].is_ascii_digit());
+    // `parse_from_str` still runs: the shape admits `2026-02-30`, which is not
+    // a day.
+    shaped
+        .then(|| NaiveDate::parse_from_str(due, "%Y-%m-%d").ok())
+        .flatten()
 }
 
 /// A note row read back from the index. Carries both the verbatim `date` and
@@ -418,6 +447,38 @@ mod tests {
             ActionItemStatus::derive(false, Some("not-a-date"), today),
             ActionItemStatus::Open
         );
+    }
+
+    #[test]
+    fn a_due_date_is_read_exactly_as_the_index_sql_reads_it() {
+        // Anything the index's `DATED` guard calls undated must be undated here
+        // too, or a `list_outstanding_items` status filter could serve a row
+        // whose rendered status the caller never asked for.
+        for undated in [
+            "2026-02-30",           // right shape, not a real day
+            "2026-13-01",           // right shape, month out of range
+            "2026-7-4",             // not fixed-width
+            "-0001-07-24",          // signed year: `%Y` alone would take it
+            "12026-07-24",          // five-digit year: likewise
+            "2026-07-24T00:00:00Z", // a timestamp, not a date
+            "",
+        ] {
+            assert_eq!(parse_due_date(undated), None, "{undated:?}");
+        }
+
+        // A real day still reads, including the range edges.
+        for (dated, expected) in [
+            ("2026-07-24", (2026, 7, 24)),
+            ("2024-02-29", (2024, 2, 29)), // a leap day is a real day
+            ("0001-01-01", (1, 1, 1)),
+        ] {
+            let (year, month, day) = expected;
+            assert_eq!(
+                parse_due_date(dated),
+                NaiveDate::from_ymd_opt(year, month, day),
+                "{dated:?}"
+            );
+        }
     }
 
     #[test]
