@@ -1065,9 +1065,34 @@ mod tests {
             .list_outstanding_items(&OutstandingParams::default(), today())
             .unwrap();
 
-        // `delete_note` clears the item rows too, so nothing from that note
-        // survives — and the inner join would drop an orphan regardless.
+        // `delete_note` clears the item rows alongside the note.
         assert_eq!(ids(&results), ["a_nest01", "a_sib001", "a_inbox1"]);
+    }
+
+    #[test]
+    fn an_orphaned_item_row_is_dropped_by_the_join() {
+        let index = seeded();
+        // `note_action_items` carries no foreign key to `notes` (see
+        // `migration_0003_meeting_facts`), so an orphan is representable if a
+        // future writer ever misses a cleanup. The inner join must not surface
+        // it — an item with no source note has no `NoteRef` to return.
+        index
+            .conn
+            .execute(
+                "INSERT INTO note_action_items \
+                   (note_id, seq, item_id, description, owner, due_date, done, extracted_date) \
+                 VALUES ('n_ghost0', 0, 'a_ghost1', 'haunt', 'You', '2026-07-01', 0, NULL)",
+                [],
+            )
+            .unwrap();
+
+        let results = index
+            .list_outstanding_items(&OutstandingParams::default(), today())
+            .unwrap();
+
+        assert!(!ids(&results).contains(&"a_ghost1"));
+        // And it is absent from the totals, not merely from the page.
+        assert_eq!(results.summary.open + results.summary.overdue, 6);
     }
 
     #[test]
