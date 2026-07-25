@@ -104,6 +104,30 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   the pigments, or an enforcement claim the guards do not make.
   (`pnpm test` covers the token/theme structure itself — this anchor covers the prose.)
 
+## Anchor 7 — MCP tool surface ↔ the server's committed schemas
+
+- **Source of truth:** `docs/MCP_TOOL_SURFACE.md` — each tool's `title`,
+  `description`, `inputSchema`, `outputSchema`, and `annotations`, plus the shared
+  `$defs` library.
+- **Mirror:** `crates/kodabi-mcp/schemas/<tool>.{input,output}.json` (one file per
+  tool per direction) and the `TOOLS` table plus description consts in
+  `crates/kodabi-mcp/src/schemas.rs`. That module's own doc comment promises each
+  file is "a verbatim copy of the matching block" in the spec.
+- **Verify:** for every entry in `TOOLS`, diff its two schema files against the
+  spec's blocks — property sets, `required` lists, defaults, bounds, and
+  descriptions must match verbatim, with only the transitive `$defs` subset inlined
+  (the spec says the server inlines rather than references). Confirm the tool's
+  `title` and description const match the spec's `- **title:**` /
+  `- **description:**` lines, and that `read_only` matches its `readOnlyHint`.
+  Also confirm every tool the spec's Tool-index table lists has a `TOOLS` entry.
+- **Failure:** a schema file that has drifted from its spec block, a tool in the
+  spec with no `TOOLS` entry (or vice versa), or a `read_only` flag disagreeing with
+  the documented annotation.
+  (The crate's own tests cover `$ref` resolution, the open-`NoteSummary` invariant,
+  the 2 KB description cap, and — via `kodabi_core::terminal::READ_TOOL_PERMISSIONS`
+  — that every read tool is pre-approved. None of them compare against the spec,
+  which is what this anchor is for.)
+
 ---
 
 **Adding an anchor:** add its section here *and* the one-line entry in the
