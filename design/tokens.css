@@ -463,6 +463,18 @@
   --lead-footnote: 22px; /* Needs attention: the cards to the reassurance */
   --gap-card: 14px; /* between two pre-lifted cards */
 
+  /* the chat view — a conversation read as prose, so it borrows the doc's
+     measure, and its rhythm is the space between speakers changing hands. */
+  --chat-measure: 660px; /* the doc measure: an answer is read like a note */
+  --chat-gap-turn: 26px; /* between two entries: wider than prose paragraphs
+                            (--space-xs), tighter than a doc section — a turn
+                            is a change of voice, not a new chapter */
+  --chat-lead-composer: 18px; /* the log to the composer's hairline */
+  --chat-composer-min: 44px; /* the composer's floor, like the writing
+                                surfaces under "measures" above: one serif
+                                line plus its inset, before it grows */
+  --chat-composer-max: 200px; /* where growth stops and it scrolls inside */
+
   /* the list rows — per-view density.
 
      A content row's box is the other half of the stance the lead-ins start:

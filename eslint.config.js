@@ -105,6 +105,7 @@ export default tseslint.config(
   {
     files: [
       "src/useCaptureState.ts",
+      "src/useChatSession.ts",
       "src/useCommandPalette.ts",
       "src/useConsentNudge.ts",
       "src/useDebouncedValue.ts",

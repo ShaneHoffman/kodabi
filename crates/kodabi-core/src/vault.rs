@@ -2016,7 +2016,14 @@ mod tests {
         // The decoys are fully valid note files, so exclusion is proven by the
         // name rules alone, not by a parse failure.
         let decoy = note_in("Ops", "n_zzzzzz", "2026-07-01", NoteType::Note).to_markdown();
-        for reserved in ["sessions", "raw", "EBWebView", ".obsidian", "_scratch"] {
+        for reserved in [
+            "sessions",
+            "raw",
+            "chats",
+            "EBWebView",
+            ".obsidian",
+            "_scratch",
+        ] {
             let dir = vault.path().join(reserved);
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join("decoy.md"), &decoy).unwrap();
@@ -2089,6 +2096,7 @@ mod tests {
             "Inbox/x",
             "sessions",
             "raw",
+            "chats",
             "EBWebView",
             "_x",
             ".x",

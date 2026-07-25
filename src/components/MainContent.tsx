@@ -1,4 +1,5 @@
 import { useNavigation } from "../useNavigation";
+import { ChatView } from "./views/ChatView";
 import { InboxView } from "./views/InboxView";
 import { NeedsAttentionView } from "./views/NeedsAttentionView";
 import { NoteEditorView } from "./views/NoteEditorView";
@@ -38,6 +39,8 @@ export function MainContent() {
       return <SettingsView />;
     case "terminal":
       return <TerminalView />;
+    case "chat":
+      return <ChatView />;
     default: {
       // Exhaustiveness: a new View variant fails to compile until routed here.
       const exhausted: never = view;

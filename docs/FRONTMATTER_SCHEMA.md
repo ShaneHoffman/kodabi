@@ -65,9 +65,9 @@ Canonical key order the writer emits: **`id, type, title, project, date, tags, s
   leading `.` or `_` — those prefixes mark infra folders (`.obsidian`, `_assets`, the
   `_glossary.yml` home) that routing discovery skips, so such a project would be writable yet
   invisible to routing. `Inbox` (any casing) is a reserved folder name — a real project may not be
-  named `Inbox` — and `sessions` and `raw` (any casing) are reserved as first segments:
-  `<vault>/sessions/` holds raw session artifacts, never notes (`raw` stays reserved alongside it;
-  a nested segment like `Data/raw` is fine).
+  named `Inbox` — and `sessions`, `raw`, and `chats` (any casing) are reserved as first segments:
+  `<vault>/sessions/` holds raw session artifacts and `<vault>/chats/` holds raw chat transcripts,
+  never notes (`raw` stays reserved alongside them; a nested segment like `Data/raw` is fine).
 - **`date`** — full timestamp+offset for anything with a real start time (a meeting, a chat
   session); date-only is acceptable for a quick-capture note jotted with no meaningful clock time.
   Store the value exactly as written. The two accepted shapes are strictly a `YYYY-MM-DD` calendar

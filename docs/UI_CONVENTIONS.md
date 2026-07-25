@@ -371,8 +371,9 @@ ring, no value wash), so this primitive is the only dropdown.
 > and "this is one of several things you are about to submit" differ, and the switch is the first
 > of those. Reach for this component only for the second kind, and expect to be its first caller.
 >
-> What keeps it from being dead code is that **a note's GFM task list draws the identical skin**
-> (`.note-reading input[type="checkbox"]`, `NoteEditorView.css`). Those two used to be the same
+> What keeps it from being dead code is that **a GFM task list draws the identical skin**
+> (`.md-reading input[type="checkbox"]`, `markdownReading.css` — the shared markdown surface the
+> note body and the chat's answers both render on). Those two used to be the same
 > five literals typed out in two files, invisible to the token guard — which scopes its spacing
 > check to padding/margin/gap, so a width or a ring thickness was structurally unseeable. Both now
 > read the Layer-4 `--check-*` family (`--check-box`, `--check-ring`, `--check-mark-w`,
@@ -404,7 +405,7 @@ import { Checkbox } from "./ui/Checkbox";
 The checked state is ink on surface — **value, not hue**. The reserved green is never used here: it means
 audio is actually being recorded, and a settings control wearing it would be claiming something false.
 
-### `ViewFrame` — the page scaffold, `variant="queue" | "library" | "panel" | "health" | "doc" | "search"`
+### `ViewFrame` — the page scaffold, `variant="queue" | "library" | "panel" | "health" | "doc" | "search" | "terminal" | "chat"`
 
 The view gutter, the content column, and the eyebrow/title header. Every full view sits in one. The
 gutter (`--gutter-view-y` / `--gutter-view-x`) is the same on every variant and on all four sides; see
@@ -413,7 +414,7 @@ gutter (`--gutter-view-y` / `--gutter-view-x`) is the same on every variant and 
 **`variant` answers "what am I looking at" before the heading is read.** It is not decoration — it is
 the one place a view declares its kind, so two views of the same kind can't drift apart. **It is a
 required prop.** There is no default and no bare scaffold: a new view has to say what kind of place it
-is. The six, with what each fixes:
+is. The eight, with what each fixes:
 
 | `variant` | The view is | Column cap | Title step | `summary` renders as |
 | --- | --- | --- | --- | --- |
@@ -423,6 +424,8 @@ is. The six, with what each fixes:
 | `health` | system state to recover from | none | `text-title-health` (28) | `text-label text-text-faint` |
 | `doc` | a note | `--measure-doc` (660) | header supplied by the view | not rendered |
 | `search` | results under a pinned query | `--measure-search` (640) | header supplied by the view | not rendered |
+| `terminal` | the embedded Claude Code terminal | none — a full-height pane that scrolls inside itself | `text-title-panel` (26) | not rendered |
+| `chat` | the designed chat over the knowledge base | `--chat-measure` (660) — the terminal's full-height stance on a doc's measure | `text-title-panel` (26) | not rendered |
 
 ```tsx
 <ViewFrame variant="library" eyebrow="Project" title={formatSlug(slug)}
@@ -573,6 +576,8 @@ new screen should find its shape here rather than inventing one.
 | `NoteEditorView` | `ViewFrame variant="doc"`, `Button`, `StatusMessage` | its own header, and raw `<textarea>` / `<input>` elements with `aria-label` + `ui-writing` |
 | `SettingsView` | `ViewFrame variant="panel"`, `Select`, `Button`, `StatusMessage` | a local `role="switch"` `Toggle`, and a raw number `<input>` (`.settings__chip`) |
 | `SearchView` | `ViewFrame variant="search"`, `StatusMessage` | its own query field (`.ui-focus-ring-within`) |
+| `TerminalView` | `ViewFrame variant="terminal"`, `Button` | the xterm mount and the session-ended notice (`TerminalView.css`) |
+| `ChatView` | `ViewFrame variant="chat"`, `Button`, `StatusMessage` | the conversation log (`.chat-view__log`, entries on the shared `.md-reading` surface), the inline permission card (`.chat-view__card`, `ui-raised`), and a raw `<textarea>` composer (`.chat-view__input ui-writing`) |
 | `AppErrorBoundary` | `ViewFrame variant="health"`, `Button`, `StatusMessage` | — |
 | `CommandPalette` | `Overlay` | its own combobox input and rows |
 | `ConsentNudge` | `Overlay`, `Select`, `TextField`, `Button`, `StatusMessage` | — |
@@ -723,10 +728,13 @@ header's shape, and whether the column is capped at all.
 | `health` | uncapped | `text-title-health` (28) |
 | `doc` | `--measure-doc` (660) | supplied by the view |
 | `search` | `--measure-search` (640) | supplied by the view |
+| `terminal` | uncapped, full-height (the pane scrolls inside itself) | `text-title-panel` (26) |
+| `chat` | `--chat-measure` (660), full-height (the log scrolls inside itself) | `text-title-panel` (26) |
 
 A measure is set only where line length actually hurts reading, and left unset
 where the content is a list of rows that should use the width it has. That is
-why four of the six cap nothing: their rows are rows, not prose. Where a single
+why five of the eight cap nothing: their rows (or the terminal's grid) are not
+prose. Where a single
 element inside one of those views *is* prose, the cap goes on that element (a
 queue row's serif snippet at `--measure-snippet`) rather than on the frame.
 

@@ -1,6 +1,7 @@
 mod audio_cmds;
 mod capture_control;
 mod capture_watchdog;
+mod chat_cmds;
 mod distill_cmds;
 mod events;
 mod index_cmds;
@@ -144,6 +145,9 @@ pub fn run() {
         // The embedded terminal's single live PTY session (Phase 3). Reaped on
         // true app exit by the `RunEvent` hook below — never on hide-to-tray.
         .manage(terminal_cmds::TerminalState::default())
+        // The designed chat view's single live headless session (Phase 3),
+        // same lifecycle: reaped only on true app exit or explicit restart.
+        .manage(chat_cmds::ChatState::default())
         .invoke_handler(tauri::generate_handler![
             device_id,
             audio_cmds::start_capture,
@@ -181,6 +185,11 @@ pub fn run() {
             terminal_cmds::terminal_write,
             terminal_cmds::terminal_resize,
             terminal_cmds::terminal_restart,
+            chat_cmds::chat_open,
+            chat_cmds::chat_send,
+            chat_cmds::chat_cancel,
+            chat_cmds::chat_permission_respond,
+            chat_cmds::chat_restart,
         ])
         .on_window_event(|window, event| match event {
             // Hide instead of exit: the tray + global hotkey must stay
@@ -219,6 +228,7 @@ pub fn run() {
                 tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit
             ) {
                 terminal_cmds::reap(app_handle);
+                chat_cmds::reap(app_handle);
             }
         });
 }

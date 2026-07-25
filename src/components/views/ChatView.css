@@ -1,0 +1,84 @@
+/* ============================================================
+   Chat — the conversation pane inside the chat ViewFrame variant.
+
+   Only non-bridged tokens live here: the --chat-* stance (design/tokens.css
+   Layer 4) and the composer's writing ramp. Type, colour and weight stay as
+   utilities on the component; the answer prose itself is the shared
+   `.md-reading` surface (../markdownReading.css).
+
+   The frame's variant gives this pane the terminal's full-height posture on
+   the doc measure; inside it, the LOG is the only thing that scrolls, and the
+   composer holds still under a top hairline — the window never gains a
+   scrollbar, and nothing reflows under the user as tokens arrive.
+   ============================================================ */
+
+.chat-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  margin-top: var(--lead-panel);
+}
+
+.chat-view__log {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The conversation's rhythm: one gap between entries, wider than a
+   paragraph's, because most boundaries here are a change of voice. */
+.chat-view__log > * + * {
+  margin-top: var(--chat-gap-turn);
+}
+
+/* A user message keeps its typed line breaks — it was written in a textarea,
+   not markdown. */
+.chat-view__user {
+  white-space: pre-wrap;
+}
+
+/* The write-approval card: raised plane, a card's inset. Its buttons are the
+   only controls inside the log. */
+.chat-view__card {
+  border-radius: var(--radius-md);
+  padding: var(--card-pad-y) var(--card-pad-x);
+}
+
+.chat-view__ended {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-sm);
+}
+
+/* The composer: pinned under the log behind a top hairline. You write in the
+   ramp you read in (the note editor's rule) — the serif reading ramp, with
+   the green caret saying "this is live" (.ui-writing at the call site). */
+.chat-view__composer {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-2xs);
+  margin-top: var(--chat-lead-composer);
+  padding-top: var(--chat-lead-composer);
+  box-shadow: inset 0 1px 0 var(--edge-faint);
+}
+
+.chat-view__input {
+  flex: 1;
+  field-sizing: content;
+  min-height: var(--chat-composer-min);
+  max-height: var(--chat-composer-max);
+  overflow-y: auto;
+  resize: none;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--text-read);
+  font-family: var(--serif);
+  font-size: var(--fs-read);
+  line-height: var(--lh-read);
+}
+
+.chat-view__input::selection {
+  background: var(--highlight);
+}

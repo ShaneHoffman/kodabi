@@ -20,6 +20,7 @@ import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
 import { SessionArtifactsSection } from "./SessionArtifactsSection";
+import "../markdownReading.css";
 import "./NoteEditorView.css";
 
 type Props = {
@@ -170,7 +171,7 @@ function ReadNote({
           // Making them live means a components override plus a body write,
           // which is a feature, not a style fix. Until then the box states
           // the item's status and does not pretend to accept a click.
-          <div className="note-reading note__body font-serif">
+          <div className="md-reading note__body font-serif">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
               {note.body_markdown}
             </ReactMarkdown>

@@ -36,6 +36,10 @@ kodabi-llm = { path = "../crates/kodabi-llm" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Chat session ids: `claude --session-id` requires a valid UUID, and the chat
+# id doubles as that session id (`chat_cmds`). Already in the tree via Tauri's
+# stack, so this adds no new crate.
+uuid = { version = "1", features = ["v4"] }
 # Reads/writes Explorer's per-icon `NotifyIconSettings` so the tray mark sits
 # on the taskbar rather than the overflow flyout (see `tray_promotion`). Already
 # in the tree via Tauri's stack, so this adds no new crate.

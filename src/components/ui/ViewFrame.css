@@ -72,3 +72,21 @@
   flex-direction: column;
   min-height: 0;
 }
+
+/* ---------- chat ----------
+   The terminal's full-height stance on a document's measure: the log scrolls
+   inside itself (the window never gains a scrollbar) and the composer holds
+   still at the bottom, but the content is prose, so the column caps like a
+   doc. Pinned to the shared left edge like every measure above — nothing
+   centres. */
+.view--chat {
+  height: 100%;
+}
+
+.view--chat .view__column {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  max-width: var(--chat-measure);
+}
