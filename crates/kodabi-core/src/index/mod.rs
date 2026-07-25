@@ -68,9 +68,10 @@ pub enum IndexError {
     /// An embedding handed to the vector store was not [`EMBEDDING_DIM`] long.
     #[error("embedding dimension mismatch: expected {expected}, got {got}")]
     EmbeddingDim { expected: usize, got: usize },
-    /// A `search_notes` pagination `cursor` was malformed — not one this index
-    /// produced (wrong version prefix, bad score encoding, or empty id).
-    #[error("invalid search cursor {value:?}")]
+    /// A pagination `cursor` was malformed — not one this index produced (wrong
+    /// version prefix, bad sort-key encoding, or an empty boundary id). Shared
+    /// by every paginated index query, each of which owns its own codec.
+    #[error("invalid pagination cursor {value:?}")]
     Cursor { value: String },
     /// A `search_notes` filter array carried more values than the query planner
     /// will bind. Rejected rather than truncated: silently dropping a value
