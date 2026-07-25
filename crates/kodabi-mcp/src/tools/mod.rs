@@ -9,6 +9,7 @@
 
 mod add_glossary_term;
 mod file_note_to_project;
+mod get_meeting_transcript;
 mod get_note;
 mod list_projects;
 mod search_notes;
@@ -18,8 +19,9 @@ use std::path::Path;
 use chrono::NaiveDate;
 use serde_json::Value;
 
-use kodabi_core::index::{ActionItemRow, IndexError, NoteRow, NoteType};
+use kodabi_core::index::{ActionItemRow, ActionItemStatus, IndexError, NoteRow, NoteType};
 use kodabi_core::note::NoteError;
+use kodabi_core::sessions::SessionsError;
 use kodabi_core::vault::{AddGlossaryTermError, ListedNote};
 
 use crate::envelope;
@@ -41,6 +43,7 @@ pub fn call(server: &Server, params: Option<&Value>) -> Result<Value, RpcError> 
     match name {
         "search_notes" => search_notes::call(server, arguments),
         "get_note" => get_note::call(server, arguments),
+        "get_meeting_transcript" => get_meeting_transcript::call(server, arguments),
         "list_projects" => list_projects::call(server, arguments),
         "file_note_to_project" => file_note_to_project::call(server, arguments),
         "add_glossary_term" => add_glossary_term::call(server, arguments),
@@ -59,6 +62,19 @@ fn map_index_error(error: IndexError) -> RpcError {
         IndexError::Sqlite(_) | IndexError::EmbeddingDim { .. } => {
             RpcError::internal(error.to_string())
         }
+    }
+}
+
+/// Maps a [`SessionsError`] to the right JSON-RPC channel. A malformed cursor
+/// is the caller's fault (`invalid_params`); everything reaching here otherwise
+/// is a storage or parse fault (`internal`). `InvalidSource` never reaches this
+/// mapper — `sessions::read_transcript_page` already folds a keyword `source`
+/// into `transcript_available: false`, which is the documented success shape,
+/// not an error.
+fn map_sessions_error(error: SessionsError) -> RpcError {
+    match error {
+        SessionsError::Cursor(_) => RpcError::invalid_params(error.to_string()),
+        other => RpcError::internal(other.to_string()),
     }
 }
 
@@ -157,15 +173,15 @@ struct NoteRefDto {
 }
 
 /// The `ActionItem` `$def`. `status` is derived server-side (see
-/// [`effective_status`]); `extracted_date` is omitted when absent, matching its
-/// optional status in the schema.
+/// [`ActionItemStatus::derive`]); `extracted_date` is omitted when absent,
+/// matching its optional status in the schema.
 #[derive(serde::Serialize)]
 struct ActionItemDto {
     id: String,
     description: String,
     owner: String,
     due_date: Option<String>,
-    status: &'static str,
+    status: ActionItemStatus,
     source: NoteRefDto,
     #[serde(skip_serializing_if = "Option::is_none")]
     extracted_date: Option<String>,
@@ -180,27 +196,13 @@ impl ActionItemDto {
             description: item.description.clone(),
             owner: item.owner.clone(),
             due_date: item.due_date.clone(),
-            status: effective_status(item.done, item.due_date.as_deref(), today),
+            status: ActionItemStatus::derive(item.done, item.due_date.as_deref(), today),
             source: NoteRefDto {
                 id: note.id.clone(),
                 path: note.path.clone(),
             },
             extracted_date: item.extracted_date.clone(),
         }
-    }
-}
-
-/// The wire `status` for an action item: a checked item is `done`; otherwise it
-/// is `overdue` once its due date is strictly before `today`, else `open`.
-/// Derived here rather than stored so it stays correct as the clock advances (an
-/// item with no due date is never overdue).
-fn effective_status(done: bool, due_date: Option<&str>, today: NaiveDate) -> &'static str {
-    if done {
-        return "done";
-    }
-    match due_date.and_then(|due| NaiveDate::parse_from_str(due, "%Y-%m-%d").ok()) {
-        Some(due) if due < today => "overdue",
-        _ => "open",
     }
 }
 

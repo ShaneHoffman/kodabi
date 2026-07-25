@@ -15,7 +15,7 @@ pub const PROTOCOL_VERSION: &str = "2025-06-18";
 /// The server instructions surfaced at `initialize`. Must stay under 2 KB —
 /// Claude Code truncates this (and every tool description) at that size, which
 /// would silently drop the "when to use this" guidance a client relies on.
-const INSTRUCTIONS: &str = "Kodabi tools over your local knowledge base of distilled, routed Markdown notes. Read: search_notes for hybrid full-text and semantic retrieval (ranked snippets), get_note to read a hit in full by its stable id, and list_projects to resolve a project name to its slug before filtering. Write (the human correction loop): file_note_to_project re-files a note to a project while preserving its stable id, and add_glossary_term adds or updates a project glossary term (upsert by normalized term). Ids and slugs are the handles: a note id looks like n_a1b2c3, a project slug is a folder path like Growth/Q3, and the reserved slug Inbox means unfiled. Lists paginate with limit plus an opaque cursor; an empty result is a valid answer, while a lookup by an id that does not exist is an error.";
+const INSTRUCTIONS: &str = "Kodabi tools over your local knowledge base of distilled, routed Markdown notes. Read: search_notes for hybrid full-text and semantic retrieval (ranked snippets), get_note to read a hit in full by its stable id, get_meeting_transcript for a meeting's per-channel transcript segments, and list_projects to resolve a project name to its slug before filtering. Write (the human correction loop): file_note_to_project re-files a note to a project while preserving its stable id, and add_glossary_term adds or updates a project glossary term (upsert by normalized term). Ids and slugs are the handles: a note id looks like n_a1b2c3, a project slug is a folder path like Growth/Q3, and the reserved slug Inbox means unfiled. Lists paginate with limit plus an opaque cursor; an empty result is a valid answer, while a lookup by an id that does not exist is an error.";
 
 const _: () = assert!(INSTRUCTIONS.len() < 2048);
 
@@ -66,6 +66,7 @@ mod tests {
     use std::fs;
     use std::path::PathBuf;
 
+    use chrono::TimeZone;
     use kodabi_core::index::{IndexedNote, NoteIndex, NoteType};
     use kodabi_core::meeting::{ActionItemFact, MeetingFacts};
 
@@ -135,11 +136,69 @@ mod tests {
             })
             .unwrap();
 
+        // A second meeting whose `source` names a real session transcript on
+        // disk, so `get_meeting_transcript` has segments to page. `n_meet01`
+        // deliberately keeps the `transcript` keyword, covering the
+        // no-transcript-stored branch.
+        let transcript_source = seed_session(vault.path());
+        index
+            .upsert_note(&IndexedNote {
+                id: "n_meet02".to_string(),
+                path: "Growth/retro.md".to_string(),
+                title: "Retro".to_string(),
+                note_type: NoteType::Meeting,
+                project: Some("Growth".to_string()),
+                date: "2026-07-12".to_string(),
+                tags: vec![],
+                source: transcript_source,
+                confidence: None,
+                body: "A retro with a transcript.".to_string(),
+                meeting: Some(MeetingFacts {
+                    duration_seconds: Some(600),
+                    speaker_count: Some(2),
+                    decisions: vec!["Keep the retro weekly".to_string()],
+                    action_items: Vec::new(),
+                }),
+            })
+            .unwrap();
+
         let config = ServerConfig {
             index_db: PathBuf::from("in-memory"),
             kb_root: vault.path().to_path_buf(),
         };
         (Server::with_backend(config, index), vault)
+    }
+
+    /// Writes a five-segment session transcript into `<vault>/sessions/` and
+    /// returns the `sessions/<file>.jsonl` value a note's `source:` carries.
+    fn seed_session(vault: &std::path::Path) -> String {
+        use kodabi_core::device::DeviceId;
+        use kodabi_core::raw_session::{write_raw_session, TranscriptSegment};
+        use kodabi_core::transcription::Channel;
+
+        let segments: Vec<TranscriptSegment> = (0..5)
+            .map(|index| TranscriptSegment {
+                index,
+                channel: if index % 2 == 0 {
+                    Channel::You
+                } else {
+                    Channel::Them
+                },
+                speaker: None,
+                start_ms: index * 1_000,
+                end_ms: index * 1_000 + 750,
+                text: format!("line {index}"),
+            })
+            .collect();
+        let path = write_raw_session(
+            &vault.join("sessions"),
+            chrono::Utc.with_ymd_and_hms(2026, 7, 12, 15, 4, 5).unwrap(),
+            &DeviceId::parse("k4m2xp7q").unwrap(),
+            Some("retro"),
+            &segments,
+        )
+        .unwrap();
+        format!("sessions/{}", path.file_name().unwrap().to_str().unwrap())
     }
 
     fn call_tool(server: &Server, name: &str, arguments: Value) -> Value {
@@ -217,14 +276,22 @@ mod tests {
     }
 
     #[test]
-    fn tools_list_returns_the_five_tools() {
+    fn tools_list_returns_every_registered_tool() {
         let (server, _vault) = seeded_server();
         let response = handle_message(
             &server,
             json!({ "jsonrpc": "2.0", "id": 4, "method": "tools/list" }),
         )
         .unwrap();
-        assert_eq!(response["result"]["tools"].as_array().unwrap().len(), 5);
+        let names: Vec<&str> = response["result"]["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"get_meeting_transcript"), "{names:?}");
+        assert!(names.contains(&"search_notes"), "{names:?}");
+        assert!(names.contains(&"add_glossary_term"), "{names:?}");
     }
 
     #[test]
@@ -314,6 +381,148 @@ mod tests {
         assert_eq!(response["result"]["isError"], Value::Bool(true));
         assert!(response["result"].get("structuredContent").is_none());
         assert!(response.get("error").is_none());
+    }
+
+    // --- get_meeting_transcript ---------------------------------------------
+
+    #[test]
+    fn get_meeting_transcript_returns_attributed_segments_and_metadata() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(
+            &server,
+            "get_meeting_transcript",
+            json!({ "id": "n_meet02" }),
+        );
+        let structured = &response["result"]["structuredContent"];
+
+        assert_eq!(response["result"]["isError"], Value::Bool(false));
+        assert_eq!(structured["note"]["id"], "n_meet02");
+        assert_eq!(structured["note"]["path"], "Growth/retro.md");
+        assert_eq!(structured["transcript_available"], Value::Bool(true));
+
+        let segments = structured["segments"].as_array().unwrap();
+        assert_eq!(segments.len(), 5);
+        assert_eq!(segments[0]["index"], 0);
+        assert_eq!(segments[0]["channel"], "you");
+        assert_eq!(segments[1]["channel"], "them");
+        assert_eq!(segments[0]["speaker"], Value::Null);
+        assert_eq!(segments[0]["start_ms"], 0);
+        assert_eq!(segments[1]["start_ms"], 1_000);
+        assert_eq!(segments[0]["text"], "line 0");
+
+        // Metadata rides along by default.
+        assert_eq!(structured["meeting"]["duration_seconds"], 600);
+        assert_eq!(structured["meeting"]["speaker_count"], 2);
+        assert_eq!(
+            structured["meeting"]["decisions"][0],
+            "Keep the retro weekly"
+        );
+        assert_eq!(structured["meeting"]["action_item_count"], 0);
+        // The whole transcript was read, so the total is exact.
+        assert_eq!(structured["page"]["has_more"], Value::Bool(false));
+        assert_eq!(structured["page"]["next_cursor"], Value::Null);
+        assert_eq!(structured["page"]["total_estimate"], 5);
+    }
+
+    #[test]
+    fn get_meeting_transcript_include_metadata_false_omits_the_meeting_block() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(
+            &server,
+            "get_meeting_transcript",
+            json!({ "id": "n_meet02", "include_metadata": false }),
+        );
+        let structured = &response["result"]["structuredContent"];
+
+        assert_eq!(structured["meeting"], Value::Null);
+        // Segments are unaffected by the metadata toggle.
+        assert_eq!(structured["segments"].as_array().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn get_meeting_transcript_pages_segments_with_a_cursor() {
+        let (server, _vault) = seeded_server();
+
+        let mut seen = Vec::new();
+        let mut arguments = json!({ "id": "n_meet02", "limit": 2 });
+        loop {
+            let response = call_tool(&server, "get_meeting_transcript", arguments.clone());
+            let structured = &response["result"]["structuredContent"];
+            for segment in structured["segments"].as_array().unwrap() {
+                seen.push(segment["index"].as_u64().unwrap());
+            }
+            match structured["page"]["next_cursor"].as_str() {
+                Some(cursor) => arguments["cursor"] = json!(cursor),
+                None => {
+                    assert_eq!(structured["page"]["has_more"], Value::Bool(false));
+                    break;
+                }
+            }
+        }
+
+        // Every segment served exactly once, in order.
+        assert_eq!(seen, vec![0, 1, 2, 3, 4]);
+    }
+
+    #[test]
+    fn get_meeting_transcript_without_a_stored_transcript_is_not_an_error() {
+        let (server, _vault) = seeded_server();
+        // `n_meet01`'s source is the `transcript` capture keyword: a real
+        // meeting note that never named a session artifact.
+        let response = call_tool(
+            &server,
+            "get_meeting_transcript",
+            json!({ "id": "n_meet01" }),
+        );
+        let structured = &response["result"]["structuredContent"];
+
+        assert_eq!(response["result"]["isError"], Value::Bool(false));
+        assert_eq!(structured["transcript_available"], Value::Bool(false));
+        assert!(structured["segments"].as_array().unwrap().is_empty());
+        assert_eq!(structured["page"]["has_more"], Value::Bool(false));
+        // Metadata still answers for a meeting with no transcript.
+        assert_eq!(structured["meeting"]["action_item_count"], 2);
+    }
+
+    #[test]
+    fn get_meeting_transcript_on_a_non_meeting_is_a_business_error() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(
+            &server,
+            "get_meeting_transcript",
+            json!({ "id": "n_plain1" }),
+        );
+
+        assert_eq!(response["result"]["isError"], Value::Bool(true));
+        assert!(response["result"].get("structuredContent").is_none());
+        assert!(response.get("error").is_none());
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("not a meeting note"), "{text}");
+    }
+
+    #[test]
+    fn get_meeting_transcript_missing_id_is_a_business_error() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(
+            &server,
+            "get_meeting_transcript",
+            json!({ "id": "n_absent" }),
+        );
+
+        assert_eq!(response["result"]["isError"], Value::Bool(true));
+        assert!(response["result"].get("structuredContent").is_none());
+        assert!(response.get("error").is_none());
+    }
+
+    #[test]
+    fn get_meeting_transcript_rejects_a_tampered_cursor() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(
+            &server,
+            "get_meeting_transcript",
+            json!({ "id": "n_meet02", "cursor": "not-a-cursor" }),
+        );
+        assert_eq!(response["error"]["code"], -32602);
     }
 
     #[test]

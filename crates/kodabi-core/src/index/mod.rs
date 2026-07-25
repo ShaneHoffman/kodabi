@@ -23,8 +23,8 @@ mod search;
 pub use embed::{ChunkHit, EmbeddedChunk};
 
 pub use note::{
-    normalize_date_to_utc, ActionItemRow, IndexedNote, MeetingFactsRow, NoteRow, NoteType,
-    UnknownNoteType,
+    normalize_date_to_utc, ActionItemRow, ActionItemStatus, IndexedNote, MeetingFactsRow, NoteRow,
+    NoteType, UnknownNoteType,
 };
 
 pub use search::{PageInfo, SearchHit, SearchParams, SearchResults, TagMatch};
