@@ -1021,6 +1021,23 @@ fn project_id(slug: &str) -> String {
 /// Splits a slug into (`parent`, `display_name`): the last path segment is the
 /// display name, everything before it the parent slug (`None` at top level).
 /// Mirrors the desktop shell's `project_dto`.
+/// Projects a scanned [`ProjectInfo`] to the wire [`ProjectSummary`] (the
+/// `Project` `$def`). Shared by `list_projects_page` and
+/// [`crate::project_context`] so the same project reads identically through
+/// either tool.
+pub(crate) fn project_summary(info: ProjectInfo) -> ProjectSummary {
+    let (parent, display_name) = split_slug(&info.slug);
+    ProjectSummary {
+        id: project_id(&info.slug),
+        slug: info.slug,
+        display_name,
+        parent,
+        note_count: info.note_count,
+        meeting_count: info.meeting_count,
+        last_activity: info.last_activity,
+    }
+}
+
 fn split_slug(slug: &str) -> (Option<String>, String) {
     match slug.rsplit_once('/') {
         Some((parent, name)) => (Some(parent.to_string()), name.to_string()),
@@ -1097,21 +1114,7 @@ pub fn list_projects_page(vault_root: &Path, query: &ProjectQuery) -> Result<Pro
         infos.retain(|info| info.note_count > 0);
     }
 
-    let mut projects: Vec<ProjectSummary> = infos
-        .into_iter()
-        .map(|info| {
-            let (parent, display_name) = split_slug(&info.slug);
-            ProjectSummary {
-                id: project_id(&info.slug),
-                slug: info.slug,
-                display_name,
-                parent,
-                note_count: info.note_count,
-                meeting_count: info.meeting_count,
-                last_activity: info.last_activity,
-            }
-        })
-        .collect();
+    let mut projects: Vec<ProjectSummary> = infos.into_iter().map(project_summary).collect();
 
     // Total order with `slug` (globally unique) as the tiebreaker, so keyset
     // pagination by id stays deterministic even when the primary key ties.

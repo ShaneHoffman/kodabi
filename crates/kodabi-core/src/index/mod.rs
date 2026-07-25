@@ -26,7 +26,7 @@ pub use embed::{ChunkHit, EmbeddedChunk};
 
 pub use note::{
     normalize_date_to_utc, ActionItemRow, ActionItemStatus, IndexedNote, MeetingFactsRow, NoteRef,
-    NoteRow, NoteType, UnknownNoteType,
+    NoteRow, NoteType, NoteTypeCounts, UnknownNoteType,
 };
 
 pub use outstanding::{OutstandingItem, OutstandingParams, OutstandingResults, OutstandingSummary};

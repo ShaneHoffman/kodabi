@@ -1,8 +1,9 @@
-//! The five tools' static metadata and their committed JSON Schemas.
+//! The eight tools' static metadata and their committed JSON Schemas.
 //!
-//! Three read tools (`search_notes`, `get_note`, `list_projects`) and two write
-//! tools (`file_note_to_project`, `add_glossary_term`); the write tools differ
-//! only in carrying `readOnlyHint: false`.
+//! Six read tools (`search_notes`, `get_note`, `get_meeting_transcript`,
+//! `list_outstanding_items`, `list_projects`, `get_project_context`) and two
+//! write tools (`file_note_to_project`, `add_glossary_term`); the write tools
+//! differ only in carrying `readOnlyHint: false`.
 //!
 //! Each schema is a verbatim copy of the matching block in
 //! `docs/MCP_TOOL_SURFACE.md` (one file per tool per direction, under
@@ -22,7 +23,8 @@ const GET_NOTE_DESCRIPTION: &str = "Fetch a note's full distilled content by sta
 const GET_MEETING_TRANSCRIPT_DESCRIPTION: &str = "Fetch the per-channel transcript (you/them attribution, millisecond offsets) and metadata for a meeting note by stable id. Returns transcript_available=false with empty segments when no transcript is stored; errors if the id is not a meeting note.";
 const LIST_OUTSTANDING_ITEMS_DESCRIPTION: &str = "List action items that are not done (open/overdue), extracted from meetings and linked to their source note. Filter by project subtree, owner, status, due-before date, or source meeting.";
 const LIST_PROJECTS_DESCRIPTION: &str = "Enumerate routing-target projects with hierarchy (parent + slug), display name, note/meeting counts, and last activity. Use to resolve a project name to its slug before filtering other tools.";
-const FILE_NOTE_TO_PROJECT_DESCRIPTION: &str = "Route or re-route a note to a project (the human correction loop). Moves the file, updates its frontmatter project + confidence, preserves the stable id, and returns the new path. Mutating but reversible.";
+const GET_PROJECT_CONTEXT_DESCRIPTION: &str = "Aggregate context for one project in a single call: description, glossary, recent notes, outstanding items, and counts. Toggle and limit each section. Ideal for grounding a chat about a project.";
+const FILE_NOTE_TO_PROJECT_DESCRIPTION: &str ="Route or re-route a note to a project (the human correction loop). Moves the file, updates its frontmatter project + confidence, preserves the stable id, and returns the new path. Mutating but reversible.";
 const ADD_GLOSSARY_TERM_DESCRIPTION: &str = "Add or update a glossary term (term, definition, aliases) for a project. Upsert by normalized term. Used for transcription biasing and post-pass cleanup.";
 
 const _: () = assert!(SEARCH_NOTES_DESCRIPTION.len() < 2048);
@@ -30,6 +32,7 @@ const _: () = assert!(GET_NOTE_DESCRIPTION.len() < 2048);
 const _: () = assert!(GET_MEETING_TRANSCRIPT_DESCRIPTION.len() < 2048);
 const _: () = assert!(LIST_OUTSTANDING_ITEMS_DESCRIPTION.len() < 2048);
 const _: () = assert!(LIST_PROJECTS_DESCRIPTION.len() < 2048);
+const _: () = assert!(GET_PROJECT_CONTEXT_DESCRIPTION.len() < 2048);
 const _: () = assert!(FILE_NOTE_TO_PROJECT_DESCRIPTION.len() < 2048);
 const _: () = assert!(ADD_GLOSSARY_TERM_DESCRIPTION.len() < 2048);
 
@@ -87,6 +90,14 @@ const TOOLS: &[ToolSpec] = &[
         read_only: true,
     },
     ToolSpec {
+        name: "get_project_context",
+        title: "Get project context",
+        description: GET_PROJECT_CONTEXT_DESCRIPTION,
+        input_schema: include_str!("../schemas/get_project_context.input.json"),
+        output_schema: include_str!("../schemas/get_project_context.output.json"),
+        read_only: true,
+    },
+    ToolSpec {
         name: "file_note_to_project",
         title: "File note to project",
         description: FILE_NOTE_TO_PROJECT_DESCRIPTION,
@@ -106,7 +117,7 @@ const TOOLS: &[ToolSpec] = &[
 
 /// The `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint` block.
 /// `readOnlyHint` tracks the tool's `read_only` flag; the other three hints are
-/// uniform across all five tools (both write tools are reversible upserts, so
+/// uniform across all eight tools (both write tools are reversible upserts, so
 /// neither is destructive — see `docs/MCP_TOOL_SURFACE.md` §7/§8).
 fn tool_annotations(read_only: bool) -> Value {
     json!({
@@ -285,13 +296,14 @@ mod tests {
                 "get_meeting_transcript",
                 "list_outstanding_items",
                 "list_projects",
+                "get_project_context",
                 "file_note_to_project",
                 "add_glossary_term",
             ]
         );
 
         // The two write tools carry readOnlyHint: false; the reads carry true.
-        // Every other hint is uniform across the five.
+        // Every other hint is uniform across the eight.
         let write_tools = ["file_note_to_project", "add_glossary_term"];
         for tool in tools {
             let name = tool["name"].as_str().unwrap();

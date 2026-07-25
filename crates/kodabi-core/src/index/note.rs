@@ -192,6 +192,23 @@ pub struct ActionItemRow {
     pub extracted_date: Option<String>,
 }
 
+/// Note counts split by [`NoteType`] — the `notes_by_type` block of
+/// `get_project_context`'s `counts`. Field names match that schema, so it
+/// serializes straight out.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct NoteTypeCounts {
+    pub meeting: u32,
+    pub note: u32,
+    pub chat: u32,
+}
+
+impl NoteTypeCounts {
+    /// Total notes across every type.
+    pub fn total(&self) -> u32 {
+        self.meeting + self.note + self.chat
+    }
+}
+
 /// A minimal stable reference to a note — the `NoteRef` `$def` of
 /// `docs/MCP_TOOL_SURFACE.md`. Carried by a cross-note read (an action item's
 /// `source`) so the caller can follow the row back to `get_note` without a

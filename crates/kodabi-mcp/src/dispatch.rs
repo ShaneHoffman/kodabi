@@ -15,7 +15,7 @@ pub const PROTOCOL_VERSION: &str = "2025-06-18";
 /// The server instructions surfaced at `initialize`. Must stay under 2 KB —
 /// Claude Code truncates this (and every tool description) at that size, which
 /// would silently drop the "when to use this" guidance a client relies on.
-const INSTRUCTIONS: &str = "Kodabi tools over your local knowledge base of distilled, routed Markdown notes. Read: search_notes for hybrid full-text and semantic retrieval (ranked snippets), get_note to read a hit in full by its stable id, get_meeting_transcript for a meeting's per-channel transcript segments, list_outstanding_items for not-done action items linked to their source meeting, and list_projects to resolve a project name to its slug before filtering. Write (the human correction loop): file_note_to_project re-files a note to a project while preserving its stable id, and add_glossary_term adds or updates a project glossary term (upsert by normalized term). Ids and slugs are the handles: a note id looks like n_a1b2c3, a project slug is a folder path like Growth/Q3, and the reserved slug Inbox means unfiled. Lists paginate with limit plus an opaque cursor; an empty result is a valid answer, while a lookup by an id that does not exist is an error.";
+const INSTRUCTIONS: &str = "Kodabi tools over your local knowledge base of distilled, routed Markdown notes. Read: search_notes for hybrid full-text and semantic retrieval (ranked snippets), get_note to read a hit in full by its stable id, get_meeting_transcript for a meeting's per-channel transcript segments, list_outstanding_items for not-done action items linked to their source meeting, list_projects to resolve a project name to its slug before filtering, and get_project_context for a one-call briefing on a project (description, glossary, recent notes, outstanding items, counts). Write (the human correction loop): file_note_to_project re-files a note to a project while preserving its stable id, and add_glossary_term adds or updates a project glossary term (upsert by normalized term). Ids and slugs are the handles: a note id looks like n_a1b2c3, a project slug is a folder path like Growth/Q3, and the reserved slug Inbox means unfiled. Lists paginate with limit plus an opaque cursor; an empty result is a valid answer, while a lookup by an id that does not exist is an error.";
 
 const _: () = assert!(INSTRUCTIONS.len() < 2048);
 
@@ -716,6 +716,165 @@ mod tests {
             &server,
             "list_outstanding_items",
             json!({ "assignee": "You" }),
+        );
+        assert_eq!(response["error"]["code"], -32602);
+    }
+
+    // --- get_project_context ------------------------------------------------
+
+    /// Adds a README and a glossary to `Growth`, for the briefing tests.
+    fn seed_project_files(vault: &std::path::Path) {
+        use kodabi_core::glossary::{Glossary, GlossaryTerm, OnConflict};
+
+        let project_dir = vault.join("Growth");
+        fs::write(
+            project_dir.join("README.md"),
+            "# Growth\n\nThe growth workstream.\n",
+        )
+        .unwrap();
+
+        let mut glossary = Glossary::default();
+        glossary
+            .upsert(
+                GlossaryTerm {
+                    term: "MERIDIAN".to_string(),
+                    definition: "A systems-migration project.".to_string(),
+                    aliases: vec!["meridian".to_string()],
+                },
+                OnConflict::Update,
+            )
+            .unwrap();
+        glossary.save(&project_dir).unwrap();
+    }
+
+    #[test]
+    fn get_project_context_assembles_every_section_and_its_counts() {
+        let (server, vault) = seeded_server();
+        seed_project_files(vault.path());
+
+        let response = call_tool(
+            &server,
+            "get_project_context",
+            json!({ "project": "Growth" }),
+        );
+        let structured = &response["result"]["structuredContent"];
+
+        assert_eq!(response["result"]["isError"], Value::Bool(false));
+        assert_eq!(structured["project"]["slug"], "Growth");
+        assert_eq!(structured["project"]["display_name"], "Growth");
+        assert_eq!(structured["project"]["parent"], Value::Null);
+        assert_eq!(
+            structured["description"],
+            "# Growth\n\nThe growth workstream."
+        );
+
+        // The glossary carries the project the `_glossary.yml` file leaves implicit.
+        let glossary = structured["glossary"].as_array().unwrap();
+        assert_eq!(glossary.len(), 1);
+        assert_eq!(glossary[0]["term"], "MERIDIAN");
+        assert_eq!(glossary[0]["project"], "Growth");
+
+        // Descendants are off by default: the three `Growth` notes, not the
+        // `Growth/Q3` one.
+        assert_eq!(structured["counts"]["notes"], 3);
+        assert_eq!(structured["counts"]["meetings"], 2);
+        assert_eq!(structured["counts"]["notes_by_type"]["meeting"], 2);
+        assert_eq!(structured["counts"]["notes_by_type"]["note"], 1);
+        assert_eq!(structured["counts"]["notes_by_type"]["chat"], 0);
+        assert_eq!(structured["counts"]["glossary_terms"], 1);
+        assert_eq!(structured["counts"]["outstanding_overdue"], 1);
+        assert_eq!(structured["counts"]["outstanding_open"], 0);
+
+        let outstanding = structured["outstanding"].as_array().unwrap();
+        assert_eq!(outstanding.len(), 1);
+        assert_eq!(outstanding[0]["id"], "a_recap1");
+
+        assert_eq!(structured["recent_notes"].as_array().unwrap().len(), 3);
+        // The one documented pagination exception: no cursor at all.
+        assert!(structured.get("page").is_none());
+    }
+
+    #[test]
+    fn get_project_context_include_descendants_widens_the_scope() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(
+            &server,
+            "get_project_context",
+            json!({ "project": "Growth", "include_descendants": true }),
+        );
+        let counts = &response["result"]["structuredContent"]["counts"];
+
+        // The `Growth/Q3` meeting and its open item join in.
+        assert_eq!(counts["notes"], 4);
+        assert_eq!(counts["meetings"], 3);
+        assert_eq!(counts["outstanding_open"], 1);
+        assert_eq!(counts["outstanding_overdue"], 1);
+    }
+
+    #[test]
+    fn get_project_context_keeps_counts_true_when_sections_are_capped() {
+        let (server, vault) = seeded_server();
+        seed_project_files(vault.path());
+
+        let response = call_tool(
+            &server,
+            "get_project_context",
+            json!({
+                "project": "Growth",
+                "recent_notes_limit": 0,
+                "outstanding_limit": 0,
+                "include_glossary": false
+            }),
+        );
+        let structured = &response["result"]["structuredContent"];
+
+        assert!(structured["recent_notes"].as_array().unwrap().is_empty());
+        assert!(structured["outstanding"].as_array().unwrap().is_empty());
+        assert!(structured["glossary"].as_array().unwrap().is_empty());
+
+        // A caller that drops a section still learns how much is there.
+        assert_eq!(structured["counts"]["notes"], 3);
+        assert_eq!(structured["counts"]["outstanding_overdue"], 1);
+        assert_eq!(structured["counts"]["glossary_terms"], 1);
+    }
+
+    #[test]
+    fn get_project_context_without_a_readme_reports_a_null_description() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(
+            &server,
+            "get_project_context",
+            json!({ "project": "Growth" }),
+        );
+        assert_eq!(
+            response["result"]["structuredContent"]["description"],
+            Value::Null
+        );
+    }
+
+    #[test]
+    fn get_project_context_unknown_project_is_a_business_error() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(
+            &server,
+            "get_project_context",
+            json!({ "project": "NoSuchProject" }),
+        );
+
+        // A lookup by a slug that misses is an error: the caller asserted it
+        // exists (unlike a list, where empty is a valid answer).
+        assert_eq!(response["result"]["isError"], Value::Bool(true));
+        assert!(response["result"].get("structuredContent").is_none());
+        assert!(response.get("error").is_none());
+    }
+
+    #[test]
+    fn get_project_context_rejects_a_malformed_slug() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(
+            &server,
+            "get_project_context",
+            json!({ "project": "Inbox/nope" }),
         );
         assert_eq!(response["error"]["code"], -32602);
     }

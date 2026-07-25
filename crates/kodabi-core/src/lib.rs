@@ -19,6 +19,7 @@ pub mod naming;
 pub mod note;
 pub mod overlay;
 pub mod pipeline;
+pub mod project_context;
 pub mod raw_session;
 pub mod reconcile;
 pub mod retention;
