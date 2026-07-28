@@ -76,11 +76,9 @@ function fromSnapshot(snapshot: ChatSnapshot): ChatSessionState {
     entries: snapshot.entries,
     streamingText: snapshot.streaming_text ?? "",
     pending: snapshot.pending_permission,
-    // A snapshot mid-stream implies an in-flight turn; a pending card also
-    // means the turn is blocked (in flight) on it.
-    turnActive:
-      snapshot.running &&
-      (snapshot.streaming_text !== null || snapshot.pending_permission !== null),
+    // The backend carries turn state explicitly — mid-turn there may be no
+    // streamed text and no pending card to infer it from.
+    turnActive: snapshot.turn_active,
     exited: !snapshot.running,
     startError: null,
   };

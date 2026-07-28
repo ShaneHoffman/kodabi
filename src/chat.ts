@@ -35,6 +35,10 @@ export type PendingPermission = {
 export type ChatSnapshot = {
   chat_id: string;
   running: boolean;
+  /** A turn is in flight (send accepted, its result not yet seen). Carried
+   * explicitly: mid-turn there may be no streamed text and no pending card
+   * (the model thinking, a read tool running), so the view cannot infer it. */
+  turn_active: boolean;
   entries: ChatEntry[];
   streaming_text: string | null;
   pending_permission: PendingPermission | null;

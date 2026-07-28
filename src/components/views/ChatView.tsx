@@ -1,4 +1,9 @@
-import { useState, type FormEvent, type KeyboardEvent } from "react";
+import {
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+  type UIEvent,
+} from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { ChatEntry, PendingPermission } from "../../chat";
@@ -12,6 +17,11 @@ import "./ChatView.css";
 
 /** The bottom sentinel the log keeps in view as the conversation grows. */
 const LOG_END_ID = "chat-view-end";
+
+/** How far above the bottom edge still counts as "reading the live end".
+ * Within it, growth keeps the end in view; beyond it, the user has scrolled
+ * up into the backlog and streaming must not yank them back down. */
+const FOLLOW_SLACK_PX = 40;
 
 /**
  * The designed chat over the knowledge base (FOUNDING_DOC §4: the front door;
@@ -29,15 +39,26 @@ const LOG_END_ID = "chat-view-end";
 export function ChatView() {
   const chat = useChatSession();
   const [draft, setDraft] = useState("");
+  // Whether the reader is at the live end of the log. Scrolling up into the
+  // backlog unpins; scrolling back down (or sending a message) repins.
+  const [pinnedToEnd, setPinnedToEnd] = useState(true);
 
   useScrollIntoView(
-    LOG_END_ID,
-    // Content growth is what should keep the end in view: new entries, more
-    // streamed text, a card appearing, or the exit notice.
+    // Content growth keeps the end in view — but only for a reader who is
+    // there: yanking someone out of the backlog on every streamed delta would
+    // make scrollback unreadable while a turn runs.
+    pinnedToEnd ? LOG_END_ID : null,
     `${chat.entries.length}:${chat.streamingText.length}:${
       chat.pending?.request_id ?? ""
     }:${chat.exited}`,
   );
+
+  const logScrolled = (event: UIEvent<HTMLDivElement>) => {
+    const log = event.currentTarget;
+    setPinnedToEnd(
+      log.scrollHeight - log.scrollTop - log.clientHeight <= FOLLOW_SLACK_PX,
+    );
+  };
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -45,6 +66,9 @@ export function ChatView() {
     if (!text || chat.turnActive || chat.exited) return;
     chat.send(text);
     setDraft("");
+    // Your own message belongs on screen: sending rejoins the live end even
+    // from deep in the backlog.
+    setPinnedToEnd(true);
   };
 
   const composerKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -81,6 +105,7 @@ export function ChatView() {
           className="chat-view__log"
           aria-label="Conversation"
           aria-busy={chat.turnActive || undefined}
+          onScroll={logScrolled}
         >
           {empty && (
             <StatusMessage variant="empty">

@@ -21,6 +21,7 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
   return {
     chat_id: CHAT_ID,
     running: true,
+    turn_active: false,
     entries: [],
     streaming_text: null,
     pending_permission: null,
@@ -61,6 +62,7 @@ describe("ChatView", () => {
           { kind: "assistant", text: "You have **Briarwood Golf**." },
         ],
         streaming_text: "And one more thing",
+        turn_active: true,
       }),
     );
     await renderChat();
@@ -70,6 +72,22 @@ describe("ChatView", () => {
     // Markdown renders: the bold survives as an element, not literal asterisks.
     expect(screen.getByText("Briarwood Golf")).toBeInTheDocument();
     expect(screen.getByText("And one more thing")).toBeInTheDocument();
+  });
+
+  it("hydrates an in-flight turn as stoppable even with nothing streaming", async () => {
+    // Mid-turn there may be no streamed text and no pending card (the model
+    // thinking, a read tool running): the snapshot's explicit turn_active is
+    // what must keep Stop up instead of re-enabling Send.
+    onCommand("chat_open", () =>
+      snapshot({
+        entries: [{ kind: "user", text: "What projects do I have?" }],
+        turn_active: true,
+      }),
+    );
+    await renderChat();
+
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
   });
 
   it("sends the draft and renders it as a user turn", async () => {

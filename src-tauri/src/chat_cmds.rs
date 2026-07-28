@@ -69,6 +69,12 @@ struct SharedChat {
     streaming: Mutex<String>,
     pending: Mutex<Option<PendingPermission>>,
     transcript: Mutex<ChatTranscript>,
+    /// Set by `chat_send`, cleared at `TurnResult` and exit. The snapshot
+    /// cannot infer an in-flight turn from its visible traces — while the
+    /// model thinks or a read tool runs there is no streamed text and no
+    /// pending card — so this flag is what keeps a mid-turn remount showing
+    /// Stop instead of re-enabling Send.
+    turn_active: AtomicBool,
     /// Set by `chat_cancel` so the pump renders the interrupted turn's error
     /// result as "stopped", not as a failure.
     interrupting: AtomicBool,
@@ -89,9 +95,11 @@ pub struct ChatSessionState {
 
 impl ChatSessionState {
     fn snapshot(&self) -> ChatSnapshot {
+        let running = self.child.is_alive();
         ChatSnapshot {
             chat_id: self.chat_id.clone(),
-            running: self.child.is_alive(),
+            running,
+            turn_active: running && self.shared.turn_active.load(Ordering::Relaxed),
             entries: self
                 .shared
                 .log
@@ -248,6 +256,10 @@ impl From<&PendingPermission> for PendingPermissionDto {
 pub struct ChatSnapshot {
     chat_id: String,
     running: bool,
+    /// A turn is in flight (`chat_send` accepted, `TurnResult` not yet seen).
+    /// Carried explicitly because mid-turn there may be nothing else to see:
+    /// no streamed text while the model thinks, no card while a read tool runs.
+    turn_active: bool,
     entries: Vec<ChatEntryDto>,
     streaming_text: Option<String>,
     pending_permission: Option<PendingPermissionDto>,
@@ -348,7 +360,13 @@ pub fn chat_send(state: State<'_, ChatState>, text: String) -> Result<(), String
     session
         .child
         .write_line(chat::user_message_json(&text))
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+    session.shared.turn_active.store(true, Ordering::Relaxed);
+    // A cancel that raced the previous turn's natural end leaves a stale
+    // interrupt intent; consumed here, it cannot relabel this turn's real
+    // failure as "stopped".
+    session.shared.interrupting.store(false, Ordering::Relaxed);
+    Ok(())
 }
 
 /// Stops the in-flight turn: any open permission card resolves to deny
@@ -407,10 +425,19 @@ pub fn chat_permission_respond(
             message: DENY_MESSAGE.to_owned(),
         }
     };
-    session
+    if let Err(err) = session
         .child
         .write_line(chat::permission_response_json(&request_id, &decision))
-        .map_err(|e| e.to_string())?;
+    {
+        // The decision never reached the child (it is exiting), so this must
+        // not be recorded as the user's resolution. Put the card back for the
+        // pump's exit handler, which owns recording a `session_closed` deny —
+        // otherwise this race leaves the prompt with no transcript record.
+        if let Ok(mut pending_slot) = session.shared.pending.lock() {
+            *pending_slot = Some(pending);
+        }
+        return Err(err.to_string());
+    }
 
     session.shared.record(ChatRecord::Permission {
         ts: chat::now_ts(),
@@ -439,15 +466,17 @@ pub fn chat_permission_respond(
 /// deliberate reset.
 #[tauri::command]
 pub fn chat_restart(app: AppHandle, state: State<'_, ChatState>) -> Result<ChatSnapshot, String> {
-    {
-        let mut guard = state.0.lock().map_err(|_| POISONED.to_string())?;
-        if let Some(session) = guard.take() {
-            session.reap();
-        }
+    // One guard across reap + spawn + store (the `chat_open` shape): released
+    // mid-restart, a concurrent `chat_open` could store its own session in the
+    // gap and have it overwritten here — leaking a live, unreapable
+    // `claude → kodabi-mcp` pair.
+    let mut guard = state.0.lock().map_err(|_| POISONED.to_string())?;
+    if let Some(session) = guard.take() {
+        session.reap();
     }
     let session = spawn_session(&app)?;
     let snapshot = session.snapshot();
-    *state.0.lock().map_err(|_| POISONED.to_string())? = Some(session);
+    *guard = Some(session);
     Ok(snapshot)
 }
 
@@ -496,6 +525,7 @@ fn spawn_session(app: &AppHandle) -> Result<ChatSessionState, String> {
         streaming: Mutex::new(String::new()),
         pending: Mutex::new(None),
         transcript: Mutex::new(transcript),
+        turn_active: AtomicBool::new(false),
         interrupting: AtomicBool::new(false),
         reaped: AtomicBool::new(false),
     });
@@ -656,6 +686,7 @@ fn handle_item(
             let _ = child.write_line(chat::control_ack_json(&request_id));
         }
         ChatStreamItem::TurnResult { is_error, result } => {
+            shared.turn_active.store(false, Ordering::Relaxed);
             let stopped = shared.interrupting.swap(false, Ordering::Relaxed) && is_error;
             let error = if is_error && !stopped {
                 let message = result
@@ -685,6 +716,7 @@ fn handle_item(
 }
 
 fn handle_exit(app: &AppHandle, chat_id: &str, code: Option<i32>, shared: &SharedChat) {
+    shared.turn_active.store(false, Ordering::Relaxed);
     // An exit with a card still open resolves it: record the deny (there is
     // no process left to write it to) so the audit trail stays truthful.
     if let Some(pending) = shared.pending.lock().ok().and_then(|mut p| p.take()) {

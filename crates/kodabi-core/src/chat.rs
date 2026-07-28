@@ -329,10 +329,14 @@ fn input_str<'v>(input: &'v Value, key: &str) -> Option<&'v str> {
     input.get(key).and_then(Value::as_str)
 }
 
-/// One quiet log line describing a completed tool call. Unknown tools fall
-/// back to their bare name, so a tool added later (e.g. task #92's
-/// `list_outstanding_items`) degrades to something truthful with no change
-/// here.
+/// One quiet log line describing a tool call, phrased for when it is written:
+/// the call streams out of the model *before* it runs. The pre-approved read
+/// tools run unconditionally, so their copy states the outcome; a write tool
+/// can still be denied at the permission card that follows, so its copy states
+/// the request — "Asked to", never a past tense the deny would falsify.
+/// Unknown tools fall back to their bare name in the same request phrasing, so
+/// a tool added later (e.g. task #92's `list_outstanding_items`) degrades to
+/// something truthful with no change here.
 pub fn tool_use_summary(tool_name: &str, input: &Value) -> String {
     match short_tool_name(tool_name) {
         "search_notes" => match input_str(input, "query") {
@@ -345,16 +349,16 @@ pub fn tool_use_summary(tool_name: &str, input: &Value) -> String {
         },
         "list_projects" => "Listed projects".to_string(),
         "file_note_to_project" => match (input_str(input, "id"), input_str(input, "project")) {
-            (Some(id), Some(project)) => format!("Filed note {id} to {project}"),
-            _ => "Filed a note".to_string(),
+            (Some(id), Some(project)) => format!("Asked to file note {id} to {project}"),
+            _ => "Asked to file a note".to_string(),
         },
         "add_glossary_term" => match (input_str(input, "term"), input_str(input, "project")) {
             (Some(term), Some(project)) => {
-                format!("Added glossary term \"{term}\" to {project}")
+                format!("Asked to add glossary term \"{term}\" to {project}")
             }
-            _ => "Added a glossary term".to_string(),
+            _ => "Asked to add a glossary term".to_string(),
         },
-        other => format!("Used {other}"),
+        other => format!("Called {other}"),
     }
 }
 
@@ -740,24 +744,28 @@ mod tests {
             tool_use_summary("mcp__kodabi__list_projects", &json!({})),
             "Listed projects"
         );
+        // Write tools are summarized as requests: the line is written before
+        // the permission card resolves, and a deny must not leave the log
+        // claiming the write happened.
         assert_eq!(
             tool_use_summary(
                 "mcp__kodabi__file_note_to_project",
                 &json!({"id": "n_a1b2c3", "project": "Briarwood Golf"})
             ),
-            "Filed note n_a1b2c3 to Briarwood Golf"
+            "Asked to file note n_a1b2c3 to Briarwood Golf"
         );
         assert_eq!(
             tool_use_summary(
                 "mcp__kodabi__add_glossary_term",
                 &json!({"term": "AEC", "project": "Briarwood Golf"})
             ),
-            "Added glossary term \"AEC\" to Briarwood Golf"
+            "Asked to add glossary term \"AEC\" to Briarwood Golf"
         );
-        // Unknown tool (e.g. a later list_outstanding_items): truthful fallback.
+        // Unknown tool (e.g. a later list_outstanding_items): truthful fallback
+        // whether it turns out to be a pre-approved read or a prompted write.
         assert_eq!(
             tool_use_summary("mcp__kodabi__list_outstanding_items", &json!({})),
-            "Used list_outstanding_items"
+            "Called list_outstanding_items"
         );
     }
 
