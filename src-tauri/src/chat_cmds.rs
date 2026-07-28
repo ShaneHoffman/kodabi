@@ -81,6 +81,12 @@ struct SharedChat {
     /// Set by a deliberate reap (restart / app exit) so the pump stays silent
     /// instead of emitting a spurious `exited` event.
     reaped: AtomicBool,
+    /// Claimed by whichever end path gets there first, so one session distills
+    /// at most once. See [`claim_distill_once`].
+    distill_scheduled: AtomicBool,
+    /// Set by `chat_restart` before it reaps, so the pump distills this session
+    /// once it has drained. See [`should_schedule_distill`].
+    distill_on_reap: AtomicBool,
 }
 
 /// A running chat session. The pump thread owns the event receiver; what
@@ -159,11 +165,74 @@ impl ChatSessionState {
 
     /// Deliberate teardown: deny any pending card, mark reaped (so the pump
     /// stays quiet), and kill the `claude → kodabi-mcp` tree.
+    ///
+    /// Deliberately schedules **no** distill, and deliberately does not wait
+    /// for the pump: `kill` only stops the child, so events the reader thread
+    /// has already parsed are still in flight and the transcript is not
+    /// complete when this returns. Whether the session distills is recorded on
+    /// [`SharedChat::distill_on_reap`] and acted on by the pump, which is the
+    /// one place that knows every record has landed. `chat_restart` sets it
+    /// (the app is live); app exit cannot distill at all, because a thread
+    /// spawned during `RunEvent::Exit` dies with the process, so it leaves the
+    /// flag clear and the startup sweep covers it.
     fn reap(&self) {
         self.deny_pending(None, PermissionResolution::SessionClosed);
         self.shared.reaped.store(true, Ordering::Relaxed);
         self.child.kill();
     }
+
+    /// This session's transcript path, for the startup sweep's live-session
+    /// exclusion. Cloned rather than borrowed: the path outlives the lock.
+    ///
+    /// `None` on a poisoned lock rather than an empty path: the caller compares
+    /// this against every candidate transcript, and a default `PathBuf` matches
+    /// none of them — it would silently drop the exclusion and let the sweep
+    /// distill a conversation that is still open.
+    pub(crate) fn transcript_path(&self) -> Option<std::path::PathBuf> {
+        self.shared
+            .transcript
+            .lock()
+            .ok()
+            .map(|transcript| transcript.path().to_path_buf())
+    }
+}
+
+/// Claims the one chat distill this session gets, returning `true` for the
+/// first caller only.
+///
+/// Two end paths can fire for a single session: reaping the child on restart
+/// also makes the pump observe an exit. Without this, one conversation would
+/// spend two headless calls and land two suffix-disambiguated notes, which
+/// nothing downstream dedupes.
+fn claim_distill_once(flag: &AtomicBool) -> bool {
+    !flag.swap(true, Ordering::SeqCst)
+}
+
+/// Whether the pump should distill the session it just saw end.
+///
+/// The pump is the only place that may make this call, because it is the only
+/// place that runs *after* every queued event has been recorded. `kill` does
+/// not drain the channel, so a caller that schedules a distill right after
+/// reaping races the tail of the conversation into the transcript — and a note
+/// that claims a half-written transcript is the one failure no later sweep can
+/// repair, since the sweep skips claimed transcripts forever.
+///
+/// An unreaped exit is the CLI dying on its own, which always distills. A
+/// reaped one distills only when the reaper asked for it: `chat_restart` does,
+/// app exit does not (its thread would die with the process).
+fn should_schedule_distill(reaped: bool, distill_on_reap: bool) -> bool {
+    !reaped || distill_on_reap
+}
+
+/// Schedules the ended session's transcript for a chat distill, at most once.
+fn schedule_chat_distill(app: &AppHandle, shared: &SharedChat) {
+    if !claim_distill_once(&shared.distill_scheduled) {
+        return;
+    }
+    let Ok(transcript) = shared.transcript.lock() else {
+        return;
+    };
+    let _ = crate::chat_distill_cmds::spawn_chat_distill(app, transcript.path().to_path_buf());
 }
 
 impl SharedChat {
@@ -472,6 +541,10 @@ pub fn chat_restart(app: AppHandle, state: State<'_, ChatState>) -> Result<ChatS
     // `claude → kodabi-mcp` pair.
     let mut guard = state.0.lock().map_err(|_| POISONED.to_string())?;
     if let Some(session) = guard.take() {
+        // Marked before the reap, never scheduled here: the pump owns the
+        // timing. Distilling on this thread would read the transcript while
+        // the pump is still writing the last turn into it.
+        session.shared.distill_on_reap.store(true, Ordering::SeqCst);
         session.reap();
     }
     let session = spawn_session(&app)?;
@@ -528,6 +601,8 @@ fn spawn_session(app: &AppHandle) -> Result<ChatSessionState, String> {
         turn_active: AtomicBool::new(false),
         interrupting: AtomicBool::new(false),
         reaped: AtomicBool::new(false),
+        distill_scheduled: AtomicBool::new(false),
+        distill_on_reap: AtomicBool::new(false),
     });
 
     let pump_app = app.clone();
@@ -744,7 +819,8 @@ fn handle_exit(app: &AppHandle, chat_id: &str, code: Option<i32>, shared: &Share
             );
         }
     }
-    if !shared.reaped.load(Ordering::Relaxed) {
+    let reaped = shared.reaped.load(Ordering::Relaxed);
+    if !reaped {
         emit(
             app,
             &ChatEventPayload::Exited {
@@ -752,5 +828,56 @@ fn handle_exit(app: &AppHandle, chat_id: &str, code: Option<i32>, shared: &Share
                 code,
             },
         );
+    }
+    // Outside the `!reaped` guard, and last: the pump has drained every queued
+    // event by now, so this is the first moment the transcript is complete.
+    // See [`should_schedule_distill`] for why no other thread may decide this.
+    if should_schedule_distill(reaped, shared.distill_on_reap.load(Ordering::SeqCst)) {
+        schedule_chat_distill(app, shared);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The double-fire guard, tested on the flag alone — which is exactly why
+    /// it is extracted: reaping a session also makes the pump observe an exit,
+    /// so both end paths reach `schedule_chat_distill` for one conversation.
+    #[test]
+    fn a_session_schedules_at_most_one_chat_distill() {
+        let scheduled = AtomicBool::new(false);
+
+        assert!(claim_distill_once(&scheduled), "the first claim wins");
+        assert!(!claim_distill_once(&scheduled), "the second is refused");
+        assert!(!claim_distill_once(&scheduled));
+    }
+
+    /// The three end paths, as the pump sees them. Extracted and tested pure
+    /// for the same reason as the claim above: the decision is reached on the
+    /// pump thread, after the drain, and there is no way to observe that
+    /// ordering from a test.
+    #[test]
+    fn only_the_pump_distills_and_only_when_the_reaper_asked() {
+        // The CLI died on its own: the session really ended, so it distills.
+        assert!(should_schedule_distill(false, false));
+
+        // App exit reaped it. A thread spawned during `RunEvent::Exit` dies
+        // with the process, so exit deliberately leaves this to the sweep.
+        assert!(!should_schedule_distill(true, false));
+
+        // `chat_restart` reaped it and asked for the distill. It runs here,
+        // on the pump, rather than on the restarting thread — which would
+        // race the last turn into the transcript it is about to read.
+        assert!(should_schedule_distill(true, true));
+    }
+
+    #[test]
+    fn separate_sessions_each_get_their_own_claim() {
+        let first = AtomicBool::new(false);
+        let second = AtomicBool::new(false);
+
+        assert!(claim_distill_once(&first));
+        assert!(claim_distill_once(&second));
     }
 }

@@ -4,6 +4,12 @@
 //! resolves the KB root, builds the headless runner, resolves the routing
 //! threshold from the environment (via [`crate::routing_env`]), and reports
 //! progress — same shape as `transcribe.rs`'s pipeline wiring.
+//!
+//! [`crate::chat_distill_cmds`] is the sibling pass for chat transcripts. It
+//! shares this module's two gates — [`distill_lock`] and the
+//! [`DISTILLS_IN_FLIGHT`] claim set — so the two never hold two headless
+//! `claude` processes between them, and so "is this artifact already being
+//! distilled" has one answer.
 
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
@@ -63,7 +69,19 @@ enum DistillStateEvent {
 /// Claude subprocesses at once. Independent of `transcribe.rs`'s lock on
 /// purpose: a distill (a subprocess call) must not block the next meeting's
 /// transcription (a model load), or vice versa.
+///
+/// Shared with [`crate::chat_distill_cmds`]: a chat distill is the same kind of
+/// subprocess call, so the two passes queue behind one lock rather than
+/// racing to hold two `claude` processes between them.
 static DISTILL_LOCK: Mutex<()> = Mutex::new(());
+
+/// Acquires [`DISTILL_LOCK`], recovering from a poisoned lock the way every
+/// other guard in this module does.
+pub(crate) fn distill_lock() -> MutexGuard<'static, ()> {
+    DISTILL_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 /// Sessions queued for or currently being distilled.
 ///
@@ -96,12 +114,16 @@ fn in_flight() -> MutexGuard<'static, BTreeSet<PathBuf>> {
 
 /// Claims `session_path` for a distill run. `false` when a run already holds
 /// it, in which case the caller must not start another.
-fn claim_in_flight(session_path: &Path) -> bool {
+///
+/// Shared with [`crate::chat_distill_cmds`], which claims chat transcripts in
+/// the same set: the paths can't collide (`sessions/` vs `chats/`), and one set
+/// means one answer to "is this artifact already being distilled".
+pub(crate) fn claim_in_flight(session_path: &Path) -> bool {
     in_flight().insert(session_path.to_path_buf())
 }
 
 /// Releases the claim on `session_path`. A no-op when nothing held it.
-fn clear_in_flight(session_path: &Path) {
+pub(crate) fn clear_in_flight(session_path: &Path) {
     in_flight().remove(session_path);
 }
 
@@ -316,7 +338,7 @@ enum DistillFailure {
 
 /// Best-effort extraction of a panic's payload message; panics carry
 /// `&str`/`String` payloads in practice (`panic!` with a literal or format).
-fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
+pub(crate) fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
     panic
         .downcast_ref::<&str>()
         .copied()

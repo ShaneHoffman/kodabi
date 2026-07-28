@@ -7,6 +7,8 @@
 pub mod benchmark;
 pub mod capture;
 pub mod chat;
+pub mod chat_distill;
+pub mod chats;
 pub mod device;
 pub mod distill;
 pub mod embed;
