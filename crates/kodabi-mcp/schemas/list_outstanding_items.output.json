@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["items", "summary", "page"],
+  "properties": {
+    "items": { "type": "array", "items": { "$ref": "#/$defs/ActionItem" }, "description": "Matching action items, ordered by due date ascending (undated last)." },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["open", "overdue", "done"],
+      "properties": {
+        "open": { "type": "integer", "minimum": 0, "description": "Total matching items with status open (across all pages)." },
+        "overdue": { "type": "integer", "minimum": 0, "description": "Total matching items with status overdue (across all pages)." },
+        "done": { "type": "integer", "minimum": 0, "description": "Total matching items with status done (across all pages; 0 unless done was requested)." }
+      }
+    },
+    "page": { "$ref": "#/$defs/PageInfo" }
+  },
+  "$defs": {
+    "NoteId": {
+      "type": "string",
+      "pattern": "^n_[0-9a-z]{6,}$",
+      "description": "Stable note identifier, e.g. \"n_a1b2c3\". Generated at creation, never rewritten on move/re-route. This is the write handle."
+    },
+    "IsoDate": {
+      "type": "string",
+      "format": "date",
+      "description": "Calendar date, ISO 8601 / RFC 3339 full-date, e.g. \"2026-07-11\"."
+    },
+    "ActionItemStatus": {
+      "type": "string",
+      "enum": ["open", "overdue", "done"],
+      "description": "Action-item status. 'overdue' is derived server-side from 'open' + a past due date."
+    },
+    "PageInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["has_more", "next_cursor"],
+      "properties": {
+        "has_more": { "type": "boolean", "description": "True if more results exist beyond this page." },
+        "next_cursor": { "type": ["string", "null"], "description": "Opaque token to pass as the next request's cursor; null when has_more is false." },
+        "total_estimate": { "type": ["integer", "null"], "minimum": 0, "description": "Total matches when the underlying candidate pool was exhausted (an exact count), or null when it was not — a truncated pool knows only its own size, which would understate the total. Never a value the caller can treat as a floor for how much is left; use has_more for that." }
+      },
+      "description": "Cursor-based pagination envelope. Cursors are opaque and mutation-safe (they encode sort key + id, not an offset)."
+    },
+    "NoteRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "path"],
+      "properties": {
+        "id": { "$ref": "#/$defs/NoteId" },
+        "path": { "type": "string", "description": "Current note path relative to the KB root, e.g. \"Growth/Q3/weekly-sync.md\". Informational; changes on move." }
+      },
+      "description": "Minimal stable reference to a note: stable id plus current path."
+    },
+    "ActionItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "description", "owner", "due_date", "status", "source"],
+      "properties": {
+        "id": { "type": "string", "pattern": "^a_[0-9a-z]{6,}$", "description": "Stable action-item id, e.g. \"a_9f8e7d\"." },
+        "description": { "type": "string", "description": "What is to be done." },
+        "owner": { "type": "string", "description": "Who owns it (e.g. \"you\" or a person's name)." },
+        "due_date": { "oneOf": [ { "$ref": "#/$defs/IsoDate" }, { "type": "null" } ], "description": "Due date, or null if none." },
+        "status": { "$ref": "#/$defs/ActionItemStatus" },
+        "source": { "$ref": "#/$defs/NoteRef", "description": "The meeting note this item was extracted from." },
+        "extracted_date": { "oneOf": [ { "$ref": "#/$defs/IsoDate" }, { "type": "null" } ], "description": "Date the item was extracted (usually the meeting date)." }
+      },
+      "description": "An extracted action / outstanding item linked to its source note."
+    }
+  }
+}

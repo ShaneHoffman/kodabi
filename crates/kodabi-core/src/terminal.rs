@@ -18,14 +18,21 @@ use serde::Serialize;
 /// (`docs/MCP_TOOL_SURFACE.md` §Server & wiring).
 pub const MCP_SERVER_KEY: &str = "kodabi";
 
-/// The three read tools, pre-approved so chat-over-the-KB needs no per-tool
+/// The read tools, pre-approved so chat-over-the-KB needs no per-tool
 /// permission prompt. The two write tools (`file_note_to_project`,
 /// `add_glossary_term`) are deliberately omitted, so Claude Code still prompts
 /// for them — there is a real TTY in the terminal to answer.
-pub const READ_TOOL_PERMISSIONS: [&str; 3] = [
+///
+/// Must list every `read_only` entry of `crates/kodabi-mcp/src/schemas.rs`'s
+/// `TOOLS` table: a read tool missing here still works, but prompts on every
+/// call, which is exactly the friction the embedded terminal exists to remove.
+pub const READ_TOOL_PERMISSIONS: [&str; 6] = [
     "mcp__kodabi__search_notes",
     "mcp__kodabi__get_note",
+    "mcp__kodabi__get_meeting_transcript",
+    "mcp__kodabi__list_outstanding_items",
     "mcp__kodabi__list_projects",
+    "mcp__kodabi__get_project_context",
 ];
 
 /// Set on the spawned `claude` process to disable its own transcript and

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id"],
+  "properties": {
+    "id": { "$ref": "#/$defs/NoteId", "description": "Stable id of the meeting note whose transcript to fetch." },
+    "include_metadata": { "type": "boolean", "default": true, "description": "Include meeting metadata (duration, speaker count, decisions) in the response." },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 1000, "default": 200, "description": "Max transcript segments per page (segments are ordered by start time)." },
+    "cursor": { "type": "string", "description": "Opaque pagination token from a prior response's page.next_cursor." }
+  },
+  "$defs": {
+    "NoteId": {
+      "type": "string",
+      "pattern": "^n_[0-9a-z]{6,}$",
+      "description": "Stable note identifier, e.g. \"n_a1b2c3\". Generated at creation, never rewritten on move/re-route. This is the write handle."
+    }
+  }
+}

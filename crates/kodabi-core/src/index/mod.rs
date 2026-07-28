@@ -17,15 +17,21 @@
 mod embed;
 mod migrations;
 mod note;
+mod outstanding;
 mod query;
+mod scope;
 mod search;
 
 pub use embed::{ChunkHit, EmbeddedChunk};
 
 pub use note::{
-    normalize_date_to_utc, ActionItemRow, IndexedNote, MeetingFactsRow, NoteRow, NoteType,
-    UnknownNoteType,
+    normalize_date_to_utc, ActionItemRow, ActionItemStatus, IndexedNote, MeetingFactsRow, NoteRef,
+    NoteRow, NoteType, NoteTypeCounts, UnknownNoteType,
 };
+
+pub use outstanding::{OutstandingItem, OutstandingParams, OutstandingResults, OutstandingSummary};
+
+pub use scope::ProjectScope;
 
 pub use search::{PageInfo, SearchHit, SearchParams, SearchResults, TagMatch};
 
@@ -62,9 +68,10 @@ pub enum IndexError {
     /// An embedding handed to the vector store was not [`EMBEDDING_DIM`] long.
     #[error("embedding dimension mismatch: expected {expected}, got {got}")]
     EmbeddingDim { expected: usize, got: usize },
-    /// A `search_notes` pagination `cursor` was malformed — not one this index
-    /// produced (wrong version prefix, bad score encoding, or empty id).
-    #[error("invalid search cursor {value:?}")]
+    /// A pagination `cursor` was malformed — not one this index produced (wrong
+    /// version prefix, bad sort-key encoding, or an empty boundary id). Shared
+    /// by every paginated index query, each of which owns its own codec.
+    #[error("invalid pagination cursor {value:?}")]
     Cursor { value: String },
     /// A `search_notes` filter array carried more values than the query planner
     /// will bind. Rejected rather than truncated: silently dropping a value

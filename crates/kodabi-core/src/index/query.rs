@@ -5,7 +5,11 @@ use std::collections::HashMap;
 
 use rusqlite::{params, params_from_iter, OptionalExtension, Row};
 
-use super::note::{normalize_date_to_utc, ActionItemRow, IndexedNote, MeetingFactsRow, NoteRow};
+use super::note::{
+    normalize_date_to_utc, ActionItemRow, IndexedNote, MeetingFactsRow, NoteRow, NoteType,
+    NoteTypeCounts,
+};
+use super::scope::ProjectScope;
 use super::{NoteIndex, Result};
 use crate::meeting::MeetingFacts;
 
@@ -223,6 +227,67 @@ impl NoteIndex {
             note.tags = tags_by_id.remove(&note.id).unwrap_or_default();
         }
         Ok(notes)
+    }
+
+    /// The most recent notes in `scope`, newest first by UTC-normalized date
+    /// with an id tiebreak. The scope-aware, limited generalization of
+    /// [`notes_by_project`](Self::notes_by_project), for
+    /// `get_project_context`'s `recent_notes` section.
+    ///
+    /// A `limit` of 0 is an empty result, matching the schema's "0 to omit".
+    pub fn recent_notes(&self, scope: &ProjectScope, limit: u32) -> Result<Vec<NoteRow>> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let (filter, values) = match scope.predicate() {
+            Some((clause, values)) => (format!("WHERE {clause}"), values),
+            None => (String::new(), Vec::new()),
+        };
+        let sql = format!(
+            "SELECT {NOTE_COLUMNS} FROM notes {filter} ORDER BY date_utc DESC, id LIMIT {limit}"
+        );
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let mut notes = stmt
+            .query_map(params_from_iter(values), map_row)?
+            .collect::<rusqlite::Result<Vec<NoteRow>>>()?;
+
+        let ids: Vec<&str> = notes.iter().map(|n| n.id.as_str()).collect();
+        let mut tags_by_id = self.load_tags_by_ids(&ids)?;
+        for note in &mut notes {
+            note.tags = tags_by_id.remove(&note.id).unwrap_or_default();
+        }
+        Ok(notes)
+    }
+
+    /// Note counts in `scope`, one per [`NoteType`] (zero for absent types).
+    pub fn note_counts_by_type(&self, scope: &ProjectScope) -> Result<NoteTypeCounts> {
+        let (filter, values) = match scope.predicate() {
+            Some((clause, values)) => (format!("WHERE {clause}"), values),
+            None => (String::new(), Vec::new()),
+        };
+        let sql = format!("SELECT type, count(*) FROM notes {filter} GROUP BY type");
+
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params_from_iter(values), |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            })?
+            .collect::<rusqlite::Result<Vec<(String, i64)>>>()?;
+
+        let mut counts = NoteTypeCounts::default();
+        for (note_type, count) in rows {
+            let count = count as u32;
+            // The `type` column is CHECK-constrained to the three values, so an
+            // unknown one cannot appear; ignore rather than fail if it somehow does.
+            match note_type.parse::<NoteType>() {
+                Ok(NoteType::Meeting) => counts.meeting = count,
+                Ok(NoteType::Note) => counts.note = count,
+                Ok(NoteType::Chat) => counts.chat = count,
+                Err(_) => {}
+            }
+        }
+        Ok(counts)
     }
 
     /// Loads one note's tags, sorted for deterministic output.

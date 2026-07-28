@@ -56,6 +56,7 @@ use rusqlite::{params_from_iter, Row};
 
 use super::embed::embedding_to_blob;
 use super::note::NoteType;
+use super::scope::ProjectScope;
 use super::{IndexError, NoteIndex, Result, EMBEDDING_DIM};
 use crate::embed::Embedder;
 
@@ -700,20 +701,12 @@ fn build_filters(params: &SearchParams) -> Result<Filters> {
     let mut clauses = Vec::new();
     let mut values = Vec::new();
 
-    if let Some(project) = &params.project {
-        if project.eq_ignore_ascii_case("Inbox") {
-            // The reserved Inbox sentinel maps to an unfiled note (project NULL).
-            clauses.push("notes.project IS NULL".to_string());
-        } else if params.include_descendants {
-            // Exact match, or any descendant under `project/`. The LIKE pattern
-            // escapes the slug's own `%`/`_`/`\` so they stay literal.
-            clauses.push("(notes.project = ? OR notes.project LIKE ? ESCAPE '\\')".to_string());
-            values.push(Value::Text(project.clone()));
-            values.push(Value::Text(format!("{}/%", like_escape(project))));
-        } else {
-            clauses.push("notes.project = ?".to_string());
-            values.push(Value::Text(project.clone()));
-        }
+    // The Inbox sentinel and the subtree anchor live in `ProjectScope`, shared
+    // with the other project-scoped queries so the three cannot drift.
+    let scope = ProjectScope::resolve(params.project.as_deref(), params.include_descendants);
+    if let Some((clause, mut scope_values)) = scope.predicate() {
+        clauses.push(clause);
+        values.append(&mut scope_values);
     }
 
     // Both arrays are deduplicated first. The schema marks them `uniqueItems`,
@@ -815,19 +808,6 @@ fn dedup_types(types: &[NoteType]) -> Vec<NoteType> {
 /// `?,?,…` for `n` bound values.
 fn sql_placeholders(n: usize) -> String {
     std::iter::repeat_n("?", n).collect::<Vec<_>>().join(",")
-}
-
-/// Escapes a string for use inside a `LIKE … ESCAPE '\'` pattern so its own
-/// `%`, `_`, and `\` stay literal.
-fn like_escape(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for c in s.chars() {
-        if matches!(c, '\\' | '%' | '_') {
-            out.push('\\');
-        }
-        out.push(c);
-    }
-    out
 }
 
 /// Validates an `IsoDate` bound and returns its canonical `YYYY-MM-DD` form.
