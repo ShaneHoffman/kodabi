@@ -106,6 +106,10 @@ pub enum SessionsError {
     /// A session transcript that exists but cannot be read or parsed.
     #[error(transparent)]
     RawSession(#[from] RawSessionError),
+    /// A pagination token [`read_transcript_page`] did not mint. A caller
+    /// error, not a storage fault.
+    #[error("malformed pagination cursor {0:?}")]
+    Cursor(String),
 }
 
 /// Lists the sessions needing attention, newest capture first.
@@ -346,6 +350,113 @@ pub fn read_session_artifacts(
         segments,
         audio_path,
     })
+}
+
+/// Smallest and largest `limit` [`read_transcript_page`] honors, mirroring the
+/// `get_meeting_transcript` `inputSchema` bounds.
+pub const MIN_TRANSCRIPT_LIMIT: u32 = 1;
+pub const MAX_TRANSCRIPT_LIMIT: u32 = 1000;
+
+/// Cursor-based pagination envelope for [`read_transcript_page`], mirroring the
+/// `PageInfo` `$def` of `docs/MCP_TOOL_SURFACE.md`. A local mirror rather than a
+/// shared type, following `vault::ProjectPageInfo` — each paginated surface owns
+/// its own cursor codec. `total_estimate` is always exact here: the whole
+/// transcript is read into memory, so its size *is* the total.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TranscriptPageInfo {
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
+    pub total_estimate: Option<u64>,
+}
+
+/// One page of a meeting's transcript — the `get_meeting_transcript` payload
+/// minus the note metadata the MCP layer adds.
+///
+/// `transcript_available` is `false` (with empty `segments`) both when retention
+/// pruned the `.jsonl` and when the note's `source` never named one; see
+/// [`read_transcript_page`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct TranscriptPage {
+    pub transcript_available: bool,
+    pub segments: Vec<TranscriptSegment>,
+    pub page: TranscriptPageInfo,
+}
+
+/// Reads one page of a note's transcript, ordered by `start_ms` ascending.
+///
+/// Wraps [`read_session_artifacts`] with the paging the
+/// `get_meeting_transcript` tool needs. Two "no transcript" cases collapse to
+/// the same honest answer — `transcript_available: false` with no segments:
+/// retention pruned the `.jsonl`, and the note's `source` is a capture keyword
+/// (`manual`, `quick-capture`, …) that never named a session at all. Neither is
+/// an error: the note is still a meeting, it simply has nothing stored to page.
+/// A transcript that exists but cannot be parsed stays a real error.
+///
+/// `limit` is clamped to `MIN_TRANSCRIPT_LIMIT..=MAX_TRANSCRIPT_LIMIT`. The
+/// cursor is validated before any disk access, so a malformed token fails the
+/// same way whatever the vault holds.
+pub fn read_transcript_page(
+    vault_root: &Path,
+    source: &str,
+    limit: u32,
+    cursor: Option<&str>,
+) -> Result<TranscriptPage, SessionsError> {
+    let limit = limit.clamp(MIN_TRANSCRIPT_LIMIT, MAX_TRANSCRIPT_LIMIT) as usize;
+    let cursor = cursor.map(decode_transcript_cursor).transpose()?;
+
+    let artifacts = match read_session_artifacts(vault_root, source) {
+        Ok(artifacts) => artifacts,
+        Err(SessionsError::InvalidSource(_)) => SessionArtifacts {
+            transcript_available: false,
+            segments: Vec::new(),
+            audio_path: None,
+        },
+        Err(err) => return Err(err),
+    };
+
+    let total = artifacts.segments.len();
+    // Keyset on the segment's own `index`, which `raw_session::assemble` assigns
+    // after sorting by `start_ms` — so it is the transcript's total order, and
+    // resuming past the boundary segment can neither skip nor repeat a row.
+    let start = match cursor {
+        Some(last_index) => artifacts
+            .segments
+            .iter()
+            .position(|segment| segment.index > last_index)
+            .unwrap_or(total),
+        None => 0,
+    };
+    let end = start.saturating_add(limit).min(total);
+    let segments = artifacts.segments[start..end].to_vec();
+
+    let has_more = end < total;
+    let next_cursor = segments
+        .last()
+        .filter(|_| has_more)
+        .map(|segment| encode_transcript_cursor(segment.index));
+
+    Ok(TranscriptPage {
+        transcript_available: artifacts.transcript_available,
+        segments,
+        page: TranscriptPageInfo {
+            has_more,
+            next_cursor,
+            total_estimate: Some(total as u64),
+        },
+    })
+}
+
+/// Encodes a transcript cursor: the boundary segment's `index`.
+fn encode_transcript_cursor(index: u64) -> String {
+    format!("v1:{index}")
+}
+
+/// Decodes a transcript cursor, rejecting anything [`encode_transcript_cursor`]
+/// did not produce.
+fn decode_transcript_cursor(raw: &str) -> Result<u64, SessionsError> {
+    raw.strip_prefix("v1:")
+        .and_then(|index| index.parse::<u64>().ok())
+        .ok_or_else(|| SessionsError::Cursor(raw.to_string()))
 }
 
 /// Lexically validates a `source:` value as a session reference and returns
@@ -808,5 +919,153 @@ mod tests {
         // reports the target as handled.
         let removed = delete_session_for_source(vault.path(), &source).unwrap();
         assert!(removed);
+    }
+
+    // --- read_transcript_page ------------------------------------------------
+
+    /// Writes a session of `count` alternating-channel segments 1s apart, and
+    /// returns its `source:` value.
+    fn write_multi_segment_session(vault: &Path, count: u64) -> String {
+        let segments: Vec<TranscriptSegment> = (0..count)
+            .map(|index| TranscriptSegment {
+                index,
+                channel: if index % 2 == 0 {
+                    Channel::You
+                } else {
+                    Channel::Them
+                },
+                speaker: None,
+                start_ms: index * 1_000,
+                end_ms: index * 1_000 + 500,
+                text: format!("segment {index}"),
+            })
+            .collect();
+        let path = raw_session::write_raw_session(
+            &vault.join(SESSIONS_DIR),
+            instant(14),
+            &device(),
+            Some("long talk"),
+            &segments,
+        )
+        .unwrap();
+        source_value(path.file_name().unwrap().to_str().unwrap())
+    }
+
+    #[test]
+    fn transcript_page_walks_every_segment_exactly_once() {
+        let vault = tempdir().unwrap();
+        let source = write_multi_segment_session(vault.path(), 7);
+
+        let mut seen = Vec::new();
+        let mut cursor: Option<String> = None;
+        loop {
+            let page = read_transcript_page(vault.path(), &source, 3, cursor.as_deref()).unwrap();
+            assert!(page.transcript_available);
+            // The total is exact on every page, not just the first.
+            assert_eq!(page.page.total_estimate, Some(7));
+            seen.extend(page.segments.iter().map(|segment| segment.index));
+            match page.page.next_cursor {
+                Some(next) => cursor = Some(next),
+                None => {
+                    assert!(!page.page.has_more);
+                    break;
+                }
+            }
+        }
+
+        assert_eq!(seen, (0..7).collect::<Vec<u64>>());
+    }
+
+    #[test]
+    fn transcript_page_reports_ordering_channels_and_offsets() {
+        let vault = tempdir().unwrap();
+        let source = write_multi_segment_session(vault.path(), 3);
+
+        let page = read_transcript_page(vault.path(), &source, 200, None).unwrap();
+
+        assert_eq!(page.segments.len(), 3);
+        assert!(!page.page.has_more);
+        assert!(page.page.next_cursor.is_none());
+        // Ordered by start_ms ascending, with per-channel attribution intact.
+        let offsets: Vec<u64> = page.segments.iter().map(|s| s.start_ms).collect();
+        assert_eq!(offsets, [0, 1_000, 2_000]);
+        assert_eq!(page.segments[0].channel, Channel::You);
+        assert_eq!(page.segments[1].channel, Channel::Them);
+        assert_eq!(page.segments[0].speaker, None);
+    }
+
+    #[test]
+    fn transcript_page_clamps_limit_to_the_schema_bounds() {
+        let vault = tempdir().unwrap();
+        let source = write_multi_segment_session(vault.path(), 5);
+
+        // 0 clamps up to 1 rather than returning an empty page forever.
+        let page = read_transcript_page(vault.path(), &source, 0, None).unwrap();
+        assert_eq!(page.segments.len(), 1);
+        assert!(page.page.has_more);
+
+        // An over-large limit clamps down but still serves everything here.
+        let page = read_transcript_page(vault.path(), &source, u32::MAX, None).unwrap();
+        assert_eq!(page.segments.len(), 5);
+        assert!(!page.page.has_more);
+    }
+
+    #[test]
+    fn pruned_transcript_is_unavailable_not_an_error() {
+        let vault = tempdir().unwrap();
+        let source = write_multi_segment_session(vault.path(), 3);
+        let file_name = source.strip_prefix("sessions/").unwrap();
+        fs::remove_file(vault.path().join(SESSIONS_DIR).join(file_name)).unwrap();
+
+        let page = read_transcript_page(vault.path(), &source, 200, None).unwrap();
+
+        assert!(!page.transcript_available);
+        assert!(page.segments.is_empty());
+        assert!(!page.page.has_more);
+        assert_eq!(page.page.total_estimate, Some(0));
+    }
+
+    #[test]
+    fn a_capture_keyword_source_is_unavailable_not_an_error() {
+        let vault = tempdir().unwrap();
+
+        // A meeting note captured without a session artifact (`manual`,
+        // `quick-capture`, …) has nothing to page — the same honest answer as a
+        // pruned transcript, not an `InvalidSource` error.
+        for source in ["manual", "quick-capture", "transcript"] {
+            let page = read_transcript_page(vault.path(), source, 200, None).unwrap();
+            assert!(!page.transcript_available, "{source}");
+            assert!(page.segments.is_empty(), "{source}");
+        }
+    }
+
+    #[test]
+    fn a_tampered_transcript_cursor_is_rejected() {
+        let vault = tempdir().unwrap();
+        let source = write_multi_segment_session(vault.path(), 3);
+
+        for bad in ["", "v1:", "v2:0", "0", "v1:abc", "v1:-1"] {
+            assert!(
+                matches!(
+                    read_transcript_page(vault.path(), &source, 2, Some(bad)),
+                    Err(SessionsError::Cursor(_))
+                ),
+                "cursor {bad:?} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn a_cursor_past_the_last_segment_yields_an_empty_final_page() {
+        let vault = tempdir().unwrap();
+        let source = write_multi_segment_session(vault.path(), 3);
+
+        // A cursor minted before the transcript shrank (retention rewrote it, a
+        // hand edit trimmed it) must not panic or wrap around.
+        let page = read_transcript_page(vault.path(), &source, 2, Some("v1:99")).unwrap();
+
+        assert!(page.segments.is_empty());
+        assert!(!page.page.has_more);
+        assert!(page.page.next_cursor.is_none());
     }
 }

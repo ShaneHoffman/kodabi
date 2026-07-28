@@ -192,6 +192,102 @@ pub struct ActionItemRow {
     pub extracted_date: Option<String>,
 }
 
+/// Note counts split by [`NoteType`] — the `notes_by_type` block of
+/// `get_project_context`'s `counts`. Field names match that schema, so it
+/// serializes straight out.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize)]
+pub struct NoteTypeCounts {
+    pub meeting: u32,
+    pub note: u32,
+    pub chat: u32,
+}
+
+impl NoteTypeCounts {
+    /// Total notes across every type.
+    pub fn total(&self) -> u32 {
+        self.meeting + self.note + self.chat
+    }
+}
+
+/// A minimal stable reference to a note — the `NoteRef` `$def` of
+/// `docs/MCP_TOOL_SURFACE.md`. Carried by a cross-note read (an action item's
+/// `source`) so the caller can follow the row back to `get_note` without a
+/// second lookup. `path` is informational and changes on move; `id` is the
+/// handle.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct NoteRef {
+    pub id: String,
+    pub path: String,
+}
+
+/// An action item's read-time status — the `ActionItemStatus` `$def` of
+/// `docs/MCP_TOOL_SURFACE.md`. The serde spellings match that enum
+/// (`open | overdue | done`) so it both deserializes the `status` filter of
+/// `list_outstanding_items` and serializes into an `ActionItem` on the wire.
+///
+/// Never stored: `note_action_items` persists only the `done` checkbox and the
+/// `due_date`, and `Overdue` is derived against the caller's `today` so it stays
+/// correct as the clock advances without a reindex.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ActionItemStatus {
+    Open,
+    Overdue,
+    Done,
+}
+
+impl ActionItemStatus {
+    /// A checked item is [`Done`]; otherwise it is [`Overdue`] once its due date
+    /// is strictly before `today`, else [`Open`]. An item with no due date is
+    /// never overdue.
+    ///
+    /// `today` is passed in rather than read here: kodabi-core never reads the
+    /// clock (`.claude/rules/utc-timestamps.md`), and the shell supplies the
+    /// device's local date because due dates are local calendar dates.
+    ///
+    /// A due date this function cannot read as a real `YYYY-MM-DD` day counts as
+    /// undated (see [`parse_due_date`]), never as an error.
+    ///
+    /// [`Done`]: ActionItemStatus::Done
+    /// [`Overdue`]: ActionItemStatus::Overdue
+    /// [`Open`]: ActionItemStatus::Open
+    pub fn derive(done: bool, due_date: Option<&str>, today: NaiveDate) -> Self {
+        if done {
+            return ActionItemStatus::Done;
+        }
+        match due_date.and_then(parse_due_date) {
+            Some(due) if due < today => ActionItemStatus::Overdue,
+            _ => ActionItemStatus::Open,
+        }
+    }
+}
+
+/// Parses a stored `due_date` as a real calendar day in the literal
+/// `YYYY-MM-DD` shape, or `None`.
+///
+/// The shape is checked before handing the string to `chrono` because `%Y`
+/// alone is looser than the shape suggests — it takes a signed, variable-width
+/// year, so `-0001-07-24` parses. That matters beyond tidiness: the index's
+/// `list_outstanding_items` filters `open`/`overdue` in SQL and re-derives the
+/// rendered status here, and the two must classify every row identically. Its
+/// `DATED` guard accepts exactly this set (a fixed-width digit shape plus a
+/// real day), so any looseness on either side would let a status filter serve
+/// an item whose rendered status the caller never asked for.
+pub(crate) fn parse_due_date(due: &str) -> Option<NaiveDate> {
+    let bytes = due.as_bytes();
+    let shaped = bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && [0, 1, 2, 3, 5, 6, 8, 9]
+            .iter()
+            .all(|&i| bytes[i].is_ascii_digit());
+    // `parse_from_str` still runs: the shape admits `2026-02-30`, which is not
+    // a day.
+    shaped
+        .then(|| NaiveDate::parse_from_str(due, "%Y-%m-%d").ok())
+        .flatten()
+}
+
 /// A note row read back from the index. Carries both the verbatim `date` and
 /// the derived `date_utc` ordering key (see [`normalize_date_to_utc`]).
 #[derive(Debug, Clone, PartialEq)]
@@ -306,6 +402,99 @@ mod tests {
             assert_eq!(serde_json::from_str::<NoteType>(&json).unwrap(), ty);
         }
         assert!(serde_json::from_str::<NoteType>("\"transcript\"").is_err());
+    }
+
+    #[test]
+    fn action_item_status_is_derived_against_today() {
+        let today = NaiveDate::from_ymd_opt(2026, 7, 24).unwrap();
+
+        // A checked box is done whatever the due date says.
+        assert_eq!(
+            ActionItemStatus::derive(true, Some("2020-01-01"), today),
+            ActionItemStatus::Done
+        );
+        assert_eq!(
+            ActionItemStatus::derive(true, None, today),
+            ActionItemStatus::Done
+        );
+
+        // Strictly before today is overdue; today itself is not yet.
+        assert_eq!(
+            ActionItemStatus::derive(false, Some("2026-07-23"), today),
+            ActionItemStatus::Overdue
+        );
+        assert_eq!(
+            ActionItemStatus::derive(false, Some("2026-07-24"), today),
+            ActionItemStatus::Open
+        );
+        assert_eq!(
+            ActionItemStatus::derive(false, Some("2026-07-25"), today),
+            ActionItemStatus::Open
+        );
+
+        // An undated item is never overdue, however far the clock advances.
+        assert_eq!(
+            ActionItemStatus::derive(false, None, today),
+            ActionItemStatus::Open
+        );
+        assert_eq!(
+            ActionItemStatus::derive(false, None, NaiveDate::from_ymd_opt(2099, 1, 1).unwrap()),
+            ActionItemStatus::Open
+        );
+
+        // An unparseable due date degrades to open rather than erroring.
+        assert_eq!(
+            ActionItemStatus::derive(false, Some("not-a-date"), today),
+            ActionItemStatus::Open
+        );
+    }
+
+    #[test]
+    fn a_due_date_is_read_exactly_as_the_index_sql_reads_it() {
+        // Anything the index's `DATED` guard calls undated must be undated here
+        // too, or a `list_outstanding_items` status filter could serve a row
+        // whose rendered status the caller never asked for.
+        for undated in [
+            "2026-02-30",           // right shape, not a real day
+            "2026-13-01",           // right shape, month out of range
+            "2026-7-4",             // not fixed-width
+            "-0001-07-24",          // signed year: `%Y` alone would take it
+            "12026-07-24",          // five-digit year: likewise
+            "2026-07-24T00:00:00Z", // a timestamp, not a date
+            "",
+        ] {
+            assert_eq!(parse_due_date(undated), None, "{undated:?}");
+        }
+
+        // A real day still reads, including the range edges.
+        for (dated, expected) in [
+            ("2026-07-24", (2026, 7, 24)),
+            ("2024-02-29", (2024, 2, 29)), // a leap day is a real day
+            ("0001-01-01", (1, 1, 1)),
+        ] {
+            let (year, month, day) = expected;
+            assert_eq!(
+                parse_due_date(dated),
+                NaiveDate::from_ymd_opt(year, month, day),
+                "{dated:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn action_item_status_serde_matches_the_schema_spelling() {
+        for (status, spelling) in [
+            (ActionItemStatus::Open, "\"open\""),
+            (ActionItemStatus::Overdue, "\"overdue\""),
+            (ActionItemStatus::Done, "\"done\""),
+        ] {
+            assert_eq!(serde_json::to_string(&status).unwrap(), spelling);
+            assert_eq!(
+                serde_json::from_str::<ActionItemStatus>(spelling).unwrap(),
+                status
+            );
+        }
+        assert!(serde_json::from_str::<ActionItemStatus>("\"pending\"").is_err());
     }
 
     #[test]

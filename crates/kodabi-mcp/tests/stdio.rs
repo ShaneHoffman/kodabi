@@ -6,6 +6,7 @@ use std::io::Write;
 use std::process::{Command, Stdio};
 
 use kodabi_core::index::{IndexedNote, NoteIndex, NoteType};
+use kodabi_core::meeting::{ActionItemFact, MeetingFacts};
 
 #[test]
 fn stdio_server_handshakes_reads_and_writes_with_clean_stdout() {
@@ -23,14 +24,30 @@ fn stdio_server_handshakes_reads_and_writes_with_clean_stdout() {
                 id: "n_note01".to_string(),
                 path: "Growth/plan.md".to_string(),
                 title: "Plan".to_string(),
-                note_type: NoteType::Note,
+                note_type: NoteType::Meeting,
                 project: Some("Growth".to_string()),
                 date: "2026-07-10".to_string(),
                 tags: vec![],
                 source: "manual".to_string(),
                 confidence: None,
                 body: "The quarterly plan.".to_string(),
-                meeting: None,
+                // A meeting with one overdue action item, so the milestone tool
+                // (`list_outstanding_items`) has something real to serve
+                // through the built binary.
+                meeting: Some(MeetingFacts {
+                    duration_seconds: Some(900),
+                    speaker_count: Some(2),
+                    decisions: vec!["Ship the plan".to_string()],
+                    action_items: vec![ActionItemFact {
+                        id: "a_memo01".to_string(),
+                        description: "send the memo".to_string(),
+                        owner: "You".to_string(),
+                        // Safely in the past → `overdue` whenever this runs.
+                        due_date: Some("2020-01-01".to_string()),
+                        done: false,
+                        extracted_date: Some("2026-07-10".to_string()),
+                    }],
+                }),
             })
             .unwrap();
     }
@@ -49,6 +66,7 @@ fn stdio_server_handshakes_reads_and_writes_with_clean_stdout() {
         "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\"}\n",
         "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"list_projects\",\"arguments\":{}}}\n",
         "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"add_glossary_term\",\"arguments\":{\"project\":\"Growth\",\"term\":\"MERIDIAN\",\"definition\":\"A migration project.\"}}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"list_outstanding_items\",\"arguments\":{\"project\":\"Growth\"}}}\n",
     );
     {
         // Dropping stdin closes the pipe, so the server hits EOF and exits.
@@ -75,9 +93,10 @@ fn stdio_server_handshakes_reads_and_writes_with_clean_stdout() {
         })
         .collect();
 
-    // Three responses: initialize (id 1), list_projects (id 2), and
-    // add_glossary_term (id 3). The notification draws none.
-    assert_eq!(responses.len(), 3);
+    // Four responses: initialize (id 1), list_projects (id 2),
+    // add_glossary_term (id 3), and list_outstanding_items (id 4). The
+    // notification draws none.
+    assert_eq!(responses.len(), 4);
 
     let init = responses.iter().find(|r| r["id"] == 1).unwrap();
     assert_eq!(init["result"]["serverInfo"]["name"], "kodabi");
@@ -101,4 +120,23 @@ fn stdio_server_handshakes_reads_and_writes_with_clean_stdout() {
     // The write landed on disk in the project's glossary file.
     let glossary = std::fs::read_to_string(vault.join("Growth").join("_glossary.yml")).unwrap();
     assert!(glossary.contains("MERIDIAN"));
+
+    // The milestone read ("what's outstanding on <project>?") serves the
+    // action item straight out of the file-backed index, over the real binary.
+    let outstanding = responses.iter().find(|r| r["id"] == 4).unwrap();
+    assert_eq!(
+        outstanding["result"]["isError"],
+        serde_json::Value::Bool(false)
+    );
+    let items = outstanding["result"]["structuredContent"]["items"]
+        .as_array()
+        .unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["id"], "a_memo01");
+    assert_eq!(items[0]["status"], "overdue");
+    assert_eq!(items[0]["source"]["id"], "n_note01");
+    assert_eq!(
+        outstanding["result"]["structuredContent"]["summary"]["overdue"],
+        1
+    );
 }
