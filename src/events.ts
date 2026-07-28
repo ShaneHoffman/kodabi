@@ -30,6 +30,15 @@ export const SESSIONS_CHANGED_EVENT = "sessions:changed";
  * `distill_cmds::DISTILL_STATE_EVENT`. */
 export const DISTILL_STATE_EVENT = "distill:state";
 
+/** Chat-distill progress, same tagged-status shape as `distill:state` but its
+ * own channel, so a chat finishing cannot overwrite a meeting distill's label.
+ * Mirrors `chat_distill_cmds::CHAT_DISTILL_STATE_EVENT`.
+ *
+ * No subscriber yet, and deliberately so: a distilled chat surfaces the way a
+ * quick capture does, through `vault:changed` refreshing the Inbox and project
+ * lists. Named here because this file is the complete event registry. */
+export const CHAT_DISTILL_STATE_EVENT = "chat-distill:state";
+
 /** Emitted when a capture is attempted before recording consent is
  * acknowledged, so the frontend opens the consent nudge. Mirrors
  * `capture_control::CONSENT_REQUIRED_EVENT`. */

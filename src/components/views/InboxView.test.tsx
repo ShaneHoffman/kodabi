@@ -160,6 +160,33 @@ describe("InboxView", () => {
     expect(screen.getByText("Vendor follow-up")).toBeInTheDocument();
   });
 
+  it("names a row's kind when it is not a plain note", async () => {
+    serveVault([
+      makeNote({
+        id: "n_g7h8i9",
+        title: "Irrigation contractor comparison",
+        type: "chat",
+        date: "2026-07-10T09:15:00-07:00",
+        confidence: 0.62,
+      }),
+    ]);
+
+    renderInbox();
+
+    expect(
+      await screen.findByText("2026-07-10 · chat · 62% match"),
+    ).toBeInTheDocument();
+  });
+
+  it("says nothing about kind on a plain note's row", async () => {
+    serveVault([PLANNING]);
+
+    renderInbox();
+
+    // The majority case: a `note` segment on every row would be noise.
+    expect(await screen.findByText("2026-07-01 · 41% match")).toBeInTheDocument();
+  });
+
   it("opens the note when the card body is clicked", async () => {
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     serveVault([

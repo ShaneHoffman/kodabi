@@ -31,3 +31,18 @@ export function noteMeta(
 export function matchScore(confidence: number | null): string {
   return `${Math.round((confidence ?? 0) * 100)}% match`;
 }
+
+/**
+ * A note's kind as a meta segment, or `null` when it says nothing.
+ *
+ * Every note is a `note` until proven otherwise, so that value is noise in a
+ * dense list; a `meeting` or a `chat` is worth a word. `noteMeta` drops falsy
+ * middles, so the `null` disappears without the caller branching.
+ *
+ * The single-note surface (`NoteEditorView`) deliberately passes `note.type`
+ * straight through instead: there, one note fills the view and its kind is
+ * information rather than clutter.
+ */
+export function noteKind(type: NoteSummary["type"]): string | null {
+  return type === "note" ? null : type;
+}
