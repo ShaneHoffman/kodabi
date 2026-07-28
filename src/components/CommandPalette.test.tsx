@@ -119,8 +119,9 @@ describe("CommandPalette sections", () => {
     const user = userEvent.setup();
     await renderPalette();
     const options = screen.getAllByRole("option");
-    // Inbox, briarwood-golf | New note, Quick capture, Search notes, Settings
-    expect(options).toHaveLength(6);
+    // Inbox, briarwood-golf | New note, Quick capture, Search notes,
+    // Open chat, Open terminal, Settings
+    expect(options).toHaveLength(8);
     expect(input()).toHaveAttribute("aria-activedescendant", options[0].id);
 
     await user.keyboard("{ArrowDown}{ArrowDown}");

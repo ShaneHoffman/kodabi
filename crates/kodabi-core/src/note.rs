@@ -66,13 +66,14 @@ pub const INBOX: &str = "Inbox";
 /// Knowledge-base root directory names owned by other subsystems — the
 /// transcription pipeline's raw-session-artifact tree
 /// (`docs/FRONTMATTER_SCHEMA.md` places `raw/…` relative to the vault root),
-/// its `sessions/` tree, and WebView2's data dir (the KB root is currently the
+/// its `sessions/` tree, the chat transcript store (`chats/`, see
+/// [`crate::chat`]), and WebView2's data dir (the KB root is currently the
 /// Tauri `app_data_dir`, which they share). A project may not claim one as its
 /// first segment — vault enumeration and project discovery (`routing`) skip
 /// these dirs, so a note filed there would be invisible to the UI — but deeper
 /// segments stay legal (`Data/raw` is a real project). Reserved in any casing
 /// — the filesystem is case-insensitive on Windows.
-pub(crate) const RESERVED_ROOT_DIRS: &[&str] = &["sessions", "raw", "EBWebView"];
+pub(crate) const RESERVED_ROOT_DIRS: &[&str] = &["sessions", "raw", "chats", "EBWebView"];
 
 /// Per-process counter that, combined with the process id, gives each in-flight
 /// write a unique scratch filename so concurrent writes can't clobber each
@@ -2087,7 +2088,16 @@ contractor shortlist.
     fn reserved_root_dir_project_in_any_casing_is_rejected() {
         // These root dirs belong to other subsystems and are skipped by vault
         // enumeration — a note filed there would be unreachable in the UI.
-        for reserved in ["sessions", "Sessions", "raw", "RAW", "EBWebView", "raw/sub"] {
+        for reserved in [
+            "sessions",
+            "Sessions",
+            "raw",
+            "RAW",
+            "chats",
+            "Chats",
+            "EBWebView",
+            "raw/sub",
+        ] {
             let note = Note::new(
                 id(),
                 NoteType::Note,

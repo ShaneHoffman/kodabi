@@ -20,7 +20,8 @@ Pre-alpha — early development, no releases yet. See [`ROADMAP.md`](docs/ROADMA
 - Confidence-split routing into projects, with an Inbox and one-click re-route correction loop
 - Quick-capture window (global hotkey → text box → same routing pipeline)
 - Hybrid retrieval (full-text + vector, RRF merge) exposed as a `search_notes` MCP tool
-- Chat over your history via an embedded Claude Code terminal wired to the MCP server
+- Chat over your history: a designed chat view driving Claude Code headless, plus an embedded
+  terminal for power users — both wired to the MCP server
 
 ## Recording & privacy
 
@@ -60,7 +61,7 @@ crates/kodabi-transcribe/ # Transcription engines: Parakeet TDT via sherpa-onnx 
 crates/kodabi-embed/    # Local embedding backend — bge-small-en-v1.5 via fastembed/ONNX
                         # Runtime, fully offline at runtime; cargo-feature-gated.
 crates/kodabi-llm/      # The headless Claude Code runner every LLM call (cleanup, distill,
-                        # routing) goes through.
+                        # routing, chat sessions) goes through.
 crates/kodabi-mcp/      # Stdio MCP server (hand-rolled JSON-RPC) exposing the v1 tool
                         # surface of docs/MCP_TOOL_SURFACE.md over kodabi-core.
 .claude/                # Agentic dev workflow — task skills, read-only auditor agents, and

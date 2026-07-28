@@ -54,3 +54,10 @@ export const TERMINAL_OUTPUT_EVENT = "terminal:output";
  * silent), carrying its exit code if known, so the terminal can offer a restart.
  * Mirrors `terminal_cmds::TERMINAL_EXIT_EVENT`. */
 export const TERMINAL_EXIT_EVENT = "terminal:exit";
+
+/** Every chat session lifecycle event — streamed text deltas, completed
+ * assistant blocks, tool-use summaries, permission requests/resolutions, turn
+ * ends, and process exit — as a tagged payload carrying the session's
+ * `chat_id`, so a stale session's stragglers can be dropped. Mirrors
+ * `chat_cmds::CHAT_EVENT`. */
+export const CHAT_EVENT = "chat:event";

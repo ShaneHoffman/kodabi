@@ -23,7 +23,9 @@ in `eslint.config.js` fail any non-blessed file at the
   `useEffect`. Backend events: [`useTauriEvent`](../../src/useTauriEvent.ts) (the
   `listen()` primitive every other subscription should prefer),
   `useVaultQuery` (vault fetch + refetch bus), `useCaptureState`,
-  `useDistillState`, `useTranscriptionState`, `useSettings`, `useConsentNudge`.
+  `useDistillState`, `useTranscriptionState`, `useSettings`, `useConsentNudge`,
+  `useChatSession` (the chat view's backend session: `chat_open` on mount +
+  the `chat:event` stream).
   DOM: `useCommandPalette` (global ⌘K/Ctrl-K keydown), `useDialogFocus` (dialog
   focus hand-off), `useScrollIntoView` (active-descendant row visibility),
   `useOutsidePointerDown` (dismiss on outside press), `useXterm` (the embedded

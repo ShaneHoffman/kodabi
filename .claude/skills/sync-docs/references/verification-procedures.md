@@ -57,8 +57,9 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 - **Mirror:** the "Primitives" section of `docs/UI_CONVENTIONS.md` — `Button` (variants,
   `loading`), `TextField` (`error`, `hint`), `Select` (`disabled` vs **`busy`**,
   `emptyLabel`, keyboard behavior), `Checkbox` (and its `--check-*` coupling to the
-  note editor's task list), `ViewFrame` (six variants; `summary` is a **type error**
-  on `panel`/`doc`/`search`, not a silent no-op), `StatusMessage` (variant → ARIA
+  shared markdown surface's task list), `ViewFrame` (eight variants; `summary` is a
+  **type error** outside `queue`/`library`/`health`, not a silent no-op),
+  `StatusMessage` (variant → ARIA
   role), `Overlay` — plus the "What consumes these today" table.
 - **Do not look for `Textarea`, `ListRow` or `PlaceholderView`.** All three were
   deleted (they had no call sites); `UI_CONVENTIONS.md` keeps a "there is no X

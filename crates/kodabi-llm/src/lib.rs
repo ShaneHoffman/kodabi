@@ -21,6 +21,8 @@
 //! with correct escaping — the fix for CVE-2024-24576), so no manual
 //! `cmd /C` wrapping is needed here.
 
+pub mod chat;
+
 use std::io::Write;
 use std::path::PathBuf;
 use std::process::{Child, Command, Output, Stdio};

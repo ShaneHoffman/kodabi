@@ -89,6 +89,21 @@ export function useCommands(): Command[] {
         run: () => navigate({ kind: "search", query: "" }),
       },
       {
+        id: "chat",
+        group: "action",
+        title: "Open chat",
+        run: () => navigate({ kind: "chat" }),
+      },
+      {
+        // The terminal's only way in: it lost its sidebar row when Chat took
+        // the front-door slot (the foot was four rows and read as clutter),
+        // and the palette is where its power-user audience already lives.
+        id: "terminal",
+        group: "action",
+        title: "Open terminal",
+        run: () => navigate({ kind: "terminal" }),
+      },
+      {
         id: "settings",
         group: "action",
         title: "Settings",

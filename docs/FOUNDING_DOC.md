@@ -322,7 +322,7 @@ order of expected value — each earns its place only after the core loop proves
 | ~~Default STT engine~~ | — | **DECIDED: Parakeet TDT (sherpa-onnx)** (real-meeting benchmark 2026-07-15 — silence-safe, ~10× faster, no content-accuracy deficit; whisper.cpp stays the fallback. See `docs/benchmarks/stt-engine-benchmark.md`) | ✅ Closed |
 | Embedding model | bge-small / nomic-embed / other | Benchmark retrieval quality on real notes | Phase 2 |
 | ~~Audio retention default~~ | — | **DECIDED: audio is not persisted in v1** (only transcript + timestamps); an opt-in audio-retention toggle is deferred until a use case pulls it, at which point the retention policy must cover it. Transcript retention (distill then discard after N days) stays the v1 policy. | ✅ Closed |
-| Claude Code invocation | headless CLI vs Agent SDK | Verify current docs at implementation time | Phase 3 |
+| ~~Claude Code invocation~~ | — | **DECIDED: headless CLI** (2026-07, chat UI implementation — the Agent SDK is TypeScript/Python only, so it would force a Node sidecar into a pure-Rust backend; the CLI's bidirectional stream-json mode gives the chat everything the SDK offered: one long-lived process per conversation, token streaming via `--include-partial-messages`, and programmatic write-tool permission prompts over the same pipes via `--permission-prompt-tool stdio`'s `can_use_tool` control requests, verified against a live CLI. All three spawn sites are now CLI: distill (`kodabi-llm`, one-shot), the terminal (PTY, interactive), and chat (`kodabi_core::chat` + `kodabi_llm::chat`, streaming). | ✅ Closed |
 
 ## 8. Risks & mitigations
 

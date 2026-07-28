@@ -44,10 +44,27 @@ Claude Code MCP reference (`code.claude.com/docs/en/mcp`) and the MCP tool speci
   Tauri shell from app config (not from the working directory), read by `crates/kodabi-mcp/src/config.rs`.
   It may implement the MCP `roots/list` request if it wants to bound its own filesystem access to
   Claude Code's granted directories.
-- **Permissions.** The two write tools should be allow-listed explicitly — e.g.
-  `"mcp__kodabi__file_note_to_project"`, `"mcp__kodabi__add_glossary_term"` — so Claude Code's
-  permission prompt is meaningful per-tool; the six read tools can be granted as a group. The server
-  performs no confirmation of its own; approval is entirely Claude Code's permission model.
+- **Permissions.** The *implemented* read tools are pre-approved as a group (the single source is
+  `READ_TOOL_PERMISSIONS` in `crates/kodabi-core/src/terminal.rs` — a read tool added to the server
+  must be added there too, or it will prompt), and the write tools (e.g.
+  `"mcp__kodabi__file_note_to_project"`, `"mcp__kodabi__add_glossary_term"`) are deliberately left
+  off the allow-list, so approval stays meaningful per-tool. The server performs no confirmation of
+  its own; approval is entirely Claude Code's permission model — and how the prompt reaches the user
+  depends on the consumer (below).
+- **Two in-app consumers share this wiring**, both spawned against the same generated `.mcp.json`
+  with `--strict-mcp-config`, both with `CLAUDE_CODE_SKIP_PROMPT_HISTORY=1`:
+  - the **embedded terminal** (`src-tauri/src/terminal_cmds.rs`): interactive `claude` in a PTY,
+    read tools pre-approved via a generated `--settings` file; a write tool's permission prompt has
+    a real TTY to answer.
+  - the **designed chat view** (`src-tauri/src/chat_cmds.rs`): headless `claude -p` in
+    bidirectional stream-json mode, built-in tools disabled (`--tools ""`), read tools pre-approved
+    via `--allowedTools`. There is no TTY, so `--permission-prompt-tool stdio` routes a write tool's
+    request onto stdout as a `can_use_tool` control request; the chat renders it as an inline
+    Allow/Deny card and writes the decision back over stdin. A prompt lost to a stop, restart, or
+    app exit always resolves to deny.
+  Both may run at once: two `claude → kodabi-mcp` process pairs over the same index and vault is
+  fine (SQLite reads are concurrent, and writes go through the vault paths the file watcher
+  reconciles).
 - Keep every tool `description` and the server's own instructions string **under 2 KB** — Claude
   Code truncates both at that size, and truncation would silently drop the "when to use this"
   guidance a tool-search-driven client relies on.
@@ -562,7 +579,7 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
       "minLength": 1,
       "maxLength": 300,
       "pattern": "^[^/\\\\]+(?:/[^/\\\\]+)*$",
-      "description": "Hierarchical project path/slug relative to the KB root, e.g. \"Growth/Q3\". Segments are folder names; no leading/trailing or empty segments. Each segment must also be a legal Windows folder name (no reserved device names such as CON/PRN/NUL, no trailing dot or space, none of the characters Windows forbids in a path segment), and may not start with \".\" or \"_\" — those prefixes mark infra folders (\".obsidian\", \"_assets\") that routing discovery skips, so such a project would be writable yet invisible to routing. The Phase 2 writer rejects violations. \"Inbox\" (any casing) is a reserved folder name — a real project may not use it — and \"sessions\" and \"raw\" (any casing) are reserved as first segments: <KB root>/sessions/ holds raw session artifacts, never notes (\"raw\" stays reserved alongside it; a nested segment like \"Data/raw\" is fine). This is the canonical project handle accepted by tools. Because no real project can be named \"Inbox\", read tools that filter by project reuse it as a sentinel meaning \"unfiled\" — see search_notes's project field."
+      "description": "Hierarchical project path/slug relative to the KB root, e.g. \"Growth/Q3\". Segments are folder names; no leading/trailing or empty segments. Each segment must also be a legal Windows folder name (no reserved device names such as CON/PRN/NUL, no trailing dot or space, none of the characters Windows forbids in a path segment), and may not start with \".\" or \"_\" — those prefixes mark infra folders (\".obsidian\", \"_assets\") that routing discovery skips, so such a project would be writable yet invisible to routing. The Phase 2 writer rejects violations. \"Inbox\" (any casing) is a reserved folder name — a real project may not use it — and \"sessions\", \"raw\", and \"chats\" (any casing) are reserved as first segments: <KB root>/sessions/ holds raw session artifacts and <KB root>/chats/ holds raw chat transcripts, never notes (\"raw\" stays reserved alongside them; a nested segment like \"Data/raw\" is fine). This is the canonical project handle accepted by tools. Because no real project can be named \"Inbox\", read tools that filter by project reuse it as a sentinel meaning \"unfiled\" — see search_notes's project field."
     },
     "IsoDate": {
       "type": "string",

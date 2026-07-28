@@ -245,8 +245,7 @@ pub fn reap(app: &AppHandle) {
 /// Spawns the PTY, writes the generated MCP config + settings, launches `claude`
 /// wired to them, and starts the reader + coalescer threads.
 fn spawn_session(app: &AppHandle) -> Result<TerminalSession, String> {
-    let mcp_binary = resolve_mcp_binary(app)?;
-    let (mcp_path, settings_path) = write_config_files(app, mcp_binary)?;
+    let (mcp_path, settings_path) = write_config_files(app)?;
     let kb_root = crate::transcribe::knowledge_base_dir(app)?;
 
     let pair = native_pty_system()
@@ -406,14 +405,26 @@ fn claude_program() -> OsString {
     std::env::var_os("KODABI_CLAUDE_BINARY").unwrap_or_else(|| OsString::from("claude"))
 }
 
-/// Generates the machine-local `.mcp.json` and Claude Code settings under
-/// `app_config_dir()` (never the syncable KB root, since they hold absolute
-/// machine paths), and returns their paths. Regenerated on each open so a moved
-/// install is self-healing.
-fn write_config_files(app: &AppHandle, mcp_binary: PathBuf) -> Result<(PathBuf, PathBuf), String> {
+/// The one directory holding every generated Claude Code wiring file. The
+/// underscore prefix is load-bearing: on Windows, `app_config_dir()` and
+/// `app_data_dir()` are the SAME folder, and that folder is the KB root — so a
+/// plainly named config dir here becomes a phantom project in `list_projects`
+/// (which is exactly what the earlier `mcp/` and `terminal/` dirs did).
+/// Vault enumeration skips `_`/`.`-prefixed dirs as infra, the same shield
+/// `EBWebView` needs a reserved name for.
+const WIRING_DIR: &str = "_claude";
+
+/// Generates the machine-local `.mcp.json` under [`WIRING_DIR`] in
+/// `app_config_dir()` (it holds absolute machine paths, so it must never sync
+/// with the KB's content) and returns its path. Regenerated on each open so a
+/// moved install is self-healing. Shared with the chat session (`chat_cmds`),
+/// which wires the same server into its headless spawn.
+pub(crate) fn write_mcp_config(app: &AppHandle) -> Result<PathBuf, String> {
+    let mcp_binary = resolve_mcp_binary(app)?;
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
     let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
     let kb_root = crate::transcribe::knowledge_base_dir(app)?;
+    remove_legacy_wiring(&config_dir);
 
     let paths = terminal::McpPaths {
         mcp_binary,
@@ -421,18 +432,39 @@ fn write_config_files(app: &AppHandle, mcp_binary: PathBuf) -> Result<(PathBuf, 
         kb_root,
     };
     let mcp_json = terminal::mcp_config_json(&paths).map_err(|e| e.to_string())?;
-    let settings_json = terminal::settings_json().map_err(|e| e.to_string())?;
 
-    let mcp_dir = config_dir.join("mcp");
-    let terminal_dir = config_dir.join("terminal");
-    fs::create_dir_all(&mcp_dir).map_err(|e| e.to_string())?;
-    fs::create_dir_all(&terminal_dir).map_err(|e| e.to_string())?;
-
-    let mcp_path = mcp_dir.join("kodabi.mcp.json");
-    let settings_path = terminal_dir.join("settings.json");
+    let wiring_dir = config_dir.join(WIRING_DIR);
+    fs::create_dir_all(&wiring_dir).map_err(|e| e.to_string())?;
+    let mcp_path = wiring_dir.join("kodabi.mcp.json");
     fs::write(&mcp_path, mcp_json).map_err(|e| e.to_string())?;
+    Ok(mcp_path)
+}
+
+/// The terminal's config pair: the shared `.mcp.json` plus the Claude Code
+/// settings file pre-approving the read tools (the chat spawn passes its
+/// allow-list as argv instead, so the settings file stays terminal-only).
+fn write_config_files(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
+    let mcp_path = write_mcp_config(app)?;
+    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+
+    let settings_json = terminal::settings_json().map_err(|e| e.to_string())?;
+    let settings_path = config_dir.join(WIRING_DIR).join("terminal-settings.json");
     fs::write(&settings_path, settings_json).map_err(|e| e.to_string())?;
     Ok((mcp_path, settings_path))
+}
+
+/// Removes the wiring files' pre-`_claude` homes (`mcp/kodabi.mcp.json`,
+/// `terminal/settings.json`), which sat in the shared config/data folder as
+/// bare dirs and therefore listed as phantom "mcp" and "terminal" projects on
+/// Windows (see [`WIRING_DIR`]). Best-effort and surgical: only the known
+/// files are removed, and `remove_dir` refuses a dir holding anything else —
+/// a user's real `mcp/` or `terminal/` project keeps its notes.
+fn remove_legacy_wiring(config_dir: &Path) {
+    for (dir, file) in [("mcp", "kodabi.mcp.json"), ("terminal", "settings.json")] {
+        let legacy_dir = config_dir.join(dir);
+        let _ = fs::remove_file(legacy_dir.join(file));
+        let _ = fs::remove_dir(&legacy_dir);
+    }
 }
 
 /// Resolves the `kodabi-mcp` binary: an explicit `KODABI_MCP_BINARY` override,

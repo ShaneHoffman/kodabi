@@ -26,12 +26,24 @@ import "./ViewFrame.css";
  *   terminal— the embedded Claude Code terminal. A small masthead over a
  *             full-bleed pane: its body (the xterm mount) grows to fill the
  *             height the gutter leaves, and scrolls inside itself.
+ *   chat    — the designed chat over the knowledge base. The terminal's
+ *             full-height stance on a document's measure (--chat-measure):
+ *             the log scrolls inside itself and the composer stays put, but
+ *             what fills the pane is prose, so it caps like a doc.
  *
  * `doc` and `search` render no header of their own: their headers are a
  * genuinely different shape (a back link and its own actions; a query field)
  * and arrive as children.
  */
-type Variant = "queue" | "library" | "panel" | "health" | "doc" | "search" | "terminal";
+type Variant =
+  | "queue"
+  | "library"
+  | "panel"
+  | "health"
+  | "doc"
+  | "search"
+  | "terminal"
+  | "chat";
 
 type BaseProps = {
   /** The small uppercase label above the title. Names the section, not the field. */
@@ -80,6 +92,9 @@ const TITLE_CLASS: Record<Variant, string> = {
   // A tool, sized like the config panel: a small serif title, so the pane below
   // it gets the room.
   terminal: "ui-balance font-serif text-title-panel leading-title text-text",
+  // Same stance as the terminal: the conversation is the content, not the
+  // masthead.
+  chat: "ui-balance font-serif text-title-panel leading-title text-text",
 };
 
 /** A queue states the work; a library and a health view state the size.
@@ -95,6 +110,7 @@ const SUMMARY_CLASS: Record<Variant, string> = {
   doc: "",
   search: "",
   terminal: "",
+  chat: "",
 };
 
 /** The variants that render `summary` at all. `panel`, `doc` and `search`

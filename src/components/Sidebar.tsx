@@ -167,15 +167,21 @@ export function Sidebar({ onOpenPalette }: Props) {
         <nav aria-label="App">
           <ul className="sidebar__list">
             <li>
+              {/* Chat leads the app rail: it is the front door onto the
+                  knowledge base (FOUNDING_DOC §4). The terminal — the
+                  power-user escape hatch onto the same session shape — has no
+                  row here on purpose: four rows made the foot busier than the
+                  rail above it, and the palette is the app's primary
+                  navigation for exactly that audience ("Open terminal"). */}
               <Button
                 variant="quiet"
-                aria-current={view.kind === "terminal" ? "page" : undefined}
-                onClick={() => navigate({ kind: "terminal" })}
+                aria-current={view.kind === "chat" ? "page" : undefined}
+                onClick={() => navigate({ kind: "chat" })}
                 className={`sidebar__row flex w-full text-left text-body ${
-                  view.kind === "terminal" ? "is-selected text-text" : "text-text-soft"
+                  view.kind === "chat" ? "is-selected text-text" : "text-text-soft"
                 }`}
               >
-                <span>Terminal</span>
+                <span>Chat</span>
               </Button>
             </li>
             <li>
