@@ -86,8 +86,9 @@ Canonical key order the writer emits: **`id, type, title, project, date, tags, s
   `^[a-z0-9]+(?:-[a-z0-9]+)*$` (lowercase kebab-case, no leading `#`). Emitted as an inline flow
   list (`tags: [budgeting, phase-2]`). Keep the key absent rather than an empty list when a note has
   none; a hand-edited `tags: []` is normalized to an omitted key on the next rewrite.
-- **`source`** — identifies *how* a note came to exist. For `type: meeting` and `type: chat` notes
-  that have a corresponding raw session artifact (per the Phase 1 raw session store), `source` is
+- **`source`** — identifies *how* a note came to exist. For `type: meeting` notes with a raw
+  session artifact (the Phase 1 raw session store, `sessions/`) and for `type: chat` notes
+  distilled from a saved conversation (the chat transcript store, `chats/`), `source` is
   a relative path to that artifact, giving direct traceback from the distilled note to its raw
   recording without adding a seventh field. Raw artifact filenames follow the timestamp+device-ID
   scheme in [`FILENAME_SCHEME.md`](FILENAME_SCHEME.md), so simultaneous capture on two devices
@@ -178,7 +179,7 @@ title: Chat: irrigation contractor comparison
 project: Briarwood Golf
 date: 2026-07-10T09:15:00-07:00
 tags: [research]
-source: sessions/20260710T161500000Z-k4m2xp7q-irrigation-contractor-comparison.jsonl
+source: chats/20260710T161500000Z-k4m2xp7q.jsonl
 ---
 
 # Chat: irrigation contractor comparison
@@ -189,7 +190,13 @@ note.
 ```
 
 Note the `chat` example has no `confidence` key — it was manually kept into the project rather
-than auto-routed, so there is no routing score to record.
+than auto-routed, so there is no routing score to record. A chat note that came straight out of
+the distill pass (`kodabi-core`'s `chat_distill`) does carry one, exactly like a meeting: it is
+routed by the same confidence split, and lands in `Inbox` with its score when uncertain.
+
+The `source` path is the chat transcript under `chats/`, written by the chat view one JSONL record
+per turn. Unlike the `sessions/` scheme it carries no title slug — a chat is named only by when it
+started and which device it started on.
 
 ---
 
@@ -200,7 +207,8 @@ are the placement and byte-level rules it establishes.
 
 - **Folder.** A note lives at `<vault>/<project>/<slug>.md`. A hierarchical `project` nests folders
   (`Growth/Q3` → `<vault>/Growth/Q3/`), creating any missing parents; an `Inbox` note lives in
-  `<vault>/Inbox/`. The vault root is the KB root (`sessions/…` in `source` is relative to it).
+  `<vault>/Inbox/`. The vault root is the KB root (`sessions/…` and `chats/…` in `source` are
+  relative to it).
 - **Filename.** `{slug}.md`, where `slug` comes from the note's title under the same slug rules the
   session scheme uses (lowercase, non-alphanumeric runs → `-`, 40-char cap). This is the
   distilled-note filename and is **distinct** from the timestamp+device *raw/session* scheme in

@@ -32,6 +32,13 @@
 //!   list, and the cost of erring this way is a duplicate note if the user
 //!   retries, against a silently dropped meeting if it erred the other way.
 //!
+//! The same derivation now decides which *chats* are undistilled
+//! ([`crate::chats`]), by subtracting the same `source:` set. The one deliberate
+//! difference: an undistilled chat is never surfaced to the user. `chats/` is a
+//! sibling of `sessions/` precisely so a chat transcript cannot read as an
+//! unclaimed capture, so it earns no needs-attention row and no retry button —
+//! the startup sweep just tries again, and the transcript is never pruned.
+//!
 //! The one persisted bit is the **dismissed marker**: a `.dismissed` sibling
 //! of the `.jsonl` ([`naming::dismissed_sibling`]) recording that the user
 //! waved the session off. That is user *intent*, which no walk of the vault

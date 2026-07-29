@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useNavigation } from "../../useNavigation";
-import { noteMeta } from "../../noteMeta";
+import { noteKind, noteMeta } from "../../noteMeta";
 import { useProjectNotes } from "../../useNotes";
 import { useProjects } from "../../useProjects";
 import { DeleteProjectDialog } from "../DeleteProjectDialog";
@@ -108,7 +108,7 @@ export function ProjectView({ slug }: Props) {
                 {/* A right rail, so the dates line up into their own column
                     and the titles keep a clean left edge to scan down. */}
                 <span className="flex-none whitespace-nowrap font-mono text-meta text-text-faint">
-                  {noteMeta(note)}
+                  {noteMeta(note, noteKind(note.type))}
                 </span>
               </button>
             </li>

@@ -9,6 +9,7 @@ import {
   onCommand,
   resetTauriMocks,
 } from "../../test/tauri";
+import type { NoteSummary } from "../../useNotes";
 import type { Project } from "../../useProjects";
 import { useVaultChangedBridge } from "../../useVaultChangedBridge";
 import { CapturePipelineProvider } from "../CapturePipelineProvider";
@@ -154,5 +155,56 @@ describe("ProjectView delete flow", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Delete Growth?" })).toBeInTheDocument();
+  });
+});
+
+describe("ProjectView index rows", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  /** A `NoteSummary` row as `list_notes` returns it for a project. */
+  function note(overrides: Partial<NoteSummary> & { id: string; title: string }): NoteSummary {
+    return {
+      path: `Growth/${overrides.id}.md`,
+      type: "note",
+      project: "Growth",
+      date: "2026-07-10T09:15:00-07:00",
+      tags: [],
+      source: "manual",
+      confidence: 0.9,
+      snippet: "",
+      ...overrides,
+    };
+  }
+
+  async function openGrowthWith(notes: NoteSummary[]) {
+    const user = userEvent.setup();
+    onCommand("list_projects", () => ({
+      inbox_note_count: 0,
+      projects: [project("Growth", notes.length)],
+    }));
+    onCommand("list_notes", (args) => (args?.project === "Growth" ? notes : []));
+    onCommand("list_failed_sessions", () => []);
+    onCommand("capture_phase", () => ({
+      phase: "idle",
+      sources: { loopback: "off", microphone: "off" },
+    }));
+    renderShell();
+    await user.click(await screen.findByRole("button", { name: /Growth/ }));
+  }
+
+  it("names a row's kind when it is not a plain note", async () => {
+    await openGrowthWith([
+      note({ id: "n_g7h8i9", title: "Irrigation contractor comparison", type: "chat" }),
+    ]);
+
+    expect(await screen.findByText("2026-07-10 · chat")).toBeInTheDocument();
+  });
+
+  it("says nothing about kind on a plain note's row", async () => {
+    await openGrowthWith([note({ id: "n_a1b2c3", title: "Quarterly planning" })]);
+
+    expect(await screen.findByText("2026-07-10")).toBeInTheDocument();
   });
 });

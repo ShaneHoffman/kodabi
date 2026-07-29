@@ -8,7 +8,7 @@ import {
   type PipelineStage,
 } from "../../useCapturePipeline";
 import { useNavigation } from "../../useNavigation";
-import { matchScore, noteMeta } from "../../noteMeta";
+import { matchScore, noteKind, noteMeta } from "../../noteMeta";
 import {
   fileNoteToProject,
   INBOX_PROJECT,
@@ -636,7 +636,7 @@ function InboxRow({
               {note.title}
             </span>
             <span className="mt-2xs block font-mono text-cap text-text-faint">
-              {noteMeta(note, matchScore(note.confidence))}
+              {noteMeta(note, noteKind(note.type), matchScore(note.confidence))}
             </span>
             {note.snippet && (
               <span className="inbox__snippet mt-2xs block font-serif text-snippet leading-snippet text-text-soft">
