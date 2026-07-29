@@ -111,7 +111,7 @@ component (the pattern established by `Sidebar.css`, `SpiritMark.css`, and each 
 | --- | --- | --- |
 | Edges / hairlines | the `--edge-*` ladder (`--edge-faint` … `--edge-dot`) | rendered as **inset shadows** |
 | Elevation | `--lift`, plus one recipe per plane role (`--lift-card`, `--lift-row`, `--lift-menu`, …) | rendered as `box-shadow` |
-| Motion | `--dur-*`, `--ease-*` | `transition` / `animation` shorthands |
+| Motion | `--dur-*`, `--ease-*` | `transition` / `animation` shorthands, and `@starting-style` |
 | Focus | `--focus-width`, `--focus-offset`, `--radius-focus` | rendered as `outline` |
 | Derived recipes | `--wash-active`, `--selection`, `--scrim`, `--scrollbar-*` | composed values |
 | Sheen | `--sheen` | specialised |
@@ -567,6 +567,9 @@ Beyond spacing and primitives, a few consistency rules for any screen:
   outside-press dismissal, timers, Tauri events) comes from the blessed bridge hooks in `src/` — the
   primitives here compose those hooks, derive during render, and act in event handlers. See
   [`.claude/rules/no-use-effect.md`](../.claude/rules/no-use-effect.md); eslint enforces the list.
+  An entrance animation is not the exception it looks like: `@starting-style` in the co-located CSS
+  animates a first paint with no mount flag and no effect, so it needs no hook at all
+  ([`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §4).
 
 ---
 

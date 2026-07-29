@@ -373,6 +373,47 @@ content moving under the reader, and neither of these does:
 Recorded here so the next audit does not re-flag them. Anything else animating a layout property is
 still a bug.
 
+### An entrance is a starting style, not a mount flag
+
+**Where the list above sanctions an entrance, it is a `transition` plus `@starting-style` in the
+component's own CSS.** Never a `mounted` flag flipped after the first render, and never a second
+`@keyframes` block for what is a two-state change.
+
+```css
+.thing {
+  transition: opacity var(--dur-settle) var(--ease-standard);
+}
+
+@starting-style {
+  .thing { opacity: 0; }
+}
+```
+
+The React idiom for this is a `useState` flag set from a `useEffect`, and it fails twice over. A
+boolean is not an external system with cleanup, so it cannot be a bridge hook
+([`.claude/rules/no-use-effect.md`](../.claude/rules/no-use-effect.md)) — licensing one would cost
+three edits for a fade. And it is a frame late by construction: the element paints at rest, then
+jumps back to animate. `@starting-style` hands the browser the transition's first computed style
+*before* the first paint, so there is nothing to flip and nothing to catch up to.
+
+**This settles how, not whether.** The Never-animates list above still decides which surfaces get an
+entrance at all. Adopting the mechanism licenses nothing new.
+
+**`@keyframes` keeps the looping and multi-step motion.** An entrance has exactly two states, which
+makes it a transition — and a transition is interruptible, where an `animation … both` plays out
+regardless. Anything with a third state or a repeat (the breath, the waveform, the starting pulse)
+stays an animation. The dividing line is now checkable: **every `@keyframes` left in `src/` loops.**
+
+**Reduced motion is one declaration, and still two rules.** `transition: none` in both blocks (see
+below) leaves `@starting-style` with nothing to run from, so the element paints at rest. The
+app-wide 1ms floor is not enough on its own — it shortens the entrance rather than removing it, so a
+frame of the starting style can still show.
+
+**No `@supports` guard.** `@starting-style` is Chromium 117; the shipped WebView2 is 150.0.4078.105
+and Tauri v2's own documented floor is 125, both above it. (CSS anchor positioning, at 131, is the
+case that *does* need gating.) Measured inside the running app's WebView2 rather than read off the
+registry — [`docs/decisions/popover-primitive.md`](decisions/popover-primitive.md) §5.1.
+
 ### Reduced motion
 
 `src/index.css` applies an app-wide floor: under `prefers-reduced-motion: reduce`, animations and

@@ -67,9 +67,15 @@
   padding: var(--row-queue-y) var(--row-queue-trail) var(--row-queue-y)
     var(--row-queue-x);
   border-radius: var(--radius-row);
+  /* `opacity` rides along here rather than on the fresh fill-in's own selector
+     below: `transition` is a shorthand, so a second declaration scoped to
+     `--fresh` would REPLACE these two and drop the hover lift for as long as
+     the row is fresh. Nothing else changes a row's opacity, so this leg is
+     inert until the entrance uses it. */
   transition:
     background-color var(--dur-plane) var(--ease-standard),
-    box-shadow var(--dur-plane) var(--ease-standard);
+    box-shadow var(--dur-plane) var(--ease-standard),
+    opacity var(--dur-plane) var(--ease-standard);
 }
 
 /* The lift is read off the SHELL: the picker is a sibling the button's own
@@ -89,7 +95,7 @@
 
 /* The picker, overlaid where the old grid's trailing column sat: inset by
    the row's own x padding, centred by flex rather than a translateY so the
-   fresh fill-in's transform keyframe cannot clobber the centring. The
+   fresh fill-in's own transform cannot clobber the centring. The
    wrapper is pointer-transparent so the dead strip around the control falls
    through to the card button; the control itself opts back in. */
 .inbox__rowActions {
@@ -175,21 +181,24 @@
    placeholder drops in from above and settles — the one entrance motion in
    the app, and the other half of the "one deliberate motion" FOUNDING_DOC §4
    reserves for distill-and-route (the vanish below is the first half). It
-   plays once, on mount, via `animation` rather than a class toggled after
-   render: a `transition` cannot animate a freshly created element's very
-   first frame without a rAF trick, and this needs none. */
+   plays once, on mount: `@starting-style` gives the browser the transition's
+   first computed style before the first paint, so this needs neither a
+   keyframe block nor a class toggled after render (docs/DESIGN_SYSTEM.md §4).
+
+   Unlike the fresh fill-in below, this rule owns the `transition` shorthand
+   outright rather than borrowing the row's: the placeholder is carved out of
+   the hover lift above (`:not(.inbox__row--placeholder)`), so it has no
+   background-color or box-shadow transition worth preserving. */
 .inbox__row--placeholder {
-  animation: inbox-row-enter var(--dur-enter) var(--ease-standard) both;
+  transition:
+    opacity var(--dur-enter) var(--ease-standard),
+    transform var(--dur-enter) var(--ease-standard);
 }
 
-@keyframes inbox-row-enter {
-  from {
+@starting-style {
+  .inbox__row--placeholder {
     opacity: 0;
     transform: translateY(-16px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
   }
 }
 
@@ -210,7 +219,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .inbox__row--placeholder {
-    animation: none;
+    transition: none;
   }
   .inbox__row--placeholder.inbox__row--vanishing {
     transition: none;
@@ -226,7 +235,7 @@
 }
 
 :root[data-reduce-motion="on"] .inbox__row--placeholder {
-  animation: none;
+  transition: none;
 }
 :root[data-reduce-motion="on"] .inbox__row--placeholder.inbox__row--vanishing {
   transition: none;
@@ -246,44 +255,38 @@
    this is that row's one-shot arrival: the card fades in, the overlaid
    picker slides in a step behind it. Scoped to the shell's two direct
    children so a fresh row's own hover/hand-off states are untouched once
-   the animation ends. */
-.inbox__rowShell--fresh > .inbox__row {
-  animation: inbox-fresh-fade var(--dur-plane) var(--ease-standard) both;
-}
+   the arrival settles.
 
+   The card needs no `transition` of its own — its opacity leg lives on
+   `.inbox__row` above, precisely so this rule does not replace the shorthand
+   carrying the hover lift. The picker has no base transition to preserve, so
+   it states its own. */
 .inbox__rowShell--fresh > .inbox__rowActions {
-  animation: inbox-fresh-slide var(--dur-plane) var(--ease-standard) both;
+  transition:
+    opacity var(--dur-plane) var(--ease-standard),
+    transform var(--dur-plane) var(--ease-standard);
 }
 
-@keyframes inbox-fresh-fade {
-  from {
+@starting-style {
+  .inbox__rowShell--fresh > .inbox__row {
     opacity: 0;
   }
-  to {
-    opacity: 1;
-  }
-}
 
-@keyframes inbox-fresh-slide {
-  from {
+  .inbox__rowShell--fresh > .inbox__rowActions {
     opacity: 0;
     transform: translateX(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateX(0);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .inbox__rowShell--fresh > .inbox__row,
   .inbox__rowShell--fresh > .inbox__rowActions {
-    animation: none;
+    transition: none;
   }
 }
 :root[data-reduce-motion="on"] .inbox__rowShell--fresh > .inbox__row,
 :root[data-reduce-motion="on"] .inbox__rowShell--fresh > .inbox__rowActions {
-  animation: none;
+  transition: none;
 }
 
 /* ---------- the filed toast ----------
@@ -308,23 +311,23 @@
   box-shadow: var(--lift-menu);
   text-align: left;
   cursor: pointer;
-  animation: inbox-toast-enter var(--dur-settle) var(--ease-standard) both;
-  transition: opacity var(--dur-settle) var(--ease-standard);
+  /* One shorthand for both ends: the entrance reads its start from
+     `@starting-style` below, the exit from `--fading`. `transform` is inert
+     on the way out — nothing moves the toast once it has arrived. */
+  transition:
+    opacity var(--dur-settle) var(--ease-standard),
+    transform var(--dur-settle) var(--ease-standard);
+}
+
+@starting-style {
+  .inbox__toast {
+    opacity: 0;
+    transform: translateY(8px);
+  }
 }
 
 .inbox__toast--fading {
   opacity: 0;
-}
-
-@keyframes inbox-toast-enter {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 .inbox__toast__arrow {
@@ -332,13 +335,17 @@
   font-size: var(--fs-label);
 }
 
+/* This takes the toast's fade-OUT with it, which the app-wide 1ms floor had
+   already collapsed to nothing anyway: the toast now disappears at the start
+   of its fade window rather than the end. That is the better answer under
+   reduced motion, and the dwell timer that owns the window is unchanged. */
 @media (prefers-reduced-motion: reduce) {
   .inbox__toast {
-    animation: none;
+    transition: none;
   }
 }
 :root[data-reduce-motion="on"] .inbox__toast {
-  animation: none;
+  transition: none;
 }
 
 /* ---------- leaving ----------
