@@ -126,6 +126,10 @@ export function ConsentNudge({ onClose }: Props) {
         options={RETENTION_OPTIONS}
         busy={submitting}
       />
+      {/* "Days to keep", not Settings' "Days". Deliberate divergence: that
+          screen nests this field inside a role="group" named Retention, so the
+          group supplies the rest of the meaning. This dialog is a flat column of
+          fields with nothing to lean on, so the label carries all of it. */}
       {kind === "keep_days" && (
         <TextField
           label="Days to keep"

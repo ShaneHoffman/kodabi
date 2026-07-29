@@ -588,6 +588,21 @@
   --tab-pad-bottom: 9px; /* tab text to the rule it sits on */
   --gap-setting: 20px; /* a settings row: label column to control column */
   --sublabel-tuck: -3px; /* negative: pulls a sublabel up under its label */
+  /* The air that tells a group of settings apart from the rows either side of
+     it. There is no companion indent token: a nested row is indented one
+     --space-sm, because 16px is a step the ladder already explains and Layer 4
+     is for the numbers it does not.
+
+     ONLY THE AIR AROUND A GROUP GROWS. The rhythm inside it stays
+     --row-panel-y, because a nested row is a whole setting and a shorter box
+     would claim it is not — and because the eye runs down the control column
+     and reads an uneven cadence as a mistake. Proximity is bought with contrast
+     instead: 13 + 14 + 13 at a group boundary against 13 + 13 between two rows
+     inside it. That is 40px, which is the bridged section-gap step (--space-lg)
+     arriving by addition — this is the increment that gets there from a row's
+     own padding, which is why it is 14 and not 40. The same trick as
+     --palette-section-gap and --sidebar-section-gap, spent on this panel. */
+  --gap-setting-group: 14px;
 
   /* where a summoned overlay sits, and how the summoned surfaces are packed.
 

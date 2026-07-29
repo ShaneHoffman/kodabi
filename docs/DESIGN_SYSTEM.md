@@ -151,6 +151,7 @@ Per DESIGN.md, value carries the hierarchy. In practice:
 | Row padding | `--row-queue-*` · `--row-library-*` · `--row-search-*` | A content row consumes its own pair (20/16, 16/14, 15/12) |
 | Title ↔ action column gap | `--gap-row-columns` (28px) | `.project__row`'s grid; folded into the Inbox row's `--row-queue-trail` reservation |
 | Card stack gap | `--gap-card` (14px) | Pre-lifted cards (`.attention__stack`) |
+| Nested row indent | `--space-sm` (16px) | A settings row inside a `role="group"`, subordinate to it |
 | Header → list lead-in | `--lead-*` | The gap between a view's header and the thing it heads |
 
 A content row's geometry is not on the 4px step scale and is not shared between views: the row is
@@ -164,6 +165,17 @@ line. Pick by content, not by view.
 
 **A list is not a table.** No column rules, no zebra striping, no borders (DESIGN.md refuses
 admin-panel density). Separation is space and value.
+
+**Rank between rows is indent, proximity and semantics.** A row that depends on the one above it is
+indented one step and carries no rule, no rail, no fill and no expander; the cluster is a
+`role="group"` with a name, so the dependency reaches a screen reader instead of living only in the
+pixels. A group that no row heads draws a heading, and that heading ranks up with `--fw-medium` and
+`text-text` per *Weight and colour carry rank before size does* above — not with a larger size, and
+not with a fourth eyebrow step. The rhythm *inside* a group is the view's own row pair, unchanged;
+only the air around it grows, because a nested row is a whole row and a shorter box would say it is
+not. And an indent is a claim about dependency, so it has to be true: two independent options are
+peers under a heading, never one nested inside the other. See `docs/UI_CONVENTIONS.md`,
+*A dependent setting is grouped, not just listed*.
 
 **A subordinate section may not out-measure its subject.** An exception block (the Inbox's "Needs
 attention") that grows unbounded will bury the content the view is named for. Cap it and let it
