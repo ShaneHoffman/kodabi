@@ -13,13 +13,49 @@
  * `compile_error!` engine guard quiet. See docs/UI_E2E_HARNESS.md.
  */
 
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createServer } from "node:net";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 
 import { waitForEndpoint } from "./cdp.mjs";
+
+const execFileAsync = promisify(execFile);
+
+/**
+ * A one-line snapshot of whether `kodabi.exe` and any `msedgewebview2.exe`
+ * children are alive, for the failure path only.
+ *
+ * When the CDP endpoint never comes up, "the process crashed" and "the
+ * process is alive but never created a webview" look identical from the
+ * harness's side — both leave `logs()` empty, since neither writes anything
+ * to stdout/stderr. This is the one cheap way to tell them apart without a
+ * debugger attached to the machine: if `kodabi.exe` is gone, it exited
+ * silently; if it's alive with zero webview children, the hang is in Rust
+ * setup before any window exists; if webview children exist, Tauri got as
+ * far as creating a webview and the debug-port argument or the CDP listener
+ * itself is the problem.
+ */
+async function snapshotProcesses() {
+  // Two calls, not one `/FI` per image name: tasklist ANDs multiple filters
+  // together rather than ORing them, and a process can't match two image
+  // names at once.
+  const forImage = async (imageName) => {
+    try {
+      const { stdout } = await execFileAsync("tasklist", ["/FI", `IMAGENAME eq ${imageName}`]);
+      return stdout.trim();
+    } catch (error) {
+      return `tasklist ${imageName} failed: ${error.message}`;
+    }
+  };
+  const [kodabi, webview] = await Promise.all([
+    forImage("kodabi.exe"),
+    forImage("msedgewebview2.exe"),
+  ]);
+  return `${kodabi}\n${webview}`;
+}
 
 /** Keep the tail of the app's own stdio; it is the whole diagnosis in CI. */
 const LOG_LINES = 200;
@@ -136,7 +172,10 @@ export async function launchKodabi({ exe, startupTimeoutMs = 120_000 } = {}) {
     handle.webviewVersion = version.Browser;
     return handle;
   } catch (error) {
-    const detail = [error.message, exited, handle.logs()].filter(Boolean).join("\n");
+    const processes = await snapshotProcesses();
+    const detail = [error.message, exited, handle.logs(), "--- tasklist ---", processes]
+      .filter(Boolean)
+      .join("\n");
     await handle.stop();
     throw new Error(`failed to launch ${exe}:\n${detail}`);
   }
