@@ -450,9 +450,11 @@ either is not an error and not a look anyone has designed — pass the header as
 header opposite the title block: the one thing the view is for. It is not a container — a caller with
 two passes a flex `<div>` and the type says nothing, which is how `ProjectView` came to carry two. It
 also sits in `BaseProps` rather than being discriminated on `variant`, so `doc` and `search` accept it
-and `renderHeader` drops it on the floor: the same silent no-op `summary` was made a type error for
-two paragraphs below. Which slot an action belongs in, and how many a surface may hold, is *Composition*
-below.
+too — and since neither passes an `eyebrow` or a `title`, `renderHeader` returns before it reaches the
+action and drops it on the floor. (The drop is that early return, not a variant check: a `doc` caller
+that passed a title as well would get both, in a header nobody designed.) The same silent no-op
+`summary` was made a type error for two paragraphs below. Which slot an action belongs in, and how
+many a surface may hold, is *Composition* below.
 
 **`summary` is not a free styling slot.** The variant fixes its typographic role, so a workload sentence
 can never render at a count's weight in one view and a heading's in another. Call sites pass the content,
@@ -582,8 +584,9 @@ Beyond spacing and primitives, a few consistency rules for any screen:
 
 `design/tokens.css` is exact about how far a line of text may run: a note's column stops at
 `--measure-doc` (660), a queue row's serif snippet at `--measure-snippet` (500), a settings row at
-`--measure-setting` (520). Nothing anywhere says how many controls may sit beside that column. Reading density is governed to the pixel; control density was governed per view, one view at a
-time, which is how a single screen came to carry four separate places to look for something to press.
+`--measure-setting` (520). Nothing anywhere says how many controls may sit beside that column.
+Reading density is governed to the pixel; control density was governed per view, one view at a time,
+which is how a single screen came to carry four separate places to look for something to press.
 This section is the other half: **which slot an action goes in, and how many a surface may hold.**
 
 ### The shell has two regions, and a view fills one
@@ -625,9 +628,10 @@ never by where there happened to be room.
 link, and Settings' tab rail, which *filters* the pane rather than navigating (`role="tablist"`, so a
 screen reader announces it as a filter and not as a second set of destinations competing with the
 sidebar). Affordances *inside* the content belong to the content: a note's tag chips, a recording's
-`<audio>` player. A recovery control belongs to the **view state** that raised it, not to the frame —
-`TerminalView`'s Restart, `ChatView`'s Start a new chat, `AppErrorBoundary`'s Try this screen again and
-the Inbox's filed toast all sit inside a state block, and the vocabulary for those is
+`<audio>` player. A control a **view state** raised belongs to that state and not to the frame,
+whether it recovers or announces — `TerminalView`'s Restart, `ChatView`'s Start a new chat,
+`AppErrorBoundary`'s Try this screen again and the Inbox's filed toast (a success, not a recovery)
+all sit inside a state block, and the vocabulary for those is
 [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §3. And the `Sidebar`'s New project button is global, so it
 lives in the other region entirely.
 
