@@ -40,10 +40,12 @@ These mirror CI exactly (`CLAUDE.md`). Match every surface the diff touches:
 | Changed surface | Gates to run |
 | --- | --- |
 | Any Rust (`crates/**`, `src-tauri/**`) | Ensure `dist/` exists (else `pnpm install --frozen-lockfile && pnpm build`), then `cargo fmt --all --check` → `cargo clippy --workspace --all-targets --locked -- -D warnings` → `cargo test --workspace --locked` |
+| `src-tauri/src/lib.rs` (the `generate_handler![…]` list) | + `pnpm test` — `src/invokeParity.test.ts` reads that list, so a renamed or removed command fails the *frontend* job even when every Rust gate passes |
 | `crates/kodabi-transcribe` | + `cargo clippy -p kodabi-transcribe --features parakeet …`, `--features vad …`, `--features whisper …` (each `--all-targets --locked -- -D warnings`) |
 | `crates/kodabi-embed` **or** `crates/kodabi-core` | + `cargo clippy -p kodabi-embed --features bge --all-targets --locked -- -D warnings` |
 | `src-tauri/**` **or** `crates/**` | + `cargo clippy -p kodabi --features parakeet --all-targets --locked -- -D warnings` (the shipping engine feature; the `--workspace` legs cfg it out) |
 | Frontend (`src/**`, `index.css`, frontend config) | `pnpm exec eslint . --max-warnings=0` + `pnpm test` + `pnpm build` |
+| `e2e/**` | `pnpm exec eslint . --max-warnings=0` — the harness is linted (`eslint.config.js`) and CI's eslint step is unfiltered, so an `e2e/`-only commit still needs it. Run `pnpm e2e:build && pnpm test:e2e` too when the change could alter what the slice asserts |
 | Docs / `.claude` only | No build gates. `validate.mjs --check-schema` if either schema doc changed; the validator's `test.mjs` if the validator itself changed |
 
 Notes: the `whisper` leg needs an MSVC dev environment (`vcvars64.bat`) and

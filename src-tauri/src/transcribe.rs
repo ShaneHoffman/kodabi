@@ -304,16 +304,33 @@ fn recover_orphan(app: &AppHandle, orphan: RecoverableOrphan) {
     }
 }
 
+/// Environment override for the knowledge-base root.
+///
+/// Deliberately the same name `kodabi-mcp` already reads at startup
+/// (`crates/kodabi-mcp/src/config.rs`) and that the generated `.mcp.json`
+/// already writes (`kodabi_core::terminal`), so one name means one thing across
+/// the tree: the app that *generates* the sidecar's config while ignoring the
+/// same variable itself is exactly the drift `.claude/rules/tauri-command-parity.md`
+/// exists to prevent, one layer down.
+///
+/// Always-on rather than `#[cfg(debug_assertions)]`, so the end-to-end harness
+/// (`e2e/`) exercises the path that actually ships. Setting it also requires
+/// setting `KODABI_INDEX_DB` — see `index_state::open_index`.
+const KB_ROOT_ENV: &str = "KODABI_KB_ROOT";
+
 /// Resolves the knowledge-base root — the plain, user-syncable folder that
 /// holds sessions, glossaries, and (later) routed notes (FOUNDING_DOC's
-/// "plain folder" model). This is a placeholder location: today it is the
-/// app-data dir, but it is the single seam a future vault-path setting
-/// replaces, so every KB path derives from here rather than calling
-/// `app_data_dir()` inline. Per-project subfolders — each with their own
-/// `_glossary.yml` — will hang off this once routing lands. Shared with
-/// `note_cmds` so the note writer resolves the same KB root as the transcribe
-/// pipeline (both must route through this single seam).
+/// "plain folder" model). Unset, this is the app-data dir; it is the single
+/// seam a future vault-path setting replaces, so every KB path derives from
+/// here rather than calling `app_data_dir()` inline, and `KODABI_KB_ROOT` is
+/// the first, smallest form of that setting. Per-project subfolders — each with
+/// their own `_glossary.yml` — hang off this. Shared with `note_cmds` so the
+/// note writer resolves the same KB root as the transcribe pipeline (both must
+/// route through this single seam).
 pub(crate) fn knowledge_base_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Some(root) = std::env::var_os(KB_ROOT_ENV).filter(|value| !value.is_empty()) {
+        return Ok(PathBuf::from(root));
+    }
     app.path()
         .app_data_dir()
         .map_err(|err| format!("failed to resolve knowledge base directory: {err}"))

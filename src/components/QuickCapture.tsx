@@ -160,6 +160,7 @@ export function QuickCapture() {
         <div className={engaged ? "mt-sm" : ""}>
           <textarea
             ref={inputRef}
+            data-testid="quick-capture-input"
             aria-label="Capture a thought"
             autoFocus
             spellCheck={false}
@@ -200,7 +201,10 @@ export function QuickCapture() {
         )}
 
         {status.kind === "filed" ? (
-          <span className="flex-none font-mono text-micro text-text">
+          <span
+            data-testid="quick-capture-destination"
+            className="flex-none font-mono text-micro text-text"
+          >
             → {status.destination}
           </span>
         ) : engaged ? (
@@ -221,6 +225,7 @@ export function QuickCapture() {
           <div className="flex flex-none items-center gap-sm">
             <Button
               variant="quiet"
+              data-testid="quick-capture-record"
               onClick={record}
               className="flex items-center gap-2xs py-3xs text-action text-text-soft"
             >
@@ -229,6 +234,7 @@ export function QuickCapture() {
             </Button>
             <Button
               variant="filled"
+              data-testid="quick-capture-submit"
               onClick={submit}
               disabled={!text.trim()}
               loading={status.kind === "submitting"}

@@ -36,5 +36,11 @@ The layers, each with its real home:
 The invoke string in step 4 **must equal the Rust function name exactly**
 (snake_case); DTO field casing must match the serde attributes and the TS type.
 
-Enforcement: the `/add-tauri-command` skill scaffolds all layers; the
-`tauri-command-auditor` agent cross-checks parity and flags fat wrappers.
+Enforcement, in three layers: `src/invokeParity.test.ts` (in `pnpm test`, which CI
+runs) fails any `invoke("name")` string that is not in the `generate_handler![…]`
+list — making the naming half of this rule a gate rather than a convention; the
+`e2e/` end-to-end tier catches what a static check cannot, namely a control that
+renders but was never wired to the command it names; and the
+`/add-tauri-command` skill plus the `tauri-command-auditor` agent scaffold the
+layers and flag fat wrappers. Note the first is a *subset* check — it cannot see
+an unregistered command that nothing calls yet, or a DTO field rename.

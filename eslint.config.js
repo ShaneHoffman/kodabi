@@ -62,6 +62,15 @@ const noEffectSelector = {
 
 export default tseslint.config(
   { ignores: ["dist", "target", "src-tauri"] },
+  // The end-to-end harness: plain Node ESM, deliberately outside the
+  // `**/*.{ts,tsx}` block below (it is not typechecked by `tsc -b`, whose
+  // project covers `src` only). Linted rather than left alone so `e2e/` does
+  // not become a second unlinted island next to preview-mock.js.
+  {
+    files: ["e2e/**/*.mjs"],
+    extends: [js.configs.recommended],
+    languageOptions: { ecmaVersion: 2022, globals: globals.node },
+  },
   {
     files: ["**/*.{ts,tsx}"],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],

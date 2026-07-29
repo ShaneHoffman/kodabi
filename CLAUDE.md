@@ -66,7 +66,9 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   `cargo clippy --workspace --all-targets --locked -- -D warnings`, and
   `cargo test --workspace --locked` must pass before every commit that touches Rust;
   `pnpm exec eslint . --max-warnings=0`, `pnpm test`, and `pnpm build` before commits that touch
-  the frontend.
+  the frontend — and `pnpm test` also before a commit that edits the `generate_handler![…]` list in
+  `src-tauri/src/lib.rs`, since `src/invokeParity.test.ts` reads it (the eslint step is unfiltered,
+  so it likewise covers `e2e/`).
   The clippy/test gates need `dist/` to exist — `src-tauri` embeds it via
   `tauri::generate_context!`, which fails the compile when it's missing — so in a fresh worktree
   run `pnpm install --frozen-lockfile && pnpm build` first (CI's Rust jobs do the same).
@@ -110,6 +112,15 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   `src/**/*.test.{ts,tsx}` and run by `pnpm test`. Mock **only** the Tauri IPC boundary — the
   `src/test/tauri.ts` harness stands in for `@tauri-apps/api`'s `invoke`/`listen`, and the
   component under test keeps its real hooks. Coverage is the load-bearing seams, not the whole UI.
+  Because that suite mocks the boundary, it cannot see an unwired control or a Rust-side DTO
+  rename — `src/invokeParity.test.ts` covers invoke-string drift statically, and the rest is the
+  end-to-end tier below.
+- **End-to-end tests:** `e2e/` drives the real app window over CDP (WebView2 remote debugging),
+  across the real IPC bridge. Windows-only, zero dependencies, **not a per-commit gate**: run
+  `pnpm e2e:build && pnpm test:e2e`. It needs a debug build with embedded assets
+  (`--features tauri/custom-protocol`), which is *not* what the cargo gates produce, and `dist/`
+  must be current before cargo runs — `pnpm e2e:build` does both in order. CI runs it as a
+  non-required check. See `docs/UI_E2E_HARNESS.md`.
 - **Design tokens:** never hard-code a color, font, spacing, or motion value. `design/tokens.css` is
   the single source of truth, bridged into Tailwind by `src/index.css` — consume tokens, never
   duplicate them. **Enforced by two guards, not by review:** `src/designTokens.test.ts` (in

@@ -547,9 +547,12 @@ Beyond spacing and primitives, a few consistency rules for any screen:
 - **No hover-only affordances.** Every action is reachable by keyboard and discoverable without hovering;
   the primitives' `:focus-visible` ring is the baseline. Hover may *enhance* an always-visible control, but
   it must never be the only way to reveal or trigger one.
-- **`data-testid` discipline.** Interactive elements a screen adds carry a stable kebab-case `data-testid`
-  so a future end-to-end harness can select them without depending on copy or DOM shape. The primitives
-  spread native props, so a passed `data-testid` reaches the underlying element.
+- **`data-testid` discipline.** Interactive elements a screen adds — and any element whose text an
+  assertion reads — carry a stable kebab-case `data-testid`, so the end-to-end harness in
+  [`e2e/`](../e2e/README.md) can select them without depending on copy or DOM shape. Only `Button`,
+  `TextField` and `Checkbox` spread native props, so only those pass a `data-testid` down to the
+  underlying element. `Select`, `ViewFrame`, `Overlay`, `StatusMessage` and `DestructiveConfirmDialog`
+  take closed prop sets and reject it as a type error — put the id on a surrounding element instead.
 - **No component-level `useEffect`.** External-system glue (focus hand-off, scroll-into-view,
   outside-press dismissal, timers, Tauri events) comes from the blessed bridge hooks in `src/` — the
   primitives here compose those hooks, derive during render, and act in event handlers. See

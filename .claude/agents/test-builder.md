@@ -71,6 +71,22 @@ Coverage is deliberately partial — the load-bearing seams, not the whole UI. R
 remains the first place logic should be tested; a behavior that could live in
 kodabi-core is better covered there than through the DOM.
 
+## End-to-end (`e2e/`)
+
+Mocking the IPC boundary is the jsdom tier's ceiling, not just its convention: a
+control that renders but was never wired to its command, and a Rust-side DTO
+field rename, both pass a green `pnpm test` by construction. Two tiers cover that
+blind spot, and the gap between them decides which one a finding belongs to:
+
+- `src/invokeParity.test.ts` — a static guard (in `pnpm test`) that every
+  `invoke("name")` string is registered in `generate_handler![…]`. Cheap and
+  flake-proof; prefer it whenever a check can be made statically.
+- `e2e/` — drives the real app window over CDP against a temp vault. The only
+  tier that crosses the real IPC bridge, so the only one that catches an unwired
+  control. Windows-only, never gates a commit, and expensive relative to the
+  above: propose a slice only for a seam the other two genuinely cannot see, and
+  say which failure it would catch. See `docs/UI_E2E_HARNESS.md`.
+
 ## Output
 
 Audit mode: a "Coverage gaps" table (behavior · concrete failing input · proposed

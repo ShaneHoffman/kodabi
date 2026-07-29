@@ -411,28 +411,51 @@ fn lock(index: &Mutex<NoteIndex>) -> MutexGuard<'_, NoteIndex> {
     index.lock().unwrap_or_else(|poison| poison.into_inner())
 }
 
-/// Opens (creating if absent) the index database under the app-data dir.
+/// Environment override for the index database, as a full path to the file.
 ///
-/// The index lives at `app_data_dir()/index.db` — derived straight from
+/// Same name and same semantics as `kodabi-mcp`'s own `KODABI_INDEX_DB`
+/// (`crates/kodabi-mcp/src/config.rs`), which the generated `.mcp.json` already
+/// writes alongside `KODABI_KB_ROOT`.
+///
+/// It is the mandatory companion to `KODABI_KB_ROOT`, not an independent knob:
+/// `IndexState::initialize` hands the KB root to the watcher and to the startup
+/// `Job::Reconcile`, so redirecting the vault while the index stayed under the
+/// real app-data dir would converge that index against the foreign vault and
+/// delete every row for the notes it can no longer see.
+const INDEX_DB_ENV: &str = "KODABI_INDEX_DB";
+
+/// Opens (creating if absent) the index database.
+///
+/// Unset, the index lives at `app_data_dir()/index.db` — derived straight from
 /// `app_data_dir()` rather than the KB root, because it is a machine-local cache
 /// that must stay put even when a future vault-path setting relocates the notes.
 /// This is a pinned invariant: the index is "derived, never synced", so it must
-/// never sit inside the (syncable) KB folder. Today the two directories coincide,
-/// which is exactly why the watcher filters `index.db*` out of its events.
+/// never sit inside the (syncable) KB folder. By default the two directories
+/// coincide, which is exactly why the watcher filters `index.db*` out of its
+/// events; `KODABI_INDEX_DB` is how they are pulled apart, which is the case
+/// the invariant above exists to allow.
 fn open_index(app: &AppHandle) -> Option<Mutex<NoteIndex>> {
-    let dir = match app.path().app_data_dir() {
-        Ok(dir) => dir,
-        Err(err) => {
-            eprintln!("failed to resolve app data dir for the note index: {err}");
-            return None;
+    let path = match std::env::var_os(INDEX_DB_ENV).filter(|value| !value.is_empty()) {
+        Some(value) => PathBuf::from(value),
+        None => {
+            let dir = match app.path().app_data_dir() {
+                Ok(dir) => dir,
+                Err(err) => {
+                    eprintln!("failed to resolve app data dir for the note index: {err}");
+                    return None;
+                }
+            };
+            dir.join("index.db")
         }
     };
-    // First launch has no app-data dir yet.
-    if let Err(err) = std::fs::create_dir_all(&dir) {
-        eprintln!("failed to create app data dir for the note index: {err}");
-        return None;
+    // First launch has no app-data dir yet — and an overridden path may name a
+    // directory that does not exist either.
+    if let Some(parent) = path.parent() {
+        if let Err(err) = std::fs::create_dir_all(parent) {
+            eprintln!("failed to create the note index directory: {err}");
+            return None;
+        }
     }
-    let path = dir.join("index.db");
     match NoteIndex::open(&path) {
         Ok(index) => Some(Mutex::new(index)),
         Err(err) => {
