@@ -297,6 +297,9 @@ nobody wears. **Copy the raw pattern those two use.**
 
 A hand-rolled collapsible listbox (WAI-ARIA active-descendant), **not** a headless dependency — the same
 combobox know-how the command palette proves, minus the dep, keeping the app's zero-UI-dependency posture.
+That choice was re-tested against base-ui in 2026-07 and held; see
+[`docs/decisions/popover-primitive.md`](decisions/popover-primitive.md) for the evidence and the
+conditions that would reopen it.
 Focus stays on the trigger; ↑/↓ move a virtual highlight via `aria-activedescendant`, Enter/Space selects,
 Escape closes and returns focus to the trigger, click-outside closes, and typing jumps (typeahead). The
 open list sits on the **overlay** plane (`--overlay` + `--lift-menu`, at `--layer-dropdown`); the active
