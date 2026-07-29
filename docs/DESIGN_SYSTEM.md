@@ -117,6 +117,12 @@ Each title step is therefore a **triple**. The size never travels alone:
 hand — the note editor's, a dialog heading — must spell all three too; the size alone renders at body
 leading with no tracking, which is what the three dialog headings used to do.
 
+**Enforced, not aspirational.** `src/titleSteps.test.ts` (in `pnpm test`) scans every `src/**/*.tsx`
+for a class string carrying a `text-title-*` and fails it if the matching `leading-title-*` and
+`tracking-title-*` are not in the same string. That covers the `ViewFrame` variants no component test
+exercises, every hand-spelled title, and any new one added later — a half-spelled step renders fine
+and typechecks fine, so nothing else would catch it.
+
 **Nothing compensates for us.** Source Serif 4 is loaded as static weights (`src/fonts.ts`) with no
 `opsz` axis, so every title from 26 to 36px is set from the same text-optimised master. A variable
 face with optical sizing would do some of this itself; this one will not.
