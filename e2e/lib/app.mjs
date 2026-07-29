@@ -42,7 +42,12 @@ function freePort() {
   });
 }
 
-export async function launchKodabi({ exe, startupTimeoutMs = 60_000 } = {}) {
+// 120s, not 60: on a first-ever run on a fresh CI VM the wait stacks a cold
+// Windows Defender real-time scan of a freshly built, unsigned exe on top of
+// WebView2's own first-launch cost on that machine. Locally this never gets
+// close to either bound — success lands in ~1.3-1.7s — so the higher ceiling
+// costs nothing on the path that matters.
+export async function launchKodabi({ exe, startupTimeoutMs = 120_000 } = {}) {
   if (!exe) {
     throw new Error("launchKodabi needs the path to a built kodabi.exe");
   }
