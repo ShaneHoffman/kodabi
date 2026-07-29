@@ -184,7 +184,8 @@ process inspection, not assumed — `kodabi.exe` and seven `msedgewebview2.exe`
 children were alive with real memory usage (up to 134 MB) for the full wait
 window, so the app launched and rendered fine; the CDP port simply never
 opened. Switched to the config-level `additionalBrowserArgs` mechanism (see
-**Setup**), verified locally; CI confirmation is the next run on this branch.
+**Setup**) and confirmed green in CI on the next run — the same runner image
+that hung indefinitely on the env-var route passed the full slice in 4m28s.
 The observed runtime version was `Edg/150.0.4078.105`; the harness logs it so a
 future CI-only failure names the build it happened on. If a future runner
 image also ignores `additionalBrowserArgs`, the next fallback is driving the
