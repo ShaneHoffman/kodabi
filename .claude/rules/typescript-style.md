@@ -24,4 +24,7 @@ The frontend is TypeScript strict, and the strictness is a gate, not a suggestio
 - **No new UI runtime dependencies without discussion.** The app holds a
   zero-UI-dependency posture — the hand-rolled `Select` primitive (a full
   combobox with no headless library) is the precedent. Add a dependency only after
-  agreeing it's worth the weight.
+  agreeing it's worth the weight. The posture was re-tested against base-ui in
+  2026-07 and held; [`docs/decisions/popover-primitive.md`](../../docs/decisions/popover-primitive.md)
+  is the evidence, including what would overturn it. Read it before re-opening
+  the question.
