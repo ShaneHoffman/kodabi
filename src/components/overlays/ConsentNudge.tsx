@@ -87,7 +87,10 @@ export function ConsentNudge({ onClose }: Props) {
       onKeyDown={onKeyDown}
       className="flex flex-col gap-md p-md"
     >
-      <h2 id="consent-nudge-title" className="font-serif text-title-panel text-text">
+      <h2
+        id="consent-nudge-title"
+        className="font-serif text-title-panel leading-title-panel tracking-title-panel text-text"
+      >
         Before your first capture
       </h2>
 

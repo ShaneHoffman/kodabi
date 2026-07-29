@@ -136,7 +136,7 @@ function ReadNote({
 
         <header className="note__title-row">
           <div className="flex items-start justify-between gap-md">
-            <h2 className="ui-balance font-serif text-title-doc font-semibold leading-title-doc tracking-title text-text">
+            <h2 className="ui-balance font-serif text-title-doc font-semibold leading-title-doc tracking-title-doc text-text">
               {note.title}
             </h2>
             <div className="flex flex-none items-center gap-sm">
@@ -401,7 +401,7 @@ function EditNote({
             region of the same document and used to disagree about what it
             was: read mode said <header>, edit and create said <div>. */}
         <header className="note__title-row flex items-center">
-          <h2 className="ui-balance font-serif text-title-doc font-semibold leading-title-doc tracking-title text-text">
+          <h2 className="ui-balance font-serif text-title-doc font-semibold leading-title-doc tracking-title-doc text-text">
             {title}
           </h2>
         </header>
@@ -605,7 +605,7 @@ function CreateNote({ initialProject }: { initialProject: string | null }) {
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Untitled"
             aria-label="Title"
-            className="note-edit__title ui-focus-ring ui-writing font-serif text-title-doc font-semibold leading-title-doc tracking-title text-text placeholder:text-text-faint"
+            className="note-edit__title ui-focus-ring ui-writing font-serif text-title-doc font-semibold leading-title-doc tracking-title-doc text-text placeholder:text-text-faint"
           />
         </div>
 

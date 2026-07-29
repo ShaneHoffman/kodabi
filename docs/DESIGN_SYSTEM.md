@@ -68,8 +68,8 @@ The scale above is not one ramp, it is two, and they diverge on purpose.
 
 Before, one loose ramp served both, so the interface wore reading-sized type at reading line-height
 and every list read like a document. The gap between `--fs-body` and `--fs-read` is now the point:
-chrome is compact, a note still opens like a page. Weights, letter-spacings, eyebrow, cap, and
-display are unchanged.
+chrome is compact, a note still opens like a page. Weights, eyebrow, cap, and display were unchanged
+by that move; tracking and leading step separately, on size — see below.
 
 **Don't close the gap.** Reaching for `text-read` to make an interface element feel more generous
 re-merges the two voices; the interface answer is space (§1, list density), not a larger size.
@@ -94,6 +94,38 @@ reference: it is chrome sitting directly above sans nav labels, not a label on c
 
 An eyebrow labels a *section*. It is not a field label (that is `text-cap text-text-soft`, owned by
 `TextField`) and not a status line (that is `text-cap`).
+
+### Tracking and leading are size-specific, not just role-specific
+
+The eyebrow steps above vary by *depth*. The title steps vary by **size**, which is the other half of
+the same idea. Letters read further apart the larger they get, so a single tracking value cannot
+serve 26px and 36px: the step that looks composed on a Settings title leaves a note title looking
+spaced out. Leading runs the same way, inverted — a ratio that reads as one block at 26px opens into
+two drifting lines by 36px.
+
+Each title step is therefore a **triple**. The size never travels alone:
+
+| Step | px | Tracking | Leading |
+| --- | --- | --- | --- |
+| `text-row` (sans) | 18 | `tracking-row` -0.005em | the interface ramp's |
+| `text-title-panel` | 26 | `tracking-title-panel` -0.012em | `leading-title-panel` 1.12 |
+| `text-title-health` | 28 | `tracking-title-health` -0.014em | `leading-title-health` 1.1 |
+| `text-title-library` | 34 | `tracking-title-library` -0.019em | `leading-title-library` 1.06 |
+| `text-title-doc` | 36 | `tracking-title-doc` -0.02em | `leading-title-doc` 1.05 |
+
+`ViewFrame` emits all three for the variants it draws, so its titles cannot drift. A title spelled by
+hand — the note editor's, a dialog heading — must spell all three too; the size alone renders at body
+leading with no tracking, which is what the three dialog headings used to do.
+
+**Nothing compensates for us.** Source Serif 4 is loaded as static weights (`src/fonts.ts`) with no
+`opsz` axis, so every title from 26 to 36px is set from the same text-optimised master. A variable
+face with optical sizing would do some of this itself; this one will not.
+
+**`tracking-wordmark` (+0.02em at 22px) is deliberately off this ramp** — the wordmark is a logotype,
+letterspaced on purpose, not a title that happens to be that size. Don't "fix" it to a negative step.
+
+The values are sub-pixel per letter (-0.019em at 34px is -0.65px) and are meant to be: the effect is
+cumulative across a word, not visible on any single pair.
 
 ### Weight and colour carry rank before size does
 

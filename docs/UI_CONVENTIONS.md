@@ -86,8 +86,12 @@ Most tokens are bridged into Tailwind utilities and are consumed **as utilities 
   `text-eyebrow` (11) up through the four view-title steps (`text-title-panel` … `text-title-doc`)
 - **Families** → `font-sans`, `font-serif`, `font-mono`
 - **Weights** → `font-medium`, `font-semibold`
-- **Tracking** → `tracking-eyebrow` (section eyebrows), `tracking-caps` (uppercase micro-text)
-- **Line-heights** → `leading-body`, `leading-read`
+- **Tracking** → two ramps: the eyebrow steps (`tracking-eyebrow` / `-eyebrow-menu` / `tracking-rail`,
+  plus `tracking-caps` for uppercase micro-text) step on *depth*; the title steps
+  (`tracking-title-panel` … `tracking-title-doc`, and `tracking-row`) step on *size*. See
+  [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §1
+- **Line-heights** → `leading-body`, `leading-read`, and one `leading-title-*` per title step, which
+  must travel with the `text-title-*` of the same name
 - **Spacing steps** → `p-*`, `px-*`, `py-*`, `gap-*`, `m-*` with the named suffixes above
 - **Radii** → `rounded-sm`, `rounded-md` (tokens.css overrides Tailwind's defaults at `:root`)
 
@@ -429,6 +433,11 @@ is. The eight, with what each fixes:
 | `search` | results under a pinned query | `--measure-search` (640) | header supplied by the view | not rendered |
 | `terminal` | the embedded Claude Code terminal | none — a full-height pane that scrolls inside itself | `text-title-panel` (26) | not rendered |
 | `chat` | the designed chat over the knowledge base | `--chat-measure` (660) — the terminal's full-height stance on a doc's measure | `text-title-panel` (26) | not rendered |
+
+The "Title step" column names the size, but a step is a **triple**: `ViewFrame` emits
+`text-title-x` with the `leading-title-x` and `tracking-title-x` that tighten alongside it
+([`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §1). A 26px serif title spelled anywhere else — a
+dialog heading, say — takes all three, or it renders at body leading with no tracking.
 
 ```tsx
 <ViewFrame variant="library" eyebrow="Project" title={formatSlug(slug)}
