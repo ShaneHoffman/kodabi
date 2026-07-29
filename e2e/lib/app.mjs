@@ -2,15 +2,20 @@
  * Launches the real Kodabi app against a throwaway vault and attaches the CDP
  * harness to it.
  *
- * The build this drives is NOT the one the cargo gates produce:
+ * The build this drives is NOT the one the cargo gates produce, and it is not
+ * a plain `cargo build` either — it must go through `e2e/build.mjs`
+ * (`pnpm e2e:build`), which does two things together:
  *
- *   cargo build -p kodabi --features tauri/custom-protocol
+ *   1. `--features tauri/custom-protocol` flips tauri's `dev` cfg off, so the
+ *      exe serves the embedded `dist/` from http://tauri.localhost instead of
+ *      expecting a Vite dev server on 1420 — while staying on the debug
+ *      profile, which keeps the MockEngine STT stub (no models, no native
+ *      deps) and keeps the release-only `compile_error!` engine guard quiet.
+ *   2. `TAURI_CONFIG` merges in `src-tauri/tauri.e2e.conf.json`, which bakes
+ *      the CDP debug port (`CDP_PORT` below) into every window's
+ *      `additionalBrowserArgs` at compile time.
  *
- * `tauri/custom-protocol` flips tauri's `dev` cfg off, so the exe serves the
- * embedded `dist/` from http://tauri.localhost instead of expecting a Vite dev
- * server on 1420 — while staying on the debug profile, which keeps the
- * MockEngine STT stub (no models, no native deps) and keeps the release-only
- * `compile_error!` engine guard quiet. See docs/UI_E2E_HARNESS.md.
+ * See docs/UI_E2E_HARNESS.md.
  */
 
 import { execFile, spawn } from "node:child_process";
@@ -61,20 +66,39 @@ async function snapshotProcesses() {
 const LOG_LINES = 200;
 
 /**
- * Asks the OS for an unused port.
+ * The CDP debug port, fixed rather than harness-chosen.
  *
- * Deliberately not a fixed 9222: a developer with Chrome already listening
- * there would have the harness silently attach to their browser and assert
- * against the wrong process.
+ * It has to match `additionalBrowserArgs` in `src-tauri/tauri.e2e.conf.json`
+ * exactly: that value is compiled into the binary once (via `TAURI_CONFIG` at
+ * build time — see `e2e/build.mjs`), so there is no runtime hook left for the
+ * harness to pick a fresh one per run. `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`
+ * *would* have let each run choose its own port, and worked exactly that way
+ * on an ordinary dev machine — but it was silently ignored on GitHub's hosted
+ * Windows runner: the app and its WebView2 children launched and ran fine,
+ * they just never opened a CDP port. The config-level mechanism survives
+ * that environment, at the cost of the port being fixed.
  */
-function freePort() {
+const CDP_PORT = 9339;
+
+/**
+ * Fails fast, before spawning, if something is already listening on the
+ * fixed CDP port — a leftover process from a crashed previous run, or an
+ * unrelated program. Without this the harness would otherwise wait out the
+ * full startup timeout attached to the wrong process, or worse, silently
+ * pass against it.
+ */
+function assertPortFree(port) {
   return new Promise((resolve, reject) => {
     const server = createServer();
-    server.on("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const { port } = server.address();
-      server.close(() => resolve(port));
-    });
+    server.on("error", () =>
+      reject(
+        new Error(
+          `port ${port} is already in use — a leftover kodabi.exe from a prior run, ` +
+            `or another program. Free it before running the E2E harness again.`,
+        ),
+      ),
+    );
+    server.listen(port, "127.0.0.1", () => server.close(resolve));
   });
 }
 
@@ -88,11 +112,13 @@ export async function launchKodabi({ exe, startupTimeoutMs = 120_000 } = {}) {
     throw new Error("launchKodabi needs the path to a built kodabi.exe");
   }
 
+  await assertPortFree(CDP_PORT);
+
   const vaultDir = await mkdtemp(join(tmpdir(), "kodabi-e2e-vault-"));
   const stateDir = await mkdtemp(join(tmpdir(), "kodabi-e2e-state-"));
   const indexDb = join(stateDir, "index.db");
   const userDataDir = join(stateDir, "webview2");
-  const port = await freePort();
+  const port = CDP_PORT;
 
   const proc = spawn(exe, [], {
     env: {
@@ -104,11 +130,11 @@ export async function launchKodabi({ exe, startupTimeoutMs = 120_000 } = {}) {
       // row.
       KODABI_KB_ROOT: vaultDir,
       KODABI_INDEX_DB: indexDb,
-      WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
       // Not optional. Tauri leaves WebView2's data directory unset, so it is
       // derived from the exe name — meaning a harness-launched kodabi.exe would
       // otherwise share a browser process with a developer's already-running
-      // instance, and the debug-port argument would not take effect.
+      // instance, and (on a machine where additionalBrowserArgs is honored at
+      // all) settings like it require distinct data directories per instance.
       WEBVIEW2_USER_DATA_FOLDER: userDataDir,
     },
     stdio: ["ignore", "pipe", "pipe"],

@@ -1,0 +1,52 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Kodabi",
+        "width": 960,
+        "height": 640,
+        "minWidth": 720,
+        "minHeight": 480,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9339"
+      },
+      {
+        "label": "quick-capture",
+        "title": "Quick capture",
+        "url": "capture.html",
+        "width": 560,
+        "height": 200,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "center": true,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9339"
+      },
+      {
+        "label": "capture-overlay",
+        "title": "Capture overlay",
+        "url": "overlay.html",
+        "width": 264,
+        "height": 68,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "visible": false,
+        "transparent": true,
+        "shadow": false,
+        "contentProtected": true,
+        "focus": false,
+        "focusable": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --remote-debugging-port=9339"
+      }
+    ]
+  }
+}

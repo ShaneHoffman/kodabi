@@ -31,10 +31,13 @@ Three failure classes, in increasing order of what it takes to catch them:
 
 ## Setup — what "run the real app" costs
 
-The build under test is not one any existing gate produces:
+The build under test is not one any existing gate produces, and it is not a
+plain `cargo build` either — `pnpm e2e:build` (`e2e/build.mjs`) does two things
+together:
 
 ```
 cargo build -p kodabi --features tauri/custom-protocol --locked
+# plus TAURI_CONFIG=<contents of src-tauri/tauri.e2e.conf.json>
 ```
 
 `src-tauri` declares no `custom-protocol` feature of its own, so it is addressed
@@ -44,6 +47,18 @@ embedded `dist/` from `http://tauri.localhost` instead of expecting a Vite dev
 server — while staying on the **debug profile**, which keeps the `MockEngine`
 STT stub and keeps the release-only `compile_error!` engine guard quiet. So the
 tier needs no STT model, no release build, and no Vite server.
+
+The `TAURI_CONFIG` half bakes the CDP debug port into every window's
+`additionalBrowserArgs` at compile time (`tauri_build::build()` merges it via
+JSON Merge Patch — RFC 7396 — so `tauri.e2e.conf.json` restates every field of
+all three windows, not just the new one, or the merge would wipe the rest of
+each window's config). **This replaced the harness's original mechanism**,
+`WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` set at launch: it worked on an ordinary
+dev machine but was silently ignored on GitHub's hosted `windows-latest`
+runner — confirmed by process inspection (below), not assumed. The port is
+therefore fixed (`CDP_PORT` in `e2e/lib/app.mjs`) rather than chosen per run;
+`launchKodabi` fails fast if that port is already bound rather than silently
+attaching to the wrong process.
 
 Two always-on environment seams point a run at a throwaway vault:
 `KODABI_KB_ROOT` and `KODABI_INDEX_DB`, reusing the exact names `kodabi-mcp`
@@ -160,10 +175,21 @@ relocate a user's notes.
 `show_quick_capture`, the hotkey, or the dismiss-on-blur behaviour. Those are
 untested by this tier and must not be assumed covered.
 
-**Runner-image coupling.** The tier depends on the WebView2 Evergreen runtime
-being present and on `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` being honoured. The
-observed runtime was `Edg/150.0.4078.105`; the harness logs the version so a
-CI-only failure names the build it happened on.
+**Runner-image coupling — confirmed, not hypothetical.** The tier depends on
+the WebView2 Evergreen runtime being present, and its first live CI run showed
+that a runtime *can* diverge from a dev machine in exactly the way this section
+originally only speculated about: `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS` was
+silently ignored on GitHub's hosted `windows-latest` runner. Confirmed by
+process inspection, not assumed — `kodabi.exe` and seven `msedgewebview2.exe`
+children were alive with real memory usage (up to 134 MB) for the full wait
+window, so the app launched and rendered fine; the CDP port simply never
+opened. Switched to the config-level `additionalBrowserArgs` mechanism (see
+**Setup**), verified locally; CI confirmation is the next run on this branch.
+The observed runtime version was `Edg/150.0.4078.105`; the harness logs it so a
+future CI-only failure names the build it happened on. If a future runner
+image also ignores `additionalBrowserArgs`, the next fallback is driving the
+OS-level `--remote-debugging-port` via a registry policy rather than any
+Tauri-level mechanism.
 
 **The build-order trap is real and bit us during the spike.** `dist/` is
 embedded at compile time, so `cargo build` without a preceding `pnpm build`

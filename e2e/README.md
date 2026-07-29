@@ -13,7 +13,7 @@ deliberately does *not* cover, is in
 ## Running it
 
 ```powershell
-pnpm e2e:build   # pnpm build && cargo build -p kodabi --features tauri/custom-protocol
+pnpm e2e:build   # pnpm build && node e2e/build.mjs
 pnpm test:e2e
 ```
 
@@ -41,8 +41,17 @@ no release build, and no Vite server.
 
 ## How it drives the app
 
-Kodabi runs three webviews in one process. `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`
-opens a CDP port, and `/json/list` enumerates all three:
+Kodabi runs three webviews in one process. The CDP debug port is baked into
+every window's `additionalBrowserArgs` at compile time by `e2e/build.mjs`
+(`src-tauri/tauri.e2e.conf.json`, merged via `TAURI_CONFIG`) — **not** set at
+launch via `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS`, which is the harness's
+original mechanism and still the one to reach for on an ordinary dev machine,
+but which GitHub's hosted `windows-latest` runner silently ignores (confirmed:
+the app and its WebView2 children ran fine, the CDP port just never opened).
+Because the port is fixed at compile time rather than chosen per run, it's a
+constant (`CDP_PORT` in `lib/app.mjs`, currently `9339`), and `launchKodabi`
+fails fast if that port is already bound rather than risk attaching to the
+wrong process. `/json/list` then enumerates all three webviews:
 
 | Window | Target URL |
 |---|---|
@@ -88,6 +97,9 @@ opens on a backend event, never on mount — so an un-onboarded machine still
 boots straight to the Inbox. Add a third seam only when something here needs to
 *write* config.
 
-On failure the harness keeps the temp vault, prints its path, and dumps both
-webview consoles plus the app's own stdio. Ask for that output first; it is
-usually the whole diagnosis.
+On failure the harness keeps the temp vault, prints its path, dumps both
+webview consoles plus the app's own stdio, and snapshots whether `kodabi.exe`
+and any `msedgewebview2.exe` children are alive (`tasklist`). Ask for that
+output first; it is usually the whole diagnosis — it's what distinguished "the
+app crashed" from "the app is fine, the CDP port never opened" when this
+harness first ran in CI.

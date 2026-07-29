@@ -11,7 +11,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "node --test \"e2e/**/*.test.mjs\"",
-    "e2e:build": "pnpm build && cargo build -p kodabi --features tauri/custom-protocol --locked",
+    "e2e:build": "pnpm build && node e2e/build.mjs",
     "lint": "eslint .",
     "mcp:build": "cargo build -p kodabi-mcp",
     "mcp:build:release": "cargo build -p kodabi-mcp --release",

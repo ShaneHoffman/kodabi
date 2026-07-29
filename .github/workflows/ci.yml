@@ -408,8 +408,12 @@ jobs:
         # tauri/custom-protocol flips tauri's `dev` cfg off, so the exe serves
         # dist/ from http://tauri.localhost rather than expecting a Vite dev
         # server. Debug profile keeps MockEngine: no models, no native STT deps.
+        # e2e/build.mjs also merges in tauri.e2e.conf.json's additionalBrowserArgs
+        # (the CDP debug port, baked in at compile time) — the runtime
+        # WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS env var this job used to rely on
+        # is silently ignored on this runner image.
         if: steps.changed.outputs.run == 'true'
-        run: cargo build -p kodabi --features tauri/custom-protocol --locked
+        run: node e2e/build.mjs
       - name: Run the end-to-end slice
         # No pnpm install: the harness is Node built-ins only.
         if: steps.changed.outputs.run == 'true'
