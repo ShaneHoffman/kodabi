@@ -69,6 +69,7 @@ export function Sidebar({ onOpenPalette }: Props) {
       <li key={entry.kind === "inbox" ? "inbox" : entry.project.id}>
         <Button
           variant="quiet"
+          data-testid={rail ? "sidebar-inbox" : undefined}
           aria-current={selected ? "page" : undefined}
           onClick={() => navigate(entryView(entry))}
           style={depthStyle(depth)}
@@ -80,7 +81,10 @@ export function Sidebar({ onOpenPalette }: Props) {
           {/* Tabular figures: this column counts up and down as notes are
               filed, and proportional digits made the numbers shuffle
               sideways against the rail's right edge as they changed. */}
-          <span className="ui-tnum font-mono text-cap font-normal text-text-faint">
+          <span
+            data-testid={rail ? "sidebar-inbox-count" : undefined}
+            className="ui-tnum font-mono text-cap font-normal text-text-faint"
+          >
             {count}
           </span>
         </Button>

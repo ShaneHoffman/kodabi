@@ -1,7 +1,7 @@
 ---
 name: test
-description: Run or improve Kodabi's tests — quick/full/frontend modes run the right commands; audit/write modes delegate to the test-builder agent. Use to check tests before a commit or to fill a coverage gap.
-argument-hint: [mode: quick | full | frontend | audit | write — plus optional focus]
+description: Run or improve Kodabi's tests — quick/full/frontend/e2e modes run the right commands; audit/write modes delegate to the test-builder agent. Use to check tests before a commit, to drive the real app window end-to-end, or to fill a coverage gap.
+argument-hint: [mode: quick | full | frontend | e2e | audit | write — plus optional focus]
 ---
 
 # Test
@@ -23,6 +23,12 @@ default to **quick** for a diff-scoped check.
   `src/**/*.test.{ts,tsx}`; coverage is the load-bearing seams (the distill/consent
   state machines, the Inbox re-route, quick capture), not the whole UI, so a green
   run is not a claim that everything is covered.
+- **e2e** — `pnpm e2e:build`, then `pnpm test:e2e`. Drives the real app window over
+  CDP against a temp vault, so it is the only tier that crosses the real IPC bridge.
+  Windows-only; **never gates a commit**. Run it after a change to a control's wiring,
+  a command's name, or a DTO's shape. `pnpm e2e:build` is not optional — `dist/` is
+  embedded at compile time, so `cargo build` alone tests a stale frontend. See
+  [`docs/UI_E2E_HARNESS.md`](../../../docs/UI_E2E_HARNESS.md).
 - **audit** — spawn `test-builder` in **audit** mode with the diff scope; it returns
   a read-only coverage-gap table.
 - **write** — spawn `test-builder` in **write** mode for the target; then run

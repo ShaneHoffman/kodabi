@@ -419,16 +419,22 @@ const WIRING_DIR: &str = "_claude";
 /// with the KB's content) and returns its path. Regenerated on each open so a
 /// moved install is self-healing. Shared with the chat session (`chat_cmds`),
 /// which wires the same server into its headless spawn.
+///
+/// Both paths come from the app's own resolvers rather than from
+/// `app_data_dir()` inline, so the sidecar is handed the same vault and the same
+/// index this process opened. `KODABI_KB_ROOT` and `KODABI_INDEX_DB` move
+/// together or not at all (see `index_state::index_db_path`); resolving one here
+/// and hard-coding the other would split the sidecar's reads from its writes.
 pub(crate) fn write_mcp_config(app: &AppHandle) -> Result<PathBuf, String> {
     let mcp_binary = resolve_mcp_binary(app)?;
     let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
-    let data_dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let index_db = crate::index_state::index_db_path(app)?;
     let kb_root = crate::transcribe::knowledge_base_dir(app)?;
     remove_legacy_wiring(&config_dir);
 
     let paths = terminal::McpPaths {
         mcp_binary,
-        index_db: data_dir.join("index.db"),
+        index_db,
         kb_root,
     };
     let mcp_json = terminal::mcp_config_json(&paths).map_err(|e| e.to_string())?;

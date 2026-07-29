@@ -136,7 +136,7 @@ export function InboxView() {
               </StatusMessage>
             )
           ) : (
-            <ul className="inbox__list">
+            <ul data-testid="inbox-list" className="inbox__list">
               {placeholder && <PipelinePlaceholder presence={placeholder} />}
               {notes.map((note) => (
                 // Keyed by path, not id: two files can carry the same id (an
@@ -623,6 +623,7 @@ function InboxRow({
               nothing more and the whole card is now the button. */}
           <button
             type="button"
+            data-testid="inbox-row"
             className="inbox__row ui-focus-ring"
             onClick={() =>
               navigate({
@@ -632,7 +633,10 @@ function InboxRow({
               })
             }
           >
-            <span className="block truncate text-row font-semibold tracking-row text-text">
+            <span
+              data-testid="inbox-row-title"
+              className="block truncate text-row font-semibold tracking-row text-text"
+            >
               {note.title}
             </span>
             <span className="mt-2xs block font-mono text-cap text-text-faint">

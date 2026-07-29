@@ -352,3 +352,75 @@ jobs:
             cat guard.log
             exit 1
           }
+
+  # Drives the real app window over CDP — the only tier that crosses the real
+  # IPC bridge, so the only one that can catch an unwired control. Deliberately
+  # NOT a required check yet; see the promotion criteria in
+  # docs/UI_E2E_HARNESS.md. It copies the in-job change gate below so the check
+  # always reports, which is what lets it be promoted with no YAML change.
+  e2e:
+    name: UI (E2E, quick capture)
+    runs-on: windows-latest
+    timeout-minutes: 25
+    needs: frontend
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for changes to the frontend, the shell, or the harness
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Same base-selection logic as the app job: PR base, else the commit
+          # the push replaced, else HEAD~1 for a brand-new branch.
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            base="HEAD~1"
+          fi
+          # `src` is in this list and not in the app job's: catching a
+          # frontend-side wiring regression is the entire point of this tier.
+          changed="$(git diff --name-only "$base" HEAD -- src src-tauri crates e2e Cargo.toml Cargo.lock .github/workflows/ci.yml)"
+          if [ -n "$changed" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install Node (the harness needs a global WebSocket)
+        if: steps.changed.outputs.run == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Install Rust (stable)
+        if: steps.changed.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        if: steps.changed.outputs.run == 'true'
+      - name: Download dist/ (built by the frontend job)
+        # Also sidesteps the local build-order trap: dist/ is embedded at
+        # compile time, so it must exist and be current before cargo runs.
+        if: steps.changed.outputs.run == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+      - name: Build the debug app with embedded assets
+        # tauri/custom-protocol flips tauri's `dev` cfg off, so the exe serves
+        # dist/ from http://tauri.localhost rather than expecting a Vite dev
+        # server. Debug profile keeps MockEngine: no models, no native STT deps.
+        # e2e/build.mjs also merges in tauri.e2e.conf.json's additionalBrowserArgs
+        # (the CDP debug port, baked in at compile time) — the runtime
+        # WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS env var this job used to rely on
+        # is silently ignored on this runner image.
+        if: steps.changed.outputs.run == 'true'
+        run: node e2e/build.mjs
+      - name: Run the end-to-end slice
+        # No pnpm install: the harness is Node built-ins only.
+        if: steps.changed.outputs.run == 'true'
+        run: node --test "e2e/**/*.test.mjs"
+      - name: Reap any surviving app or WebView2 processes
+        if: always()
+        shell: bash
+        run: |
+          taskkill //F //IM kodabi.exe //T || true
+          taskkill //F //IM msedgewebview2.exe //T || true

@@ -64,6 +64,8 @@ crates/kodabi-llm/      # The headless Claude Code runner every LLM call (cleanu
                         # routing, chat sessions) goes through.
 crates/kodabi-mcp/      # Stdio MCP server (hand-rolled JSON-RPC) exposing the v1 tool
                         # surface of docs/MCP_TOOL_SURFACE.md over kodabi-core.
+e2e/                    # End-to-end harness — drives the real app window over CDP, across
+                        # the real IPC bridge (zero dependencies; see docs/UI_E2E_HARNESS.md).
 .claude/                # Agentic dev workflow — task skills, read-only auditor agents, and
                         # the rules they enforce.
 Cargo.toml              # Cargo workspace manifest (src-tauri + every crates/kodabi-* member).
@@ -89,6 +91,8 @@ pnpm dev           # frontend only, in a browser
 pnpm build         # typecheck + Vite build
 pnpm test          # frontend tests (vitest + Testing Library, jsdom)
 pnpm lint          # frontend lint
+pnpm e2e:build     # build the app for the end-to-end harness (must precede test:e2e)
+pnpm test:e2e      # end-to-end tests against the real app window (Windows only)
 ```
 
 ### Speech-to-text engines

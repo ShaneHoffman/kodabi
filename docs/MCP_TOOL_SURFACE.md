@@ -42,8 +42,15 @@ Claude Code MCP reference (`code.claude.com/docs/en/mcp`) and the MCP tool speci
   An entry with no `type`/`url` field is read by Claude Code as a stdio server. The server resolves
   the knowledge-base root and the index from its own config — the two env vars above, injected by the
   Tauri shell from app config (not from the working directory), read by `crates/kodabi-mcp/src/config.rs`.
-  It may implement the MCP `roots/list` request if it wants to bound its own filesystem access to
-  Claude Code's granted directories.
+  The server may implement the MCP `roots/list` request if it wants to bound its own filesystem access
+  to Claude Code's granted directories.
+
+  Those two names are **shared with the desktop app, not owned by the MCP server**: the app reads the
+  same `KODABI_KB_ROOT` (`transcribe::knowledge_base_dir`) and `KODABI_INDEX_DB`
+  (`index_state::open_index`) as overrides for its own vault and index, falling back to the app-data
+  dir when they are unset. One name means one location on both sides of the boundary. They must be set
+  together — the index reconciles against the KB root, so moving one without the other converges the
+  index against a foreign vault. The end-to-end harness relies on this (`docs/UI_E2E_HARNESS.md`).
 - **Permissions.** The *implemented* read tools are pre-approved as a group (the single source is
   `READ_TOOL_PERMISSIONS` in `crates/kodabi-core/src/terminal.rs` — a read tool added to the server
   must be added there too, or it will prompt), and the write tools (e.g.
