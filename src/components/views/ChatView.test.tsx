@@ -29,11 +29,14 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
   };
 }
 
-/** Mount and let the `chat_open` snapshot land (loading renders nothing). */
+/** Mount and let the `chat_open` snapshot land (loading renders nothing).
+ * Returns the render result so the motion tests can reach for the entrance
+ * class by selector — there is no accessible handle on a wrapper div. */
 async function renderChat() {
-  render(<ChatView />);
+  const view = render(<ChatView />);
   await waitFor(() => expect(invokedCommands()).toContain("chat_open"));
   await screen.findByRole("region", { name: "Chat" });
+  return view;
 }
 
 describe("ChatView", () => {
@@ -141,6 +144,103 @@ describe("ChatView", () => {
     });
     expect(screen.getByText("The answer is 42, obviously.")).toBeInTheDocument();
     expect(screen.queryByText("The answer is 42.")).not.toBeInTheDocument();
+  });
+
+  // ---------- the answer's entrance (docs/DESIGN_SYSTEM.md §4) ----------
+  // jsdom runs neither @starting-style nor transitions, so what these lock in
+  // is the class contract: which element carries `.chat-view__answer`, and
+  // just as importantly which is denied it. That IS the design — see the
+  // comment on ChatEntryRow's assistant case.
+
+  it("marks the arriving answer and keeps the same node across deltas", async () => {
+    const { container } = await renderChat();
+    expect(container.querySelector(".chat-view__answer")).toBeNull();
+
+    act(() => {
+      emitFromBackend("chat:event", {
+        type: "delta",
+        chat_id: CHAT_ID,
+        text: "Streaming ",
+      });
+    });
+    const arriving = container.querySelector(".chat-view__answer");
+    expect(arriving).toHaveTextContent("Streaming");
+
+    act(() => {
+      emitFromBackend("chat:event", {
+        type: "delta",
+        chat_id: CHAT_ID,
+        text: "onward.",
+      });
+    });
+    // The same DOM node, grown — not a replacement. @starting-style resolves
+    // only on insertion, so a fresh node here would re-run the entrance on
+    // every delta, which at the backend's 16ms coalesce window is ~60Hz.
+    expect(container.querySelector(".chat-view__answer")).toBe(arriving);
+    expect(arriving).toHaveTextContent("Streaming onward.");
+  });
+
+  it("does not animate the completed answer the stream hands off to", async () => {
+    const { container } = await renderChat();
+
+    act(() => {
+      emitFromBackend("chat:event", {
+        type: "delta",
+        chat_id: CHAT_ID,
+        text: "The answer is 42.",
+      });
+    });
+    expect(container.querySelector(".chat-view__answer")).not.toBeNull();
+
+    act(() => {
+      emitFromBackend("chat:event", {
+        type: "assistant_done",
+        chat_id: CHAT_ID,
+        text: "The answer is 42.",
+      });
+    });
+    // `assistant_done` unmounts the streaming block and mounts a different div
+    // holding the same prose. If that entry carried the entrance class, every
+    // turn would end by fading in an answer the reader has already read.
+    expect(screen.getByText("The answer is 42.")).toBeInTheDocument();
+    expect(container.querySelector(".chat-view__answer")).toBeNull();
+  });
+
+  it("leaves a backlog hydrated from the snapshot entirely still", async () => {
+    onCommand("chat_open", () =>
+      snapshot({
+        entries: [
+          { kind: "user", text: "What projects do I have?" },
+          { kind: "tool_use", summary: "Listed projects" },
+          { kind: "assistant", text: "You have **Briarwood Golf**." },
+        ],
+      }),
+    );
+    const { container } = await renderChat();
+
+    // Why "scrollback never animates" is provable rather than asserted: no
+    // entry carries the class, so returning to the Chat tab has nothing to
+    // replay.
+    expect(container.querySelectorAll(".chat-view__answer")).toHaveLength(0);
+  });
+
+  it("still marks a mid-turn answer hydrated from the snapshot", async () => {
+    // Accepted by design: remounting mid-turn (leaving Chat and coming back)
+    // replays the entrance on the live answer alone, while the backlog around
+    // it paints at rest. That answer genuinely is still arriving, and the
+    // motion marks which part of the view is live.
+    onCommand("chat_open", () =>
+      snapshot({
+        entries: [{ kind: "user", text: "What projects do I have?" }],
+        streaming_text: "You have",
+        turn_active: true,
+      }),
+    );
+    const { container } = await renderChat();
+
+    const arriving = container.querySelectorAll(".chat-view__answer");
+    expect(arriving).toHaveLength(1);
+    expect(arriving[0]).toHaveTextContent("You have");
   });
 
   it("drops events from another session's chat_id", async () => {
