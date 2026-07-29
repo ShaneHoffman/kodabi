@@ -3,17 +3,17 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { captureLabel } from "../captureLabel";
-import { startCapture, stopCapture } from "../captureControl";
-import { hideQuickCaptureWindow, submitQuickCapture } from "../quickCapture";
-import { isCaptureActive, useCaptureState } from "../useCaptureState";
-import { useDebouncedValue } from "../useDebouncedValue";
-import { formatElapsed, useElapsed } from "../useElapsed";
-import { useTauriEvent } from "../useTauriEvent";
-import { useTimeout } from "../useTimeout";
-import { QUICK_CAPTURE_SHOWN_EVENT } from "../events";
-import { Button } from "./ui/Button";
-import { StatusMessage } from "./ui/StatusMessage";
+import { captureLabel } from "../../captureLabel";
+import { startCapture, stopCapture } from "../../captureControl";
+import { hideQuickCaptureWindow, submitQuickCapture } from "../../quickCapture";
+import { isCaptureActive, useCaptureState } from "../../useCaptureState";
+import { useDebouncedValue } from "../../useDebouncedValue";
+import { formatElapsed, useElapsed } from "../../useElapsed";
+import { useTauriEvent } from "../../useTauriEvent";
+import { useTimeout } from "../../useTimeout";
+import { QUICK_CAPTURE_SHOWN_EVENT } from "../../events";
+import { Button } from "../ui/Button";
+import { StatusMessage } from "../ui/StatusMessage";
 import "./QuickCapture.css";
 
 /** How long the destination flashes before the window dismisses itself. Short

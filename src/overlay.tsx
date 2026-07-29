@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { CaptureOverlayPill } from "./components/CaptureOverlayPill";
+import { CaptureOverlayPill } from "./components/capture/CaptureOverlayPill";
 import { startReduceMotion } from "./reduceMotion";
 import { applyTheme, startThemeSync } from "./theme";
 import "./fonts";

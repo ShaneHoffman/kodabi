@@ -20,7 +20,7 @@ import { useProjects } from "../../useProjects";
 import { isSessionSource } from "../../useSessions";
 import { formatElapsed, useElapsed } from "../../useElapsed";
 import { useTimeout } from "../../useTimeout";
-import { DeleteNoteDialog } from "../DeleteNoteDialog";
+import { DeleteNoteDialog } from "../dialogs/DeleteNoteDialog";
 import { Button } from "../ui/Button";
 import { Select, type SelectOption } from "../ui/Select";
 import { StatusMessage } from "../ui/StatusMessage";

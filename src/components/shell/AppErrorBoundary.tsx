@@ -1,7 +1,7 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
-import { Button } from "./ui/Button";
-import { ViewFrame } from "./ui/ViewFrame";
-import { StatusMessage } from "./ui/StatusMessage";
+import { Button } from "../ui/Button";
+import { ViewFrame } from "../ui/ViewFrame";
+import { StatusMessage } from "../ui/StatusMessage";
 
 type Props = {
   /** Remounts the boundary when it changes, so navigating away from a view

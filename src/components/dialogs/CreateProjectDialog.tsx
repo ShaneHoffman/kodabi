@@ -4,13 +4,13 @@ import {
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { useDialogFocus } from "../useDialogFocus";
-import { useNavigation } from "../useNavigation";
-import { createProject } from "../useProjects";
-import { wrapDialogTab } from "./dialogTabTrap";
-import { Button } from "./ui/Button";
-import { Overlay } from "./ui/Overlay";
-import { TextField } from "./ui/TextField";
+import { useDialogFocus } from "../../useDialogFocus";
+import { useNavigation } from "../../useNavigation";
+import { createProject } from "../../useProjects";
+import { wrapDialogTab } from "../../dialogTabTrap";
+import { Button } from "../ui/Button";
+import { Overlay } from "../ui/Overlay";
+import { TextField } from "../ui/TextField";
 
 type Props = {
   onClose: () => void;

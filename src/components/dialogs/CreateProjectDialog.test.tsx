@@ -1,23 +1,23 @@
 import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { VAULT_CHANGED_EVENT } from "../events";
+import { VAULT_CHANGED_EVENT } from "../../events";
 import {
   emitFromBackend,
   invoke,
   invokedCommands,
   onCommand,
   resetTauriMocks,
-} from "../test/tauri";
-import type { Project } from "../useProjects";
-import { useVaultChangedBridge } from "../useVaultChangedBridge";
-import { CapturePipelineProvider } from "./CapturePipelineProvider";
-import { MainContent } from "./MainContent";
-import { NavigationProvider } from "./NavigationProvider";
-import { Sidebar } from "./Sidebar";
+} from "../../test/tauri";
+import type { Project } from "../../useProjects";
+import { useVaultChangedBridge } from "../../useVaultChangedBridge";
+import { CapturePipelineProvider } from "../providers/CapturePipelineProvider";
+import { MainContent } from "../shell/MainContent";
+import { NavigationProvider } from "../providers/NavigationProvider";
+import { Sidebar } from "../shell/Sidebar";
 
-vi.mock("@tauri-apps/api/core", () => import("../test/tauri"));
-vi.mock("@tauri-apps/api/event", () => import("../test/tauri"));
+vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
+vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
 
 /** A `ProjectDto` row as `list_projects` / `create_project` return it. */
 function project(slug: string, noteCount = 0): Project {

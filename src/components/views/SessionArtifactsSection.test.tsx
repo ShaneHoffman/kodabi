@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionArtifactsSection } from "./SessionArtifactsSection";
 import { NoteEditorView } from "./NoteEditorView";
-import { NavigationProvider } from "../NavigationProvider";
+import { NavigationProvider } from "../providers/NavigationProvider";
 import type { NoteDetail } from "../../useNotes";
 import type { SessionArtifacts, TranscriptSegment } from "../../useSessions";
 import {

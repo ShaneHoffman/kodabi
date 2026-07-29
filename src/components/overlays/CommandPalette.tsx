@@ -4,12 +4,12 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { COMMAND_GROUP_LABEL, useCommands, type Command } from "../useCommands";
-import { useDialogFocus } from "../useDialogFocus";
-import { useFilteredCommands } from "../useFilteredCommands";
-import { useNavigation } from "../useNavigation";
-import { useScrollIntoView } from "../useScrollIntoView";
-import { Overlay } from "./ui/Overlay";
+import { COMMAND_GROUP_LABEL, useCommands, type Command } from "../../useCommands";
+import { useDialogFocus } from "../../useDialogFocus";
+import { useFilteredCommands } from "../../useFilteredCommands";
+import { useNavigation } from "../../useNavigation";
+import { useScrollIntoView } from "../../useScrollIntoView";
+import { Overlay } from "../ui/Overlay";
 import "./CommandPalette.css";
 
 type Props = {

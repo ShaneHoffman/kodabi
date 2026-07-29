@@ -3,7 +3,7 @@ import { useNavigation } from "../../useNavigation";
 import { noteMeta } from "../../noteMeta";
 import { useProjectNotes } from "../../useNotes";
 import { useProjects } from "../../useProjects";
-import { DeleteProjectDialog } from "../DeleteProjectDialog";
+import { DeleteProjectDialog } from "../dialogs/DeleteProjectDialog";
 import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";

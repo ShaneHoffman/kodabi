@@ -12,7 +12,7 @@ import { useScrollIntoView } from "../../useScrollIntoView";
 import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
-import "../markdownReading.css";
+import "./markdownReading.css";
 import "./ChatView.css";
 
 /** The bottom sentinel the log keeps in view as the conversation grows. */

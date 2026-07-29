@@ -196,7 +196,7 @@ The reserved green is spent on the SpiritMark and nothing else, including the st
 As *text* it measures **4.06–4.56:1** against the light theme's three planes, below the 4.5:1 floor
 on two of them; as a *graphic* it clears the 3:1 one everywhere in both themes. The label carries
 the same state through value instead
-([`CaptureStatusLine`](../src/components/CaptureStatusLine.tsx)). The measured figures live once, in
+([`CaptureStatusLine`](../src/components/capture/CaptureStatusLine.tsx)). The measured figures live once, in
 [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §6 — this line used to quote 3.42–3.70, which were the
 *pre-re-tune* green's numbers and had been wrong here since the pigment changed.
 

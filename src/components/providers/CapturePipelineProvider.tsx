@@ -1,8 +1,8 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { CapturePipelineContext } from "../useCapturePipeline";
-import { isCaptureActive, useCaptureState } from "../useCaptureState";
-import { useDistillState } from "../useDistillState";
-import { useTranscriptionState } from "../useTranscriptionState";
+import { CapturePipelineContext } from "../../useCapturePipeline";
+import { isCaptureActive, useCaptureState } from "../../useCaptureState";
+import { useDistillState } from "../../useDistillState";
+import { useTranscriptionState } from "../../useTranscriptionState";
 
 /**
  * The one subscription to the capture/transcription/distill events, held
