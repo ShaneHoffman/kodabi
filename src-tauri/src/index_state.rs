@@ -424,7 +424,7 @@ fn lock(index: &Mutex<NoteIndex>) -> MutexGuard<'_, NoteIndex> {
 /// delete every row for the notes it can no longer see.
 const INDEX_DB_ENV: &str = "KODABI_INDEX_DB";
 
-/// Opens (creating if absent) the index database.
+/// Resolves the index database path — the one place that decides it.
 ///
 /// Unset, the index lives at `app_data_dir()/index.db` — derived straight from
 /// `app_data_dir()` rather than the KB root, because it is a machine-local cache
@@ -434,18 +434,30 @@ const INDEX_DB_ENV: &str = "KODABI_INDEX_DB";
 /// coincide, which is exactly why the watcher filters `index.db*` out of its
 /// events; `KODABI_INDEX_DB` is how they are pulled apart, which is the case
 /// the invariant above exists to allow.
+///
+/// Shared with `terminal_cmds::write_mcp_config`, which hands both this path and
+/// the KB root to the `kodabi-mcp` sidecar. That pairing is the whole point of
+/// having one resolver: a `.mcp.json` naming the overridden vault next to the
+/// app-data index would point the sidecar's `search_notes` at one vault and its
+/// `list_projects` at another.
+pub(crate) fn index_db_path(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Some(value) = std::env::var_os(INDEX_DB_ENV).filter(|value| !value.is_empty()) {
+        return Ok(PathBuf::from(value));
+    }
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|err| format!("failed to resolve app data dir for the note index: {err}"))?;
+    Ok(dir.join("index.db"))
+}
+
+/// Opens (creating if absent) the index database at [`index_db_path`].
 fn open_index(app: &AppHandle) -> Option<Mutex<NoteIndex>> {
-    let path = match std::env::var_os(INDEX_DB_ENV).filter(|value| !value.is_empty()) {
-        Some(value) => PathBuf::from(value),
-        None => {
-            let dir = match app.path().app_data_dir() {
-                Ok(dir) => dir,
-                Err(err) => {
-                    eprintln!("failed to resolve app data dir for the note index: {err}");
-                    return None;
-                }
-            };
-            dir.join("index.db")
+    let path = match index_db_path(app) {
+        Ok(path) => path,
+        Err(err) => {
+            eprintln!("{err}");
+            return None;
         }
     };
     // First launch has no app-data dir yet — and an overridden path may name a

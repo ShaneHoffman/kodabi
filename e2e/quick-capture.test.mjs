@@ -36,16 +36,43 @@ let app;
 let capture;
 let main;
 
+/**
+ * Whether anything in this file has failed.
+ *
+ * Tracked by hand because `process.exitCode` cannot answer it here: node:test
+ * sets the exit code only *after* the file's `after` hook has run, so reading it
+ * in the hook always sees `undefined` — and every diagnostic below would be
+ * skipped on exactly the runs that need it.
+ */
+let failed = false;
+
+/** A `test()` that records its own failure for the `after` hook. */
+function scenario(name, body) {
+  test(name, async (t) => {
+    try {
+      await body(t);
+    } catch (error) {
+      failed = true;
+      throw error;
+    }
+  });
+}
+
 before(async () => {
-  app = await launchKodabi({ exe: EXE });
-  capture = await attach(await findTarget(app.port, { urlEndsWith: WINDOW.quickCapture }));
-  main = await attach(await findTarget(app.port, { urlEndsWith: WINDOW.main }));
+  try {
+    app = await launchKodabi({ exe: EXE });
+    capture = await attach(await findTarget(app.port, { urlEndsWith: WINDOW.quickCapture }));
+    main = await attach(await findTarget(app.port, { urlEndsWith: WINDOW.main }));
+  } catch (error) {
+    failed = true;
+    throw error;
+  }
 });
 
 after(async () => {
   // Dump both consoles and the app's own stdio; a CI-only failure is close to
   // undiagnosable without them.
-  if (process.exitCode) {
+  if (failed) {
     console.error("--- quick-capture console ---\n" + (capture?.consoleLog().join("\n") ?? ""));
     console.error("--- main console ---\n" + (main?.consoleLog().join("\n") ?? ""));
     console.error("--- app stdio ---\n" + (app?.logs() ?? ""));
@@ -53,10 +80,10 @@ after(async () => {
   }
   capture?.close();
   main?.close();
-  await app?.stop({ keepArtifacts: Boolean(process.exitCode) });
+  await app?.stop({ keepArtifacts: failed });
 });
 
-test("both webviews mount against a fresh vault", async () => {
+scenario("both webviews mount against a fresh vault", async () => {
   // The quick-capture window is `visible: false` but pre-created, so its
   // webview is live from startup. Driving it hidden is deliberate: it sidesteps
   // the DismissArmed blur guard entirely, because nothing can steal focus from
@@ -65,13 +92,24 @@ test("both webviews mount against a fresh vault", async () => {
     `document.readyState === "complete" && !!document.querySelector('[data-testid="quick-capture-input"]')`,
     { label: "quick-capture mounted" },
   );
-  await main.waitFor(`document.readyState === "complete"`, { label: "main mounted" });
+  // Waiting on a rendered element, not just `readyState`: the root render is
+  // scheduled rather than run inline, so "complete" can fire with an empty body
+  // and every assertion below would then read null off a DOM React has not
+  // reached yet.
+  await main.waitFor(
+    `document.readyState === "complete" && !!document.querySelector('[data-testid="sidebar-inbox-count"]')`,
+    { label: "main mounted" },
+  );
 
-  // Without this the run could pass against a stale vault.
+  // A cheap tripwire, not a proof: the row renders `note_count ?? 0` while
+  // `list_projects` is still in flight, so a "0" read early says nothing. The
+  // real freshness guarantee is structural — `launchKodabi` points KODABI_KB_ROOT
+  // at a fresh `mkdtemp` dir — and the assertions that would actually catch the
+  // app ignoring it are the exact-list and count-of-1 ones below.
   assert.equal(await textOf(main, "sidebar-inbox-count"), "0", "the temp vault should start empty");
 });
 
-test("filing a thought puts it in the Inbox", async () => {
+scenario("filing a thought puts it in the Inbox", async () => {
   await typeInto(capture, "quick-capture-input", MARKER);
 
   // The click, not an Enter keydown: "the button doesn't actually call the
@@ -96,7 +134,7 @@ test("filing a thought puts it in the Inbox", async () => {
   assert.deepEqual(titles, [MARKER], "the Inbox should hold exactly the note just filed");
 });
 
-test("the sidebar count reflects the new note", async () => {
+scenario("the sidebar count reflects the new note", async () => {
   // A second, independent assertion over a *different* command and DTO:
   // list_projects -> inbox_note_count (snake_case). A field-casing regression
   // there breaks this and nothing else in the slice, which is what makes it
@@ -107,7 +145,7 @@ test("the sidebar count reflects the new note", async () => {
   );
 });
 
-test("the note is on disk with the captured title", async () => {
+scenario("the note is on disk with the captured title", async () => {
   // Separates "the UI did not render it" from "the backend did not write it".
   const inbox = join(app.vaultDir, "Inbox");
   const files = (await readdir(inbox)).filter((name) => name.endsWith(".md"));
