@@ -2,19 +2,19 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FLASH_MS, QuickCapture } from "./QuickCapture";
-import type { QuickCaptureOutcome } from "../quickCapture";
-import { QUICK_CAPTURE_SHOWN_EVENT } from "../events";
-import type { CaptureStateEvent } from "../useCaptureState";
+import type { QuickCaptureOutcome } from "../../quickCapture";
+import { QUICK_CAPTURE_SHOWN_EVENT } from "../../events";
+import type { CaptureStateEvent } from "../../useCaptureState";
 import {
   emitFromBackend,
   invoke,
   invokedCommands,
   onCommand,
   resetTauriMocks,
-} from "../test/tauri";
+} from "../../test/tauri";
 
-vi.mock("@tauri-apps/api/core", () => import("../test/tauri"));
-vi.mock("@tauri-apps/api/event", () => import("../test/tauri"));
+vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
+vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
 
 function outcome(project: string | null): QuickCaptureOutcome {
   return {

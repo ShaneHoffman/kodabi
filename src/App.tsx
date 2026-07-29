@@ -1,5 +1,5 @@
-import { AppShell } from "./components/AppShell";
-import { NavigationProvider } from "./components/NavigationProvider";
+import { AppShell } from "./components/shell/AppShell";
+import { NavigationProvider } from "./components/providers/NavigationProvider";
 
 function App() {
   return (

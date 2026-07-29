@@ -1,7 +1,7 @@
 import { useState } from "react";
-import { useNavigation } from "../useNavigation";
-import { deleteProject } from "../useProjects";
-import { DestructiveConfirmDialog } from "./ui/DestructiveConfirmDialog";
+import { useNavigation } from "../../useNavigation";
+import { deleteProject } from "../../useProjects";
+import { DestructiveConfirmDialog } from "../ui/DestructiveConfirmDialog";
 
 type Props = {
   /** The project to delete, as its canonical slug. */

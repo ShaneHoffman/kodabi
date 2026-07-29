@@ -2,16 +2,16 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CaptureOverlayPill } from "./CaptureOverlayPill";
-import type { CaptureStateEvent } from "../useCaptureState";
+import type { CaptureStateEvent } from "../../useCaptureState";
 import {
   emitFromBackend,
   invokedCommands,
   onCommand,
   resetTauriMocks,
-} from "../test/tauri";
+} from "../../test/tauri";
 
-vi.mock("@tauri-apps/api/core", () => import("../test/tauri"));
-vi.mock("@tauri-apps/api/event", () => import("../test/tauri"));
+vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
+vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
 
 /** The event `useCaptureState` subscribes to, mirroring
  * `capture_control::CAPTURE_STATE_EVENT`. Held privately by that hook, so the

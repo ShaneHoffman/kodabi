@@ -12,10 +12,10 @@ import {
 import type { NoteSummary } from "../../useNotes";
 import type { Project } from "../../useProjects";
 import { useVaultChangedBridge } from "../../useVaultChangedBridge";
-import { CapturePipelineProvider } from "../CapturePipelineProvider";
-import { MainContent } from "../MainContent";
-import { NavigationProvider } from "../NavigationProvider";
-import { Sidebar } from "../Sidebar";
+import { CapturePipelineProvider } from "../providers/CapturePipelineProvider";
+import { MainContent } from "../shell/MainContent";
+import { NavigationProvider } from "../providers/NavigationProvider";
+import { Sidebar } from "../shell/Sidebar";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));

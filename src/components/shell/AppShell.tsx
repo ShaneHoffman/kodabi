@@ -1,13 +1,13 @@
-import { useCommandPalette } from "../useCommandPalette";
-import { useConsentNudge } from "../useConsentNudge";
-import { useNavigation, viewKey } from "../useNavigation";
-import { useSessionsChangedBridge } from "../useSessionsChangedBridge";
-import { useVaultChangedBridge } from "../useVaultChangedBridge";
+import { useCommandPalette } from "../../useCommandPalette";
+import { useConsentNudge } from "../../useConsentNudge";
+import { useNavigation, viewKey } from "../../useNavigation";
+import { useSessionsChangedBridge } from "../../useSessionsChangedBridge";
+import { useVaultChangedBridge } from "../../useVaultChangedBridge";
 import { AppErrorBoundary } from "./AppErrorBoundary";
-import { CapturePipelineProvider } from "./CapturePipelineProvider";
-import { CaptureToast } from "./CaptureToast";
-import { CommandPalette } from "./CommandPalette";
-import { ConsentNudge } from "./ConsentNudge";
+import { CapturePipelineProvider } from "../providers/CapturePipelineProvider";
+import { CaptureToast } from "../overlays/CaptureToast";
+import { CommandPalette } from "../overlays/CommandPalette";
+import { ConsentNudge } from "../overlays/ConsentNudge";
 import { MainContent } from "./MainContent";
 import { Sidebar } from "./Sidebar";
 

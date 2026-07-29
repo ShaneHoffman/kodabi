@@ -1,5 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
-import { INITIAL_VIEW, NavigationContext, type View } from "../useNavigation";
+import { INITIAL_VIEW, NavigationContext, type View } from "../../useNavigation";
 
 type Props = {
   children: ReactNode;

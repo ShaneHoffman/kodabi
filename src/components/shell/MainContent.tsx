@@ -1,12 +1,12 @@
-import { useNavigation } from "../useNavigation";
-import { ChatView } from "./views/ChatView";
-import { InboxView } from "./views/InboxView";
-import { NeedsAttentionView } from "./views/NeedsAttentionView";
-import { NoteEditorView } from "./views/NoteEditorView";
-import { ProjectView } from "./views/ProjectView";
-import { SearchView } from "./views/SearchView";
-import { SettingsView } from "./views/SettingsView";
-import { TerminalView } from "./views/TerminalView";
+import { useNavigation } from "../../useNavigation";
+import { ChatView } from "../views/ChatView";
+import { InboxView } from "../views/InboxView";
+import { NeedsAttentionView } from "../views/NeedsAttentionView";
+import { NoteEditorView } from "../views/NoteEditorView";
+import { ProjectView } from "../views/ProjectView";
+import { SearchView } from "../views/SearchView";
+import { SettingsView } from "../views/SettingsView";
+import { TerminalView } from "../views/TerminalView";
 
 /** Routes the main region to the active destination view. */
 export function MainContent() {

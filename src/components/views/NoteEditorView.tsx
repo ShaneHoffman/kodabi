@@ -15,12 +15,12 @@ import {
 import { useProjects } from "../../useProjects";
 import { isSessionSource } from "../../useSessions";
 import { applyMarkup, selectionAnchor } from "../../textareaCaret";
-import { DeleteNoteDialog } from "../DeleteNoteDialog";
+import { DeleteNoteDialog } from "../dialogs/DeleteNoteDialog";
 import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
 import { SessionArtifactsSection } from "./SessionArtifactsSection";
-import "../markdownReading.css";
+import "./markdownReading.css";
 import "./NoteEditorView.css";
 
 type Props = {

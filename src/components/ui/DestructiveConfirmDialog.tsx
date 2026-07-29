@@ -5,7 +5,7 @@ import {
   type ReactNode,
 } from "react";
 import { useDialogFocus } from "../../useDialogFocus";
-import { wrapDialogTab } from "../dialogTabTrap";
+import { wrapDialogTab } from "../../dialogTabTrap";
 import { Button } from "./Button";
 import { Overlay } from "./Overlay";
 import { StatusMessage } from "./StatusMessage";
