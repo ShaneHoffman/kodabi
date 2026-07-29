@@ -8,7 +8,7 @@ Three documents describe the look, and they divide cleanly:
 | --- | --- |
 | [`docs/DESIGN.md`](DESIGN.md) | The **aesthetic** — the four principles, the reference class, what we refuse |
 | [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) | The **system** — interaction states, the view state vocabulary, motion, elevation, the accessibility floor |
-| **This document** | The **mechanics** — the spacing steps and the primitive catalogue |
+| **This document** | The **mechanics** — the spacing steps, the primitive catalogue, and where a control goes |
 
 [`design/tokens.css`](../design/tokens.css) is the material all three describe.
 
@@ -455,6 +455,16 @@ look like a chapter opening.
 back link and its own actions; a query field), so they arrive as children. Passing `eyebrow`/`title` to
 either is not an error and not a look anyone has designed — pass the header as a child instead.
 
+**`action` is one node, and it is one action.** A single header-level control, right-aligned in the
+header opposite the title block: the one thing the view is for. It is not a container — a caller with
+two passes a flex `<div>` and the type says nothing, which is how `ProjectView` came to carry two. It
+also sits in `BaseProps` rather than being discriminated on `variant`, so `doc` and `search` accept it
+too — and since neither passes an `eyebrow` or a `title`, `renderHeader` returns before it reaches the
+action and drops it on the floor. (The drop is that early return, not a variant check: a `doc` caller
+that passed a title as well would get both, in a header nobody designed.) The same silent no-op
+`summary` was made a type error for two paragraphs below. Which slot an action belongs in, and how
+many a surface may hold, is *Composition* below.
+
 **`summary` is not a free styling slot.** The variant fixes its typographic role, so a workload sentence
 can never render at a count's weight in one view and a heading's in another. Call sites pass the content,
 never a class — there is no `className` on it to reach for.
@@ -579,6 +589,159 @@ Beyond spacing and primitives, a few consistency rules for any screen:
   An entrance animation is not the exception it looks like: `@starting-style` in the co-located CSS
   animates a first paint with no mount flag and no effect, so it needs no hook at all
   ([`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §4).
+
+---
+
+## Composition — where a control goes
+
+`design/tokens.css` is exact about how far a line of text may run: a note's column stops at
+`--measure-doc` (660), a queue row's serif snippet at `--measure-snippet` (500), a settings row at
+`--measure-setting` (520). Nothing anywhere says how many controls may sit beside that column.
+Reading density is governed to the pixel; control density was governed per view, one view at a time,
+which is how a single screen came to carry four separate places to look for something to press.
+This section is the other half: **which slot an action goes in, and how many a surface may hold.**
+
+### The shell has two regions, and a view fills one
+
+`AppShell` renders the `Sidebar` beside a single `<main>`, with the capture toast, the command palette
+and the consent nudge overlaid on top rather than docked beside. `MainContent` is a flat switch and all
+eight destinations render into that one main slot. **There is no inspector, no split, and no third
+rail.** A view that needs more room takes depth, not width.
+
+That is a decision, not an accident of what got built first. *Layer 4* below records that per-view
+gutters were tried and removed because a left edge that moves between destinations reads as the layout
+being unstable rather than as two places being different kinds of place. A region that some destinations
+have and others don't is the same failure at the right edge: it makes the main column's width depend on
+where you navigated. The two candidates people reach for are already answered by stacking — a note's
+metadata is one `noteMeta` line under the title, leading the body at `--lead-doc`, and
+`SessionArtifactsSection` sits under the body behind a single hairline, which its own stylesheet calls
+*chrome below the document, not part of it*.
+
+**What would overturn it:** a majority of destinations wanting the *same* persistent secondary content,
+which has to stay visible while the main column is being used. One line of metadata is not that, and a
+recording you play once is not either. Until then, "more than fits" is answered by a summoned surface
+(`Overlay`, the command palette) or a disclosure. If that day comes it is a `ViewFrame` variant change
+and it is named here — not discovered by whichever view runs out of room first.
+
+### The five slots
+
+**A view's actions sit in one of five places**, and the slot is chosen by what the action *acts on* —
+never by where there happened to be room.
+
+| Slot | Acts on | Ceiling |
+| --- | --- | --- |
+| **Frame header** — `ViewFrame`'s `action` | the view: the one thing you came here to do | **one** |
+| **View-owned header** — `doc` and `search` only | the open document, or the query | **one cluster** |
+| **Contextual chrome** | whatever summoned it — a selection, a pending prompt | no count; *one job* |
+| **Row affordance** | one item in a list | **two** |
+| **Footer / composer** | the surface as a whole: commit it, or abandon it | **two** |
+
+**Four kinds of control are deliberately outside that list.** Getting around is not acting — a back
+link, and Settings' tab rail, which *filters* the pane rather than navigating (`role="tablist"`, so a
+screen reader announces it as a filter and not as a second set of destinations competing with the
+sidebar). Affordances *inside* the content belong to the content: a note's tag chips, a recording's
+`<audio>` player. A control a **view state** raised belongs to that state and not to the frame,
+whether it recovers or announces — `TerminalView`'s Restart, `ChatView`'s Start a new chat,
+`AppErrorBoundary`'s Try this screen again and the Inbox's filed toast (a success, not a recovery)
+all sit inside a state block, and the vocabulary for those is
+[`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §3. And the `Sidebar`'s New project button is global, so it
+lives in the other region entirely.
+
+**A frame header takes one action, because that is what the prop is.** `action` is a single node,
+right-aligned in the header opposite the title block. A caller with two reaches for a flex `<div>` and
+the type never notices — which is exactly how a ceiling erodes: not by a decision, but by there being
+nowhere to record one.
+
+**`doc` and `search` draw their own header, and it is still one cluster.** They render no frame header
+at all (see `ViewFrame` above), so the discipline is kept by hand: whatever the surface can do goes in
+the title row, in one group, rather than spreading down the column. The back link sits on its own line
+*above* that row, and Layer 4 gives the gap a token of its own (`--lead-doc-title`, 18), because the way
+*out* of a document reads differently from the things you can do *to* it.
+
+**Contextual chrome is summoned by state and never parked.** The note editor's format toolbar is the
+pattern: it exists only while text is selected, anchored just above the selection rather than parked in
+a bar at the top of the screen, which is why it can carry five tools without reading as clutter. You
+summoned it, it does one job, and it leaves. The chat's inline permission card is the same slot in a
+different shape — a card in the log flow rather than a floating bar, raised where the exchange that
+asked for it sits, and gone once you answer. What disqualifies a control from this slot is being there
+when nothing summoned it: a bar that is simply always present is a frame header that grew.
+
+**Two is a row's ceiling, because a row is scanned rather than read.** No list in the app exceeds it and
+the two that reach it stop there: an Inbox row overlays Delete and its File picker, and a Needs
+Attention card carries Retry and Dismiss (its dismissed shelf, Restore and Delete). Most carry fewer — a
+project or search row carries none at all, because the whole row is the button. A third affordance would
+take its width from the title, which is the row's actual subject.
+
+**A footer holds one control that commits the surface and one that abandons it.** `CreateProjectDialog`
+pairs a `quiet` Cancel with the `filled` Create that the `Button` entry above reserves for the action
+ending a surface. `DestructiveConfirmDialog` inverts the emphasis instead — the `destructive` confirm
+first, a `primary` Cancel beside it — because there the *non-default* control is the one that acts
+([`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §2). A composer is the same slot on a surface you do not
+leave: the chat's Send commits the draft and comes back for the next one, and Stop replaces it while a
+turn is running rather than sitting beside it. Two controls is what this section fixes; which variant
+wears which weight, and in what order, is the `Button` entry's business and §2's.
+
+### How much one surface may hold
+
+**At rest, a view shows at most three clusters and four controls** — counting one representative row
+affordance, and not counting contextual chrome. *At rest* means what you meet on arrival: nothing
+selected, no dialog open, no shelf expanded.
+
+The number is read off what already ships rather than picked:
+
+| Surface | Clusters | Controls at rest |
+| --- | --- | --- |
+| `InboxView` | 1 | 2 — a row's Delete and its File picker |
+| `ProjectView` | 1 | 2 — New note, Delete project |
+| `NeedsAttentionView` | 2 | 3 — a card's Retry and Dismiss, plus the shelf toggle |
+| `SettingsView` (its heaviest tab, Capture) | 1 | 4 — two toggles, Run test, Rebuild: one per row |
+| `SearchView` | 0 | 0 — the query field is the surface |
+| `TerminalView` | 0 | 0 — Restart appears only once the session has exited |
+| `ChatView` | 1 | 1 — the composer's Send, which Stop replaces mid-turn |
+| `NoteEditorView` (reading a session note) | **4** | **5** |
+
+Seven of the eight sit at or under it without ever having been told to, which is the evidence that the
+number is this app's own rather than an import. Settings sits exactly on it. The eighth is why this
+section exists.
+
+Counting *at rest* is what makes that table honest, and it is why a file-wide count of `<Button` is a
+different measurement — that one scores `ChatView` and `NeedsAttentionView` at five each. Most of those
+never share a screen: Send and Stop are a ternary, the composer and the exited view's Start a new chat
+are exclusive, and the dismissed shelf stays collapsed until you open it. The rest is contextual chrome,
+which this ceiling excludes by design — the chat's permission card really does sit in the log above a
+live composer, and it is meant to.
+
+**The ceiling is a smell test, not a lint rule — and it is stated as a number anyway.** Nothing can
+enforce it: [`src/designTokens.test.ts`](../src/designTokens.test.ts) reads stylesheets and
+`eslint.config.js` reads class strings, and neither can count controls. But a number you can hold a
+screen up against still beats "keep it simple", which is what governed this until now — and which is how
+one screen reached four places to press without anyone ever deciding it should.
+
+### Going over, and the one that already has
+
+Going over is allowed and it is not free: **record it here, name the constraint that forces it, and name
+what expires it.** That is the documented-departures habit below, plus the expiry — those three record
+what forces them and stop there, and a ceiling is the kind of rule that needs the second half, because
+an exception justified by "there is only one other control here" stops being true the moment a third
+arrives ([`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §2 states that doctrine for focus rings). An
+exception with no recorded reason is indistinguishable from an oversight six months later, and that is
+the whole cost this section exists to avoid paying twice.
+
+**One sanctioned exception: `ProjectView`'s header carries two.** New note and Delete project sit in a
+frame header typed for one. Both are quiet text rather than control chips, so neither out-weighs the
+title beside them; creation leads, and the destructive one needs no weight of its own because it sits
+behind `DeleteProjectDialog` and the confirmation is what marks it
+([`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §2). **It expires if a third verb appears, or if either one
+stops being quiet text** — at that point the header is a toolbar and should say so.
+
+**`NoteEditorView` is over, and it is the open case.** Reading a distilled session note whose audio and
+transcript both survived retention puts five controls in four places: the back link, Edit and Delete
+note in the title row, then Reveal in Explorer and the transcript disclosure as rows down in
+`SessionArtifactsSection` — with the recording's `<audio>` player in among them. That is the maximal
+note rather than every note, but the count was never really the problem: four *places* is. A reader
+sweeps the whole column to learn what they can do here, every time, which is the failure that having no
+rule produces. Giving the note's actions one home is the follow-on work this section was written for;
+whoever does it updates the table above when it lands.
 
 ---
 
@@ -743,18 +906,23 @@ the frame around them.
 The gutter is not part of it, and neither is the alignment: every variant takes
 `--gutter-view-y` / `--gutter-view-x` (44 / 60) on all four sides, and every
 column is pinned to the same left edge. What still varies is the title step, the
-header's shape, and whether the column is capped at all.
+header's shape, whether the column is capped at all, and where the view's
+actions live.
 
-| `variant` | Column | Title step |
-| --- | --- | --- |
-| `queue` | uncapped | none — a one-line masthead |
-| `library` | uncapped | `text-title-library` (34) |
-| `panel` | uncapped (rows cap themselves at `--measure-setting`, 520) | `text-title-panel` (26) |
-| `health` | uncapped | `text-title-health` (28) |
-| `doc` | `--measure-doc` (660) | supplied by the view |
-| `search` | `--measure-search` (640) | supplied by the view |
-| `terminal` | uncapped, full-height (the pane scrolls inside itself) | `text-title-panel` (26) |
-| `chat` | `--chat-measure` (660), full-height (the log scrolls inside itself) | `text-title-panel` (26) |
+| `variant` | Column | Title step | Where its actions live |
+| --- | --- | --- | --- |
+| `queue` | uncapped | none — a one-line masthead | two per row: the work is the list |
+| `library` | uncapped | `text-title-library` (34) | the frame header |
+| `panel` | uncapped (rows cap themselves at `--measure-setting`, 520) | `text-title-panel` (26) | one per row (the tab rail filters, it doesn't act) |
+| `health` | uncapped | `text-title-health` (28) | two per card, plus the shelf toggle |
+| `doc` | `--measure-doc` (660) | supplied by the view | its own title row; a format toolbar while editing (and today, more — see the open case) |
+| `search` | `--measure-search` (640) | supplied by the view | none — the query field is the surface |
+| `terminal` | uncapped, full-height (the pane scrolls inside itself) | `text-title-panel` (26) | none until the session exits |
+| `chat` | `--chat-measure` (660), full-height (the log scrolls inside itself) | `text-title-panel` (26) | the composer footer, plus contextual chrome in the log |
+
+The last column is a stance decision like the other three, and it is the one
+this table gained last: see *Composition* above for the slots it names, what
+each may hold, and how to record going over.
 
 A measure is set only where line length actually hurts reading, and left unset
 where the content is a list of rows that should use the width it has. That is
