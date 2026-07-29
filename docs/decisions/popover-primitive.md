@@ -369,8 +369,10 @@ a second sanctioned exception — the rationale already only supports the narrow
 **This spike does not make that edit.** It is a design-system change, it is Shane's call, and it
 belongs in the same change as the entrance it licenses. #109 must land it or drop the entrance;
 what it must not do is ship an animated dropdown against an unamended §4. Noted here so the
-conflict is inherited rather than rediscovered. (`@starting-style` appears nowhere in the repo
-today, so nothing has adjudicated this already.)
+conflict is inherited rather than rediscovered. (`@starting-style` has since landed — #107 added
+the mechanism to §4 and converted the Inbox's four entrances to it — but that change is explicitly
+*how, not whether*, and left the overlay-entrance bullet untouched. So this is still unadjudicated,
+and still #109's to settle.)
 
 While that ticket is open, `Select.css`'s comment justifying right-alignment as a collision
 workaround becomes false and should be rewritten — with real flipping, right-alignment reverts to a
