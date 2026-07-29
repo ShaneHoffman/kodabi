@@ -177,9 +177,16 @@ reports `Edg/150.0.4078.105` (V8 15.0.23.12); the installed runtime is
 `true` for all six properties, and an `insertRule` probe confirms `@starting-style`.
 
 **No WebView2 floor is declared** in `src-tauri/tauri.conf.json` or `src-tauri/Cargo.toml`; Tauri
-v2's own documented floor is 125, which is below `anchor-scope`'s 131. The prototype therefore wraps
-everything in `@supports (anchor-name: --x) and (position-area: block-end)`, keeping today's
-behaviour as the base branch. That costs nothing and makes the claim safe in the bad direction.
+v2's own documented floor is 125, which is below `anchor-scope`'s 131. Everything is therefore
+wrapped in an `@supports` guard, keeping today's behaviour as the base branch — and **that guard has
+to test `anchor-scope`**, which is the trap this spike nearly shipped. The prototype as run tested
+only `anchor-name` and `position-area`, and those are satisfied in exactly the band this paragraph
+names: between 125 and 131 the guard passes, `anchor-scope` is dropped as an unknown declaration,
+and every menu on the page collapses onto the last trigger in source order (§5.4) — silently, which
+is the worst way to fail. §5.2 records the corrected condition. `anchor-scope` has the highest floor
+in the table above, so testing it alone would do; the condition keeps all three rather than resting
+on that version ordering. The §5.3 gates are unaffected either way — none of them evaluates an
+`@supports` condition.
 
 ### 5.2 The prototype
 
@@ -188,9 +195,10 @@ mt-2xs` from the list's `className` and gains a `ui-select` class on the wrapper
 today's stance as an explicit base branch plus:
 
 ```css
-@supports (anchor-name: --x) and (position-area: block-end) {
+@supports (anchor-scope: --x) and (anchor-name: --x) and (position-area: block-end) {
   /* Without anchor-scope every element sharing an anchor-name resolves to the
-     LAST one in source order — see §5.4. */
+     LAST one in source order — see §5.4. It carries the highest floor of the
+     three (131), so it is what the guard must test; see §5.1. */
   .ui-select          { anchor-scope: --ui-select-trigger; }
   .ui-select__trigger { anchor-name: --ui-select-trigger; }
 
