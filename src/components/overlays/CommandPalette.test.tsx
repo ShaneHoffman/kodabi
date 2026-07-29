@@ -2,11 +2,11 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CommandPalette } from "./CommandPalette";
-import { NavigationProvider } from "./NavigationProvider";
-import { onCommand, resetTauriMocks } from "../test/tauri";
+import { NavigationProvider } from "../providers/NavigationProvider";
+import { onCommand, resetTauriMocks } from "../../test/tauri";
 
-vi.mock("@tauri-apps/api/core", () => import("../test/tauri"));
-vi.mock("@tauri-apps/api/event", () => import("../test/tauri"));
+vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
+vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
 
 function serveVault(): void {
   onCommand("list_projects", () => ({

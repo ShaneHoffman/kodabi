@@ -1,5 +1,5 @@
 import type { CaptureStateEvent } from "./useCaptureState";
-import type { SpiritMarkMode } from "./components/SpiritMark";
+import type { SpiritMarkMode } from "./components/capture/SpiritMark";
 
 /** What the indicator shows for a capture state. */
 export type CaptureLabel = {

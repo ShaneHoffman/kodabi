@@ -4,7 +4,7 @@
    Only non-bridged tokens live here: the --chat-* stance (design/tokens.css
    Layer 4) and the composer's writing ramp. Type, colour and weight stay as
    utilities on the component; the answer prose itself is the shared
-   `.md-reading` surface (../markdownReading.css).
+   `.md-reading` surface (./markdownReading.css).
 
    The frame's variant gives this pane the terminal's full-height posture on
    the doc measure; inside it, the LOG is the only thing that scrolls, and the

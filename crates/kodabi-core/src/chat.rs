@@ -16,9 +16,11 @@
 //! [`crate::terminal::SKIP_HISTORY_ENV`], Claude Code keeps no transcript of
 //! its own — the JSONL transcript written by [`ChatTranscript`] under
 //! [`CHATS_DIR`] is the *only* durable record of a chat, and it is the raw
-//! artifact the chat-sessions-as-documents pass will later distill into a
-//! `type: chat` note. The retention sweep does not touch `chats/`; a chat
-//! transcript is user knowledge, not a recovery artifact.
+//! artifact [`crate::chat_distill`] turns into a `type: chat` note, gated by
+//! [`has_distillable_substance`] so an empty session never files one. The
+//! retention sweep does not touch `chats/`; a chat transcript is user
+//! knowledge, not a recovery artifact, and unlike a meeting transcript nothing
+//! else preserves it.
 
 use std::ffi::OsString;
 use std::fs::OpenOptions;
@@ -514,6 +516,52 @@ pub fn read_transcript(path: &Path) -> io::Result<Vec<ChatRecord>> {
         .collect())
 }
 
+/// Least combined user+assistant prose, in characters, a chat needs before it
+/// is worth spending a distill call on. One real question plus one real answer
+/// clears this comfortably; a "hi" / "hello" probe is two orders of magnitude
+/// under it.
+pub const MIN_CHAT_DISTILL_CHARS: usize = 400;
+
+/// Whether a chat transcript carries enough to be worth distilling into a note:
+/// at least one user turn *and* at least one assistant turn, together carrying
+/// at least [`MIN_CHAT_DISTILL_CHARS`].
+///
+/// Only [`ChatRecord::User`] and [`ChatRecord::Assistant`] text counts. A
+/// session that only opened, only ran tools, or only errored produced no
+/// knowledge however many lines it wrote — and requiring both voices is what
+/// rules out a question the model never got to answer.
+///
+/// Deliberately pure and deliberately not persisted: "this chat was too thin"
+/// is a fact derived from the transcript, and re-deriving it on the next sweep
+/// costs one read of a file that is by definition tiny. Persisting it would be
+/// a second source of truth about the same bytes, which is exactly what
+/// [`crate::sessions`] refuses to do (its `.dismissed` marker records *user
+/// intent*, never a verdict this code reached on its own).
+pub fn has_distillable_substance(records: &[ChatRecord]) -> bool {
+    let mut has_user = false;
+    let mut has_assistant = false;
+    let mut chars = 0usize;
+
+    for record in records {
+        let text = match record {
+            ChatRecord::User { text, .. } => {
+                has_user = true;
+                text
+            }
+            ChatRecord::Assistant { text, .. } => {
+                has_assistant = true;
+                text
+            }
+            // Meta is plumbing, ToolUse is how an answer was reached rather
+            // than the answer, and Permission/Error record a non-event.
+            _ => continue,
+        };
+        chars += text.chars().count();
+    }
+
+    has_user && has_assistant && chars >= MIN_CHAT_DISTILL_CHARS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -899,5 +947,88 @@ mod tests {
         drop(file);
 
         assert_eq!(read_transcript(transcript.path()).unwrap(), vec![user]);
+    }
+
+    // --- substance gate ---------------------------------------------------
+
+    fn user(text: &str) -> ChatRecord {
+        ChatRecord::User {
+            ts: "2026-07-12T14:03:40Z".to_string(),
+            text: text.to_string(),
+        }
+    }
+
+    fn assistant(text: &str) -> ChatRecord {
+        ChatRecord::Assistant {
+            ts: "2026-07-12T14:03:45Z".to_string(),
+            text: text.to_string(),
+        }
+    }
+
+    fn long(prefix: &str) -> String {
+        format!("{prefix} {}", "x".repeat(MIN_CHAT_DISTILL_CHARS))
+    }
+
+    #[test]
+    fn substance_requires_both_voices() {
+        // Either voice alone clears the character bar and still fails: a
+        // question nobody answered established nothing.
+        assert!(!has_distillable_substance(&[user(&long("asked"))]));
+        assert!(!has_distillable_substance(&[assistant(&long("answered"))]));
+        assert!(has_distillable_substance(&[
+            user(&long("asked")),
+            assistant(&long("answered")),
+        ]));
+    }
+
+    #[test]
+    fn substance_requires_enough_prose() {
+        assert!(!has_distillable_substance(&[
+            user("hi"),
+            assistant("hello")
+        ]));
+
+        // Split across turns, so the sum is what counts, not any one turn.
+        let half = "y".repeat(MIN_CHAT_DISTILL_CHARS / 2 + 1);
+        assert!(has_distillable_substance(&[user(&half), assistant(&half)]));
+    }
+
+    #[test]
+    fn substance_ignores_meta_tool_use_permission_and_error() {
+        let records = vec![
+            ChatRecord::Meta {
+                chat_id: "3c9a35a1".to_string(),
+                model: CHAT_DEFAULT_MODEL.to_string(),
+                started_at: "2026-07-12T14:03:35Z".to_string(),
+            },
+            user("hi"),
+            ChatRecord::ToolUse {
+                ts: "2026-07-12T14:03:42Z".to_string(),
+                tool: "mcp__kodabi__search_notes".to_string(),
+                input: json!({ "query": "irrigation" }),
+                summary: long("Searched notes for"),
+            },
+            ChatRecord::Permission {
+                ts: "2026-07-12T14:03:50Z".to_string(),
+                request_id: "03eeffbb".to_string(),
+                tool: "mcp__kodabi__add_glossary_term".to_string(),
+                allowed: false,
+                resolution: PermissionResolution::Cancelled,
+            },
+            ChatRecord::Error {
+                ts: "2026-07-12T14:04:10Z".to_string(),
+                message: long("the turn failed"),
+            },
+            assistant("hello"),
+        ];
+
+        // Both voices are present, and the only thing over the bar is the
+        // tool summary plus the error — neither of which is knowledge.
+        assert!(!has_distillable_substance(&records));
+    }
+
+    #[test]
+    fn substance_of_an_empty_transcript_is_false() {
+        assert!(!has_distillable_substance(&[]));
     }
 }

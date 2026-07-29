@@ -1,7 +1,7 @@
-import { captureLabel } from "../captureLabel";
-import type { CaptureStateEvent } from "../useCaptureState";
-import { useCaptureState } from "../useCaptureState";
-import { useDebouncedValue } from "../useDebouncedValue";
+import { captureLabel } from "../../captureLabel";
+import type { CaptureStateEvent } from "../../useCaptureState";
+import { useCaptureState } from "../../useCaptureState";
+import { useDebouncedValue } from "../../useDebouncedValue";
 import { CaptureStatusLine } from "./CaptureStatusLine";
 import "./ListeningIndicator.css";
 

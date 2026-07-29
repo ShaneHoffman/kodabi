@@ -14,7 +14,7 @@
 
 /* ---------- the reading body ----------
    The rendered Markdown itself is the shared `.md-reading` surface
-   (../markdownReading.css), which the chat view reads in too. Only the
+   (./markdownReading.css), which the chat view reads in too. Only the
    note's own lead-ins and composing chrome remain here. */
 
 /* The document's own lead-ins. A note breathes wider than a list does — this

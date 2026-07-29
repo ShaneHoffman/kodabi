@@ -73,7 +73,7 @@ type Props = {
  * A token-styled dropdown, hand-rolled as a collapsible listbox
  * (WAI-ARIA active-descendant) rather than reaching for a headless
  * dependency — the same combobox know-how the command palette proves
- * (src/components/CommandPalette.tsx), minus the dep. Focus stays on the
+ * (src/components/overlays/CommandPalette.tsx), minus the dep. Focus stays on the
  * trigger; ↑/↓ move a virtual highlight via aria-activedescendant,
  * Enter/Space selects, Escape closes, typing jumps.
  *

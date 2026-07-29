@@ -1,22 +1,22 @@
 import { useState, type CSSProperties } from "react";
-import { DISTILL_STATE_EVENT } from "../events";
-import { PALETTE_SHORTCUT_LABEL } from "../useCommandPalette";
-import type { DistillEvent } from "../useDistillState";
-import { useNavigation } from "../useNavigation";
+import { DISTILL_STATE_EVENT } from "../../events";
+import { PALETTE_SHORTCUT_LABEL } from "../../useCommandPalette";
+import type { DistillEvent } from "../../useDistillState";
+import { useNavigation } from "../../useNavigation";
 import {
   entryView,
   isEntrySelected,
   slugDepth,
   useProjects,
   type SidebarEntry,
-} from "../useProjects";
-import { useFailedSessions } from "../useSessions";
-import { useTauriEvent } from "../useTauriEvent";
-import { notifyVaultChanged } from "../useVaultQuery";
-import { CreateProjectDialog } from "./CreateProjectDialog";
-import { ListeningIndicator } from "./ListeningIndicator";
-import { Button } from "./ui/Button";
-import { StatusMessage } from "./ui/StatusMessage";
+} from "../../useProjects";
+import { useFailedSessions } from "../../useSessions";
+import { useTauriEvent } from "../../useTauriEvent";
+import { notifyVaultChanged } from "../../useVaultQuery";
+import { CreateProjectDialog } from "../dialogs/CreateProjectDialog";
+import { ListeningIndicator } from "../capture/ListeningIndicator";
+import { Button } from "../ui/Button";
+import { StatusMessage } from "../ui/StatusMessage";
 import "./Sidebar.css";
 
 type Props = {

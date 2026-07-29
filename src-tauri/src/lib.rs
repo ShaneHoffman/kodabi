@@ -2,6 +2,7 @@ mod audio_cmds;
 mod capture_control;
 mod capture_watchdog;
 mod chat_cmds;
+mod chat_distill_cmds;
 mod distill_cmds;
 mod events;
 mod index_cmds;
@@ -135,6 +136,12 @@ pub fn run() {
             // sweep away un-recoverable leftovers. Detached, so it never blocks
             // launch; a clean shutdown leaves nothing to recover.
             transcribe::spawn_recovery(app.handle());
+
+            // Distill any chat that ended without a hook: the app was quit or
+            // killed while a conversation was open, or an earlier distill
+            // failed. Membership is derived from disk, so this is both the
+            // crash-recovery path and the retry path. Detached like the above.
+            chat_distill_cmds::spawn_chat_sweep(app.handle());
             Ok(())
         })
         .manage(audio_cmds::CaptureState::default())

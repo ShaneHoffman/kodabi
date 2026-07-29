@@ -8,7 +8,7 @@ import {
   type PipelineStage,
 } from "../../useCapturePipeline";
 import { useNavigation } from "../../useNavigation";
-import { matchScore, noteMeta } from "../../noteMeta";
+import { matchScore, noteKind, noteMeta } from "../../noteMeta";
 import {
   fileNoteToProject,
   INBOX_PROJECT,
@@ -20,7 +20,7 @@ import { useProjects } from "../../useProjects";
 import { isSessionSource } from "../../useSessions";
 import { formatElapsed, useElapsed } from "../../useElapsed";
 import { useTimeout } from "../../useTimeout";
-import { DeleteNoteDialog } from "../DeleteNoteDialog";
+import { DeleteNoteDialog } from "../dialogs/DeleteNoteDialog";
 import { Button } from "../ui/Button";
 import { Select, type SelectOption } from "../ui/Select";
 import { StatusMessage } from "../ui/StatusMessage";
@@ -640,7 +640,7 @@ function InboxRow({
               {note.title}
             </span>
             <span className="mt-2xs block font-mono text-cap text-text-faint">
-              {noteMeta(note, matchScore(note.confidence))}
+              {noteMeta(note, noteKind(note.type), matchScore(note.confidence))}
             </span>
             {note.snippet && (
               <span className="inbox__snippet mt-2xs block font-serif text-snippet leading-snippet text-text-soft">

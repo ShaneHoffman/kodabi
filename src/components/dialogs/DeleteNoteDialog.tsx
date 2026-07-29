@@ -1,6 +1,6 @@
 import { useState } from "react";
-import { deleteNote } from "../useNotes";
-import { DestructiveConfirmDialog } from "./ui/DestructiveConfirmDialog";
+import { deleteNote } from "../../useNotes";
+import { DestructiveConfirmDialog } from "../ui/DestructiveConfirmDialog";
 
 type Props = {
   /** The note to delete, by its stable id. */

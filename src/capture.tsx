@@ -1,6 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { QuickCapture } from "./components/QuickCapture";
+import { QuickCapture } from "./components/capture/QuickCapture";
 import { startReduceMotion } from "./reduceMotion";
 import { applyTheme, startThemeSync } from "./theme";
 import "./fonts";

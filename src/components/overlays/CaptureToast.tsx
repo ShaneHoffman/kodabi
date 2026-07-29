@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useCapturePipeline } from "../useCapturePipeline";
+import { useCapturePipeline } from "../../useCapturePipeline";
 import "./CaptureToast.css";
 
 type Notice = {

@@ -1,13 +1,13 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { CapturePipelineProvider } from "./CapturePipelineProvider";
+import { CapturePipelineProvider } from "../providers/CapturePipelineProvider";
 import { CaptureToast } from "./CaptureToast";
-import { DISTILL_STATE_EVENT } from "../events";
-import { emitFromBackend, onCommand, resetTauriMocks } from "../test/tauri";
+import { DISTILL_STATE_EVENT } from "../../events";
+import { emitFromBackend, onCommand, resetTauriMocks } from "../../test/tauri";
 
-vi.mock("@tauri-apps/api/core", () => import("../test/tauri"));
-vi.mock("@tauri-apps/api/event", () => import("../test/tauri"));
+vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
+vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
 
 /* The two event names the hooks keep private. Spelled out rather than
  * exported for a test's convenience: these strings are the contract with Rust

@@ -1,7 +1,7 @@
-import { captureLabel, markMode } from "../captureLabel";
-import { dismissCaptureOverlay } from "../captureOverlay";
-import { isCaptureActive, useCaptureState } from "../useCaptureState";
-import { useDebouncedValue } from "../useDebouncedValue";
+import { captureLabel, markMode } from "../../captureLabel";
+import { dismissCaptureOverlay } from "../../captureOverlay";
+import { isCaptureActive, useCaptureState } from "../../useCaptureState";
+import { useDebouncedValue } from "../../useDebouncedValue";
 import { CaptureStatusLine } from "./CaptureStatusLine";
 import { SpiritMark } from "./SpiritMark";
 import "./CaptureOverlayPill.css";

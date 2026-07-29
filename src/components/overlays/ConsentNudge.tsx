@@ -1,19 +1,19 @@
 import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useDialogFocus } from "../useDialogFocus";
+import { useDialogFocus } from "../../useDialogFocus";
 import {
   acknowledgeConsent,
   buildRetentionPolicy,
   DEFAULT_KEEP_DAYS,
   RETENTION_OPTIONS,
   type RetentionKind,
-} from "../useSettings";
-import { wrapDialogTab } from "./dialogTabTrap";
-import { Button } from "./ui/Button";
-import { Overlay } from "./ui/Overlay";
-import { Select } from "./ui/Select";
-import { StatusMessage } from "./ui/StatusMessage";
-import { TextField } from "./ui/TextField";
+} from "../../useSettings";
+import { wrapDialogTab } from "../../dialogTabTrap";
+import { Button } from "../ui/Button";
+import { Overlay } from "../ui/Overlay";
+import { Select } from "../ui/Select";
+import { StatusMessage } from "../ui/StatusMessage";
+import { TextField } from "../ui/TextField";
 
 type Props = {
   onClose: () => void;

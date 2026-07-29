@@ -196,7 +196,7 @@ The reserved green is spent on the SpiritMark and nothing else, including the st
 As *text* it measures **4.06–4.56:1** against the light theme's three planes, below the 4.5:1 floor
 on two of them; as a *graphic* it clears the 3:1 one everywhere in both themes. The label carries
 the same state through value instead
-([`CaptureStatusLine`](../src/components/CaptureStatusLine.tsx)). The measured figures live once, in
+([`CaptureStatusLine`](../src/components/capture/CaptureStatusLine.tsx)). The measured figures live once, in
 [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §6 — this line used to quote 3.42–3.70, which were the
 *pre-re-tune* green's numbers and had been wrong here since the pigment changed.
 
@@ -493,8 +493,15 @@ it; it is stated in [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §2, where it ap
 rather than to one unused component.
 
 Build a row's meta string with [`noteMeta`](../src/noteMeta.ts), which takes the surface's own
-middle segment: `noteMeta(note)`, `noteMeta(note, note.type)`,
-`noteMeta(note, matchScore(note.confidence))`.
+middle segments: `noteMeta(note, noteKind(note.type))` (ProjectView),
+`noteMeta(note, noteKind(note.type), matchScore(note.confidence))` (InboxView), and
+`noteMeta(note, note.type)` (NoteEditorView). Falsy middles are dropped, so a helper may return
+`null` rather than making every caller branch.
+
+A **list** row names its kind through `noteKind`, which returns `null` for a plain `note` — every
+note is one until proven otherwise, so the word is noise on most rows and information on a
+`meeting` or a `chat`. The **single-note** surface passes `note.type` straight through instead:
+one note fills the view, so its kind is worth stating unconditionally.
 
 ### `Overlay` — the modal shell
 
