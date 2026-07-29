@@ -272,8 +272,18 @@
 
   /* line-heights (per role) */
   --lh-tight: 1.15; /* a two-line status block (the listening label) */
-  --lh-title: 1.05; /* a big serif view title */
-  --lh-title-doc: 1.08; /* the note title, which is bigger again */
+
+  /* the view-title ramp — leading tightens as the step grows, for the same
+     optical reason the tracking below does: a ratio that reads as one block at
+     26px opens into two separate lines by 36px. One step per title size, so a
+     title's size and its leading cannot drift apart. This used to be two
+     tokens that ran the wrong way — the 36px note title was the LOOSEST of
+     them at 1.08 while 26–34px all shared 1.05. */
+  --lh-title-panel: 1.12; /* 26px — Settings, Terminal, Chat, a dialog */
+  --lh-title-health: 1.1; /* 28px — Needs attention */
+  --lh-title-library: 1.06; /* 34px — Project */
+  --lh-title-doc: 1.05; /* 36px — Note */
+
   --lh-heading: 1.2;
   --lh-body: 1.5; /* interface body */
   --lh-snippet: 1.5; /* serif snippet, captured thought, an action-item label */
@@ -287,9 +297,23 @@
   --ls-rail: 0.12em; /* the sidebar's PROJECTS eyebrow, one step tighter again */
   --ls-caps: 0.1em; /* uppercase micro-text that is not a section eyebrow (IDLE) */
   --ls-token: 0.03em; /* the mono file token */
-  --ls-wordmark: 0.02em;
-  --ls-title: -0.01em; /* the note title */
-  --ls-row: -0.005em; /* a working-list row title */
+  --ls-wordmark: 0.02em; /* a logotype, deliberately OFF the ramp below */
+  --ls-row: -0.005em; /* an 18px working-list row title — the ramp's floor */
+
+  /* the view-title ramp — tracking is size-specific, not just role-specific.
+     Letters read further apart the larger they get, so one value cannot serve
+     26px and 36px: the step that looks composed on a Settings title leaves a
+     note title looking spaced out. Nothing compensates for us — Source Serif 4
+     is loaded as static weights (src/fonts.ts) with no `opsz` axis, so every
+     title here is set from the same text-optimised master.
+
+     Values interpolate between --ls-row above (18px, -0.005em) and -0.02em at
+     the top, flattening as real tracking tables do. Sub-pixel by design; the
+     effect is cumulative across a word, not per letter. */
+  --ls-title-panel: -0.012em; /* 26px */
+  --ls-title-health: -0.014em; /* 28px */
+  --ls-title-library: -0.019em; /* 34px */
+  --ls-title-doc: -0.02em; /* 36px */
 
   /* ---------- Layer 3 — spacing ----------
      A 4px step scale for component-internal spacing. Per-view geometry does

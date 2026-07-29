@@ -14,9 +14,11 @@ import "./ViewFrame.css";
  *   queue   — work to get through. A compact one-line masthead instead of a
  *             big title: a queue is not a document, and giving it a 34px
  *             serif heading made it read as one. Caps no column.
- *   library — a place to browse. The largest title in the app, and the
- *             opposite stance from `queue` in weight and density. Caps no
- *             column: its rows are rows, not prose.
+ *   library — a place to browse. The largest title ViewFrame itself draws, and
+ *             the opposite stance from `queue` in weight and density. (Not the
+ *             largest in the app: `doc` renders no header, and the note editor
+ *             spells the 36px step by hand.) Caps no column: its rows are rows,
+ *             not prose.
  *   panel   — configuration. A small title and no column cap, so a tab rail
  *             can run the full pane (its rows cap themselves).
  *   health  — system state to recover from. A short list of pre-lifted
@@ -79,22 +81,32 @@ type Props = BaseProps &
 /** Each variant's title step. A config panel and a note must not open at the
  * same size, which is exactly what one shared `text-h2` used to make them do.
  *
+ * A step is a TRIPLE, never a bare size: `text-title-x` always travels with
+ * `leading-title-x` and `tracking-title-x`. Both tighten as the step grows,
+ * because letters read further apart and lines drift apart at display sizes,
+ * and Source Serif 4 ships here as static weights with no `opsz` axis to do it
+ * for us (docs/DESIGN_SYSTEM.md §1). Dropping either half re-opens the gap.
+ *
  * `ui-balance` on all three: these run to 26–34px in a serif inside a capped
  * measure, which is the exact shape that drops a single word onto a line of
  * its own. */
 const TITLE_CLASS: Record<Variant, string> = {
   queue: "",
-  library: "ui-balance font-serif text-title-library leading-title text-text",
-  panel: "ui-balance font-serif text-title-panel leading-title text-text",
-  health: "ui-balance font-serif text-title-health leading-title text-text",
+  library:
+    "ui-balance font-serif text-title-library leading-title-library tracking-title-library text-text",
+  panel:
+    "ui-balance font-serif text-title-panel leading-title-panel tracking-title-panel text-text",
+  health:
+    "ui-balance font-serif text-title-health leading-title-health tracking-title-health text-text",
   doc: "",
   search: "",
   // A tool, sized like the config panel: a small serif title, so the pane below
   // it gets the room.
-  terminal: "ui-balance font-serif text-title-panel leading-title text-text",
+  terminal:
+    "ui-balance font-serif text-title-panel leading-title-panel tracking-title-panel text-text",
   // Same stance as the terminal: the conversation is the content, not the
   // masthead.
-  chat: "ui-balance font-serif text-title-panel leading-title text-text",
+  chat: "ui-balance font-serif text-title-panel leading-title-panel tracking-title-panel text-text",
 };
 
 /** A queue states the work; a library and a health view state the size.

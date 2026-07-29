@@ -75,7 +75,10 @@ export function CreateProjectDialog({ onClose }: Props) {
       onKeyDown={onKeyDown}
       className="flex flex-col gap-md p-md"
     >
-      <h2 id="create-project-title" className="font-serif text-title-panel text-text">
+      <h2
+        id="create-project-title"
+        className="font-serif text-title-panel leading-title-panel tracking-title-panel text-text"
+      >
         New project
       </h2>
 

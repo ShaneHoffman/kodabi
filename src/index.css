@@ -87,23 +87,34 @@
   --font-weight-bold: var(--fw-bold);
 
   /* ---------- type — tracking ----------
-     Three eyebrow steps, not one, and the difference is deliberate: a view
-     eyebrow opens widest, a section eyebrow inside an overlay sits one step
-     tighter, and the sidebar rail tighter again, so nesting reads through
-     the letter-spacing before the size. Never Tailwind's own
-     `tracking-wide` (0.025em) for any of them. */
+     Two ramps, on two different axes. The eyebrows step on DEPTH: three steps,
+     not one, so a view eyebrow opens widest, a section eyebrow inside an
+     overlay sits one step tighter, and the sidebar rail tighter again — nesting
+     reads through the letter-spacing before the size. Never Tailwind's own
+     `tracking-wide` (0.025em) for any of them.
+
+     The titles step on SIZE, which is the other half of the same idea: letters
+     read further apart as they grow, so each title step carries its own
+     negative tracking (docs/DESIGN_SYSTEM.md §1). Every step here pairs with
+     the --leading-title-* of the same name. */
   --tracking-eyebrow: var(--ls-eyebrow);
   --tracking-eyebrow-menu: var(--ls-eyebrow-menu);
   --tracking-rail: var(--ls-rail);
   --tracking-caps: var(--ls-caps);
   --tracking-token: var(--ls-token);
   --tracking-wordmark: var(--ls-wordmark);
-  --tracking-title: var(--ls-title);
   --tracking-row: var(--ls-row);
+  --tracking-title-panel: var(--ls-title-panel);
+  --tracking-title-health: var(--ls-title-health);
+  --tracking-title-library: var(--ls-title-library);
+  --tracking-title-doc: var(--ls-title-doc);
 
-  /* ---------- type — line-heights ---------- */
+  /* ---------- type — line-heights ----------
+     The four title steps tighten as they grow, mirroring the tracking above. */
   --leading-tight: var(--lh-tight);
-  --leading-title: var(--lh-title);
+  --leading-title-panel: var(--lh-title-panel);
+  --leading-title-health: var(--lh-title-health);
+  --leading-title-library: var(--lh-title-library);
   --leading-title-doc: var(--lh-title-doc);
   --leading-heading: var(--lh-heading);
   --leading-body: var(--lh-body);

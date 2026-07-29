@@ -32,9 +32,13 @@ describe("ViewFrame", () => {
       </ViewFrame>,
     );
 
+    // The step is a triple, not a size: the leading and tracking that tighten
+    // with it travel together, so dropping one half cannot pass unnoticed.
     expect(screen.getByRole("heading", { name: "briarwood-golf" })).toHaveClass(
       "font-serif",
       "text-title-library",
+      "leading-title-library",
+      "tracking-title-library",
     );
     // Quieter than a queue's on purpose: nothing in a library is waiting on you.
     expect(screen.getByText("12 notes")).toHaveClass("text-label", "text-text-faint");
@@ -49,6 +53,8 @@ describe("ViewFrame", () => {
 
     expect(screen.getByRole("heading", { name: "Settings" })).toHaveClass(
       "text-title-panel",
+      "leading-title-panel",
+      "tracking-title-panel",
     );
   });
 
