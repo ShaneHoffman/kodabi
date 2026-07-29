@@ -157,10 +157,19 @@ beyond Windows, revisit A on the cross-platform row alone.
 
 ## Caveats / threats to validity
 
-**One slice is not a suite.** Exactly one path is covered — quick capture into
+**One slice is not a suite.** Exactly one *path* is covered — quick capture into
 the Inbox. A green run says that path is wired, nothing more. The value is the
 harness plus the precedent; further slices are cheap only in proportion to how
 many `data-testid`s exist.
+
+The one thing the tier gates beyond that path is the **shipping CSP**, and only
+because it is structurally the only place that can: `pnpm tauri dev` serves the
+frontend from Vite, which sends no CSP header, so the policy is inert in the one
+build mode anyone runs daily and first bites in the build that ships. Two
+scenarios cover it — one asserts the inlined `data:` font face actually loads,
+one asserts neither webview logged a refusal or Tauri's postMessage-fallback
+warning. That is how the `connect-src` omission that silently degraded every
+`invoke()` to the slow bridge was found in the first place.
 
 **The two vault seams are a pair, and the pairing is load-bearing.**
 `IndexState::initialize` hands the KB root to the watcher and to a startup
@@ -233,3 +242,5 @@ these was run for this decision:
 | Rename the invoke string in `src/quickCapture.ts` | static check **and** slice go red |
 | Replace `onClick={submit}` with a no-op in `QuickCapture.tsx` | **only** the slice goes red |
 | Rename `inbox_note_count` in `note_cmds.rs` | **only** the sidebar-count assertion goes red |
+| Drop `connect-src` from the CSP in `src-tauri/tauri.conf.json` | **only** the console-clean scenario goes red |
+| Drop `data:` from the CSP's `font-src` | **both** CSP scenarios go red (the refusal is logged, *and* the face fails to load) |
