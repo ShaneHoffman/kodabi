@@ -367,11 +367,10 @@ fn a_meeting_transcript_distills_routes_writes_indexes_and_searches_back() {
     );
 
     // --- write → frontmatter ---------------------------------------------
-    let note = index_written_note(
-        &mut NoteIndex::open_in_memory().unwrap(),
-        root,
-        &distilled.path,
-    );
+    // One index for the whole chain: the note is parsed back off disk and
+    // indexed once, and every assertion from here down reads that same pass.
+    let mut index = NoteIndex::open_in_memory().unwrap();
+    let note = index_written_note(&mut index, root, &distilled.path);
     assert_eq!(note.note_type, NoteType::Meeting);
     assert_eq!(note.routing.project(), "Briarwood Golf");
     assert_close(
@@ -398,8 +397,6 @@ fn a_meeting_transcript_distills_routes_writes_indexes_and_searches_back() {
     assert!(date_utc.ends_with('Z'), "ordering key: {date_utc}");
 
     // --- write → index → search ------------------------------------------
-    let mut index = NoteIndex::open_in_memory().unwrap();
-    index_written_note(&mut index, root, &distilled.path);
     let id = note.id.as_str();
 
     let row = index
