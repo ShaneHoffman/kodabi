@@ -96,9 +96,31 @@ const MARKER = `e2e quick capture ${process.pid}-${Date.now()}`;
  */
 const CSP_COMPLAINTS = [/Content Security Policy/i, /IPC custom protocol failed/i];
 
+/**
+ * A refusal line with any inlined `data:` payload elided.
+ *
+ * Chromium quotes the refused URL, and for a font that URL *is* the base64
+ * woff2. It caps its own quoting near a kilobyte, so this is not unbounded —
+ * but a `font-src` regression refuses six faces per webview, each line is then
+ * a kilobyte of base64, and the `after` hook prints the whole buffer again.
+ * Left verbatim that buries the one part worth reading, and it is not the
+ * head: the directive that names the cause comes *after* the URL, so a plain
+ * truncation would drop exactly it. Eliding the blob in place keeps both ends
+ * and the length, which is all the payload was ever going to tell anyone.
+ */
+function elideDataUrls(line) {
+  return line.replace(
+    /data:[^'"\s)]{60,}/g,
+    (blob) => `${blob.slice(0, 40)}…<${blob.length} chars elided>`,
+  );
+}
+
 /** Every buffered console line from `session` that matches a complaint pattern. */
 function cspComplaints(session) {
-  return session.consoleLog().filter((line) => CSP_COMPLAINTS.some((re) => re.test(line)));
+  return session
+    .consoleLog()
+    .filter((line) => CSP_COMPLAINTS.some((re) => re.test(line)))
+    .map(elideDataUrls);
 }
 
 let app;
@@ -274,7 +296,8 @@ scenario("no webview logged a CSP refusal or a degraded IPC path", async () => {
   // are sufficient evidence.
   //
   // deepEqual against [] rather than a length check, so a failure prints the
-  // offending console lines verbatim. That output is usually the whole diagnosis.
+  // offending console lines themselves (bar an elided `data:` payload). That
+  // output is usually the whole diagnosis.
   assert.deepEqual(cspComplaints(capture), [], "the quick-capture webview hit the CSP");
   assert.deepEqual(cspComplaints(main), [], "the main webview hit the CSP");
 });
