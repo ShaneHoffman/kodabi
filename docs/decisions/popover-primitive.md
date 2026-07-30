@@ -382,21 +382,26 @@ free design choice rather than a necessity.
 filed as `feat/select-origin-entrance`. The §4 bullet was scoped to the window plane as recommended, with a
 paragraph naming the dropdown plane's distinction and stating that it licenses nothing above itself;
 the five-surface enumeration stays the operative list rather than the plane's tokens, because both
-toasts wear `--lift-menu` while stacking at `--layer-overlay`. The entrance runs at `--dur-plane`, with
-`transition: none` in **both** reduced-motion branches, which §5.2's prototype omitted.
+toasts wear `--lift-menu` while stacking at `--layer-overlay`.
 
-**Why those two branches are load-bearing, measured on the way:** they look redundant beside the
-app-wide floor in `index.css` and are not. The floor is `transition-duration: 1ms !important`, which a
-plain declaration cannot outrank — but it never touches `transition-property`, and `transition: none`
-sets that to `none`. That half is uncontested, so the component rule wins outright and the transition
-stops existing rather than being shortened. Probed in the shipping WebView2 (150.0.4078.105) against
-the built CSS under `:root[data-reduce-motion="on"]`: with the component rule, the menu computes
-`transition-property: none` and `opacity: 1` at insertion and at every following frame; restore
-`transition-property` inline — the exact cascade the app would have if the component dropped its
-override — and the same menu computes `opacity: 0` at `scale(0.96)` **at insertion**, reaching rest a
-frame later. So `docs/DESIGN_SYSTEM.md` §4's standing claim that the 1ms floor "is not enough on its
-own" holds, and the same reasoning says `ChatView.css` / `QuickCapture.css` must keep their overrides
-too. Nothing here argues for dropping the floor's `!important`.
+**The reduced-motion mechanism changed under this branch, mid-flight, and the entrance was rebuilt
+onto the new one rather than shipped against the old.** The first commit here gated the entrance with
+a component-level `transition: none` under both switches, reasoning from the app-wide
+`transition-duration: 1ms !important` floor that `index.css` carried at the time — measured directly:
+that floor never touches `transition-property`, so the plain override won the cascade outright and the
+transition stopped existing rather than being shortened. That was correct for the floor as it stood.
+While this branch was in Code Review, `main` merged #108 (`fix: gate reduced motion on movement, not
+duration`, `c8825cf`) and deleted the floor entirely, replacing it with a `--move` token remap
+(`design/tokens.css`) plus two independent gates — a `--dur-move-*` duration for a load-bearing end
+state, and `calc(<value> * var(--move))` amplitude for a decorative one. Merging that into this branch
+made the component-level override both unnecessary and, per `src/designTokens.test.ts`'s new movement
+gates, a scan failure waiting to happen (the transform leg's `--dur-plane` and the starting-style's
+bare `scale(0.96)` both trip the new checks). `Select.css` was rewritten onto the new mechanism instead
+of patched around it: the transform leg now takes `--dur-move-plane`, the scale is amplitude-gated as
+`calc(1 - 0.04 * var(--move))` — inverted from the usual `calc(<value> * var(--move))` shape because a
+scale's identity is `1`, not `0` — and the two component-level reduced-motion rules were deleted
+outright, since gating both legs at their own declaration is what #108 made sufficient everywhere else
+in `src/`.
 
 The first caveat in §6 is carried as a comment in `Select.css` rather than worked around. **The second
 is not settled, and is larger than §6 measured** — see §8.2. The third is settled as

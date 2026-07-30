@@ -221,7 +221,7 @@
     transform-origin: top right;
     transition:
       opacity var(--dur-plane) var(--ease-standard),
-      transform var(--dur-plane) var(--ease-standard);
+      transform var(--dur-move-plane) var(--ease-standard);
   }
 
   /* The entrance: the menu grows out of the corner it hangs off instead of
@@ -230,6 +230,17 @@
      on the surface: a dropdown is opened by a click on its own trigger, not
      summoned by a hotkey a hundred times a day, which is what the ban on an
      overlay entrance was written about (docs/DESIGN_SYSTEM.md §4).
+
+     Reduced motion needs no rule of its own here (docs/DESIGN_SYSTEM.md §4,
+     "Reduced motion"): the transform leg above already takes --dur-move-plane,
+     and the scale is amplitude-gated right here. The formula is NOT the
+     `calc(<value> * var(--move))` shape every displacement in the app uses —
+     it can't be, because a displacement's identity is 0 and a scale's is 1, so
+     zeroing --move must land on 1, not 0. `calc(1 - 0.04 * var(--move))` reads
+     as "shrink by 4% only while --move is 1". Opacity keeps its plain
+     --dur-plane on both legs, same as the chat answer's entrance
+     (ChatView.css) — under reduce the menu still fades in over 180ms and
+     simply never scales.
 
      There is deliberately NO exit. The list is conditionally rendered, so
      closing unmounts it — which is what the ARIA wiring, both bridge hooks and
@@ -240,32 +251,7 @@
   @starting-style {
     .ui-select__list {
       opacity: 0;
-      transform: scale(0.96);
+      transform: scale(calc(1 - 0.04 * var(--move)));
     }
-  }
-
-  /* Reduced motion is one declaration and still two rules: the OS setting and
-     Settings → Appearance (src/reduceMotion.ts) cannot share one. Both sit
-     inside the guard because the transition they answer does
-     (docs/DESIGN_SYSTEM.md §4).
-
-     These two are LOAD-BEARING, and the reason is a cascade detail worth
-     stating once: index.css's app-wide floor is `transition-duration: 1ms
-     !important`, which a plain declaration cannot outrank — but the floor
-     never touches `transition-property`, and `transition: none` sets it to
-     `none`. That half is uncontested, so this rule wins outright and the
-     transition stops existing rather than being shortened. Measured in the
-     shipping WebView2 (150.0.4078.105): with this rule the list computes
-     opacity 1 at insertion; with `transition-property` restored and the 1ms
-     floor left to do the work alone, it computes opacity 0 at scale(0.96) at
-     insertion. Deleting either of these would put a frame of the starting
-     style back on screen under reduced motion. */
-  @media (prefers-reduced-motion: reduce) {
-    .ui-select__list {
-      transition: none;
-    }
-  }
-  :root[data-reduce-motion="on"] .ui-select__list {
-    transition: none;
   }
 }

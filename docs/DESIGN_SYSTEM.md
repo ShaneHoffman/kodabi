@@ -362,7 +362,7 @@ disappears before the user can see the result — quick capture flashes its dest
 | Token | Value | Spent on |
 | --- | --- | --- |
 | `--dur-quick` | 150ms | Hover and colour changes on a control |
-| `--dur-plane` | 180ms | A row rising onto the raised plane; a `Select` menu opening onto the overlay one; the toggle knob's travel; a fresh-filed row's fill-in |
+| `--dur-plane` | 180ms | A row rising onto the raised plane; a `Select` menu's fade-in as it opens; the toggle knob's travel; a fresh-filed row's fill-in |
 | `--dur-settle` | 200ms | A row leaving or entering a list; the Inbox placeholder's vanish-left; the filed toast's entrance and fade; the chat answer's arrival |
 | `--dur-enter` | 280ms | The Inbox placeholder arriving at the top of the queue |
 | `--dur-wake` | 450ms | The spirit-mark waking and settling |
@@ -378,7 +378,7 @@ is movement rather than value. They are the duration half of the reduced-motion 
 
 | Token | Wraps | Spent on |
 | --- | --- | --- |
-| `--dur-move-plane` | `--dur-plane` | The toggle knob's travel; the fresh-filed row's picker sliding in |
+| `--dur-move-plane` | `--dur-plane` | The toggle knob's travel; the fresh-filed row's picker sliding in; a `Select` menu's scale-in |
 | `--dur-move-settle` | `--dur-settle` | The vanish-left; the filed toast's rise; the chat answer's rise; `.inbox__slot`'s collapse; `.inbox__fill`'s width |
 | `--dur-move-enter` | `--dur-enter` | The Inbox placeholder's drop from above |
 | `--dur-move-wake` | `--dur-wake` | The spirit-mark core's transform easing back to rest |
@@ -536,19 +536,6 @@ transition to run: the element paints at rest and still fades in over the real d
 is worth keeping — content appearing fully formed reads as breakage rather than as arriving, which
 is this section's whole warrant for spending motion in the first place. See below.
 
-**And the component's own declaration is what does the removing — not the floor.** The two look
-redundant, and the cascade is why they are not. The floor sets `animation-duration`,
-`animation-iteration-count`, `transition-duration` and `scroll-behavior` with `!important`; it never
-touches `transition-property`. `transition: none` sets `transition-property: none`, which is
-therefore uncontested, so the plain component rule wins outright and the transition stops *existing*
-rather than being shortened to 1ms. Measured in the shipping WebView2 (150.0.4078.105) against the
-built CSS, under `:root[data-reduce-motion="on"]`: with the component rule present the menu computes
-`transition-property: none` and `opacity: 1` at insertion and at every following frame; restore
-`transition-property` alone and leave the 1ms floor to do the work, and the same menu computes
-`opacity: 0` at `scale(0.96)` **at insertion**, reaching rest a frame later. **So an entrance shipped
-without its two reduced-motion rules is a bug, not a belt-and-braces omission** — which is the whole
-reason this section states them.
-
 **No `@supports` guard.** `@starting-style` is Chromium 117; the shipped WebView2 is 150.0.4078.105
 and Tauri v2's own documented floor is 125, both above it. (CSS anchor positioning, at 131, is the
 case that *does* need gating.) Measured inside the running app's WebView2 rather than read off the
@@ -614,11 +601,14 @@ component that only consumes tokens gets both switches for free — but the two 
 above each state themselves twice. The in-app switch can only *add* reduction, never overrule an OS
 request for it: `reduceMotion.ts` has no "off" value, only set-or-remove.
 
-**Two things not to re-flag.** `SettingsView.css`'s `translateX(var(--toggle-travel))` must *not* be
+**Three things not to re-flag.** `SettingsView.css`'s `translateX(var(--toggle-travel))` must *not* be
 amplitude-gated — that would park the knob at "off" and destroy the control's state readout; it is
-duration-gated only. And `@xterm/xterm`'s stylesheet carries two `opacity` transitions on the
+duration-gated only. `@xterm/xterm`'s stylesheet carries two `opacity` transitions on the
 scroll-slider that now run under reduced motion. That is correct under this section, and it is
-third-party CSS that cannot be tokenised anyway.
+third-party CSS that cannot be tokenised anyway. And `Select.css`'s menu entrance amplitude-gates a
+*scale*, not a displacement, so it is not `calc(<value> * var(--move))` — a displacement's identity
+is `0`, a scale's is `1`, so it reads `calc(1 - 0.04 * var(--move))` instead: shrink by 4% while
+`--move` is `1`, land back on the identity when it is `0`. Same gate, inverted arithmetic.
 
 **What went wrong before, recorded so the shape of the mistake stays legible.** The old floor
 collapsed every duration to 1ms app-wide, and it failed in both directions. It threw away the
