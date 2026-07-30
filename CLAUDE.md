@@ -134,7 +134,7 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   `docs/DESIGN_SYSTEM.md` decides every visual question the tokens don't
   (interaction states, view states, motion, elevation, the accessibility floor);
   `docs/UI_CONVENTIONS.md` holds the spacing steps, the primitive catalogue, and the composition
-  rule (which of the five slots an action goes in, and how much one surface may hold).
+  rule (which of the six slots an action goes in, and how much one surface may hold).
 - **Spec agreement:** `docs/FRONTMATTER_SCHEMA.md` and `docs/MCP_TOOL_SURFACE.md` mirror each
   other (frontmatter fields ≡ the MCP `NoteSummary` shape). Editing one requires checking the
   other in the same change.

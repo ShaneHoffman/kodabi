@@ -58,7 +58,8 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   `loading`), `TextField` (`error`, `hint`), `Select` (`disabled` vs **`busy`**,
   `emptyLabel`, keyboard behavior), `Checkbox` (and its `--check-*` coupling to the
   shared markdown surface's task list), `ViewFrame` (eight variants; `summary` is a
-  **type error** outside `queue`/`library`/`health`, not a silent no-op),
+  **type error** outside `queue`/`library`/`health`, and `action` is a **type error** on
+  `doc`/`search` — the two that draw no header — neither being a silent no-op),
   `StatusMessage` (variant → ARIA
   role), `Overlay` — plus the "What consumes these today" table.
 - **Do not look for `Textarea`, `ListRow` or `PlaceholderView`.** All three were

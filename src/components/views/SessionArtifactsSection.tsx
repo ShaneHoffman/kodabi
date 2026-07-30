@@ -5,6 +5,7 @@ import { StatusMessage } from "../ui/StatusMessage";
 import {
   revealSessionAudio,
   useSessionArtifacts,
+  type SessionArtifacts,
   type TranscriptSegment,
 } from "../../useSessions";
 import "./SessionArtifactsSection.css";
@@ -27,11 +28,27 @@ const CHANNEL_LABELS: Record<
  * by `ReadNote` only when the note's `source` names a session artifact
  * (`isSessionSource`), so keyword-sourced notes never fetch.
  *
+ * ONE control, behind ONE disclosure. The summary stays primary and the source
+ * is one interaction away — the recording and the transcript arrive together
+ * because they are used together (a turn's `m:ss` offset exists so the two can
+ * be read against each other), and they arrive only when asked for. This used
+ * to be two rows with a control each, which put a reader's fourth and fifth
+ * places to press below a document that already had two
+ * (docs/UI_CONVENTIONS.md, *Composition*). Nesting a second toggle inside this
+ * one would be the same failure again, so opening Source opens all of it.
+ *
+ * Accepted consequence: collapsing unmounts the `<audio>`, so closing the
+ * source stops the source. Playing a recording while reading the note below it
+ * no longer works. Revisit only if that turns out to be how people listen — the
+ * fix is keeping the panel mounted behind `hidden`, at the cost of a live but
+ * invisible media element.
+ *
  * Loading renders nothing (the house quiet loading — the note body is already
  * on screen and this section arriving a beat later is calmer than a spinner).
  */
 export function SessionArtifactsSection({ source }: { source: string }) {
   const { artifacts, error } = useSessionArtifacts(source);
+  const [expanded, setExpanded] = useState(false);
 
   if (error !== null) {
     return (
@@ -44,26 +61,83 @@ export function SessionArtifactsSection({ source }: { source: string }) {
     return null;
   }
 
+  // Derived, never tracked: retention can prune both artifacts under an open
+  // panel, and an `open` flag that outlived its content would render an empty
+  // box. Computed during render, not reconciled in an effect
+  // (.claude/rules/no-use-effect.md).
+  const summonable =
+    artifacts.audio_path !== null || artifacts.transcript_available;
+  const open = expanded && summonable;
+
   return (
     <section className="session-artifacts" aria-label="Session source">
-      {artifacts.audio_path !== null && (
-        <RecordingRow audioPath={artifacts.audio_path} />
+      {summonable && (
+        <Button
+          variant="quiet"
+          aria-expanded={open}
+          data-testid="session-source"
+          className="session-artifacts__toggle font-mono text-meta text-text-soft"
+          onClick={() => setExpanded((isOpen) => !isOpen)}
+        >
+          Source
+          <span className="text-text-faint">{sourceDetail(artifacts)}</span>
+        </Button>
       )}
-      <TranscriptSection
-        transcriptAvailable={artifacts.transcript_available}
-        segments={artifacts.segments}
-      />
+
+      {/* Stays visible at rest, and deliberately so: this sentence's whole job
+          is that "checked against the source" never fails silently, which it
+          would do until the click if it sat inside the panel. It names only the
+          transcript even when the audio is gone too, because `audio_path: null`
+          cannot tell "pruned" from "never retained". */}
+      {!artifacts.transcript_available && (
+        <p className="session-artifacts__unavailable text-cap text-text-faint">
+          The raw transcript for this note is no longer stored.
+        </p>
+      )}
+
+      {open && (
+        <div className="session-artifacts__panel">
+          {artifacts.audio_path !== null && (
+            <Recording audioPath={artifacts.audio_path} />
+          )}
+          {artifacts.transcript_available && <Turns segments={artifacts.segments} />}
+        </div>
+      )}
     </section>
   );
 }
 
+/** What survived retention, in the toggle's own faint voice: ` · recording · 3
+ * segments`. The `·`-joined parts are the house meta shape (`noteMeta`, and the
+ * Needs Attention shelf's `Dismissed · N`), and they are the only signal at
+ * rest for what opening this will show. Never called with nothing to say — the
+ * caller renders no toggle at all then. */
+function sourceDetail(artifacts: SessionArtifacts): string {
+  const parts: string[] = [];
+  if (artifacts.audio_path !== null) {
+    parts.push("recording");
+  }
+  if (artifacts.transcript_available) {
+    parts.push(
+      artifacts.segments.length === 1
+        ? "1 segment"
+        : `${artifacts.segments.length} segments`,
+    );
+  }
+  return parts.map((part) => ` · ${part}`).join("");
+}
+
 /**
  * The retained recording: native playback controls fed through the asset
- * protocol, plus a reveal action. Fully declarative — playback state is
- * browser chrome, so no effect and no bridge hook. The reserved green is
- * "audio is being recorded" and appears nowhere here.
+ * protocol, plus a reveal action. Fully declarative — playback state is browser
+ * chrome, so no effect and no bridge hook. The reserved green is "audio is
+ * being recorded" and appears nowhere here.
+ *
+ * Reveal sits here rather than up in the note's title row because it acts on
+ * the `.wav`, not on the note: the slot follows what a control acts on, never
+ * where there happened to be room.
  */
-function RecordingRow({ audioPath }: { audioPath: string }) {
+function Recording({ audioPath }: { audioPath: string }) {
   const [revealError, setRevealError] = useState<string | null>(null);
 
   return (
@@ -72,6 +146,7 @@ function RecordingRow({ audioPath }: { audioPath: string }) {
         <span className="font-mono text-meta text-text-faint">Recording</span>
         <Button
           variant="quiet"
+          data-testid="reveal-recording"
           className="text-label text-text-soft"
           onClick={() => {
             setRevealError(null);
@@ -100,62 +175,33 @@ function RecordingRow({ audioPath }: { audioPath: string }) {
 }
 
 /**
- * The raw transcript, collapsed by default: the summary stays primary and the
- * source is one interaction away. A pruned transcript states its absence
- * instead of hiding the section, so "checked against the source" never fails
- * silently.
+ * The raw transcript's exchange, uncapped. The disclosure above IS the cap:
+ * this only exists once asked for, so it does not out-measure the note the way
+ * an always-open block below a summary would (docs/DESIGN_SYSTEM.md §1). A
+ * nested scroller would be worse than long — it traps the wheel inside `main`'s
+ * own scroller and breaks Ctrl+F across the very text people came here to
+ * search.
  */
-function TranscriptSection({
-  transcriptAvailable,
-  segments,
-}: {
-  transcriptAvailable: boolean;
-  segments: TranscriptSegment[];
-}) {
-  const [expanded, setExpanded] = useState(false);
-
-  if (!transcriptAvailable) {
-    return (
-      <p className="session-artifacts__unavailable text-cap text-text-faint">
-        The raw transcript for this note is no longer stored.
-      </p>
-    );
-  }
-
-  const count =
-    segments.length === 1 ? "1 segment" : `${segments.length} segments`;
+function Turns({ segments }: { segments: TranscriptSegment[] }) {
   return (
-    <div className="session-artifacts__transcript">
-      <Button
-        variant="quiet"
-        aria-expanded={expanded}
-        className="font-mono text-meta text-text-soft"
-        onClick={() => setExpanded((open) => !open)}
-      >
-        Transcript
-        <span className="text-text-faint"> · {count}</span>
-      </Button>
-      {expanded && (
-        <ol className="session-artifacts__turns">
-          {segments.map((segment) => {
-            const channel = CHANNEL_LABELS[segment.channel];
-            return (
-              <li key={segment.index} className="session-artifacts__turn">
-                <span className="ui-tnum font-mono text-meta text-text-faint">
-                  {formatOffset(segment.start_ms)}
-                </span>
-                <span className={`font-mono text-meta ${channel.tone}`}>
-                  {channel.label}
-                </span>
-                <span className="session-artifacts__turn-text font-serif text-body text-text-read">
-                  {segment.text}
-                </span>
-              </li>
-            );
-          })}
-        </ol>
-      )}
-    </div>
+    <ol className="session-artifacts__turns">
+      {segments.map((segment) => {
+        const channel = CHANNEL_LABELS[segment.channel];
+        return (
+          <li key={segment.index} className="session-artifacts__turn">
+            <span className="ui-tnum font-mono text-meta text-text-faint">
+              {formatOffset(segment.start_ms)}
+            </span>
+            <span className={`font-mono text-meta ${channel.tone}`}>
+              {channel.label}
+            </span>
+            <span className="session-artifacts__turn-text font-serif text-body text-text-read">
+              {segment.text}
+            </span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }
 

@@ -457,24 +457,36 @@ either is not an error and not a look anyone has designed — pass the header as
 
 **`action` is one node, and it is one action.** A single header-level control, right-aligned in the
 header opposite the title block: the one thing the view is for. It is not a container — a caller with
-two passes a flex `<div>` and the type says nothing, which is how `ProjectView` came to carry two. It
-also sits in `BaseProps` rather than being discriminated on `variant`, so `doc` and `search` accept it
-too — and since neither passes an `eyebrow` or a `title`, `renderHeader` returns before it reaches the
-action and drops it on the floor. (The drop is that early return, not a variant check: a `doc` caller
-that passed a title as well would get both, in a header nobody designed.) The same silent no-op
-`summary` was made a type error for two paragraphs below. Which slot an action belongs in, and how
-many a surface may hold, is *Composition* below.
+two passes a flex `<div>` and the type says nothing, which is how `ProjectView` came to carry two. Which
+slot an action belongs in, and how many a surface may hold, is *Composition* below.
+
+**And it is only a prop on the six variants that draw a header.** On `doc` and `search` it is a **type
+error**, for the same reason `summary` is on the three variants below. It used to sit in `BaseProps`, so
+those two accepted it — and since neither passes an `eyebrow` or a `title`, `renderHeader` returned
+before it reached the action and dropped it on the floor. (The guard is `!eyebrow && !title`, not a
+variant check, so strictly it drops the action on *any* caller that passes no header content; every
+shipped call site on the other six passes a title, which is why `doc` and `search` are the two the type
+now excludes.) A view that draws its own header puts its own actions in it.
+
+**Note the asymmetry that remains, on purpose.** Passing `eyebrow`/`title` to `doc`/`search` still
+compiles, because those two render rather than vanish — a `doc` caller that passes a title gets an `<h2>`
+with no type step on it at all (`TITLE_CLASS.doc` is deliberately `""`) in a header nobody designed,
+which is a visible mistake rather than a silent one. `action` and `summary` are the props with nowhere to land at all, and
+those are the two the compiler now catches. Separately and not fixed here: because neither variant
+passes either, `NoteEditorView`'s and `SearchView`'s `<section>` carry no accessible name and are not
+exposed as regions — a real gap, flagged in the component, wanting its own decision rather than a side
+effect of this one.
 
 **`summary` is not a free styling slot.** The variant fixes its typographic role, so a workload sentence
 can never render at a count's weight in one view and a heading's in another. Call sites pass the content,
 never a class — there is no `className` on it to reach for.
 
 **And it is only a prop on the three variants that draw one.** `queue`, `library` and `health` accept
-it; on `panel`, `doc` and `search` it is a **type error**, not a silent no-op. Note the asymmetry with
-the paragraph above: passing `eyebrow`/`title` to `doc`/`search` compiles and simply renders no header,
-because those two legitimately supply their own. `summary` is different — there is no typographic role
-for one on those variants at all, so the props are discriminated on `variant` and the compiler says so
-at the call site. It used to be accepted, dropped at render, and reported nowhere.
+it; on `panel`, `doc` and `search` it is a **type error**, not a silent no-op — there is no typographic
+role for one on those three at all, so the props are discriminated on `variant` and the compiler says so
+at the call site. It used to be accepted, dropped at render, and reported nowhere. `action` above is the
+same fix for the same reason, on the narrower set of variants that draw no header; the asymmetry with
+`eyebrow`/`title` is spelled out there.
 
 **Omit `summary` at zero.** The empty `StatusMessage` in the body already says there's nothing here, and
 two "nothing here" voices in one header is one too many. Every call site does this with a conditional
@@ -623,9 +635,9 @@ recording you play once is not either. Until then, "more than fits" is answered 
 (`Overlay`, the command palette) or a disclosure. If that day comes it is a `ViewFrame` variant change
 and it is named here — not discovered by whichever view runs out of room first.
 
-### The five slots
+### The six slots
 
-**A view's actions sit in one of five places**, and the slot is chosen by what the action *acts on* —
+**A view's actions sit in one of six places**, and the slot is chosen by what the action *acts on* —
 never by where there happened to be room.
 
 | Slot | Acts on | Ceiling |
@@ -635,6 +647,7 @@ never by where there happened to be room.
 | **Contextual chrome** | whatever summoned it — a selection, a pending prompt | no count; *one job* |
 | **Row affordance** | one item in a list | **two** |
 | **Footer / composer** | the surface as a whole: commit it, or abandon it | **two** |
+| **Disclosure** — the toggle that summons a subordinate section | content stacked below the view's subject | **one per section, and it does not nest** |
 
 **Four kinds of control are deliberately outside that list.** Getting around is not acting — a back
 link, and Settings' tab rail, which *filters* the pane rather than navigating (`role="tablist"`, so a
@@ -681,11 +694,36 @@ leave: the chat's Send commits the draft and comes back for the next one, and St
 turn is running rather than sitting beside it. Two controls is what this section fixes; which variant
 wears which weight, and in what order, is the `Button` entry's business and §2's.
 
+**A disclosure is one toggle, and the section behind it is where its controls go.** This is the slot
+that answers "more than fits" above, and it is the one a view reaches for when a subordinate section
+has to sit under the subject rather than beside it. **The toggle is the section's whole control footprint
+at rest**: the section's own actions live *inside* what it opens, next to the thing they act on, and a
+second toggle nested in there would put the reader back to two places. `NeedsAttentionView`'s dismissed
+shelf is the shape — one collapsed line, `Dismissed · N`, with Restore and Delete on the rows it
+reveals — and a note's source pairing is the same slot below a document: one `Source · recording · 3
+segments` line, with the recording (and its Reveal), the player, and the transcript all behind it. The
+toggle states in its own label what opening it will show, because a control whose only signal is a
+chevron makes the reader click to find out whether there was anything there. And the disclosure *is*
+the cap on what it holds: a section that only exists once asked for cannot out-measure the subject the
+way an always-open block below it would (§1 of [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md)), so what it
+reveals does not additionally need a scroller.
+
 ### How much one surface may hold
 
 **At rest, a view shows at most three clusters and four controls** — counting one representative row
 affordance, and not counting contextual chrome. *At rest* means what you meet on arrival: nothing
 selected, no dialog open, no shelf expanded.
+
+**The count is every control that acts, wherever it sits — not every control in a slot.** Being held
+outside the slot list does not exempt a control from the count: a back link is one place a reader has
+to look, and it counts. A **collapsed disclosure counts as its one toggle and nothing behind it**, which
+is the whole point of the slot. Three things are excluded, each for a reason that is not "it did not fit
+the table": contextual chrome, because it is not there until summoned; affordances that belong to the
+content rather than acting on it (a recording's `<audio>` transport, a tag chip's `×`); and Settings'
+tab rail, which indexes the pane rather than acting on it — the same reason it is not in the slot list
+and the Layer-4 table says it "filters, it doesn't act". Without that stated the table below is
+unreadable: a reader who exempts the back link scores the note editor a compliant 3/4 in exactly the
+state that prompted this section, and one who counts the tab rail scores Settings over it.
 
 The number is read off what already ships rather than picked:
 
@@ -698,11 +736,11 @@ The number is read off what already ships rather than picked:
 | `SearchView` | 0 | 0 — the query field is the surface |
 | `TerminalView` | 0 | 0 — Restart appears only once the session has exited |
 | `ChatView` | 1 | 1 — the composer's Send, which Stop replaces mid-turn |
-| `NoteEditorView` (reading a session note) | **4** | **5** |
+| `NoteEditorView` (reading a session note) | 3 | 4 — the back link, Edit and Delete note, plus the source disclosure |
 
-Seven of the eight sit at or under it without ever having been told to, which is the evidence that the
+Seven of the eight sat at or under it without ever having been told to, which is the evidence that the
 number is this app's own rather than an import. Settings sits exactly on it. The eighth is why this
-section exists.
+section exists, and it now sits on it too — see *Going over* below for what moved.
 
 Counting *at rest* is what makes that table honest, and it is why a file-wide count of `<Button` is a
 different measurement — that one scores `ChatView` and `NeedsAttentionView` at five each. Most of those
@@ -734,14 +772,46 @@ behind `DeleteProjectDialog` and the confirmation is what marks it
 ([`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §2). **It expires if a third verb appears, or if either one
 stops being quiet text** — at that point the header is a toolbar and should say so.
 
-**`NoteEditorView` is over, and it is the open case.** Reading a distilled session note whose audio and
-transcript both survived retention puts five controls in four places: the back link, Edit and Delete
-note in the title row, then Reveal in Explorer and the transcript disclosure as rows down in
-`SessionArtifactsSection` — with the recording's `<audio>` player in among them. That is the maximal
-note rather than every note, but the count was never really the problem: four *places* is. A reader
-sweeps the whole column to learn what they can do here, every time, which is the failure that having no
-rule produces. Giving the note's actions one home is the follow-on work this section was written for;
-whoever does it updates the table above when it lands.
+**`NoteEditorView` was over, and that case is closed.** Reading a distilled session note whose audio and
+transcript both survived retention used to put five controls in four places: the back link, Edit and
+Delete note in the title row, then Reveal in Explorer and the transcript disclosure as separate rows
+down in `SessionArtifactsSection`. The count was never really the problem; four *places* was. What
+landed is the *Disclosure* slot above: the whole source pairing now sits behind one
+`Source · recording · 3 segments` toggle, so the note reads at three places and four controls.
+
+Be precise about how that arithmetic works, because the wrong lesson is easy to take from it. **Nothing
+merged.** Reveal in Explorer still exists, unchanged; the transcript's toggle became the Source toggle,
+widened to stand for the whole section. What changed is that **Reveal stopped being a resting control**
+and became a summoned one, which the counting rule above licenses exactly ("a collapsed disclosure
+counts as its one toggle and nothing behind it"). So the drop from four *places* to three is the real
+win here, and the control count followed it.
+
+**And moving the `<audio>` player bought nothing at all.** A player is an affordance that belongs to the
+content rather than acting on it, excluded from the count above, so it never scored in the first place.
+It moved because the recording and the transcript are one artifact used together — a turn's `m:ss`
+offset exists so the two can be read against each other — and grouping is its own justification. The
+distinction matters for the next change: hiding a **control** is what moved this number, under a rule
+that says so out loud; hiding **content** moves nothing, and no future change should cite this one as
+though it did.
+
+**Reveal in Explorer survived the cut, and that was close.** Deleting it reaches the same 3/4 with a
+smaller change, and the ticket invited removal. It stayed because a session recording lives at
+`sessions/<ISO>-<hash>-<slug>.wav`, which is not a path anyone navigates to by hand, and it is the only
+bridge from the app to a file `docs/FOUNDING_DOC.md`'s plain-folder posture says is the user's. The
+honest counter-evidence, recorded so the next reader does not have to rediscover it: **a note's own
+`.md` has no reveal control**, so the app does not offer reveal systematically. **This expires if reveal
+gets a home that covers notes too** — at which point the recording's copy belongs there instead.
+
+**One accepted regression, named so it can be revisited.** Collapsing the disclosure unmounts the
+`<audio>`, so closing the source stops the source, and playing a recording while reading the note below
+it no longer works. Closing a thing stopping that thing is the honest reading, and the alternative
+(keeping the panel mounted behind `hidden`) trades it for a live but invisible media element. **It
+expires if that turns out to be how people actually listen.**
+
+The same change made the frame's half of this mechanical rather than advisory: **`action` is now a type
+error on `doc` and `search`**, the two variants that draw no header, so a view cannot quietly hand the
+frame an action and get nothing (see the `ViewFrame` entry above). `ProjectView`'s two-button header is
+therefore the only surviving exception in this section.
 
 ---
 
@@ -762,6 +832,7 @@ new screen should find its shape here rather than inventing one.
 | `DestructiveConfirmDialog` | `Overlay`, `Button` (`destructive` beside a `primary` Cancel), `StatusMessage` | — |
 | `DeleteProjectDialog` | `DestructiveConfirmDialog` | — |
 | `NoteEditorView` | `ViewFrame variant="doc"`, `Button`, `StatusMessage` | its own header, and raw `<textarea>` / `<input>` elements with `aria-label` + `ui-writing` |
+| `SessionArtifactsSection` | `Button variant="quiet"` (one disclosure toggle, one Reveal), `StatusMessage` | the disclosure below a document (`.session-artifacts`, one hairline and one summoned panel) and the transcript's three-column turns; the recording is a native `<audio controls>` |
 | `SettingsView` | `ViewFrame variant="panel"`, `Select`, `Button`, `StatusMessage` | a local `role="switch"` `Toggle`, and a raw number `<input>` (`.settings__chip`) |
 | `SearchView` | `ViewFrame variant="search"`, `StatusMessage` | its own query field (`.ui-focus-ring-within`) |
 | `TerminalView` | `ViewFrame variant="terminal"`, `Button` | the xterm mount and the session-ended notice (`TerminalView.css`) |
@@ -915,7 +986,7 @@ actions live.
 | `library` | uncapped | `text-title-library` (34) | the frame header |
 | `panel` | uncapped (rows cap themselves at `--measure-setting`, 520) | `text-title-panel` (26) | one per row (the tab rail filters, it doesn't act) |
 | `health` | uncapped | `text-title-health` (28) | two per card, plus the shelf toggle |
-| `doc` | `--measure-doc` (660) | supplied by the view | its own title row; a format toolbar while editing (and today, more — see the open case) |
+| `doc` | `--measure-doc` (660) | supplied by the view | its own title row; a format toolbar while editing; the source pairing behind one disclosure |
 | `search` | `--measure-search` (640) | supplied by the view | none — the query field is the surface |
 | `terminal` | uncapped, full-height (the pane scrolls inside itself) | `text-title-panel` (26) | none until the session exits |
 | `chat` | `--chat-measure` (660), full-height (the log scrolls inside itself) | `text-title-panel` (26) | the composer footer, plus contextual chrome in the log |

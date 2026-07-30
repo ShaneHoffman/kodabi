@@ -15,8 +15,23 @@
   padding-top: var(--lead-session);
 }
 
-.session-artifacts__recording + .session-artifacts__transcript,
-.session-artifacts__recording + .session-artifacts__unavailable {
+/* The summoned panel. Matches .attention__dismissed-stack, the app's other
+   disclosure: what a toggle opens sits a field-stack step below it. */
+.session-artifacts__panel {
+  margin-top: var(--space-sm);
+}
+
+/* The pruned-transcript sentence stays at rest, so it sits under the toggle
+   rather than inside the panel. Keyed on the toggle, so the case with no toggle
+   at all (nothing survived) gets no stray gap above the sentence — the
+   section's own padding-top is already the separation there. */
+.session-artifacts__toggle + .session-artifacts__unavailable {
+  margin-top: var(--space-2xs);
+}
+
+/* The two artifacts inside the panel are the section's own blocks, which is
+   exactly what --lead-session names. */
+.session-artifacts__recording + .session-artifacts__turns {
   margin-top: var(--lead-session);
 }
 
@@ -24,10 +39,6 @@
    pairing audio with a transcript, so it gets the doc's width to scrub in. */
 .session-artifacts__player {
   width: 100%;
-}
-
-.session-artifacts__turns {
-  margin-top: var(--space-xs);
 }
 
 /* One turn of the exchange: offset, speaker, text on a shared baseline. The
