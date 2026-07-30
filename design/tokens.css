@@ -52,10 +52,11 @@
      :root[data-theme="dark"]                               → dark, forced
      :root[data-theme="light"]                              → light, forced (wins over OS dark)
 
-   Two further blocks sit just above those, and they are NOT theme blocks: they
-   set `--move: 0` — the motion switch, likewise reached two ways (the OS
-   setting and Settings → Appearance). They are kept out of the four on purpose,
-   so "four theme blocks" stays true of the palette.
+   Two further blocks sit between the first of those and the three dark/forced
+   ones, and they are NOT theme blocks: they set `--move: 0` — the motion
+   switch, likewise reached two ways (the OS setting and Settings → Appearance).
+   They are kept out of the four on purpose, so "four theme blocks" stays true
+   of the palette.
    ============================================================ */
 
 :root {
@@ -381,8 +382,8 @@
      Reduced motion means fewer and GENTLER, not none. Movement and position
      are what cause vestibular trouble; a colour or opacity change does not,
      and it is often the thing carrying the meaning. So one switch turns off
-     movement alone, and the two blocks at the end of this file are the only
-     place it is thrown.
+     movement alone, and the two blocks just below the theme mappings' first
+     block — immediately before the dark ones — are the only place it is thrown.
 
      `--move` is unitless and is 1 or 0 — a switch, not a slider. A value in
      between would produce half-motion nobody asked for.
@@ -765,8 +766,8 @@
    which is what keeps "four theme blocks" true both above and in
    src/designTokens.test.ts. They sit here, between the scales and the theme
    mappings, because `--move` is a Layer 3 value: it belongs beside the motion
-   scale it gates, not among the palettes, and this keeps the four theme blocks
-   contiguous below.
+   scale it gates, not among the palettes, and this keeps the three dark and
+   forced mappings contiguous below.
 
    ORDER MATTERS. The media block is a plain `:root`, the same specificity as
    the default that sets `--move: 1`, so it wins only by coming after it. The
