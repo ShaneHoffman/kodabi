@@ -1,13 +1,22 @@
-//! Structured meeting facts derived from a note, for the MCP `get_note` tool's
-//! `MeetingMeta` + `ActionItem` output.
+//! Structured facts derived from a distilled note body, for the MCP `get_note`
+//! tool's `MeetingMeta` + `ActionItem` output and the outstanding-items surface.
 //!
-//! A meeting note stores its decisions and action items only as Markdown in its
+//! A distilled note stores its decisions and action items only as Markdown in its
 //! body (the distill pass renders them and keeps no structured copy — see
 //! [`crate::distill`]'s action-item grammar), and its duration / speaker count
 //! nowhere at all: those live only in the raw session transcript the note's
 //! `source` points at. This module re-derives all of that from disk so the index
 //! can cache it (`crate::index`) and `get_note` can serve it without re-parsing
 //! the body or re-reading the JSONL per call.
+//!
+//! **Scope: meeting *and* chat notes** ([`derives_facts`]) — "chats are documents
+//! too" (FOUNDING_DOC §3.6), and a chat's commitments are as real as a meeting's.
+//! The `meeting` names here (this module, [`MeetingFacts`], the `note_meetings`
+//! table, `IndexedNote::meeting`) are historical: they predate the chat leg and
+//! were kept because the MCP wire object is still `meeting`/`MeetingMeta`, which
+//! stays meeting-only. The two session-derived scalars are the real divergence —
+//! they are always `None` for a chat, whose `source` is a chat transcript rather
+//! than a session recording.
 //!
 //! Everything here is a pure function of the note's body + its session file, so a
 //! reindex reproduces it exactly — the index stays a rebuildable cache
@@ -22,17 +31,21 @@ use crate::note::{Note, NoteType, Source};
 use crate::raw_session::{self, TranscriptSegment};
 use crate::transcription::Channel;
 
-/// The structured facts a meeting note carries: the two session-derived scalars
+/// The structured facts a distilled note carries: the two session-derived scalars
 /// (`None` when there is no measurable transcript), the ordered decisions, and
 /// the ordered action items.
+///
+/// Historical name — this is also a chat note's facts (see the module doc). Both
+/// scalars are always `None` for a chat.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MeetingFacts {
     /// Transcript length in whole seconds, or `None` when the `source` is a
-    /// keyword (e.g. `manual`) or the session file is gone (retention-pruned).
+    /// keyword (e.g. `manual`), the session file is gone (retention-pruned), or
+    /// the note is a chat (never measured).
     pub duration_seconds: Option<u32>,
     /// Count of distinct real speaker channels (`You`/`Them`) present in the
-    /// transcript; `None` when unknown (keyword/pruned source, or an
-    /// unattributed transcript). Names are not resolved in v1.
+    /// transcript; `None` when unknown (keyword/pruned source, an unattributed
+    /// transcript, or a chat). Names are not resolved in v1.
     pub speaker_count: Option<u32>,
     /// The `## Decisions` bullets, in body order.
     pub decisions: Vec<String>,
@@ -62,15 +75,36 @@ pub struct ActionItemFact {
     pub extracted_date: Option<String>,
 }
 
-/// Derives meeting facts for a note, or `None` when it is not a meeting note.
+/// Whether a note of this type carries facts worth deriving — the single source
+/// of truth for the gate, mirrored in SQL by
+/// [`note_ids_missing_meeting_facts`](crate::index::NoteIndex::note_ids_missing_meeting_facts).
+///
+/// The rule is *"is this body machine-rendered by [`crate::distill::render_body`]?"*
+/// [`parse_action_line`] is documented as that renderer's exact inverse, so a
+/// meeting body and a chat body round-trip through the grammar by construction.
+///
+/// [`NoteType::Note`] is deliberately excluded: `quick_capture`
+/// ([`crate::capture`]) writes the user's text verbatim and never runs the distill
+/// pass, so nothing guarantees a `note` body follows the grammar. Since the parser
+/// takes everything before the *first* `" to "` as the owner, a hand-written
+/// `- [ ] Send the deck to Priya.` would index with owner `"Send the deck"` and
+/// description `"Priya"`. Hand-written commitments belong to the Phase 5
+/// commitment ledger, which can widen this deliberately.
+pub fn derives_facts(note_type: NoteType) -> bool {
+    matches!(note_type, NoteType::Meeting | NoteType::Chat)
+}
+
+/// Derives facts for a note, or `None` when its type carries none
+/// ([`derives_facts`]).
 ///
 /// The convenience entry point for the index write path, which holds a parsed
 /// [`Note`]. The backfill path holds only a stored row, so it parses the pieces
 /// out and calls [`derive_meeting_facts`] directly.
 pub fn meeting_facts_for(note: &Note, kb_root: &Path) -> Option<MeetingFacts> {
-    (note.note_type == NoteType::Meeting).then(|| {
+    derives_facts(note.note_type).then(|| {
         derive_meeting_facts(
             note.id.as_str(),
+            note.note_type,
             &note.date,
             &note.source,
             &note.body,
@@ -79,23 +113,34 @@ pub fn meeting_facts_for(note: &Note, kb_root: &Path) -> Option<MeetingFacts> {
     })
 }
 
-/// Derives the structured facts from a meeting note's primitive fields. Takes the
-/// pieces rather than a `&Note` so both the write path (from a parsed note) and
-/// the backfill pass (from a stored `NoteRow`) reuse it. The caller is
-/// responsible for only invoking it on meeting notes.
+/// Derives the structured facts from a distilled note's primitive fields. Takes
+/// the pieces rather than a `&Note` so both the write path (from a parsed note)
+/// and the backfill pass (from a stored `NoteRow`) reuse it. The caller is
+/// responsible for only invoking it on a type [`derives_facts`] accepts.
 ///
 /// `kb_root` resolves a `RawArtifact` `source` (a repo-relative path) to the
 /// session JSONL; a keyword source or a missing/pruned file yields `None`
 /// duration and speaker count.
+///
+/// `note_type` gates the session read: only a meeting's `source` points at a
+/// session recording. A chat's points at its `chats/*.jsonl` transcript, whose
+/// records are `ChatRecord`s, not `TranscriptSegment`s — reading it would slurp
+/// the whole file only to fail deserializing it, on every index and every
+/// backfill. Both scalars are `None` for a chat by construction, not by accident.
 pub fn derive_meeting_facts(
     note_id: &str,
+    note_type: NoteType,
     date: &str,
     source: &Source,
     body: &str,
     kb_root: &Path,
 ) -> MeetingFacts {
     let (decisions, action_items) = parse_body(note_id, date, body);
-    let (duration_seconds, speaker_count) = session_metrics(source, kb_root);
+    let (duration_seconds, speaker_count) = if note_type == NoteType::Meeting {
+        session_metrics(source, kb_root)
+    } else {
+        (None, None)
+    };
     MeetingFacts {
         duration_seconds,
         speaker_count,
@@ -296,7 +341,13 @@ mod tests {
     /// Writes segments as JSONL exactly as `read_raw_session` expects, returning
     /// the repo-relative path to store as a note `source`.
     fn write_session(kb_root: &Path, segments: &[TranscriptSegment]) -> String {
-        let rel = "sessions/capture.jsonl";
+        write_session_at(kb_root, "sessions/capture.jsonl", segments)
+    }
+
+    /// The same, at a caller-chosen path — so a test can put *real, readable*
+    /// transcript bytes behind a `chats/` source and prove the type gate, not the
+    /// absence of a parseable file.
+    fn write_session_at(kb_root: &Path, rel: &str, segments: &[TranscriptSegment]) -> String {
         let path = kb_root.join(rel);
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         let mut contents = String::new();
@@ -424,7 +475,14 @@ Body text.
         );
         let source = Source::parse(&rel).unwrap();
 
-        let facts = derive_meeting_facts(NOTE_ID, "2026-07-09", &source, "", kb.path());
+        let facts = derive_meeting_facts(
+            NOTE_ID,
+            NoteType::Meeting,
+            "2026-07-09",
+            &source,
+            "",
+            kb.path(),
+        );
         assert_eq!(facts.duration_seconds, Some(30)); // 30_250 ms floors to 30 s
         assert_eq!(facts.speaker_count, Some(2)); // You + Them
     }
@@ -435,7 +493,14 @@ Body text.
         let rel = write_session(kb.path(), &[segment(0, Channel::You, 0, 5_000)]);
         let source = Source::parse(&rel).unwrap();
 
-        let facts = derive_meeting_facts(NOTE_ID, "2026-07-09", &source, "", kb.path());
+        let facts = derive_meeting_facts(
+            NOTE_ID,
+            NoteType::Meeting,
+            "2026-07-09",
+            &source,
+            "",
+            kb.path(),
+        );
         assert_eq!(facts.speaker_count, Some(1));
     }
 
@@ -445,7 +510,14 @@ Body text.
         let rel = write_session(kb.path(), &[segment(0, Channel::Unknown, 0, 5_000)]);
         let source = Source::parse(&rel).unwrap();
 
-        let facts = derive_meeting_facts(NOTE_ID, "2026-07-09", &source, "", kb.path());
+        let facts = derive_meeting_facts(
+            NOTE_ID,
+            NoteType::Meeting,
+            "2026-07-09",
+            &source,
+            "",
+            kb.path(),
+        );
         assert_eq!(facts.duration_seconds, Some(5));
         assert_eq!(facts.speaker_count, None);
     }
@@ -455,7 +527,14 @@ Body text.
         let kb = tempdir().unwrap();
         let source = Source::parse("manual").unwrap();
 
-        let facts = derive_meeting_facts(NOTE_ID, "2026-07-09", &source, "", kb.path());
+        let facts = derive_meeting_facts(
+            NOTE_ID,
+            NoteType::Meeting,
+            "2026-07-09",
+            &source,
+            "",
+            kb.path(),
+        );
         assert_eq!(facts.duration_seconds, None);
         assert_eq!(facts.speaker_count, None);
     }
@@ -467,30 +546,106 @@ Body text.
         // longer exists.
         let source = Source::parse("sessions/gone.jsonl").unwrap();
 
-        let facts = derive_meeting_facts(NOTE_ID, "2026-07-09", &source, "", kb.path());
+        let facts = derive_meeting_facts(
+            NOTE_ID,
+            NoteType::Meeting,
+            "2026-07-09",
+            &source,
+            "",
+            kb.path(),
+        );
         assert_eq!(facts.duration_seconds, None);
         assert_eq!(facts.speaker_count, None);
     }
 
-    #[test]
-    fn meeting_facts_for_returns_none_for_a_non_meeting_note() {
+    /// Builds a note of the given type with one action item in its body.
+    fn note_of(id: &str, note_type: NoteType, source: &str) -> Note {
         use crate::note::{NoteId, Routing, Tag};
 
-        let kb = PathBuf::from(".");
-        let note = Note::new(
-            NoteId::parse("n_note01").unwrap(),
-            NoteType::Note,
+        Note::new(
+            NoteId::parse(id).unwrap(),
+            note_type,
             Routing::Routed {
                 project: "Ops".to_string(),
                 confidence: 0.9,
             },
             "2026-07-09",
             Vec::<Tag>::new(),
-            Source::parse("quick-capture").unwrap(),
-            "## Action items\n\n- [ ] Jane to do the thing.",
+            Source::parse(source).unwrap(),
+            "## Decisions\n\n- Ship it.\n\n## Action items\n\n- [ ] Jane to do the thing.",
         )
-        .unwrap();
+        .unwrap()
+    }
+
+    #[test]
+    fn facts_are_derived_for_the_types_whose_bodies_the_distill_pass_renders() {
+        assert!(derives_facts(NoteType::Meeting));
+        assert!(derives_facts(NoteType::Chat));
+        // Deliberate: a `note` body is written verbatim by quick capture and
+        // never passes through `distill::render_body`, so nothing guarantees it
+        // follows the grammar `parse_action_line` inverts.
+        assert!(!derives_facts(NoteType::Note));
+    }
+
+    #[test]
+    fn facts_are_not_derived_for_a_plain_note() {
+        let kb = PathBuf::from(".");
+        let note = note_of("n_note01", NoteType::Note, "quick-capture");
 
         assert_eq!(meeting_facts_for(&note, &kb), None);
+    }
+
+    #[test]
+    fn facts_are_derived_for_a_chat_note() {
+        let kb = tempdir().unwrap();
+        let note = note_of("n_chat01", NoteType::Chat, "chats/session.jsonl");
+
+        let facts = meeting_facts_for(&note, kb.path()).expect("a chat note carries facts");
+        assert_eq!(facts.decisions, vec!["Ship it.".to_string()]);
+        assert_eq!(facts.action_items.len(), 1);
+        assert_eq!(facts.action_items[0].owner, "Jane");
+        assert_eq!(facts.action_items[0].description, "do the thing");
+        // The two session scalars are the real meeting/chat divergence.
+        assert_eq!(facts.duration_seconds, None);
+        assert_eq!(facts.speaker_count, None);
+    }
+
+    #[test]
+    fn a_chat_note_never_reads_its_source_as_a_transcript() {
+        let kb = tempdir().unwrap();
+        // Real, readable transcript JSONL — but behind a `chats/` source. If the
+        // type gate were dropped, `session_metrics` would parse this happily and
+        // report `Some(30)` / `Some(1)`, so this fails loudly rather than
+        // silently agreeing with an unparseable file.
+        let rel = write_session_at(
+            kb.path(),
+            "chats/session.jsonl",
+            &[segment(0, Channel::You, 0, 30_000)],
+        );
+        let source = Source::parse(&rel).unwrap();
+
+        let facts = derive_meeting_facts(
+            "n_chat01",
+            NoteType::Chat,
+            "2026-07-09",
+            &source,
+            "",
+            kb.path(),
+        );
+        assert_eq!(facts.duration_seconds, None);
+        assert_eq!(facts.speaker_count, None);
+
+        // Same bytes, same path, typed as a meeting: the read does happen. This
+        // is what proves the assertions above are the gate and not the fixture.
+        let as_meeting = derive_meeting_facts(
+            "n_mtg01",
+            NoteType::Meeting,
+            "2026-07-09",
+            &source,
+            "",
+            kb.path(),
+        );
+        assert_eq!(as_meeting.duration_seconds, Some(30));
+        assert_eq!(as_meeting.speaker_count, Some(1));
     }
 }

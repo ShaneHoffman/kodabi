@@ -64,8 +64,8 @@
         "owner": { "type": "string", "description": "Who owns it (e.g. \"you\" or a person's name)." },
         "due_date": { "oneOf": [ { "$ref": "#/$defs/IsoDate" }, { "type": "null" } ], "description": "Due date, or null if none." },
         "status": { "$ref": "#/$defs/ActionItemStatus" },
-        "source": { "$ref": "#/$defs/NoteRef", "description": "The meeting note this item was extracted from." },
-        "extracted_date": { "oneOf": [ { "$ref": "#/$defs/IsoDate" }, { "type": "null" } ], "description": "Date the item was extracted (usually the meeting date)." }
+        "source": { "$ref": "#/$defs/NoteRef", "description": "The note this item was extracted from (a meeting or a chat)." },
+        "extracted_date": { "oneOf": [ { "$ref": "#/$defs/IsoDate" }, { "type": "null" } ], "description": "Date the item was extracted (usually the source note's date)." }
       },
       "description": "An extracted action / outstanding item linked to its source note."
     }

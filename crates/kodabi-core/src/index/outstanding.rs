@@ -7,6 +7,12 @@
 //! is purely the read side, joining those rows to `notes` for the project scope
 //! and the source `NoteRef`.
 //!
+//! The join carries **no `notes.type` predicate**, deliberately: a commitment is
+//! a commitment whether it was made in a meeting or in a chat, so chat-sourced
+//! items surface here beside meeting-sourced ones (FOUNDING_DOC §3.6, "chats are
+//! documents too"). Which types produce rows at all is decided once, upstream, by
+//! [`crate::meeting::derives_facts`] — not a second time here.
+//!
 //! # Status is filtered in SQL and rendered in Rust
 //!
 //! `open`/`overdue` are derived, never stored, so both the `WHERE` clause and
@@ -589,6 +595,22 @@ mod tests {
         }
     }
 
+    /// A chat note carrying items. Both session scalars are `None`, as
+    /// `meeting::derive_meeting_facts` guarantees for a chat.
+    fn chat(id: &str, project: Option<&str>, items: Vec<ActionItemFact>) -> IndexedNote {
+        IndexedNote {
+            note_type: NoteType::Chat,
+            source: format!("chats/{id}.jsonl"),
+            meeting: Some(MeetingFacts {
+                duration_seconds: None,
+                speaker_count: None,
+                decisions: vec![],
+                action_items: items,
+            }),
+            ..meeting(id, project, vec![])
+        }
+    }
+
     /// Three notes across a project subtree, the Inbox, and a sibling project.
     fn seeded() -> NoteIndex {
         let mut index = NoteIndex::open_in_memory().unwrap();
@@ -675,6 +697,38 @@ mod tests {
         assert_eq!(results.summary.overdue, 4);
         assert_eq!(results.summary.done, 0);
         assert_eq!(results.page.total_estimate, Some(6));
+    }
+
+    /// The join deliberately carries no `notes.type` predicate: a commitment made
+    /// in a chat is as real as one made in a meeting (FOUNDING_DOC §3.6). This is
+    /// the guard against someone "tidying" the read side by adding one.
+    #[test]
+    fn chat_sourced_items_surface_beside_meeting_sourced_ones() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        index
+            .upsert_note(&meeting(
+                "n_mtg001",
+                Some("Growth"),
+                vec![item("a_mtg001", "You", Some("2026-07-02"), false)],
+            ))
+            .unwrap();
+        index
+            .upsert_note(&chat(
+                "n_cht001",
+                Some("Growth"),
+                vec![item("a_cht001", "Jane", Some("2026-07-01"), false)],
+            ))
+            .unwrap();
+
+        let results = index
+            .list_outstanding_items(&OutstandingParams::default(), today())
+            .unwrap();
+
+        // Interleaved by due date, not segregated by note type: the chat's
+        // earlier item leads.
+        assert_eq!(ids(&results), ["a_cht001", "a_mtg001"]);
+        assert_eq!(results.items[0].source.id, "n_cht001");
+        assert_eq!(results.summary.overdue, 2);
     }
 
     #[test]

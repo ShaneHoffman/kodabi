@@ -113,8 +113,8 @@ pub fn reconcile(
                 _ => {
                     // Derive meeting facts only on the write path — reading the
                     // session JSONL is real I/O, and the fast path above must
-                    // stay free of it. `meeting_facts_for` is `None` for a
-                    // non-meeting note.
+                    // stay free of it. `meeting_facts_for` is `None` for a type
+                    // that carries no facts (`meeting::derives_facts`).
                     indexed.meeting = crate::meeting::meeting_facts_for(&listed.note, vault_root);
                     index.upsert_note(&indexed)?;
                     report.upserted += 1;
@@ -145,17 +145,18 @@ pub fn reconcile(
     Ok(report)
 }
 
-/// Derives and stores meeting facts for every meeting note the index has not
-/// backfilled yet, returning how many were filled. The meeting-facts counterpart
-/// to the caller's embedding backfill (`note_ids_missing_embeddings` then
-/// `reconcile_missing`): the v3 migration adds the meeting tables empty, and
-/// `reconcile`'s fast path skips an unchanged note, so existing meeting notes
-/// carry no facts until this runs.
+/// Derives and stores meeting facts for every fact-carrying note (meeting or
+/// chat, per `meeting::derives_facts`) the index has not backfilled yet,
+/// returning how many were filled. The meeting-facts counterpart to the caller's
+/// embedding backfill (`note_ids_missing_embeddings` then `reconcile_missing`):
+/// the v3 migration adds the meeting tables empty, and `reconcile`'s fast path
+/// skips an unchanged note, so existing notes carry no facts until this runs.
 ///
-/// Works from the stored row (`body`, `source`, `date`) plus the session file —
-/// it never re-reads the `.md`. A row that vanished between the scan and now, or
-/// whose stored `source` no longer parses, is skipped. Like `reconcile`, this is
-/// rows-only and holds no embedder.
+/// Works from the stored row (`body`, `source`, `date`, `type`) plus the session
+/// file — it never re-reads the `.md`. A row that vanished between the scan and
+/// now, or whose stored `source` no longer parses, is skipped. Like `reconcile`,
+/// this is rows-only and holds no embedder. A chat is body-parse only: its type
+/// suppresses the session read (see `meeting::derive_meeting_facts`).
 pub fn reconcile_missing_meeting_facts(
     vault_root: &Path,
     index: &mut NoteIndex,
@@ -169,7 +170,12 @@ pub fn reconcile_missing_meeting_facts(
             continue;
         };
         let facts = crate::meeting::derive_meeting_facts(
-            &row.id, &row.date, &source, &row.body, vault_root,
+            &row.id,
+            row.note_type.into(),
+            &row.date,
+            &source,
+            &row.body,
+            vault_root,
         );
         index.set_meeting_facts(&row.id, Some(&facts))?;
         backfilled += 1;
@@ -368,6 +374,68 @@ mod tests {
         assert_eq!(items[0].due_date.as_deref(), Some("2026-07-15"));
 
         // And the note is no longer missing, so a second backfill is a no-op.
+        assert!(index.note_ids_missing_meeting_facts().unwrap().is_empty());
+        assert_eq!(
+            reconcile_missing_meeting_facts(vault, &mut index).unwrap(),
+            0
+        );
+    }
+
+    /// The chat leg of the backfill. Same work list, same derive, but the type
+    /// suppresses the session read — so a chat converges on its body alone, and
+    /// the two scalars stay `None` even though its `source` is a readable path.
+    #[test]
+    fn backfill_fills_a_chat_notes_facts_from_its_body_alone() {
+        let dir = tempdir().unwrap();
+        let vault = dir.path();
+        // A real chat transcript at the note's `source`, so the assertions below
+        // reflect the type gate rather than a missing file.
+        let rel = "chats/session.jsonl";
+        std::fs::create_dir_all(vault.join("chats")).unwrap();
+        std::fs::write(
+            vault.join(rel),
+            "{\"type\":\"meta\",\"session_id\":\"s1\"}\n",
+        )
+        .unwrap();
+
+        let note = Note::new(
+            NoteId::parse("n_chat01").unwrap(),
+            NoteType::Chat,
+            Routing::Routed {
+                project: "Growth".to_string(),
+                confidence: 0.9,
+            },
+            "2026-07-10",
+            Vec::<Tag>::new(),
+            Source::parse(rel).unwrap(),
+            "## Decisions\n\n- Ship it\n\n## Action items\n\n- [ ] Jane to send the memo by 2026-07-15.",
+        )
+        .unwrap();
+        let indexed = IndexedNote::from_note(&note, "Chat", "Growth/chat.md");
+
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        index.upsert_note(&indexed).unwrap();
+
+        assert_eq!(
+            index.note_ids_missing_meeting_facts().unwrap(),
+            vec!["n_chat01".to_string()]
+        );
+
+        assert_eq!(
+            reconcile_missing_meeting_facts(vault, &mut index).unwrap(),
+            1
+        );
+
+        let facts = index.get_meeting_facts("n_chat01").unwrap().unwrap();
+        assert_eq!(facts.decisions, vec!["Ship it"]);
+        assert_eq!(facts.duration_seconds, None);
+        assert_eq!(facts.speaker_count, None);
+        let items = index.get_action_items("n_chat01").unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].owner, "Jane");
+        assert_eq!(items[0].due_date.as_deref(), Some("2026-07-15"));
+
+        // Converged: the row exists, so a second pass is a no-op.
         assert!(index.note_ids_missing_meeting_facts().unwrap().is_empty());
         assert_eq!(
             reconcile_missing_meeting_facts(vault, &mut index).unwrap(),

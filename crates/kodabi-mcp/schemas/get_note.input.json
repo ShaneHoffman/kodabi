@@ -6,7 +6,7 @@
   "properties": {
     "id": { "$ref": "#/$defs/NoteId", "description": "Stable id of the note to read." },
     "include_body": { "type": "boolean", "default": true, "description": "Include the full distilled markdown body. Set false for metadata + decisions + action items only." },
-    "include_action_items": { "type": "boolean", "default": true, "description": "Include extracted action items (meetings only)." }
+    "include_action_items": { "type": "boolean", "default": true, "description": "Include extracted action items (meeting and chat notes carry them)." }
   },
   "$defs": {
     "NoteId": {
