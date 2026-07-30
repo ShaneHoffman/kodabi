@@ -78,41 +78,22 @@
   animation: listening-breathe var(--dur-glow) var(--ease-breath) infinite;
 }
 
+/* The scale is multiplied by `--move` (design/tokens.css), so under reduced
+   motion both stops land on scale(1) and the halo keeps breathing in opacity
+   alone: still, in the sense that matters, but not dead. That is why this file
+   needs no reduced-motion rule of its own any more. The two it used to carry
+   existed only to undo the app-wide 1ms floor, which collapsed the animation's
+   DURATION and left the glow resting wherever the cycle happened to be — and
+   which the in-app switch did not even reach, because this file shipped with
+   only the media-query branch. Gating the amplitude removes both failures. */
 @keyframes listening-breathe {
   0%,
   100% {
     opacity: 0.4;
-    transform: scale(0.85);
+    transform: scale(calc(1 - 0.15 * var(--move)));
   }
   50% {
     opacity: 0.8;
-    transform: scale(1.15);
+    transform: scale(calc(1 + 0.15 * var(--move)));
   }
-}
-
-/* Reduced motion settles the glow to a still, mid-strength halo rather than
-   removing it. The green carries the recording state, and a blank dot would
-   imply a privacy the user does not have — never let reduced motion remove
-   information (docs/DESIGN_SYSTEM.md §4). */
-@media (prefers-reduced-motion: reduce) {
-  .listening__glow {
-    animation: none;
-    opacity: 0.6;
-    transform: none;
-  }
-}
-
-/* The same floor, reached from Settings → Appearance instead of from the OS
-   (src/reduceMotion.ts). Stated separately because a plain selector and an
-   @media block cannot share a rule.
-
-   Without it the in-app switch fell through to the app-wide 1ms floor in
-   src/index.css, which collapses the animation's DURATION but leaves the
-   glow resting whereever the keyframes' 0% happens to put it — not at the
-   still, mid-strength halo this rule exists to specify. Two of the three
-   animated components were missing this branch; QuickCapture.css had it. */
-:root[data-reduce-motion="on"] .listening__glow {
-  animation: none;
-  opacity: 0.6;
-  transform: none;
 }

@@ -134,6 +134,48 @@ function scan(
 
 const sheets = styleSheets(join(ROOT, "src")).filter((f) => f !== TOKENS);
 
+/**
+ * The properties whose transition is MOVEMENT rather than a change of value.
+ * One list, so the two motion checks below cannot drift apart.
+ *
+ * `all` is here so a future `transition: all var(--dur-quick)` trips the check
+ * rather than silently gating nothing.
+ */
+const MOVEMENT =
+  "transform|translate|rotate|scale|width|height|top|right|bottom|left|inset|" +
+  "grid-template-rows|grid-template-columns|all";
+
+/**
+ * Each `@keyframes` / `@starting-style` body in `css`, with the line its head
+ * sits on. Found by brace counting, because these at-rules nest a whole rule
+ * inside them and `scan()` is line-based — it cannot see a block at all.
+ */
+function atRuleBlocks(css: string, head: RegExp): { body: string; line: number }[] {
+  const blocks: { body: string; line: number }[] = [];
+  const finder = new RegExp(head.source, "g");
+  let match = finder.exec(css);
+  while (match !== null) {
+    const open = css.indexOf("{", match.index);
+    if (open === -1) break;
+    let depth = 0;
+    let end = open;
+    for (let index = open; index < css.length; index++) {
+      if (css[index] === "{") depth++;
+      else if (css[index] === "}" && --depth === 0) {
+        end = index;
+        break;
+      }
+    }
+    blocks.push({
+      body: css.slice(open + 1, end),
+      line: css.slice(0, match.index).split(/\r?\n/).length,
+    });
+    finder.lastIndex = end;
+    match = finder.exec(css);
+  }
+  return blocks;
+}
+
 /** The semantic tokens every theme block must map. Named explicitly rather
  * than matched by prefix, so the Layer-1 `--lift-day` / `--lift-night`
  * primitives that live alongside them aren't mistaken for semantic keys.
@@ -203,6 +245,93 @@ describe("design tokens are the single source of truth", () => {
     // is how the two surfaces that animate drifted apart before.
     const duration = /(?<![\w-])\d*\.?\d+m?s(?![\w-])/;
     expect(scan(sheets, duration)).toEqual([]);
+  });
+
+  /*
+   * The reduced-motion guards.
+   *
+   * Reduced motion is a token remap on `--move` (design/tokens.css), not an
+   * app-wide floor: movement is gated, colour and opacity keep their real
+   * timing. That split used to be prose in docs/DESIGN_SYSTEM.md §4, and it
+   * failed twice — a component shipped honouring only one of the two switches,
+   * and a *duration* floor was used where a resting *shape* was needed, which
+   * froze the spirit-mark's aura mid-drift. These four make it a gate.
+   */
+
+  it("gates every movement transition leg on --dur-move-*", () => {
+    // `stripVars` is OFF: this has to SEE the var() to know which duration the
+    // leg took, the same reason the font-family check turns it off. Line-scoped
+    // is enough for both real spellings — a single-line `transition: transform
+    // var(--dur-plane) …` and a multi-line shorthand with one leg per line each
+    // keep the property and its duration on one line. `joinContinuations` stays
+    // off, since with it on a leg's property could pair with the NEXT leg's
+    // duration and the check would pass on a file it should fail.
+    const movementLeg = new RegExp(
+      `(?<![\\w-])(?:${MOVEMENT})\\s+var\\(--dur-(?!move-)`,
+    );
+    expect(scan(sheets, movementLeg, { stripVars: false })).toEqual([]);
+  });
+
+  it("gates every keyframe and starting-style transform on --move", () => {
+    // BLOCK-scoped, not declaration-scoped, and that is the whole trick. Four
+    // transform stops in the app are correctly ungated: three that are already
+    // the identity (`scale(1)` at spirit-mark-breathe's rest, `rotate(0deg)` in
+    // both blob keyframes' `from`), where `calc(0 * var(--move))` would be a lie
+    // about why they are still; and `capture-bar`'s `scaleY(0.3)`, which is the
+    // height the bars REST at rather than a movement. A per-declaration check
+    // would need four escape hatches; a per-block check needs none and still
+    // catches the real failure, which is a block that moves something and never
+    // mentions the switch.
+    //
+    // `@starting-style` is in scope alongside `@keyframes` because that is
+    // where three of the app's four displacement literals live.
+    //
+    // What this deliberately cannot see: a displacement in a PLAIN rule, i.e.
+    // `.inbox__row--vanishing`'s `translateX(calc(-36px * var(--move)))`.
+    // Widening it to any literal-bearing `transform` costs five escape hatches
+    // on static geometry that is not motion at all (the checkbox tick, the
+    // editor toolbar's tail, an optical 1px nudge), which is a worse trade.
+    const moving = /(?<![\w-])(?:transform|translate|rotate|scale)\s*:/;
+    const offences: Offence[] = [];
+    for (const file of sheets) {
+      const raw = readFileSync(file, "utf8");
+      const blanked = withoutComments(raw);
+      const allowed = allowedLines(raw, blanked);
+      for (const block of atRuleBlocks(blanked, /@(?:keyframes\s+[\w-]+|starting-style)/)) {
+        if (!moving.test(block.body) || block.body.includes("var(--move)")) continue;
+        if (allowed[block.line - 1]) continue;
+        offences.push({
+          file: relative(ROOT, file),
+          line: block.line,
+          text: raw.split(/\r?\n/)[block.line - 1]?.trim() ?? "",
+        });
+      }
+    }
+    expect(offences).toEqual([]);
+  });
+
+  it("never gates an animation's duration", () => {
+    // The duration gate is for `transition` only. Zeroing an ANIMATION's
+    // duration is the shape of the recorded bug: it shortens the motion without
+    // restoring a resting shape, so the spirit-mark's lopsided aura lobes froze
+    // mid-drift. Animations are gated by amplitude, inside their own @keyframes.
+    //
+    // This would NOT have caught the original, which was a literal `1ms` sitting
+    // behind a `token-guard-allow`. No guard catches a deliberate escape hatch —
+    // that is why the hatch is noisy to type and greppable. What this does is
+    // stop the same mistake being made in the token vocabulary that replaced it.
+    const gatedAnimation = /animation(?:-duration)?\s*:[^;{]*var\(--dur-move-/;
+    expect(scan(sheets, gatedAnimation, { stripVars: false })).toEqual([]);
+  });
+
+  it("never smooth-scrolls", () => {
+    // The old app-wide floor carried `scroll-behavior: auto !important` on `*`,
+    // and it gated nothing: no stylesheet asks for `smooth`, and every
+    // scrollIntoView call passes only `{ block: "nearest" }`. Deleting an inert
+    // `!important` was right; leaving the claim unchecked was not. If smooth
+    // scrolling ever arrives, the answer is a gate at that site, and this is
+    // what will force someone to think about it.
+    expect(scan(sheets, /scroll-behavior\s*:\s*smooth/)).toEqual([]);
   });
 
   it("declares no literal spacing outside design/tokens.css", () => {

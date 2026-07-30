@@ -7,9 +7,9 @@
 
    Nothing here redefines a value — design/tokens.css stays the single
    source of truth. This file documents the mapping, pulls in the shared
-   primitive recipes, and applies the three bits of global chrome
-   (scrollbars, text selection, reduced motion) that belong to no single
-   component.
+   primitive recipes, and applies the two bits of global chrome (scrollbars
+   and text selection) that belong to no single component. Reduced motion
+   used to be a third; it is now a token remap in design/tokens.css.
 
    What is deliberately NOT bridged: the Layer-4 geometry family
    (--gutter-*, --measure-*, --sidebar-*) and every elevation, edge and
@@ -180,41 +180,10 @@
   background-clip: padding-box;
 }
 
-/* Accessibility floor, app-wide: when the OS asks for reduced motion, nothing
-   animates or transitions by default. Components that need a *different*
-   reduced-motion resting state override this in their own CSS — the listening
-   dot keeps a still green dot rather than a blank one, because the green
-   carries the recording state and removing it would imply privacy that does
-   not exist. Never let reduced motion remove information. */
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    /* token-guard-allow: 1ms is the standard reduced-motion idiom, not a
-       duration choice — it collapses motion while still letting transitionend
-       and animationend fire, which `none` would suppress. Tokenising it would
-       imply it is tunable; it is not. */
-    animation-duration: 1ms !important;
-    animation-iteration-count: 1 !important;
-    /* token-guard-allow: as above. */
-    transition-duration: 1ms !important;
-    scroll-behavior: auto !important;
-  }
-}
-
-/* The same floor, reached from inside the app. Windows buries the OS setting
-   three levels into Accessibility, so Settings → Appearance offers its own
-   switch (src/reduceMotion.ts) and it lands here. Stated separately rather
-   than merged into the media query above: a plain selector and an @media
-   block cannot share a rule, and duplicating four declarations is cheaper
-   than making either one conditional. */
-:root[data-reduce-motion="on"] *,
-:root[data-reduce-motion="on"] *::before,
-:root[data-reduce-motion="on"] *::after {
-  /* token-guard-allow: the 1ms reduced-motion idiom, as above. */
-  animation-duration: 1ms !important;
-  animation-iteration-count: 1 !important;
-  /* token-guard-allow: as above. */
-  transition-duration: 1ms !important;
-  scroll-behavior: auto !important;
-}
+/* Reduced motion is NOT handled here. There used to be an app-wide floor on
+   `*` that collapsed every duration to 1ms, and it was the wrong shape twice
+   over: it threw away the colour and opacity half, which aids comprehension and
+   causes no vestibular trouble, and a duration floor cannot restore a resting
+   SHAPE, which is how the spirit-mark's aura once froze mid-drift. It is now a
+   token remap on `--move` in design/tokens.css, gating movement alone. See
+   docs/DESIGN_SYSTEM.md §4. */

@@ -131,6 +131,13 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   `no-restricted-syntax` block in `eslint.config.js` fails numeric spacing utilities (`p-3`) and
   arbitrary values (`text-[13px]`) in `className`. The escape hatch is a `token-guard-allow`
   comment, which must sit on the offending declaration or in the comment block directly above it.
+  **`designTokens.test.ts` also gates reduced motion**, which is a token remap on `--move` rather
+  than an app-wide floor: it fails a `transition` leg on a movement property (`transform`, `width`,
+  `grid-template-rows`, `all`, …) that took a bare `--dur-*` instead of `--dur-move-*`, an
+  `@keyframes` or `@starting-style` block that moves something without referencing `var(--move)`, a
+  `--dur-move-*` on an `animation` (gate animations by amplitude, never by duration), and any
+  `scroll-behavior: smooth`. See `docs/DESIGN_SYSTEM.md` §4 for which of the two gates a given site
+  needs.
   Off-scale per-view geometry is not an exception: it is named in Layer 4 of `design/tokens.css`
   (`--row-*`, `--lead-*`, `--palette-*`) and consumed from a co-located `Component.css`.
   `docs/DESIGN_SYSTEM.md` decides every visual question the tokens don't

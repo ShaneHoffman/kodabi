@@ -90,12 +90,17 @@ P1-5 to refine against real audio; the moodboard's `breathe` / `halo` keyframes 
 - **Living aura — a gentle undulation.** The aura is not a static glow: two soft, blurred layers
   slowly counter-rotate and morph their shape, so its edge quietly undulates — a living presence
   rather than a status light. Kept whisper-subtle so it *evokes* life without tipping into an
-  illustrated character; it freezes to a still, symmetric glow under reduced motion.
-- **Accessibility floor — reduced motion.** Under `prefers-reduced-motion: reduce`, all animation
-  stops and listening becomes a **still green mark** — still unmistakably on-air by the reserved
-  color and presence alone. This mirrors the locked behavior already in `design/moodboard.html`.
-  Degraded likewise settles to a still green mark; starting and reconnecting settle to a still ink
-  mark, their state carried by the text label the mark is always paired with.
+  illustrated character; under reduced motion the rotation stops and the two layers round out to a
+  still, symmetric glow.
+- **Accessibility floor — reduced motion.** Reduced motion means *fewer and gentler*, not none, so
+  under `prefers-reduced-motion: reduce` the mark **stops moving but stays alive**: the core no longer
+  swells, the aura no longer scales, and the counter-rotation stops and rounds out — while the halo
+  keeps its slow opacity breath, and starting / reconnecting keep their opacity pulse. What is gone is
+  every scale and rotation; what is kept is a signal that is still visibly *on*, because movement is
+  what causes vestibular trouble and a fade is not. Listening is unmistakably on-air by the reserved
+  color regardless; degraded likewise; starting and reconnecting stay ink, their state also carried by
+  the text label the mark is always paired with. The mechanism, and why a duration floor was the wrong
+  instrument here, is [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §4.
 
 ---
 
@@ -123,9 +128,12 @@ washi (light) and sumi (dark) grounds without redrawing.
 - **Not color alone.** The on-air read is backed by *motion* (breathing) and *presence* (the aura)
   in addition to the reserved green, and in the running app it is expected to pair with a text label
   and reflect real capture state (P1-5). It never depends solely on distinguishing one hue.
-- **Reduced motion** degrades to a still green mark for the recording states (above) — never a
-  blank or an ambiguous state. Starting and reconnecting settle to a still ink mark, since neither
-  is recording; their state is carried by the text label the mark is always paired with.
+- **Reduced motion** takes away the *movement*, not the mark: the recording states keep the reserved
+  green and the aura keeps a slow opacity breath, so the read is never a blank or an ambiguous state.
+  Starting and reconnecting stay ink and keep their opacity pulse, since neither is recording; their
+  state is also carried by the text label the mark is always paired with. Nothing scales or rotates.
+  Note this weakens the *motion* leg of "not color alone" above without removing it, which is why the
+  text-label pairing is load-bearing rather than a nicety.
 - **Contrast & theme.** The green shifts by theme (`#5F7E5A` light / `#86A67E` dark — indicative,
   P0-4 locks the final value) so it stays legible on washi and on night grounds.
 - **Unambiguous by construction.** One reserved color, spent on exactly one meaning — audio is

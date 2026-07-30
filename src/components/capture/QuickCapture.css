@@ -119,15 +119,17 @@
   background: var(--accent-dot);
 }
 
+/* Scale gated by `--move`, so reduced motion keeps the opacity breath and drops
+   the growth. Mirrors `listening-breathe` in ListeningIndicator.css. */
 @keyframes capture-breathe {
   0%,
   100% {
     opacity: 0.4;
-    transform: scale(0.85);
+    transform: scale(calc(1 - 0.15 * var(--move)));
   }
   50% {
     opacity: 0.8;
-    transform: scale(1.15);
+    transform: scale(calc(1 + 0.15 * var(--move)));
   }
 }
 
@@ -169,13 +171,17 @@
   animation-delay: var(--delay-wave-4);
 }
 
+/* The rise is gated by `--move`: at 0 the peak collapses onto the 0.3 floor the
+   bars rest at, so the waveform holds still. The override below then lifts the
+   LIVE bars to a mid height, because a flat line and a quiet line must not look
+   the same. */
 @keyframes capture-bar {
   0%,
   100% {
     transform: scaleY(0.3);
   }
   50% {
-    transform: scaleY(1);
+    transform: scaleY(calc(0.3 + 0.7 * var(--move)));
   }
 }
 
@@ -202,48 +208,35 @@
   }
 }
 
-/* Reduced motion settles the glow and the bars rather than removing them: the
-   green carries the recording state, and a still waveform still says sound is
-   being captured. The quiet bars need their own override in both branches, and
-   each restates `transform` rather than inheriting one: in the media query the
-   base `.capture__bar` rule is the weaker selector, but under
-   `:root[data-reduce-motion="on"]` it is the *stronger* one (`:root` and the
-   attribute both score as classes), so an override that named only the
-   animation would leave the quiet bars at the live settled height. They stay
-   ink and at their floor either way, with the label carrying the state. Never
-   let reduced motion remove information (docs/DESIGN_SYSTEM.md §4). */
+/* The one reduced-motion rule left in this file, and it is a resting HEIGHT
+   rather than a duration — which is why `--move` cannot express it. Gating the
+   amplitude alone would settle the live bars onto the same 0.3 floor the quiet
+   bars sit at, and the difference between those two heights is the difference
+   between "sound is arriving" and "engaged but nothing is reaching disk". Never
+   let reduced motion remove information (docs/DESIGN_SYSTEM.md §4).
+
+   `:not(--quiet)` is load-bearing, not tidiness: without it this selector ties
+   with `.capture__wave--quiet .capture__bar` at two classes and wins on source
+   order, dragging the quiet bars up to the live height. Scoped this way the
+   quiet bars need no rule at all — their own base rule already holds them at
+   the floor in ink, on an opacity-only pulse that reduced motion is happy to
+   keep. That also retires the specificity inversion this block used to have to
+   reason about: it no longer matters that `:root[data-reduce-motion="on"]`
+   reorders the two.
+
+   Two rules, because a media query and a plain selector cannot share one. */
 @media (prefers-reduced-motion: reduce) {
-  .capture__glow {
-    animation: none;
-    opacity: 0.6;
-    transform: none;
-  }
-  .capture__bar {
+  .capture__wave:not(.capture__wave--quiet) .capture__bar {
     animation: none;
     transform: scaleY(0.6);
   }
-  .capture__wave--quiet .capture__bar {
-    animation: none;
-    transform: scaleY(0.3);
-    opacity: 0.6;
-  }
 }
 
-:root[data-reduce-motion="on"] .capture__glow {
-  animation: none;
-  opacity: 0.6;
-  transform: none;
-}
-
-:root[data-reduce-motion="on"] .capture__bar {
+:root[data-reduce-motion="on"]
+  .capture__wave:not(.capture__wave--quiet)
+  .capture__bar {
   animation: none;
   transform: scaleY(0.6);
-}
-
-:root[data-reduce-motion="on"] .capture__wave--quiet .capture__bar {
-  animation: none;
-  transform: scaleY(0.3);
-  opacity: 0.6;
 }
 
 /* ---------- the stop button ----------

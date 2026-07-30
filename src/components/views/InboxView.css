@@ -37,7 +37,7 @@
   height: 100%;
   border-radius: var(--radius-track);
   background: var(--text-faint);
-  transition: width var(--dur-settle) var(--ease-standard);
+  transition: width var(--dur-move-settle) var(--ease-standard);
 }
 
 /* ---------- rows ----------
@@ -164,15 +164,18 @@
   animation: inbox-pipeline-breathe var(--dur-glow) var(--ease-breath) infinite;
 }
 
+/* The scale is multiplied by `--move`, so under reduced motion both stops land
+   on scale(1) and the dot breathes in opacity alone. Gating the DURATION
+   instead would freeze it wherever the cycle happened to be. */
 @keyframes inbox-pipeline-breathe {
   0%,
   100% {
     opacity: 0.38;
-    transform: scale(0.9);
+    transform: scale(calc(1 - 0.1 * var(--move)));
   }
   50% {
     opacity: 0.82;
-    transform: scale(1.05);
+    transform: scale(calc(1 + 0.05 * var(--move)));
   }
 }
 
@@ -192,13 +195,13 @@
 .inbox__row--placeholder {
   transition:
     opacity var(--dur-enter) var(--ease-standard),
-    transform var(--dur-enter) var(--ease-standard);
+    transform var(--dur-move-enter) var(--ease-standard);
 }
 
 @starting-style {
   .inbox__row--placeholder {
     opacity: 0;
-    transform: translateY(-16px);
+    transform: translateY(calc(-16px * var(--move)));
   }
 }
 
@@ -212,42 +215,21 @@
 .inbox__row--placeholder.inbox__row--vanishing {
   transition:
     opacity var(--dur-settle) var(--ease-standard),
-    transform var(--dur-settle) var(--ease-standard);
+    transform var(--dur-move-settle) var(--ease-standard);
   opacity: 0;
-  transform: translateX(-36px);
+  /* The travel is gated at the VALUE, not just the duration: this is an exit,
+     so the displaced state really paints, and a zero-duration transition to it
+     would teleport the row 36px left in one frame rather than not move it. The
+     `@starting-style` entrances above are the opposite case — an unrun
+     transition means their start style never paints at all. */
+  transform: translateX(calc(-36px * var(--move)));
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .inbox__row--placeholder {
-    transition: none;
-  }
-  .inbox__row--placeholder.inbox__row--vanishing {
-    transition: none;
-    opacity: 0;
-  }
-  .inbox__pipeline-dot {
-    animation: none;
-    opacity: 0.6;
-  }
-  .inbox__pipeline-stack > span {
-    transition: none;
-  }
-}
-
-:root[data-reduce-motion="on"] .inbox__row--placeholder {
-  transition: none;
-}
-:root[data-reduce-motion="on"] .inbox__row--placeholder.inbox__row--vanishing {
-  transition: none;
-  opacity: 0;
-}
-:root[data-reduce-motion="on"] .inbox__pipeline-dot {
-  animation: none;
-  opacity: 0.6;
-}
-:root[data-reduce-motion="on"] .inbox__pipeline-stack > span {
-  transition: none;
-}
+/* No reduced-motion rules in this file. Every displacement above is gated at
+   its own value by `--move` (design/tokens.css), so under reduce the placeholder
+   fades in without dropping, the vanish fades without travelling, and the dot
+   keeps its breath in opacity alone — which is the half worth keeping, since it
+   is what says the pipeline is still working. */
 
 /* ---------- fill-in ----------
    The other resolution: filed to the Inbox itself. Nothing vanishes — the
@@ -264,7 +246,7 @@
 .inbox__rowShell--fresh > .inbox__rowActions {
   transition:
     opacity var(--dur-plane) var(--ease-standard),
-    transform var(--dur-plane) var(--ease-standard);
+    transform var(--dur-move-plane) var(--ease-standard);
 }
 
 @starting-style {
@@ -274,19 +256,8 @@
 
   .inbox__rowShell--fresh > .inbox__rowActions {
     opacity: 0;
-    transform: translateX(6px);
+    transform: translateX(calc(6px * var(--move)));
   }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .inbox__rowShell--fresh > .inbox__row,
-  .inbox__rowShell--fresh > .inbox__rowActions {
-    transition: none;
-  }
-}
-:root[data-reduce-motion="on"] .inbox__rowShell--fresh > .inbox__row,
-:root[data-reduce-motion="on"] .inbox__rowShell--fresh > .inbox__rowActions {
-  transition: none;
 }
 
 /* ---------- the filed toast ----------
@@ -316,13 +287,13 @@
      on the way out — nothing moves the toast once it has arrived. */
   transition:
     opacity var(--dur-settle) var(--ease-standard),
-    transform var(--dur-settle) var(--ease-standard);
+    transform var(--dur-move-settle) var(--ease-standard);
 }
 
 @starting-style {
   .inbox__toast {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(calc(8px * var(--move)));
   }
 }
 
@@ -335,33 +306,21 @@
   font-size: var(--fs-label);
 }
 
-/* This takes the toast's fade-OUT with it, which the app-wide 1ms floor had
-   already collapsed to nothing anyway: the toast now disappears at the start
-   of its fade window rather than the end. That is the better answer under
-   reduced motion, and the dwell timer that owns the window is unchanged. */
-@media (prefers-reduced-motion: reduce) {
-  .inbox__toast {
-    transition: none;
-  }
-}
-:root[data-reduce-motion="on"] .inbox__toast {
-  transition: none;
-}
-
 /* ---------- leaving ----------
    A filed note collapses its height and fades as it goes, covering the gap
    until the vault-changed refetch drops it from the list — the minimal form
    of the distill-and-route motion (FOUNDING_DOC §4). The pipeline
    placeholder plays the same collapse alongside its own vanish above.
 
-   Reduced motion is handled app-wide in src/index.css (transitions collapse
-   to 1ms), so there is no media query here: the row simply disappears on
-   refetch, which is the correct fallback. */
+   The collapse is a layout property, so it takes a gated duration: under
+   reduced motion the track closes at once and the row simply disappears on
+   refetch, which is the correct fallback. The opacity leg keeps its real
+   timing, which costs nothing here — a 0fr track clips its child anyway. */
 .inbox__slot {
   display: grid;
   grid-template-rows: 1fr;
   transition:
-    grid-template-rows var(--dur-settle) var(--ease-standard),
+    grid-template-rows var(--dur-move-settle) var(--ease-standard),
     opacity var(--dur-settle) var(--ease-standard);
 }
 
