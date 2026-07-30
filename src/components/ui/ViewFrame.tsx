@@ -35,7 +35,8 @@ import "./ViewFrame.css";
  *
  * `doc` and `search` render no header of their own: their headers are a
  * genuinely different shape (a back link and its own actions; a query field)
- * and arrive as children.
+ * and arrive as children. Those two therefore accept neither `action` nor
+ * `summary` — both are type errors there rather than silent no-ops.
  */
 type Variant =
   | "queue"
@@ -52,12 +53,28 @@ type BaseProps = {
   eyebrow?: ReactNode;
   /** The view's name. On `queue` it leads the one-line masthead instead. */
   title?: ReactNode;
-  /** A single header-level action, right-aligned on the title's first line. */
-  action?: ReactNode;
   children: ReactNode;
 };
 
+/** The variants that draw no header at all, so nothing that belongs *to* a
+ * header can sit on them. `doc` and `search` supply their own instead. */
+type HeaderlessVariant = "doc" | "search";
+
 /**
+ * The two props that only exist where there is a header to hold them.
+ *
+ * `action` is A SINGLE header-level action, right-aligned on the title's first
+ * line: the one thing the view is for, never a container for a toolbar. Which
+ * slot an action belongs in, and how many one surface may hold, is
+ * *Composition* in docs/UI_CONVENTIONS.md.
+ *
+ * On `doc` and `search` it is a TYPE ERROR. Those two draw no header, so
+ * `renderHeader`'s early return took the action down with it and reported
+ * nothing — and a view that draws its own header puts its own actions in it.
+ * (`eyebrow` and `title` stay legal there on purpose: they render an
+ * undesigned header rather than vanishing, which is a visible mistake, not a
+ * silent one.)
+ *
  * `summary` is only accepted by the variants that draw one.
  *
  * The line under the title — a workload sentence for a queue, a count for a
@@ -74,8 +91,13 @@ type BaseProps = {
  */
 type Props = BaseProps &
   (
-    | { variant: SummaryVariant; summary?: ReactNode }
-    | { variant: Exclude<Variant, SummaryVariant>; summary?: never }
+    | { variant: SummaryVariant; summary?: ReactNode; action?: ReactNode }
+    | {
+        variant: Exclude<Variant, SummaryVariant | HeaderlessVariant>;
+        summary?: never;
+        action?: ReactNode;
+      }
+    | { variant: HeaderlessVariant; summary?: never; action?: never }
   );
 
 /** Each variant's title step. A config panel and a note must not open at the
@@ -159,8 +181,13 @@ export function ViewFrame({
     // Named, so it is a real region landmark. A bare <section> has no
     // accessible name and is not exposed as one at all, which left the window
     // with a main, an aside and a nav and nothing identifying the view inside
-    // them. `title` when there is one, `eyebrow` when the view draws its own
-    // header instead (doc, search).
+    // them. `title` when there is one, else `eyebrow`.
+    //
+    // KNOWN GAP, deliberately not fixed here: `doc` and `search` pass neither,
+    // so NoteEditorView's and SearchView's sections are still unnamed — the
+    // exact failure above, for the two views that draw their own header. The
+    // fix is a decision of its own (a `label` prop, an aria-label on the view's
+    // own <header>, or accept it), not a side effect of the action contract.
     <section
       aria-label={landmarkName(title) ?? landmarkName(eyebrow)}
       className={`view view--${variant}`}
@@ -187,6 +214,9 @@ function renderHeader({
   action,
   summary,
 }: Omit<Props, "children">) {
+  // No header content, no header. This used to swallow an `action` too, which
+  // is why `action` is now a type error on the two variants that never pass
+  // either of these.
   if (!eyebrow && !title) return null;
 
   const eyebrowNode = eyebrow && (

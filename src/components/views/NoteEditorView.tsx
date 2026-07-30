@@ -114,8 +114,14 @@ function OpenedNote({ noteId, project }: { noteId: string; project: string }) {
  * reading ramp — the one screen in the app with no list on it, and the only
  * one whose type is sized for reading rather than for scanning.
  *
- * The chrome is two quiet text buttons and a mono meta line. Nothing else,
- * because everything else would be competing with the note.
+ * The chrome is three places and no more: the way out on its own line, two
+ * quiet text buttons over a mono meta line, and — on a note distilled from a
+ * captured session — one disclosure below the body. Four controls at rest,
+ * which is exactly the ceiling in docs/UI_CONVENTIONS.md, *Composition*. This
+ * used to claim "two quiet text buttons and a mono meta line, nothing else"
+ * while shipping a reveal action and a transcript toggle further down the
+ * column, which is the drift a count is for: a reader should not have to sweep
+ * a document to learn what they can do to it.
  */
 function ReadNote({
   note,

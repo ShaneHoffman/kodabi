@@ -98,4 +98,35 @@ describe("ViewFrame", () => {
     );
     expect(screen.queryByText("ignored")).not.toBeInTheDocument();
   });
+
+  it("refuses a header action on a variant that draws no header", () => {
+    // `doc` and `search` draw their own header, so a header-level action has
+    // nowhere to sit: `renderHeader` returned before it ever reached one and
+    // reported nothing. Same treatment as `summary` above — the caller finds
+    // out at the call site instead of wondering where the button went.
+    // Children are supplied so `action` is the ONLY thing wrong here.
+    const rejected = (
+      // @ts-expect-error `action` is not part of the `doc` variant's props.
+      <ViewFrame variant="doc" action={<button type="button">Edit</button>}>
+        <p>note</p>
+      </ViewFrame>
+    );
+    expect(rejected).toBeTruthy();
+
+    // And the render half, which is where the old silent drop happened: with
+    // no `eyebrow` and no `title`, `renderHeader` returns before it reaches
+    // the action, so nothing is drawn. Be precise about what that does NOT
+    // lock — unlike `summary`, whose render is gated on `SUMMARY_CLASS[variant]`
+    // being non-empty, `action` has no variant check at all. The guard is
+    // `!eyebrow && !title`, so an untyped caller that passed a title as well
+    // WOULD get the action, in a header nobody designed. The type above is the
+    // enforcement here, not this render (docs/UI_CONVENTIONS.md says the same).
+    render(
+      // @ts-expect-error same, for the render half.
+      <ViewFrame variant="doc" action={<button type="button">Edit</button>}>
+        <p>note</p>
+      </ViewFrame>,
+    );
+    expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+  });
 });
