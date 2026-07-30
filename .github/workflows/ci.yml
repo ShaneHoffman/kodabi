@@ -14,6 +14,16 @@ concurrency:
 permissions:
   contents: read
 
+# READ BEFORE RENAMING OR SPLITTING A JOB. Every `name:` below doubles as a
+# *required status check context* in the repo's "main protection" ruleset.
+# GitHub matches those contexts by name and treats a missing one as permanently
+# pending, so a rename here with no matching ruleset edit blocks every PR to
+# main on a check that can never report. Splitting a job is the sharper trap:
+# the new half reports under a name the ruleset does not require, so whatever
+# moved into it quietly stops gating merges. The ruleset lives outside the tree
+# (`gh api repos/ShaneHoffman/kodabi/rulesets`), so it can never flip
+# atomically with this file — plan the two-step, and see the same hazard from
+# the other direction in docs/UI_E2E_HARNESS.md's promotion criteria.
 jobs:
   # dist/ is the one thing every Rust job actually waits for: src-tauri embeds
   # it at compile time via tauri::generate_context!, so it must exist before
@@ -402,11 +412,10 @@ jobs:
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
           fi
-      - name: Install Rust (stable) + clippy
+      - name: Install Rust (stable)
+        # No clippy component: the shipping-config clippy leg lives in app-dev.
         if: steps.changed.outputs.run == 'true'
         uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy
       - uses: Swatinem/rust-cache@v2
         if: steps.changed.outputs.run == 'true'
       - name: Download dist/ (built by the dist job)
