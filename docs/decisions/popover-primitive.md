@@ -378,6 +378,80 @@ While that ticket is open, `Select.css`'s comment justifying right-alignment as 
 workaround becomes false and should be rewritten — with real flipping, right-alignment reverts to a
 free design choice rather than a necessity.
 
+**Resolved 2026-07-30**, on board card **#126** — the ticket this document calls #109 throughout,
+filed as `feat/select-origin-entrance`. The §4 bullet was scoped to the window plane as recommended, with a
+paragraph naming the dropdown plane's distinction and stating that it licenses nothing above itself;
+the five-surface enumeration stays the operative list rather than the plane's tokens, because both
+toasts wear `--lift-menu` while stacking at `--layer-overlay`.
+
+**The reduced-motion mechanism changed under this branch, mid-flight, and the entrance was rebuilt
+onto the new one rather than shipped against the old.** The first commit here gated the entrance with
+a component-level `transition: none` under both switches, reasoning from the app-wide
+`transition-duration: 1ms !important` floor that `index.css` carried at the time — measured directly:
+that floor never touches `transition-property`, so the plain override won the cascade outright and the
+transition stopped existing rather than being shortened. That was correct for the floor as it stood.
+While this branch was in Code Review, `main` merged #108 (`fix: gate reduced motion on movement, not
+duration`, `c8825cf`) and deleted the floor entirely, replacing it with a `--move` token remap
+(`design/tokens.css`) plus two independent gates — a `--dur-move-*` duration for a load-bearing end
+state, and `calc(<value> * var(--move))` amplitude for a decorative one. Merging that into this branch
+made the component-level override both unnecessary and, per `src/designTokens.test.ts`'s new movement
+gates, a scan failure waiting to happen (the transform leg's `--dur-plane` and the starting-style's
+bare `scale(0.96)` both trip the new checks). `Select.css` was rewritten onto the new mechanism instead
+of patched around it: the transform leg now takes `--dur-move-plane`, the scale is amplitude-gated as
+`calc(1 - 0.04 * var(--move))` — inverted from the usual `calc(<value> * var(--move))` shape because a
+scale's identity is `1`, not `0` — and the two component-level reduced-motion rules were deleted
+outright, since gating both legs at their own declaration is what #108 made sufficient everywhere else
+in `src/`.
+
+The first caveat in §6 is carried as a comment in `Select.css` rather than worked around. **The second
+is not settled, and is larger than §6 measured** — see §8.2. The third is settled as
+**entrance-only** — the list is
+conditionally rendered, so closing unmounts it, and keeping a listbox mounted at all times to
+transition `display` would cost the ARIA wiring and ten "the list is gone" assertions in
+`Select.test.tsx` for a 180ms fade-out. §5.2's condition was used verbatim, including `anchor-scope`.
+The right-alignment comment was rewritten in the same change.
+
+### 8.2 The second §6 caveat is bigger than "~10px right", and is still open
+
+§6 measured the wrapper-to-trigger shift as `dxRight −10, dyTop 3` → `dxRight 0, dyTop 8`, and the
+resolution above first accepted it uncompensated on that reading. **That measurement only covers the
+call sites whose wrapper shrink-wraps its trigger.** `.settings__control` is `justify-self: end` on an
+`auto` grid track and both Settings selects pass `hideLabel`, so there the wrapper *is* the trigger
+(measured: wrapper 175.8 wide, trigger 175.8, list right edge identical before and after). The Inbox
+token sits in a flex `.inbox__rowActions`, likewise shrink-wrapped, which is where the 10px/5px pill
+bleed is the whole delta.
+
+**`ConsentNudge` is not that shape.** It passes a visible `label`, and `.ui-select` is a stretched
+flex item in the dialog's `flex flex-col` panel, so the wrapper spans the panel's content box while
+the trigger (`self-start w-auto`) sits at its left edge. Measured against the built CSS in
+Edg/150.0.4078.105 at 1440×900, resting (post-entrance):
+
+| Box | left | right | width |
+| --- | --- | --- | --- |
+| `.ui-overlay__panel` | 428 | 988 | 560 |
+| `.ui-select` (wrapper) | 452 | 964 | 512 |
+| `.ui-select__trigger` | 452 | 627.8 | 175.8 |
+| `.ui-select__list` (anchored) | **374.8** | 627.8 | 253.1 |
+
+The menu right-aligns to the trigger, and because it is 253px wide against a 176px trigger pinned to
+the panel's left content edge, its left edge lands **53px outside the dialog panel, over the scrim.**
+The previous stance right-aligned to the 512px wrapper and put the same list at left 710.9, well
+inside. So the shift at this call site is 336px, not 10px, and it is visible as a menu hanging off the
+side of a 560px centred modal.
+
+CSS anchor positioning cannot fix this on its own: `position-try-fallbacks` reacts to overflow of the
+*containing block* (the viewport, or the scrim, which is `fixed inset-0` and the same size), and the
+menu is nowhere near overflowing that. It never learns the panel exists. Three remedies, and the
+choice is a design call rather than a review one:
+
+1. **Accept it**, and say so in `docs/UI_CONVENTIONS.md` with the real number instead of "~10px".
+2. **Move `anchor-name` to `.ui-select`** (the wrapper). One line; restores the pre-change geometry at
+   every call site exactly, keeps the flip, the clipping escape and the entrance, and costs only the
+   token variant's 10px/5px pill-bleed gain — which §6 itself called "arguably a fix" rather than a
+   requirement. It does contradict "anchored to its own trigger" as the stated framing.
+3. **Restructure the consent dialog's retention row** so its trigger is not a narrow box at the left
+   of a wide panel.
+
 ## 9. Does adopting it in one control imply adopting it everywhere?
 
 The ticket asks this directly. **No — and the reason is structural: the app has exactly one anchored

@@ -105,10 +105,25 @@
    in front of the whole view, not lifted within it. Lighter fill, hairline
    ring and a big soft shadow, all carried by --lift-menu.
 
-   Right-aligned: every trigger that opens one sits at the right edge of its
-   row (a settings control, a queue row's file token), and a menu that grew
-   rightward from a right-aligned anchor would run off the pane. */
+   Right-aligned, and now by choice rather than by necessity: every trigger
+   that opens one sits at the right edge of its row (a settings control, a
+   queue row's file token), so a menu sharing that edge reads as hanging off
+   the control that opened it rather than floating beside it. It used to be the
+   collision handling as well — a menu growing rightward from a right-aligned
+   anchor would have run off the pane — and the anchored block at the foot of
+   this file takes that job over. The alignment now stands on the only thing it
+   was ever actually the better-looking answer to.
+
+   The stance stated here is the FALLBACK, and it is deliberately identical to
+   what the list used to wear as utilities in Select.tsx (`absolute right-0
+   top-full mt-2xs`). It moved into CSS so the @supports block below has a base
+   branch to override: a WebView2 without anchor positioning renders exactly
+   what shipped before this change, entrance included. */
 .ui-select__list {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: var(--space-2xs);
   background: var(--overlay);
   box-shadow: var(--lift-menu);
   border-radius: var(--radius-pill);
@@ -138,4 +153,105 @@
 /* The chosen value reads through weight and a check — value, never hue. */
 .ui-select__option.is-selected {
   font-weight: var(--fw-medium);
+}
+
+/* ---------- anchored to its own trigger ----------
+   CSS anchor positioning, which buys three things this control had no answer
+   for: the menu flips above when there is no room below it, it escapes a
+   clipping ancestor with no portal, and it can scale out of the edge it hangs
+   off. Kodabi ships against one evergreen Chromium (WebView2), which is what
+   makes any of it available — but no floor is declared in
+   src-tauri/tauri.conf.json and Tauri v2's own documented floor is 125, which
+   is below anchor-scope's 131. So the whole layer is guarded and the rule above
+   stays the base branch (docs/decisions/popover-primitive.md §5.1).
+
+   The guard tests anchor-scope on purpose, not only the two properties this
+   block obviously needs. Without anchor-scope every element sharing an
+   anchor-name resolves to the LAST one in source order, and this control
+   renders twice on the settings page and once per Inbox row — so between 125
+   and 131 a guard asking only about anchor-name would PASS and hang every Inbox
+   menu off the bottom row's trigger. Silently, which is the worst way to fail
+   (§5.4). anchor-scope carries the highest floor of the three, so testing it
+   alone would do; all three are named rather than resting on that version
+   ordering holding. */
+@supports (anchor-scope: --x) and (anchor-name: --x) and (position-area: block-end) {
+  .ui-select {
+    anchor-scope: --ui-select-trigger;
+  }
+
+  .ui-select__trigger {
+    anchor-name: --ui-select-trigger;
+  }
+
+  /* `fixed` is what escapes the clipping ancestor; position-anchor keeps the
+     menu glued to the trigger regardless. That escape is contingent rather than
+     free — any ancestor carrying transform, filter, backdrop-filter,
+     perspective, contain, will-change on one of those, or container-type
+     becomes the containing block, and in a harness one of them cost
+     hit-testing rather than layout. That list of seven is the standing grep
+     (§6), and it is not empty today: `.ui-overlay` carries
+     backdrop-filter (Overlay.css), so ConsentNudge's menu is contained by the
+     scrim rather than the viewport, and `.inbox__rowActions` — the token
+     trigger's own parent — carries a transform for the length of a fresh row's
+     entrance (InboxView.css). Neither moves the menu, because the scrim is
+     `fixed inset-0` and no menu is open mid-entrance; both are why the grep is
+     worth re-running rather than trusted as clean.
+
+     The two `auto`s release the base branch's own insets, which position-area
+     has no say over. The offset turns symmetric with them — margin-block, not
+     margin-top — because the menu can sit above the trigger now.
+
+     transform-origin is the one thing a flip cannot carry: @position-try
+     accepts insets, margins, sizing, self-alignment, position-anchor and
+     position-area, and not this (w3c/csswg-drafts#11666). A flipped menu
+     therefore still scales from its top edge where it should scale from its
+     bottom — ~9px over --measure-menu at scale(0.96), on the rarer of the two
+     placements. Accepted rather than papered over with a class toggled from JS,
+     which is the thing @starting-style exists to avoid
+     (docs/DESIGN_SYSTEM.md §4). */
+  .ui-select__list {
+    position: fixed;
+    position-anchor: --ui-select-trigger;
+    position-area: block-end span-inline-start;
+    position-try-fallbacks: flip-block;
+    position-visibility: anchors-visible;
+    inset-inline-end: auto;
+    inset-block-start: auto;
+    margin-block: var(--space-2xs);
+    transform-origin: top right;
+    transition:
+      opacity var(--dur-plane) var(--ease-standard),
+      transform var(--dur-move-plane) var(--ease-standard);
+  }
+
+  /* The entrance: the menu grows out of the corner it hangs off instead of
+     fading in place, so what it says is WHERE IT CAME FROM. Never from
+     scale(0) — nothing arrives from nothing. It is licensed on the PLANE, not
+     on the surface: a dropdown is opened by a click on its own trigger, not
+     summoned by a hotkey a hundred times a day, which is what the ban on an
+     overlay entrance was written about (docs/DESIGN_SYSTEM.md §4).
+
+     Reduced motion needs no rule of its own here (docs/DESIGN_SYSTEM.md §4,
+     "Reduced motion"): the transform leg above already takes --dur-move-plane,
+     and the scale is amplitude-gated right here. The formula is NOT the
+     `calc(<value> * var(--move))` shape every displacement in the app uses —
+     it can't be, because a displacement's identity is 0 and a scale's is 1, so
+     zeroing --move must land on 1, not 0. `calc(1 - 0.04 * var(--move))` reads
+     as "shrink by 4% only while --move is 1". Opacity keeps its plain
+     --dur-plane on both legs, same as the chat answer's entrance
+     (ChatView.css) — under reduce the menu still fades in over 180ms and
+     simply never scales.
+
+     There is deliberately NO exit. The list is conditionally rendered, so
+     closing unmounts it — which is what the ARIA wiring, both bridge hooks and
+     every "the list is gone" assertion in Select.test.tsx rest on — and a
+     fade-out would mean keeping a listbox mounted at all times just to
+     transition `display`. A dismissal is allowed to be instant; every other
+     overlay in the app closes that way. */
+  @starting-style {
+    .ui-select__list {
+      opacity: 0;
+      transform: scale(calc(1 - 0.04 * var(--move)));
+    }
+  }
 }

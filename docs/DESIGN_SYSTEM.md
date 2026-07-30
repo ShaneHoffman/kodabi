@@ -362,7 +362,7 @@ disappears before the user can see the result — quick capture flashes its dest
 | Token | Value | Spent on |
 | --- | --- | --- |
 | `--dur-quick` | 150ms | Hover and colour changes on a control |
-| `--dur-plane` | 180ms | A row rising onto the raised plane; the toggle knob's travel; a fresh-filed row's fill-in |
+| `--dur-plane` | 180ms | A row rising onto the raised plane; a `Select` menu's fade-in as it opens; the toggle knob's travel; a fresh-filed row's fill-in |
 | `--dur-settle` | 200ms | A row leaving or entering a list; the Inbox placeholder's vanish-left; the filed toast's entrance and fade; the chat answer's arrival |
 | `--dur-enter` | 280ms | The Inbox placeholder arriving at the top of the queue |
 | `--dur-wake` | 450ms | The spirit-mark waking and settling |
@@ -378,7 +378,7 @@ is movement rather than value. They are the duration half of the reduced-motion 
 
 | Token | Wraps | Spent on |
 | --- | --- | --- |
-| `--dur-move-plane` | `--dur-plane` | The toggle knob's travel; the fresh-filed row's picker sliding in |
+| `--dur-move-plane` | `--dur-plane` | The toggle knob's travel; the fresh-filed row's picker sliding in; a `Select` menu's scale-in |
 | `--dur-move-settle` | `--dur-settle` | The vanish-left; the filed toast's rise; the chat answer's rise; `.inbox__slot`'s collapse; `.inbox__fill`'s width |
 | `--dur-move-enter` | `--dur-enter` | The Inbox placeholder's drop from above |
 | `--dur-move-wake` | `--dur-wake` | The spirit-mark core's transform easing back to rest |
@@ -422,16 +422,37 @@ such blocks (prose, tool line, more prose), and each one is a real arrival, so e
 entrance — what stays banned is a *stagger*, not a second arrival. See the list-of-unknown-length
 bullet below for the boundary this sits inside.
 
+And **the `Select` menu's entrance** (`--dur-plane`): the open list grows from `scale(0.96)` out of the
+trigger's own corner rather than fading in place, so what the motion says is *where it came from*. The
+`transform-origin` is the anchored placement's own geometry, not a flourish laid over it — which is why
+the entrance and the positioning are one rule block in `Select.css` and not two. Never from `scale(0)`:
+nothing arrives from nothing. Note what is *not* animating: the exit. The list is conditionally
+rendered, so closing unmounts it, and a dismissal is allowed to be instant.
+
 **Never animates:**
 
 - **A data refresh.** `vault:changed` refetches constantly. Animating it would make the app twitch
   whenever a file changed on disk.
-- **Overlay entrance, with one sanctioned exception.** The palette, the consent nudge, quick
-  capture, the capture pill, and `CaptureToast` all appear instantly — showing the surface *is* the
-  transition, and a hotkey surface that fades in feels slow. The Inbox's filed toast (`InboxView.tsx`)
-  is the exception: it is not a surface arriving cold, it is the second half of a gesture already in
-  motion (the placeholder's vanish, immediately before it), so its own short entrance (`--dur-settle`)
-  reads as one continuous motion rather than two unrelated ones.
+- **A window-plane overlay's entrance, with one sanctioned exception.** The palette, the consent
+  nudge, quick capture, the capture pill, and `CaptureToast` all appear instantly — showing the
+  surface *is* the transition, and a hotkey surface that fades in feels slow. The Inbox's filed toast
+  (`InboxView.tsx`) is the exception: it is not a surface arriving cold, it is the second half of a
+  gesture already in motion (the placeholder's vanish, immediately before it), so its own short
+  entrance (`--dur-settle`) reads as one continuous motion rather than two unrelated ones.
+
+  **This bullet is about the window plane, which is what every surface it names is.** §5's
+  **Overlay — window** (`--lift-palette` / `--lift-capture`, at `--layer-overlay`) is where a
+  *summoned* surface lives, and summoned is the whole rationale: the user asked for it from a
+  keystroke, reflexively, and the surface appearing *is* the answer. **Overlay — dropdown**
+  (`--lift-menu` / `--lift-toolbar`, at `--layer-dropdown`) is not that. A `Select` menu is not
+  summoned — it is opened by a click on its own trigger, it belongs to that trigger, and it is opened
+  occasionally rather than a hundred times a day — so it scales out of the trigger's edge as it opens
+  (`--dur-plane`, `Select.css`). That **scopes** this ban rather than widening the licence: the
+  palette and quick capture stay instant on the reason above, not by omission, and the enumeration
+  stays the operative list rather than the plane names, because both toasts wear `--lift-menu` while
+  stacking at `--layer-overlay` — keying the rule to tokens alone would read as reclassifying
+  `CaptureToast` onto the dropdown plane, which is the one thing this rewording must not do. One
+  dropdown has earned one entrance, on the same terms this section applies to everything else.
 - **Layout.** Nothing reflows under the user.
 - **Anything on a list of unknown length.** Staggered row animations are decoration. The
   placeholder's arrival, a fresh-filed row's fill-in, and the chat answer's arrival are each a
@@ -520,6 +541,11 @@ and Tauri v2's own documented floor is 125, both above it. (CSS anchor positioni
 case that *does* need gating.) Measured inside the running app's WebView2 rather than read off the
 registry — [`docs/decisions/popover-primitive.md`](decisions/popover-primitive.md) §5.1.
 
+**The one `@supports` block in `src/` is not a counterexample.** `Select.css` nests its menu entrance
+inside an anchor-positioning guard because the transform it animates is only meaningful against the
+anchored placement — the origin *is* that placement's geometry — so an engine below 131 gets the old
+static menu, entrance included. The guard is for the geometry, not for `@starting-style`.
+
 ### Reduced motion
 
 **Reduced motion means fewer and gentler, not none.** What causes vestibular trouble is movement and
@@ -575,11 +601,14 @@ component that only consumes tokens gets both switches for free — but the two 
 above each state themselves twice. The in-app switch can only *add* reduction, never overrule an OS
 request for it: `reduceMotion.ts` has no "off" value, only set-or-remove.
 
-**Two things not to re-flag.** `SettingsView.css`'s `translateX(var(--toggle-travel))` must *not* be
+**Three things not to re-flag.** `SettingsView.css`'s `translateX(var(--toggle-travel))` must *not* be
 amplitude-gated — that would park the knob at "off" and destroy the control's state readout; it is
-duration-gated only. And `@xterm/xterm`'s stylesheet carries two `opacity` transitions on the
+duration-gated only. `@xterm/xterm`'s stylesheet carries two `opacity` transitions on the
 scroll-slider that now run under reduced motion. That is correct under this section, and it is
-third-party CSS that cannot be tokenised anyway.
+third-party CSS that cannot be tokenised anyway. And `Select.css`'s menu entrance amplitude-gates a
+*scale*, not a displacement, so it is not `calc(<value> * var(--move))` — a displacement's identity
+is `0`, a scale's is `1`, so it reads `calc(1 - 0.04 * var(--move))` instead: shrink by 4% while
+`--move` is `1`, land back on the identity when it is `0`. Same gate, inverted arithmetic.
 
 **What went wrong before, recorded so the shape of the mistake stays legible.** The old floor
 collapsed every duration to 1ms app-wide, and it failed in both directions. It threw away the

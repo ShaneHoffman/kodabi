@@ -309,6 +309,26 @@ Escape closes and returns focus to the trigger, click-outside closes, and typing
 open list sits on the **overlay** plane (`--overlay` + `--lift-menu`, at `--layer-dropdown`); the active
 row is the value wash (never the reserved green).
 
+The list is **anchored to its trigger** with CSS anchor positioning: it hangs off the trigger's right
+edge, flips above when there is no room below, escapes a clipping ancestor with no portal
+(`position: fixed`), and scales up out of that edge as it opens (`--dur-plane`). All of it sits behind an
+`@supports` test for `anchor-scope`, whose base branch is the plain `position: absolute` stance the list
+used to carry as utilities — so a WebView2 below 131 renders exactly what shipped before, entrance
+included. There is no exit transition: closing unmounts the list. See
+[`docs/decisions/popover-primitive.md`](decisions/popover-primitive.md) §5–§6 for the measurements and
+the two caveats a reader will otherwise re-discover.
+
+The second of those caveats has a **live consequence worth knowing before you place a `Select`**: the
+menu anchors to the *trigger's* border box, not to the wrapper. Where the wrapper shrink-wraps its
+trigger — both Settings rows (`justify-self: end` on an `auto` track, `hideLabel`) and the Inbox token
+(a flex row) — the two boxes coincide and nothing moved but the token's 10px/5px pill bleed. Where the
+wrapper *stretches* and the trigger is narrow, they do not: `ConsentNudge` passes a visible label into
+a `flex flex-col` dialog panel, so its 253px menu right-aligns to a 176px trigger pinned at the panel's
+left edge and overhangs the panel by 53px onto the scrim. **A `Select` whose wrapper is wider than its
+trigger will hang its menu off the trigger, wherever that lands.** This is unresolved, not a documented
+intent: [`popover-primitive.md`](decisions/popover-primitive.md) §8.2 has the measurements and the
+three candidate remedies.
+
 ```tsx
 import { Select } from "./ui/Select";
 
@@ -352,7 +372,8 @@ choosing** — that is the idea the two triggers split on.
 - **`token`** rests as quiet mono text with **no box at all** — transparent, `font-mono text-cap
   tracking-token text-text-faint`, and no chevron. It takes a soft `--token-active` pill (at
   `--radius-item`) under the pointer and holds it while open, stepping its colour to `--text`; the pill
-  bleeds past the text on a negative margin so nothing in the row shifts when it appears. Its arrow *is*
+  bleeds past the text on a negative margin so nothing in the row shifts when it appears — and its menu
+  anchors to that bled box, so the menu hangs off the pill's edge rather than the text's. Its arrow *is*
   the state — `→` at rest, `↓` the moment the menu is under it — and its menu rows render mono, because
   what they list are paths.
 
