@@ -354,14 +354,34 @@ export function SettingsView() {
     }
   };
 
-  const apply = async (nextKind: RetentionKind, nextDays: number) => {
+  // `acknowledge` is the day field saying "this commit was mine", and only it
+  // ever passes it. "Saved." is indented under that field, and an indent is a
+  // claim about what a line belongs to (docs/UI_CONVENTIONS.md, *A dependent
+  // setting is grouped, not just listed*) — so the line has to be raised by the
+  // control it points at. The Select raising it too meant that merely choosing
+  // "Keep for a number of days" printed "Saved." under a day count nobody had
+  // touched, which is the group's own rule broken by its own screen.
+  //
+  // The Select needs no acknowledgement of its own, and per docs/DESIGN_SYSTEM.md
+  // §3 it may not have one: a control that visibly moved is its own
+  // confirmation, which is why Theme has none either. The day field is the
+  // exception that whole state exists for — it persists on Enter or blur and
+  // the number it holds looks identical saved or unsaved, so it is the one
+  // control here whose success is not self-evident.
+  const apply = async (
+    nextKind: RetentionKind,
+    nextDays: number,
+    acknowledge = false,
+  ) => {
     setSaveError(null);
     setSavingRetention(true);
     try {
       const updated = await setRetentionPolicy(buildRetentionPolicy(nextKind, nextDays));
       setSettings(updated);
-      setDaysSaved(true);
-      setDaysSavedTick((tick) => tick + 1);
+      if (acknowledge) {
+        setDaysSaved(true);
+        setDaysSavedTick((tick) => tick + 1);
+      }
     } catch (err) {
       setSaveError(String(err));
       setDaysSaved(false);
@@ -552,10 +572,10 @@ export function SettingsView() {
                       onKeyDown={(event) => {
                         if (event.key === "Enter") {
                           event.preventDefault();
-                          void apply("keep_days", Number(days));
+                          void apply("keep_days", Number(days), true);
                         }
                       }}
-                      onBlur={() => apply("keep_days", Number(days))}
+                      onBlur={() => apply("keep_days", Number(days), true)}
                     />
                   </Row>
                 )}

@@ -198,6 +198,44 @@ describe("SettingsView retention", () => {
 
     expect(screen.queryByRole("spinbutton", { name: "Days" })).not.toBeInTheDocument();
   });
+
+  it("acknowledges the day field's own commit, at the day field's indent", async () => {
+    const user = userEvent.setup();
+    const stored: Settings = { ...DEFAULTS, retention: { policy: "keep_days", days: 45 } };
+    onCommand("set_retention_policy", () => stored);
+    await renderSeeded({ ...DEFAULTS, retention: { policy: "keep_days", days: 30 } });
+
+    const field = screen.getByRole("spinbutton", { name: "Days" });
+    await user.clear(field);
+    await user.type(field, "45{Enter}");
+
+    expect(invoke).toHaveBeenCalledWith("set_retention_policy", {
+      policy: { policy: "keep_days", days: 45 },
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("Saved.");
+  });
+
+  it("does not acknowledge the day field when it was the policy that changed", async () => {
+    // The line is indented under the day count, and an indent claims the line
+    // belongs to that field. Choosing a policy used to print "Saved." there
+    // without the field having been touched — the group's own rule broken by
+    // its own screen. The Select is committed-on-select, so the value it now
+    // shows is its confirmation, exactly as Theme's is.
+    const user = userEvent.setup();
+    const stored: Settings = { ...DEFAULTS, retention: { policy: "keep_days", days: 30 } };
+    onCommand("set_retention_policy", () => stored);
+    await renderSeeded();
+
+    await user.click(screen.getByRole("combobox", { name: /Retention/ }));
+    await user.click(screen.getByRole("option", { name: "Keep for a number of days" }));
+
+    // The policy did persist, and the day row it reveals is the visible result.
+    expect(invoke).toHaveBeenCalledWith("set_retention_policy", {
+      policy: { policy: "keep_days", days: 30 },
+    });
+    expect(await screen.findByRole("spinbutton", { name: "Days" })).toBeInTheDocument();
+    expect(screen.queryByText("Saved.")).not.toBeInTheDocument();
+  });
 });
 
 describe("SettingsView tabs", () => {
