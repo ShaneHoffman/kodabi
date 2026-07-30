@@ -1,11 +1,15 @@
 /**
  * The user's own "reduce motion" preference, on top of the OS one.
  *
- * `prefers-reduced-motion` is already honoured app-wide (src/index.css), but
- * that is the OS setting and Windows buries it three levels into Accessibility.
- * This is the in-app override: someone who wants the listening glow and the
- * caret to hold still should be able to say so here, without changing a
- * system-wide preference for every other app they own.
+ * `prefers-reduced-motion` is already honoured (design/tokens.css sets `--move:
+ * 0` from it), but that is the OS setting and Windows buries it three levels
+ * into Accessibility. This is the in-app override: someone who wants the app to
+ * stop sliding and growing things should be able to say so here, without
+ * changing a system-wide preference for every other app they own.
+ *
+ * The attribute this sets is the second of the switch's two branches, and it can
+ * only ever ADD reduction: there is no "off" value, so it cannot overrule an OS
+ * request for reduced motion. See docs/DESIGN_SYSTEM.md §4.
  *
  * It lives in localStorage rather than the settings store because it is a
  * per-device display preference with no backend field yet — the same class of

@@ -51,6 +51,11 @@
      @media (prefers-color-scheme: dark) :root:not([data-theme="light"]) → dark when the OS asks
      :root[data-theme="dark"]                               → dark, forced
      :root[data-theme="light"]                              → light, forced (wins over OS dark)
+
+   Two further blocks sit just above those, and they are NOT theme blocks: they
+   set `--move: 0` — the motion switch, likewise reached two ways (the OS
+   setting and Settings → Appearance). They are kept out of the four on purpose,
+   so "four theme blocks" stays true of the palette.
    ============================================================ */
 
 :root {
@@ -371,6 +376,42 @@
   --dur-breath: 4200ms; /* the capture mark's breath cycle */
   --dur-drift: 15000ms; /* aura blob A */
   --dur-drift-slow: 21000ms; /* aura blob B (counter-rotating) */
+
+  /* ---------- the motion switch ----------
+     Reduced motion means fewer and GENTLER, not none. Movement and position
+     are what cause vestibular trouble; a colour or opacity change does not,
+     and it is often the thing carrying the meaning. So one switch turns off
+     movement alone, and the two blocks at the end of this file are the only
+     place it is thrown.
+
+     `--move` is unitless and is 1 or 0 — a switch, not a slider. A value in
+     between would produce half-motion nobody asked for.
+
+     It drives two INDEPENDENT gates, and neither alone covers every case:
+
+       1. The four durations below, for a `transition` leg whose property is
+          transform / position / layout. Under reduce the leg's duration is 0s,
+          so no transition runs and the end state is reached at once — which is
+          what a leg whose destination is load-bearing needs (the toggle knob's
+          on-position, a row's collapsing height).
+       2. The displacement ITSELF, written `calc(<value> * var(--move))` at the
+          site. That is what a *decorative* displacement needs, because zeroing
+          the duration of a displaced end state does not stop the movement — it
+          makes the element teleport there in one frame.
+
+     THE DURATION GATE IS FOR `transition` ONLY. Never put a --dur-move-* on an
+     `animation`: collapsing an animation's duration is precisely the bug this
+     replaced. It shortens the motion without restoring a resting SHAPE, which
+     is how the spirit-mark's lopsided aura lobes once froze mid-drift. An
+     animation is gated by amplitude, in its own @keyframes.
+
+     A new movement leg adds its --dur-move-* here beside the base duration it
+     wraps; src/designTokens.test.ts fails a movement leg that took a bare one. */
+  --move: 1;
+  --dur-move-plane: calc(var(--dur-plane) * var(--move));
+  --dur-move-settle: calc(var(--dur-settle) * var(--move));
+  --dur-move-enter: calc(var(--dur-enter) * var(--move));
+  --dur-move-wake: calc(var(--dur-wake) * var(--move));
 
   /* the waveform's four bars are one animation started at four offsets, so
      the group reads as a voice rather than a metronome. The order is
@@ -710,6 +751,45 @@
   --ansi-bright-magenta: var(--k-ansi-bright-magenta-day);
   --ansi-bright-cyan: var(--k-ansi-bright-cyan-day);
   --ansi-bright-white: var(--k-ansi-bright-white-day);
+}
+
+/* ============================================================
+   The motion switch, reached two ways
+
+   `--move: 0` turns off every translate, scale and rotate in the app while
+   colour and opacity keep their real timing. The switch's own note in Layer 3
+   says what the two gates are; docs/DESIGN_SYSTEM.md §4 says what is left
+   animating under reduced motion, and why.
+
+   These are NOT theme blocks, despite the shape — they map no semantic token,
+   which is what keeps "four theme blocks" true both above and in
+   src/designTokens.test.ts. They sit here, between the scales and the theme
+   mappings, because `--move` is a Layer 3 value: it belongs beside the motion
+   scale it gates, not among the palettes, and this keeps the four theme blocks
+   contiguous below.
+
+   ORDER MATTERS. The media block is a plain `:root`, the same specificity as
+   the default that sets `--move: 1`, so it wins only by coming after it. The
+   attribute block is one selector stronger and would win from anywhere; it is
+   stated separately because a media query and a plain selector cannot share a
+   rule, and it is the in-app switch (Settings → Appearance,
+   src/reduceMotion.ts) rather than the OS one.
+
+   The media block is deliberately an unconditional `:root`, NOT the
+   `:not([data-reduce-motion="off"])` form the dark-theme block below uses.
+   There is no "off" value: reduceMotion.ts only ever sets or removes the
+   attribute, so the in-app switch can add reduction but never overrule an OS
+   request for it. Giving users that escape would mean mirroring the theme
+   pattern here and teaching reduceMotion.ts a third state.
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --move: 0;
+  }
+}
+
+:root[data-reduce-motion="on"] {
+  --move: 0;
 }
 
 /* ---------- Layer 2 — dark (night sumi): auto when the OS asks and not forced light ---------- */

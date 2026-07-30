@@ -634,8 +634,9 @@ export function SettingsView() {
                 />
               </Row>
               <SubLabel>
-                Holds the listening glow and the caret still. Your OS setting
-                already does this; here it applies to Kodabi alone.
+                Nothing slides, grows or spins. Fades and colour changes stay.
+                Your OS setting already does this; here it applies to Kodabi
+                alone.
               </SubLabel>
 
               {appearanceError && (

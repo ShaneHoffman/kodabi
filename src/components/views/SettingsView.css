@@ -207,9 +207,14 @@
   height: var(--toggle-knob);
   border-radius: 50%;
   background: var(--text);
-  transition: transform var(--dur-plane) var(--ease-standard);
+  transition: transform var(--dur-move-plane) var(--ease-standard);
 }
 
+/* The knob's travel is gated by DURATION only — never by `--move` at the value,
+   the way a decorative displacement is. Where the knob sits IS the control's
+   state readout, so under reduced motion it must still get there; it just gets
+   there at once instead of gliding. (The track's colour change keeps its real
+   timing, so the switch still reads as having been thrown.) */
 .settings__toggle[aria-checked="true"] .settings__knob {
   transform: translateX(var(--toggle-travel));
 }
