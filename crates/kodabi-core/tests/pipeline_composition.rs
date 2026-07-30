@@ -505,7 +505,11 @@ fn a_meeting_transcript_distills_routes_writes_indexes_and_searches_back() {
 /// `Meta` header, turns in both voices, one tool call, one denied permission,
 /// one failed turn. `started_at` is written at seconds precision because that is
 /// what `chat_cmds` writes, so a chat note's `date` is whole-second by
-/// construction — unlike the meeting leg's.
+/// construction — unlike the meeting leg's. That is load-bearing, not incidental:
+/// it is the only thing that tells a `Meta`-derived date apart from a
+/// filename-derived one, since both encode the same instant (see the `.000`
+/// assertion below). Rendering it at millisecond precision would silently retire
+/// that check.
 ///
 /// The two prose turns together run past `chat::MIN_CHAT_DISTILL_CHARS` (400)
 /// with room to spare. That gate is not decoration here: it is what decides
@@ -657,6 +661,18 @@ fn a_chat_transcript_distills_routes_writes_indexes_and_searches_back() {
     assert_eq!(
         date_utc, "2026-07-14T14:03:35Z",
         "the ordering key should be the instant the chat started"
+    );
+    // Which of the two recovery paths ran is legible only in the sub-second
+    // field, and only on `date` itself: `normalize_date_to_utc` truncates to the
+    // second, so the key above reads the same either way. The filename this
+    // transcript was written under carries the capture instant's `.123`
+    // milliseconds; the `Meta` record carries whole seconds. A `.000` here can
+    // therefore only have come from `Meta` — and the seconds digit is stable
+    // under every real zone offset, which are whole minutes.
+    assert!(
+        note.date.contains(":35.000"),
+        "the date should come from the Meta record, not the filename: {}",
+        note.date
     );
 
     // --- write → index → search ------------------------------------------
