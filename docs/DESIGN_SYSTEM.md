@@ -372,6 +372,20 @@ disappears before the user can see the result — quick capture flashes its dest
 | `--dur-breath` | 4200ms | The listening breath cycle |
 | `--dur-drift` / `--dur-drift-slow` | 15s / 21s | The aura's counter-rotating blobs |
 
+And four **gated** durations, each `calc(<base> * var(--move))`, for a transition leg whose property
+is movement rather than value. They are the duration half of the reduced-motion remap below;
+`--move` is `1` normally and `0` under reduced motion, so the leg becomes instant.
+
+| Token | Wraps | Spent on |
+| --- | --- | --- |
+| `--dur-move-plane` | `--dur-plane` | The toggle knob's travel; the fresh-filed row's picker sliding in |
+| `--dur-move-settle` | `--dur-settle` | The vanish-left; the filed toast's rise; the chat answer's rise; `.inbox__slot`'s collapse; `.inbox__fill`'s width |
+| `--dur-move-enter` | `--dur-enter` | The Inbox placeholder's drop from above |
+| `--dur-move-wake` | `--dur-wake` | The spirit-mark core's transform easing back to rest |
+
+There is deliberately no `--dur-move-quick`: nothing at 150ms moves. A new movement leg adds its
+`--dur-move-*` in `tokens.css` beside the base duration it wraps.
+
 `--delay-wave-1` … `--delay-wave-4` (0 / 220 / 420 / 140ms) are the four offsets one waveform
 animation is started at, so the group reads as a voice rather than a metronome. The order is
 deliberately not monotonic.
@@ -494,10 +508,12 @@ makes it a transition — and a transition is interruptible, where an `animation
 regardless. Anything with a third state or a repeat (the breath, the waveform, the starting pulse)
 stays an animation. The dividing line is now checkable: **every `@keyframes` left in `src/` loops.**
 
-**Reduced motion is one declaration, and still two rules.** `transition: none` in both blocks (see
-below) leaves `@starting-style` with nothing to run from, so the element paints at rest. The
-app-wide 1ms floor is not enough on its own — it shortens the entrance rather than removing it, so a
-frame of the starting style can still show.
+**Reduced motion needs no rule of its own on an entrance.** Write the displacement in the
+`@starting-style` block as `calc(<value> * var(--move))` and take `--dur-move-*` on the transform
+leg, and under reduced motion the start and end states are identical, so there is nothing for the
+transition to run: the element paints at rest and still fades in over the real duration. That fade
+is worth keeping — content appearing fully formed reads as breakage rather than as arriving, which
+is this section's whole warrant for spending motion in the first place. See below.
 
 **No `@supports` guard.** `@starting-style` is Chromium 117; the shipped WebView2 is 150.0.4078.105
 and Tauri v2's own documented floor is 125, both above it. (CSS anchor positioning, at 131, is the
@@ -506,24 +522,75 @@ registry — [`docs/decisions/popover-primitive.md`](decisions/popover-primitive
 
 ### Reduced motion
 
-`src/index.css` applies an app-wide floor: under `prefers-reduced-motion: reduce`, animations and
-transitions collapse to 1ms.
+**Reduced motion means fewer and gentler, not none.** What causes vestibular trouble is movement and
+position. A colour or opacity change causes none, and it is frequently the thing carrying the
+meaning, so it keeps its real timing. The rule is: **nothing translates, scales or rotates; nothing
+else changes.**
 
-A component needing a *different* reduced-motion resting state overrides it in its own CSS. The
-spirit-mark is the precedent and the reason the floor is 1ms rather than `none`: it must settle to a
-**still green mark**, because the green carries the recording state and a blank mark would imply
-privacy that does not exist. Never let reduced motion remove *information*.
+It is a token remap on **one switch**, `--move` in `design/tokens.css` — unitless, `1` or `0`, a
+switch rather than a slider. There is no app-wide floor and no `!important` on `*`.
 
-**An override is TWO rules, not one.** There are two ways into this state — the OS setting
+`--move` drives two **independent** gates, and neither alone covers every case:
+
+| Gate | What it looks like | When it is the right one |
+| --- | --- | --- |
+| **Duration** | `transform var(--dur-move-plane)` | The displaced end state is load-bearing and must still be *reached*, just instantly: the toggle knob's on-position, `.inbox__slot`'s collapsing track, `.inbox__fill`'s width. |
+| **Amplitude** | `translateX(calc(-36px * var(--move)))` | The displacement is decorative. Start and end become identical, so nothing *can* move. Also the only way to gate an animation. |
+
+**Zeroing a duration does not stop movement.** Where the displaced state really paints — an *exit*,
+like `.inbox__row--vanishing` — an instant transition to `translateX(-36px)` teleports the row 36px
+in one frame, which is worse than not moving. Gate the value. (An `@starting-style` *start* state is
+the opposite case: an unrun transition means it never paints at all. Both gates are applied at every
+displacement site anyway — every `@starting-style` and every exit — so the guards below need no
+exceptions there. The three duration-only sites are the ones in the Duration row above, where an
+amplitude gate would be actively wrong.)
+
+**Never put `--dur-move-*` on an `animation`.** Collapsing an animation's duration is the bug this
+replaced: it shortens the motion without restoring a resting **shape**. An animation is gated by
+amplitude, inside its own `@keyframes`, where multiplying each transform stop by `--move` makes both
+ends land on the identity. That also keeps the half worth keeping: a keyframe block that animates
+opacity *and* transform loses only the transform, so the listening glow, the capture glow, the
+spirit-mark's halo and the Inbox pipeline dot all stop growing and go on breathing. The
+starting/reconnecting pulse and the quiet waveform's pulse are opacity-only and are untouched.
+
+Never let reduced motion remove *information*. The green still means audio is reaching disk; a blank
+mark would imply a privacy the user does not have.
+
+**Two overrides survive, and both specify something no amplitude can express:**
+
+| Where | What it states | Why the switch cannot |
+| --- | --- | --- |
+| `SpiritMark.css`, the bloom's two pseudo-layers | `border-radius: 50%` (plus `animation: none` and `will-change: auto`) | The lobes carry a deliberately lopsided radius; drifting that lopsided blur is what makes the aura undulate. Stop the rotation and the skew is still there, sitting still. This is a resting **shape**. |
+| `QuickCapture.css`, the live waveform bars | `transform: scaleY(0.6)` | Amplitude alone settles them onto the same floor the *quiet* bars rest at, and the gap between those two heights is the difference between "sound is arriving" and "engaged, nothing reaching disk". This is **information**. |
+
+`QuickCapture`'s rule is scoped `.capture__wave:not(.capture__wave--quiet) .capture__bar`, and the
+`:not()` is load-bearing: without it the selector ties with `.capture__wave--quiet .capture__bar` at
+two classes and wins on source order, dragging the quiet bars up to the live height.
+
+**An override is still TWO rules, not one.** There are two ways into this state: the OS setting
 (`@media (prefers-reduced-motion: reduce)`) and Settings → Appearance, which sets
 `:root[data-reduce-motion="on"]` (`src/reduceMotion.ts`). A media query and a plain selector cannot
-share a rule, so a component that overrides the floor states its resting position in both blocks or
-it only honours one of the two switches. `QuickCapture.css` is the shape to copy;
-`ListeningIndicator.css` and `SpiritMark.css` shipped with only the media half, which meant the
-in-app switch fell through to the generic 1ms floor — and that floor shortens a *duration*, it
-cannot restore a resting *shape*. The spirit-mark's two bloom lobes are deliberately lopsided while
-they drift, so the in-app switch froze them mid-drift as two skewed blobs instead of settling them
-to `border-radius: 50%`.
+share a rule. This is now mostly moot — `--move` is set in both blocks once, in `tokens.css`, so a
+component that only consumes tokens gets both switches for free — but the two surviving overrides
+above each state themselves twice. The in-app switch can only *add* reduction, never overrule an OS
+request for it: `reduceMotion.ts` has no "off" value, only set-or-remove.
+
+**Two things not to re-flag.** `SettingsView.css`'s `translateX(var(--toggle-travel))` must *not* be
+amplitude-gated — that would park the knob at "off" and destroy the control's state readout; it is
+duration-gated only. And `@xterm/xterm`'s stylesheet carries two `opacity` transitions on the
+scroll-slider that now run under reduced motion. That is correct under this section, and it is
+third-party CSS that cannot be tokenised anyway.
+
+**What went wrong before, recorded so the shape of the mistake stays legible.** The old floor
+collapsed every duration to 1ms app-wide, and it failed in both directions. It threw away the
+harmless half. And because it could only shorten a duration, it left the spirit-mark's lobes frozen
+mid-drift as two skewed blobs, which a per-component `border-radius: 50%` had to undo — and
+`ListeningIndicator.css` and `SpiritMark.css` shipped with only the media-query half of that
+override, so the in-app switch fell through to the floor. A blunt floor is what made per-component
+overrides necessary in the first place; gating movement at the token removed most of them. The floor
+was also justified as 1ms rather than `none` so that `transitionend` and `animationend` could still
+fire — a dependency that never existed. There are no such listeners in `src/` or `e2e/`; every exit
+runs off a JS timer.
 
 ---
 
@@ -821,7 +888,8 @@ Settings toggle disables it permanently.
 
 ## 7. Enforcement
 
-Both guards run in gates CI already runs. Neither adds a dependency.
+Both guards run in gates CI already runs. Neither adds a dependency. Note that motion is checked
+only on the stylesheet side, because that is the only place it is written.
 
 - **[`src/designTokens.test.ts`](../src/designTokens.test.ts)** (`pnpm test`) reads `design/tokens.css`
   and every `src/**/*.css`, and fails on a literal colour, font-family, duration, or spacing value
@@ -830,6 +898,25 @@ Both guards run in gates CI already runs. Neither adds a dependency.
   theme blocks**. The second one is the quiet one and it earns its place: a new semantic key added to
   `:root` and forgotten in one of the two dark paths keeps its *light* value down that path, and
   nothing about that looks broken until someone runs the app in the OS-dark theme specifically.
+- **The same file carries four reduced-motion assertions**, which make §4's movement/value split a
+  gate rather than prose. They fail: a `transition` leg on a movement property (`transform`,
+  `width`, `grid-template-rows`, `all`, …) that took a bare `--dur-*` instead of `--dur-move-*`; an
+  `@keyframes` or `@starting-style` block that moves something without referencing `var(--move)`; a
+  `--dur-move-*` used on an `animation` rather than a `transition`; and a `scroll-behavior: smooth`
+  anywhere. The third blocks *re-introducing the shape of* the original bug: collapsing an
+  animation's duration is what froze the spirit-mark's aura mid-drift. It would not have caught the
+  original, which was a literal `1ms` waved through with a `token-guard-allow` — no guard catches a
+  deliberate escape hatch, which is the point of making them noisy and greppable. The fourth replaces
+  an inert `scroll-behavior: auto !important` the old floor carried on `*`.
+
+  The keyframe check is scoped to a **block**, not a declaration, which saves four escape hatches on
+  transform stops that are correctly ungated: three that are already the identity (`scale(1)`, two
+  `rotate(0deg)`) and one that is a resting height rather than a movement (`capture-bar`'s
+  `scaleY(0.3)` floor). What it deliberately cannot see
+  is a displacement in a *plain* rule — `.inbox__row--vanishing`'s `translateX(calc(-36px *
+  var(--move)))` is gated correctly but is checked by nobody. Widening the check to any
+  literal-bearing `transform` would cost five escape hatches on static geometry that is not motion at
+  all (the checkbox tick, the editor toolbar's tail, a 1px optical nudge), which is the worse trade.
 - **[`eslint.config.js`](../eslint.config.js)** (`pnpm exec eslint .`) fails numeric spacing utilities
   (`p-3`, `gap-4`) and arbitrary values (`text-[13px]`) inside `className`.
 

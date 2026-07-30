@@ -105,30 +105,22 @@
    `--dur-settle` and a rise from below, matching the Inbox's filed toast: the
    app's other 200ms entrance, and the same gesture of content joining a
    surface from its live edge. Transform rather than layout, so the
-   conversation does not reflow under the reader while it settles. */
+   conversation does not reflow under the reader while it settles.
+
+   Reduced motion needs no rule of its own here: the rise is gated by `--move`
+   on both legs (design/tokens.css), so the answer still fades in over 200ms but
+   arrives without moving. That is a better answer than the old floor gave —
+   it suppressed the fade too, and an answer appearing fully formed reads as
+   breakage rather than as arriving, which is this entrance's whole warrant. */
 .chat-view__answer {
   transition:
     opacity var(--dur-settle) var(--ease-standard),
-    transform var(--dur-settle) var(--ease-standard);
+    transform var(--dur-move-settle) var(--ease-standard);
 }
 
 @starting-style {
   .chat-view__answer {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(calc(8px * var(--move)));
   }
-}
-
-/* Reduced motion is two rules, not one: the OS setting and Settings →
-   Appearance (`src/reduceMotion.ts`) cannot share one. `transition: none`
-   leaves `@starting-style` nothing to run from, so the answer paints at rest —
-   the app-wide 1ms floor in index.css only shortens the entrance, which still
-   lets a frame of the starting style show. */
-@media (prefers-reduced-motion: reduce) {
-  .chat-view__answer {
-    transition: none;
-  }
-}
-:root[data-reduce-motion="on"] .chat-view__answer {
-  transition: none;
 }

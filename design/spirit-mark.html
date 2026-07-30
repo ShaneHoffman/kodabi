@@ -431,9 +431,13 @@
         <div class="card">
           <p class="k">accessibility floor</p>
           <h3>Reduced motion</h3>
-          <p>Under <span class="mono">prefers-reduced-motion</span> every animation stops and listening
-            becomes a <b>still green mark</b> — unmistakably on-air by reserved color and presence
-            alone. <span class="faint">(Toggle it in your OS to see this page obey.)</span></p>
+          <p>Under <span class="mono">prefers-reduced-motion</span> every animation on this page stops
+            and listening becomes a <b>still green mark</b> — unmistakably on-air by reserved color and
+            presence alone. <span class="faint">(Toggle it in your OS to see this page obey.)</span></p>
+          <p class="faint">The shipped app is gentler than this prototype: it stops every scale and
+            rotation but keeps the aura's opacity breath and the starting pulse, because movement is
+            what causes vestibular trouble and a fade is not. This page's own CSS was written before
+            that call. See <span class="mono">docs/DESIGN_SYSTEM.md</span> §4.</p>
         </div>
       </div>
     </section>
