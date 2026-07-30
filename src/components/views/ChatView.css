@@ -94,11 +94,13 @@
    when it first appears.
 
    This is NOT the token feed animating — nothing here reacts to a delta. The
-   block mounts once per answer and then grows in place, so `@starting-style`
-   (which resolves only on insertion) fires exactly once, on exactly one
-   element. §4's carve-out to "never animate a list of unknown length" is that
-   one-shot-on-one-row shape; the log's entries above stay still, and they have
-   no transition at all so that scrollback provably cannot animate.
+   block mounts once per assistant block and then grows in place, so
+   `@starting-style` (which resolves only on insertion) fires on arrival rather
+   than per delta, on exactly one element. A turn that stops to call a tool
+   hands back several blocks, and each is its own arrival. §4's carve-out to
+   "never animate a list of unknown length" is that one-shot-on-one-row shape;
+   the log's entries above stay still, with no entrance transition at all, so
+   that scrollback provably cannot animate.
 
    `--dur-settle` and a rise from below, matching the Inbox's filed toast: the
    app's other 200ms entrance, and the same gesture of content joining a

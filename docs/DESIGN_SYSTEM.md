@@ -390,8 +390,11 @@ rises a few px into place as it first appears, matching the filed toast's direct
 same gesture — content joining a surface at its live edge. An answer materialising fully formed reads as
 breakage rather than as arriving, which is this section's whole warrant for spending motion. Note
 what is *not* animating: **a token feed is not a licence to animate**, and nothing here reacts to a
-delta. The block mounts once per answer and then grows in place, so its `@starting-style` resolves
-exactly once. See the list-of-unknown-length bullet below for the boundary this sits inside.
+delta. The block mounts once per assistant block and then grows in place, so its `@starting-style`
+resolves once per arrival rather than once per delta. A turn that stops to call a tool has several
+such blocks (prose, tool line, more prose), and each one is a real arrival, so each gets the
+entrance — what stays banned is a *stagger*, not a second arrival. See the list-of-unknown-length
+bullet below for the boundary this sits inside.
 
 **Never animates:**
 
@@ -412,8 +415,10 @@ exactly once. See the list-of-unknown-length bullet below for the boundary this 
   **The chat log is the case that shows where the line is**, because it is both a list of unknown
   length and a surface with a real arrival on it. Only the *live* answer block animates. Every
   entry in the log — your messages, completed answers, tool lines, permission cards, errors —
-  carries no transition at all, which is what makes "scrollback never animates" provable rather
-  than asserted: there is nothing to fire. The completed entry an answer hands off to is
+  carries no entrance transition, which is what makes "scrollback never animates" provable rather
+  than asserted: there is nothing to fire on arrival. (The approval card's Allow/Deny buttons keep
+  the ordinary `--dur-quick` control states every `Button` has; a control answering the pointer is
+  not the log animating.) The completed entry an answer hands off to is
   deliberately denied the entrance class, so finishing a turn does not re-fade prose already being
   read. A per-entry or staggered entrance across that log stays banned, and adopting
   `@starting-style` for the one block does not license it (see below: it settles how, not whether).

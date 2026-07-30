@@ -206,6 +206,58 @@ describe("ChatView", () => {
     expect(container.querySelector(".chat-view__answer")).toBeNull();
   });
 
+  it("marks each answer block a tool-using turn hands back", async () => {
+    // The other half of the contract, and the reason §4 says "once per
+    // assistant block" rather than "once per turn": a turn that stops to call
+    // a tool comes back as prose, a tool line, then more prose. The second
+    // block is a fresh node, so it gets its own entrance — which is one arrival
+    // apiece, not a stagger.
+    const { container } = await renderChat();
+
+    act(() => {
+      emitFromBackend("chat:event", {
+        type: "delta",
+        chat_id: CHAT_ID,
+        text: "Let me look.",
+      });
+    });
+    const first = container.querySelector(".chat-view__answer");
+    expect(first).not.toBeNull();
+
+    // One `act` per delivery, because that is what the backend does: the pump
+    // flushes pending deltas before it emits `assistant_done`, and the next
+    // block's first delta is at least a COALESCE_MS window later
+    // (`chat_cmds.rs`). So React commits an empty `streamingText` in between
+    // and the block genuinely unmounts. Batched into one `act`, it would never
+    // leave the DOM and this would silently assert nothing.
+    act(() => {
+      emitFromBackend("chat:event", {
+        type: "assistant_done",
+        chat_id: CHAT_ID,
+        text: "Let me look.",
+      });
+      emitFromBackend("chat:event", {
+        type: "tool_use",
+        chat_id: CHAT_ID,
+        summary: "Searched notes",
+      });
+    });
+    expect(container.querySelector(".chat-view__answer")).toBeNull();
+
+    act(() => {
+      emitFromBackend("chat:event", {
+        type: "delta",
+        chat_id: CHAT_ID,
+        text: "You have two.",
+      });
+    });
+    const second = container.querySelector(".chat-view__answer");
+    expect(second).toHaveTextContent("You have two.");
+    expect(second).not.toBe(first);
+    // Still exactly one live block: the first one settled into a still entry.
+    expect(container.querySelectorAll(".chat-view__answer")).toHaveLength(1);
+  });
+
   it("leaves a backlog hydrated from the snapshot entirely still", async () => {
     onCommand("chat_open", () =>
       snapshot({
