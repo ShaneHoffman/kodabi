@@ -282,9 +282,10 @@
   box-shadow: var(--lift-menu);
   text-align: left;
   cursor: pointer;
-  /* One shorthand for both ends: the entrance reads its start from
-     `@starting-style` below, the exit from `--fading`. `transform` is inert
-     on the way out — nothing moves the toast once it has arrived. */
+  /* The ENTRANCE only, reading its start from `@starting-style` below. The
+     exit states its own quicker shorthand on `--fading`; this one used to
+     serve both ends, which locked the two to a single duration by
+     construction. */
   transition:
     opacity var(--dur-settle) var(--ease-standard),
     transform var(--dur-move-settle) var(--ease-standard);
@@ -297,7 +298,15 @@
   }
 }
 
+/* Quicker than the entrance it undoes: the dwell has expired, the user has
+   read it, and the toast is only in the way. A transition is read from the
+   state being transitioned TO, so declaring one here retimes the outbound leg
+   alone and leaves the arrival above at `--dur-settle`. It has to stay after
+   `.inbox__toast` — both are one class, so it wins on source order, not
+   specificity. The transform leg is dropped rather than retimed: nothing moves
+   the toast once it has arrived, so there is nothing on the way out to time. */
 .inbox__toast--fading {
+  transition: opacity var(--dur-exit) var(--ease-standard);
   opacity: 0;
 }
 
@@ -312,7 +321,11 @@
    of the distill-and-route motion (FOUNDING_DOC §4). The pipeline
    placeholder plays the same collapse alongside its own vanish above.
 
-   The collapse is a layout property, so it takes a gated duration: under
+   Both legs take `--dur-exit`: the slot has no entrance to pair with — `1fr`
+   is its resting state and there is no `@starting-style` — so this shorthand
+   serves the exit alone and can simply be the quicker one.
+
+   The collapse is a layout property, so it takes the gated duration: under
    reduced motion the track closes at once and the row simply disappears on
    refetch, which is the correct fallback. The opacity leg keeps its real
    timing, which costs nothing here — a 0fr track clips its child anyway. */
@@ -320,8 +333,8 @@
   display: grid;
   grid-template-rows: 1fr;
   transition:
-    grid-template-rows var(--dur-move-settle) var(--ease-standard),
-    opacity var(--dur-settle) var(--ease-standard);
+    grid-template-rows var(--dur-move-exit) var(--ease-standard),
+    opacity var(--dur-exit) var(--ease-standard);
 }
 
 .inbox__slot--leaving {

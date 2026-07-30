@@ -361,9 +361,10 @@ disappears before the user can see the result — quick capture flashes its dest
 
 | Token | Value | Spent on |
 | --- | --- | --- |
+| `--dur-exit` | 130ms | `.inbox__slot`'s collapse as a filed row leaves; the filed toast's fade |
 | `--dur-quick` | 150ms | Hover and colour changes on a control |
 | `--dur-plane` | 180ms | A row rising onto the raised plane; a `Select` menu's fade-in as it opens; the toggle knob's travel; a fresh-filed row's fill-in |
-| `--dur-settle` | 200ms | A row leaving or entering a list; the Inbox placeholder's vanish-left; the filed toast's entrance and fade; the chat answer's arrival |
+| `--dur-settle` | 200ms | A row entering a list; the filed toast's entrance; the Inbox placeholder's vanish-left; the chat answer's arrival |
 | `--dur-enter` | 280ms | The Inbox placeholder arriving at the top of the queue |
 | `--dur-wake` | 450ms | The spirit-mark waking and settling |
 | `--dur-wave` | 1000ms | One waveform bar's rise and fall |
@@ -372,19 +373,59 @@ disappears before the user can see the result — quick capture flashes its dest
 | `--dur-breath` | 4200ms | The listening breath cycle |
 | `--dur-drift` / `--dur-drift-slow` | 15s / 21s | The aura's counter-rotating blobs |
 
-And four **gated** durations, each `calc(<base> * var(--move))`, for a transition leg whose property
+**An exit runs shorter than the entrance it undoes — roughly two thirds.** Enter and exit are not the
+same motion. An entrance is asking for attention on something the reader has not seen yet, so it can
+afford to take its time; an exit plays *after* a decision the user has already made, and from that
+moment the surface is only in the way. Running both at one duration means every exit in the app is
+slower than it should be. That is the whole warrant for `--dur-exit`, and it is why the scale opens
+on it rather than on a hover: leaving is the quickest thing the app does.
+
+The rule is a *pair*, so it is read per surface rather than as a global floor — an exit is measured
+against the specific entrance it reverses, not against the fastest number available:
+
+| Surface | Entrance | Exit | Ratio |
+| --- | --- | --- | --- |
+| The filed toast | `--dur-settle` 200ms | `--dur-exit` 130ms | 65% |
+| `.inbox__slot`'s collapse | *(none — `1fr` is its resting state)* | `--dur-exit` 130ms | pure exit |
+| The Inbox placeholder | `--dur-enter` 280ms | `--dur-settle` 200ms | 71% |
+
+**The placeholder is the case that already obeyed the rule before it had a name**, and it is why the
+vanish-left keeps `--dur-settle` instead of being swept onto `--dur-exit` with the others. Its
+entrance is `--dur-enter`, not `--dur-settle`, so at 200ms it is already within a whisker of two
+thirds. Moving it to 130ms would not be applying this rule — it would be over-applying it, and
+compressing the one motion FOUNDING_DOC §4 reserves for distill-and-route. Pair first, then measure.
+
+**The spirit-mark's aura is the other exit that keeps its own duration**, and for a different reason.
+Removing `.is-listening` fades it out over `--dur-wake` (450ms) through the same reversible shorthand
+that fades it in. It is not a surface getting out of the way after a decision — it is the app's one
+continuous motion settling back to rest, and a 130ms snap would read as the mark being switched off
+rather than standing down. Splitting that pair would also cost a `:not(.is-listening)` rule to say
+something neither half wants said. Left alone deliberately, not by oversight.
+
+The toast is where the rule had to be *built* rather than just stated. Its `transition` was one
+shorthand serving both directions, which locked entrance and exit to a single duration by
+construction; the exit now states its own on `.inbox__toast--fading`. A transition is read from the
+state being transitioned **to**, so a declaration on the leaving class retimes the outbound leg alone.
+That is the general mechanism for splitting a pair, and the ordering constraint that comes with it:
+both selectors are one class, so the exit rule wins on source order and has to stay below.
+
+And five **gated** durations, each `calc(<base> * var(--move))`, for a transition leg whose property
 is movement rather than value. They are the duration half of the reduced-motion remap below;
 `--move` is `1` normally and `0` under reduced motion, so the leg becomes instant.
 
 | Token | Wraps | Spent on |
 | --- | --- | --- |
+| `--dur-move-exit` | `--dur-exit` | `.inbox__slot`'s collapsing track |
 | `--dur-move-plane` | `--dur-plane` | The toggle knob's travel; the fresh-filed row's picker sliding in; a `Select` menu's scale-in |
-| `--dur-move-settle` | `--dur-settle` | The vanish-left; the filed toast's rise; the chat answer's rise; `.inbox__slot`'s collapse; `.inbox__fill`'s width |
+| `--dur-move-settle` | `--dur-settle` | The vanish-left; the filed toast's rise; the chat answer's rise; `.inbox__fill`'s width |
 | `--dur-move-enter` | `--dur-enter` | The Inbox placeholder's drop from above |
 | `--dur-move-wake` | `--dur-wake` | The spirit-mark core's transform easing back to rest |
 
-There is deliberately no `--dur-move-quick`: nothing at 150ms moves. A new movement leg adds its
-`--dur-move-*` in `tokens.css` beside the base duration it wraps.
+There is deliberately no `--dur-move-quick`: `--dur-quick` is the hover-and-colour duration and
+nothing spending it moves. That is a statement about what the token is *for*, not about 150ms being
+too short to move in — `--dur-exit` is shorter still and does move a layout track.
+
+A new movement leg adds its `--dur-move-*` in `tokens.css` beside the base duration it wraps.
 
 `--delay-wave-1` … `--delay-wave-4` (0 / 220 / 420 / 140ms) are the four offsets one waveform
 animation is started at, so the group reads as a voice rather than a metronome. The order is
@@ -400,9 +441,32 @@ Every state change in the app runs on this one curve, so the shape of the motion
 decision made in `tokens.css` rather than a per-component one. `--ease-breath` stays symmetric on
 purpose: a breath has no direction.
 
+**One curve runs both directions, and that is a decision — a separate exit curve was considered and
+refused.** The textbook split pairs a decelerating entrance with an *accelerating* exit, so a
+departing element gathers speed as it goes. It does not earn itself here, because of what this app's
+exits actually are: two opacity fades and one layout collapse, none of which travel anywhere.
+
+- **On a fade, a decelerating curve is already the fast-feeling one.** `cubic-bezier(0.2, 0, 0, 1)`
+  front-loads the change, so most of the opacity is gone in the first third and the tail plays out
+  somewhere near invisible. An accelerating curve inverts exactly that: it holds the surface at close
+  to full opacity, then snaps it away at the end. The reader spends *longer* looking at something
+  they have finished with, which is the same hesitation this curve was chosen to remove from hover —
+  the argument at the top of this section, pointed the other way.
+- **On the collapse, decelerating is what "the list does not jump" wants.** `.inbox__slot` closes a
+  gap underneath live content; easing into `0fr` settles the rows below, where accelerating into it
+  snaps them shut.
+- **The duration bought what the curve was supposed to.** The complaint an exit curve answers is
+  "this is still here"; `--dur-exit` answers it directly, at one token, without amending the
+  single-curve position above.
+
+This is recorded so a later audit answers the argument rather than re-deriving it. What would
+overturn it: an exit that genuinely *travels* off-plane — the vanish-left is the nearest thing today
+and it is a fade with 36px of drift, not a departure — or a surface exiting far enough that
+acceleration reads as leaving rather than as lag.
+
 ### What animates
 
-**Animates:** a control's own state change (`--dur-quick`); a row leaving a list (`--dur-settle`);
+**Animates:** a control's own state change (`--dur-quick`); a row leaving a list (`--dur-exit`);
 the spirit-mark, which is the app's one continuous motion; and the Inbox pipeline placeholder,
 which spends both halves of the "one deliberate motion" FOUNDING_DOC §4 reserves for
 distill-and-route. It arrives at the top of the queue (`--dur-enter`) as a capture stops, and when
@@ -489,7 +553,7 @@ nothing to do with the layout bullet.
 
 | Candidate | Where | Why it stays still |
 | --- | --- | --- |
-| A disclosure revealing content *below* its own control | `NeedsAttentionView.tsx` | Not the hazard the layout bullet names, but the collapsed state here is a **resting** state, not a `--dur-settle` transient. The shelf is conditionally rendered, and an eased collapse needs it mounted — a mounted zero-height shelf leaves its Restore and Delete buttons tabbable behind `aria-expanded="false"`, which clipping does not fix. `InboxView.css` scopes `overflow: hidden` to `.inbox__slot--leaving > *` for the mirror-image reason: at rest that slot has to let the picker's menu overflow the row. And `SessionArtifactsSection.tsx` is the paired control — the same utility classes, deliberately matched in CSS — over a transcript of unknown length, so one could ease and the other could not. |
+| A disclosure revealing content *below* its own control | `NeedsAttentionView.tsx` | Not the hazard the layout bullet names, but the collapsed state here is a **resting** state, not a `--dur-exit` transient. The shelf is conditionally rendered, and an eased collapse needs it mounted — a mounted zero-height shelf leaves its Restore and Delete buttons tabbable behind `aria-expanded="false"`, which clipping does not fix. `InboxView.css` scopes `overflow: hidden` to `.inbox__slot--leaving > *` for the mirror-image reason: at rest that slot has to let the picker's menu overflow the row. And `SessionArtifactsSection.tsx` is the paired control — the same utility classes, deliberately matched in CSS — over a transcript of unknown length, so one could ease and the other could not. |
 | A row leaving a list on a `vault:changed` refetch | `NeedsAttentionView.tsx` | `retryDistill` resolves when the run is *queued*, not when it finishes (the outcome arrives on `distill:state`), so a leaving collapse would assert a state that is not true yet. Dismiss and Restore are moves across a parent boundary, not exits. `runAction` fires `notifyVaultChanged()` in the same `.then()` by design, so holding the card back would either desync the sidebar count or fight the render-phase prune that clears its row error. Delete is the one genuine exit, and it is the one that least needs a collapse to explain it: it lands behind `DestructiveConfirmDialog`, and `confirmDelete` closes that modal before calling `notifyVaultChanged()` itself, so the row leaves against an answer the user has just given in a modal of its own. |
 | The terminal's session-ended bar | `TerminalView.tsx` | `useXterm`'s `ResizeObserver` calls `fit.fit()` and a `resizeTerminal()` PTY IPC on every size change. Easing that height buys a full buffer reflow and an IPC round-trip per frame. |
 
@@ -946,6 +1010,12 @@ only on the stylesheet side, because that is the only place it is written.
   var(--move)))` is gated correctly but is checked by nobody. Widening the check to any
   literal-bearing `transform` would cost five escape hatches on static geometry that is not motion at
   all (the checkbox tick, the editor toolbar's tail, a 1px optical nudge), which is the worse trade.
+- **One more motion assertion holds the pair rule**: `--dur-exit` must be shorter than `--dur-settle`,
+  the entrance both of its sites reverse. It is the odd one out here in reading the token *values*
+  rather than which token a leg took, and that is exactly why it exists — a later rebalance of the
+  scale could nudge the exit past its entrance while every leg stayed on a correctly named token, and
+  every other check in the file would pass. The defect it blocks is the one §4's pair rule was
+  introduced to fix, re-introduced by arithmetic instead of by a selector.
 - **[`eslint.config.js`](../eslint.config.js)** (`pnpm exec eslint .`) fails numeric spacing utilities
   (`p-3`, `gap-4`) and arbitrary values (`text-[13px]`) inside `className`.
 

@@ -334,6 +334,29 @@ describe("design tokens are the single source of truth", () => {
     expect(scan(sheets, /scroll-behavior\s*:\s*smooth/)).toEqual([]);
   });
 
+  it("keeps an exit quicker than the entrance it undoes", () => {
+    // An exit runs at roughly 2/3 of its paired entrance: by the time it plays
+    // the user has already decided, and the surface is only in the way. Both
+    // `--dur-exit` sites (`.inbox__slot`'s collapse, the filed toast's fade)
+    // pair with `--dur-settle`, so that is the comparison worth gating.
+    //
+    // This is the one motion rule that a plain rebalance of the scale could
+    // quietly invert — every other check here is about which token a leg took,
+    // not about what the numbers are relative to each other. Nudging
+    // `--dur-exit` past `--dur-settle` would keep every leg on a correctly
+    // NAMED token while making the exits slower than the entrances, which is
+    // the exact defect this pair was introduced to fix.
+    const css = withoutComments(readFileSync(TOKENS, "utf8"));
+    const durationMs = (name: string): number => {
+      const match = css.match(new RegExp(`^\\s*--${name}:\\s*(\\d+)ms`, "m"));
+      // Fail on the token's absence rather than coercing undefined to NaN,
+      // which would make the comparison below silently pass.
+      expect(match, `design/tokens.css declares no --${name}`).not.toBeNull();
+      return Number(match?.[1]);
+    };
+    expect(durationMs("dur-exit")).toBeLessThan(durationMs("dur-settle"));
+  });
+
   it("declares no literal spacing outside design/tokens.css", () => {
     // Padding, margin and gap only, and PROPERTY-SCOPED on purpose: sizing
     // (`width: 17px`), edges (`border: 3px`), radii and offsets
