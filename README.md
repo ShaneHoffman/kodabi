@@ -93,6 +93,7 @@ pnpm test          # frontend tests (vitest + Testing Library, jsdom)
 pnpm lint          # frontend lint
 pnpm e2e:build     # build the app for the end-to-end harness (must precede test:e2e)
 pnpm test:e2e      # end-to-end tests against the real app window (Windows only)
+pnpm seed:vault    # write a fixture vault of named scenarios, for previewing
 ```
 
 ### Speech-to-text engines

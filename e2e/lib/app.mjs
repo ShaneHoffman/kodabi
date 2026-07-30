@@ -26,6 +26,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { waitForEndpoint } from "./cdp.mjs";
+import { seedVault } from "./vault.mjs";
 
 const execFileAsync = promisify(execFile);
 
@@ -102,12 +103,20 @@ function assertPortFree(port) {
   });
 }
 
-// 120s, not 60: on a first-ever run on a fresh CI VM the wait stacks a cold
-// Windows Defender real-time scan of a freshly built, unsigned exe on top of
-// WebView2's own first-launch cost on that machine. Locally this never gets
-// close to either bound — success lands in ~1.3-1.7s — so the higher ceiling
-// costs nothing on the path that matters.
-export async function launchKodabi({ exe, startupTimeoutMs = 120_000 } = {}) {
+/**
+ * Launches the app against a fresh throwaway vault.
+ *
+ * `seed` names scenarios from `./vault.mjs` to write into that vault before the
+ * app starts; omit it and the vault stays empty, which is what the quick-capture
+ * slice needs. `handle.seeded` then carries the manifest of what landed.
+ *
+ * `startupTimeoutMs` is 120s and not 60: on a first-ever run on a fresh CI VM
+ * the wait stacks a cold Windows Defender real-time scan of a freshly built,
+ * unsigned exe on top of WebView2's own first-launch cost on that machine.
+ * Locally this never gets close to either bound — success lands in ~1.3-1.7s —
+ * so the higher ceiling costs nothing on the path that matters.
+ */
+export async function launchKodabi({ exe, seed = [], startupTimeoutMs = 120_000 } = {}) {
   if (!exe) {
     throw new Error("launchKodabi needs the path to a built kodabi.exe");
   }
@@ -119,6 +128,22 @@ export async function launchKodabi({ exe, startupTimeoutMs = 120_000 } = {}) {
   const indexDb = join(stateDir, "index.db");
   const userDataDir = join(stateDir, "webview2");
   const port = CDP_PORT;
+
+  // Before the spawn, never after, and the ordering is load-bearing twice over.
+  // `IndexState::initialize` fires a startup Reconcile over whatever is on disk
+  // at launch; and `watch.rs` ignores everything under `sessions/` outright, so
+  // a transcript written after launch is not merely late to the index — it is
+  // never seen at all.
+  let seeded = null;
+  if (seed.length > 0) {
+    try {
+      seeded = await seedVault(vaultDir, seed);
+    } catch (error) {
+      await rm(vaultDir, { recursive: true, force: true }).catch(() => {});
+      await rm(stateDir, { recursive: true, force: true }).catch(() => {});
+      throw error;
+    }
+  }
 
   const proc = spawn(exe, [], {
     env: {
@@ -176,6 +201,14 @@ export async function launchKodabi({ exe, startupTimeoutMs = 120_000 } = {}) {
     port,
     vaultDir,
     indexDb,
+    /**
+     * The seed manifest, or null when nothing was seeded.
+     *
+     * A slice asserts against the titles and stems actually written rather than
+     * restating catalogue strings, so a catalogue edit cannot leave a test
+     * chasing a title that is gone.
+     */
+    seeded,
     logs: () => logLines.join("\n"),
     async stop({ keepArtifacts = false } = {}) {
       process.off("exit", reap);

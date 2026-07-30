@@ -27,6 +27,18 @@ Requires Windows and the WebView2 Evergreen runtime. Node 24+ is the repo
 prerequisite (the harness itself needs only 22+, for the global `WebSocket`).
 No npm dependencies, and no `pnpm install` — the harness is Node built-ins only.
 
+The fixture catalogue the slices seed from also drives a manual preview, so a
+change to a note surface can be looked at in every state it reaches:
+
+```powershell
+pnpm seed:vault -- --list                    # the catalogue (pnpm eats bare flags)
+pnpm seed:vault C:\kodabi-fixture            # all ten scenarios
+pnpm seed:vault C:\kodabi-fixture retention/recording-only sessions/needs-attention
+```
+
+It prints the two environment lines to paste. **Set both**, in the same shell you
+launch from — see *Isolation*.
+
 ## Why `--features tauri/custom-protocol`
 
 `src-tauri` declares no `custom-protocol` feature of its own, so the flag is
@@ -88,6 +100,13 @@ Tauri's `IPC custom protocol failed` fallback warning. The policy is annotated
 source-by-source at the top of that file, since `tauri.conf.json` is strict JSON
 and cannot hold a comment.
 
+`source-pairing.test.mjs` extends that to `media-src`, which nothing exercised
+before it: the app's only asset-protocol consumer is the `<audio>` in
+`SessionArtifactsSection`, and quick capture never opens a note with a recording.
+It also asserts the recording actually *loads*, which is a different failure —
+Tauri refuses an out-of-scope asset before the CSP is consulted, so a scope that
+does not follow `KODABI_KB_ROOT` leaves the console clean and playback dead.
+
 ## Isolation
 
 Each run gets a throwaway vault and index under the system temp dir, via **two**
@@ -105,10 +124,53 @@ every row for the notes it could no longer see.
 browser process with a developer's already-running instance.
 
 Not isolated: `app_config_dir()` (settings and consent) is still the real one.
-The slice reads it and writes nothing, and the consent nudge is push-only — it
+The slices read it and write nothing, and the consent nudge is push-only — it
 opens on a backend event, never on mount — so an un-onboarded machine still
 boots straight to the Inbox. Add a third seam only when something here needs to
 *write* config.
+
+## The fixture vault
+
+`e2e/lib/vault.mjs` holds a catalogue of named scenarios, shared by the slices
+(`launchKodabi({ seed: [...] })`) and by `pnpm seed:vault` — so a preview and a
+test can never disagree about what a scenario means. Scenarios are named after
+the **rule** they exercise, not the data they hold:
+
+| Scenario | What it is for |
+|---|---|
+| `retention/both` | transcript and recording both survived |
+| `retention/transcript-only` | the recording was pruned |
+| `retention/recording-only` | the transcript was pruned; the sentence shows at rest |
+| `retention/nothing` | both pruned — a section with nothing to press |
+| `retention/empty-transcript` | a transcript that exists and holds nothing |
+| `composition/at-ceiling` | a filed session note at the 3-cluster/4-control ceiling |
+| `sessions/needs-attention` | two unclaimed captures, one behind the dismissed shelf |
+| `confidence/low-score` | an Inbox note well under the 0.6 routing threshold |
+| `transcript/fifty-turns` | a long transcript, to prove it is uncapped |
+| `source/keyword-only` | the two shapes that must *not* pair |
+
+Four things about it are load-bearing:
+
+- **It writes files, never index rows.** `IndexState::initialize` reconciles over
+  whatever is on disk at startup, so the app indexes the fixture itself and the
+  seeder exercises the real convergence path. Writing into `index.db` directly
+  would bypass it and drift from what ships.
+- **Seeding happens before the app starts.** Both because of that startup
+  reconcile, and because the vault watcher ignores everything under `sessions/`
+  outright — a transcript written after launch is never seen at all.
+- **Timestamps are minted at seed time, not frozen into the catalogue.**
+  Retention runs a prune sweep at launch and settings are *not* isolated (above),
+  so on a machine with a `keep_days` policy a fixture dated last month would be
+  deleted out from under the run: every retention scenario would collapse into
+  `retention/nothing` and the slice would go red for something that is not a bug.
+- **`pnpm seed:vault` refuses a directory it did not write.** It wipes before it
+  seeds, and the root is caller-supplied, so a `.kodabi-fixture-vault` marker is
+  what separates "my scratch fixture" from "my actual notes". Re-seeding a marked
+  directory is one command; anything else needs `--force`.
+
+The `.wav` files are generated (a RIFF header plus a tone), never committed —
+this repo stays text-only, and `<audio>` needs real PCM to exercise playback at
+all.
 
 On failure the harness keeps the temp vault, prints its path, dumps both
 webview consoles plus the app's own stdio, and snapshots whether `kodabi.exe`
