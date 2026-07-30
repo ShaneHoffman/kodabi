@@ -15,12 +15,47 @@ permissions:
   contents: read
 
 jobs:
-  # Pure Node work — runs on Linux (~half the billed rate of Windows, faster to
-  # boot). The Vite output is platform-independent, so dist/ is built once here
-  # and shared with the Rust jobs as an artifact instead of being rebuilt in
-  # each of them.
+  # dist/ is the one thing every Rust job actually waits for: src-tauri embeds
+  # it at compile time via tauri::generate_context!, so it must exist before
+  # cargo runs. The Vite output is platform-independent, so it is built once
+  # here on Linux (~half the billed rate of Windows, faster to boot) and shared
+  # as an artifact instead of being rebuilt in each Windows job.
+  #
+  # Building it is deliberately *all* this job does. eslint and vitest sit in a
+  # sibling job (`frontend`) rather than in steps here, because the Windows jobs
+  # want the artifact and nothing else — folding the lint/test work back in
+  # would put ~20s of it on the critical path of every Rust job for no benefit.
+  # `pnpm build` is `tsc -b && vite build`, so the typecheck gate lives here and
+  # is not duplicated next door.
+  dist:
+    name: Frontend (build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Build (typecheck + Vite)
+        run: pnpm build
+      - name: Upload dist/ for the Rust jobs (generate_context! embeds it)
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist
+          if-no-files-found: error
+
+  # The pure-Node gates. Nothing downstream needs them, so they run beside
+  # `dist` instead of upstream of it and cost no wall-clock anywhere else. The
+  # duplicated `pnpm install` is a few seconds of Linux minutes off the critical
+  # path — the price of not making the Rust jobs wait on eslint.
   frontend:
-    name: Frontend (lint + test + build)
+    name: Frontend (lint + test)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -37,14 +72,6 @@ jobs:
         run: pnpm exec eslint . --max-warnings=0
       - name: Test (vitest, jsdom)
         run: pnpm test
-      - name: Build (typecheck + Vite)
-        run: pnpm build
-      - name: Upload dist/ for the Rust jobs (generate_context! embeds it)
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist
-          if-no-files-found: error
 
   # clippy and test each force a full dependency recompile (clippy compiles
   # through the clippy-driver wrapper, which doesn't share a cache fingerprint
@@ -52,19 +79,20 @@ jobs:
   # of sequential steps in one job — otherwise every run pays for both full
   # compiles back-to-back instead of overlapping them. Both need dist/ to
   # exist (src-tauri embeds it via tauri::generate_context!), downloaded from
-  # the frontend job rather than rebuilt.
+  # the `dist` job rather than rebuilt.
   #
   # These two jobs build the app with default features, i.e. the stub
   # MockEngine — the shipping configuration (`--features parakeet`) is built
-  # and exercised by the `app` job at the bottom of this file, path-filtered so
-  # the slow release compile only runs when a Rust surface changes. The
-  # /pull-request skill still release-builds the app unconditionally before a
-  # PR is opened or updated (see .claude/skills/pull-request).
+  # and exercised by the `app-dev` and `app` jobs at the bottom of this file,
+  # path-filtered so the slow release compile only runs when a Rust surface
+  # changes. The /pull-request skill still release-builds the app
+  # unconditionally before a PR is opened or updated (see
+  # .claude/skills/pull-request).
   lint:
     name: Rust (fmt + clippy)
     runs-on: windows-latest
     timeout-minutes: 20
-    needs: frontend
+    needs: dist
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust (stable) + rustfmt + clippy
@@ -72,7 +100,7 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - name: Download dist/ (built by the frontend job)
+      - name: Download dist/ (built by the dist job)
         uses: actions/download-artifact@v4
         with:
           name: dist
@@ -86,12 +114,12 @@ jobs:
     name: Rust (test)
     runs-on: windows-latest
     timeout-minutes: 20
-    needs: frontend
+    needs: dist
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Download dist/ (built by the frontend job)
+      - name: Download dist/ (built by the dist job)
         uses: actions/download-artifact@v4
         with:
           name: dist
@@ -236,30 +264,37 @@ jobs:
         if: steps.changed.outputs.run == 'true'
         run: cargo clippy -p kodabi-embed --features bge --all-targets --locked -- -D warnings
 
-  # Builds and exercises the *shipping* configuration of the desktop app, which
-  # no other job covers: `lint`/`test` run default features (the stub
-  # MockEngine), and `transcribe` clippy-checks the engine crate alone, never
-  # the app that forwards its features. Four things happen here:
+  # The dev-profile half of the *shipping* configuration, which no other job
+  # covers: `lint`/`test` run default features (the stub MockEngine), and
+  # `transcribe` clippy-checks the engine crate alone, never the app that
+  # forwards its features. Two things happen here:
   #
   #   1. the real-model integration tests run against the committed speech
   #      fixture, so CI proves audio actually transcribes with Parakeet rather
   #      than merely compiling;
   #   2. clippy lints src-tauri's `parakeet`-gated code (build_engine and
-  #      friends), which the default `--workspace` legs cfg out;
-  #   3. the app is release-built exactly as it ships;
-  #   4. the release guard is asserted to still fire, so a featureless release
-  #      build can never quietly start succeeding again.
+  #      friends), which the default `--workspace` legs cfg out.
   #
-  # Path-filtered to the Rust surfaces plus this workflow file (so edits to the
-  # job itself are exercised). Frontend-only changes skip it: the `frontend`
-  # job already validates dist/, which is all `tauri::generate_context!` needs.
-  # The model files are public sherpa-onnx release assets, cached across runs
+  # This is a separate job from `app` below, not two more steps in it, because
+  # the two halves compile on different cargo profiles and so share essentially
+  # no artifacts: sequencing them bought nothing and cost ~90s of critical
+  # path. Running them side by side duplicates the runner setup but no compile,
+  # and gives each its own rust-cache holding one profile instead of both.
+  #
+  # The two halves keep one identical path filter — the Rust surfaces plus this
+  # workflow file, so edits to the jobs themselves are exercised. Frontend-only
+  # changes skip both: the `dist` job already validates dist/, which is all
+  # `tauri::generate_context!` needs. Both still need dist/ itself, since
+  # `-p kodabi` compiles src-tauri either way.
+  #
+  # Only this half needs the models — nothing on the release side reads
+  # PARAKEET_*. They are public sherpa-onnx release assets, cached across runs
   # under a static key since those assets are immutable.
-  app:
-    name: App (release + Parakeet)
+  app-dev:
+    name: App (Parakeet tests + clippy)
     runs-on: windows-latest
-    timeout-minutes: 60
-    needs: frontend
+    timeout-minutes: 40
+    needs: dist
     steps:
       - uses: actions/checkout@v4
         with:
@@ -288,7 +323,7 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
         if: steps.changed.outputs.run == 'true'
-      - name: Download dist/ (built by the frontend job)
+      - name: Download dist/ (built by the dist job)
         if: steps.changed.outputs.run == 'true'
         uses: actions/download-artifact@v4
         with:
@@ -332,6 +367,54 @@ jobs:
       - name: Clippy (app with parakeet — strict, warnings fail)
         if: steps.changed.outputs.run == 'true'
         run: cargo clippy -p kodabi --features parakeet --all-targets --locked -- -D warnings
+
+  # The release-profile half: the app built exactly as it ships, plus the
+  # assertion that the release guard still fires, so a featureless release build
+  # can never quietly start succeeding again. Runs in parallel with `app-dev`
+  # above, which is where the split, the shared path filter, and the reason the
+  # models cache lives over there rather than here are all explained.
+  app:
+    name: App (release + Parakeet)
+    runs-on: windows-latest
+    timeout-minutes: 40
+    needs: dist
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for changes to src-tauri, crates, or the workspace manifests
+        id: changed
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Same base-selection logic as the transcribe job: PR base, else the
+          # commit the push replaced, else HEAD~1 for a brand-new branch. Kept
+          # identical to the app-dev job's: the two halves must run or skip
+          # together, or a Rust change could land with only half of the shipping
+          # configuration checked.
+          base="${{ github.event.pull_request.base.sha || github.event.before }}"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            base="HEAD~1"
+          fi
+          changed="$(git diff --name-only "$base" HEAD -- src-tauri crates Cargo.toml Cargo.lock .github/workflows/ci.yml)"
+          if [ -n "$changed" ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install Rust (stable) + clippy
+        if: steps.changed.outputs.run == 'true'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        if: steps.changed.outputs.run == 'true'
+      - name: Download dist/ (built by the dist job)
+        if: steps.changed.outputs.run == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
       - name: Release build (the shipping configuration)
         if: steps.changed.outputs.run == 'true'
         run: cargo build -p kodabi --release --locked --features parakeet
@@ -356,13 +439,14 @@ jobs:
   # Drives the real app window over CDP — the only tier that crosses the real
   # IPC bridge, so the only one that can catch an unwired control. Deliberately
   # NOT a required check yet; see the promotion criteria in
-  # docs/UI_E2E_HARNESS.md. It copies the in-job change gate below so the check
-  # always reports, which is what lets it be promoted with no YAML change.
+  # docs/UI_E2E_HARNESS.md. It copies the in-job change gate the two app jobs
+  # use so the check always reports, which is what lets it be promoted with no
+  # YAML change.
   e2e:
     name: UI (E2E, quick capture)
     runs-on: windows-latest
     timeout-minutes: 25
-    needs: frontend
+    needs: dist
     steps:
       - uses: actions/checkout@v4
         with:
@@ -372,13 +456,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Same base-selection logic as the app job: PR base, else the commit
+          # Same base-selection logic as the app jobs: PR base, else the commit
           # the push replaced, else HEAD~1 for a brand-new branch.
           base="${{ github.event.pull_request.base.sha || github.event.before }}"
           if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
             base="HEAD~1"
           fi
-          # `src` is in this list and not in the app job's: catching a
+          # `src` is in this list and not in the app jobs': catching a
           # frontend-side wiring regression is the entire point of this tier.
           changed="$(git diff --name-only "$base" HEAD -- src src-tauri crates e2e Cargo.toml Cargo.lock .github/workflows/ci.yml)"
           if [ -n "$changed" ]; then
@@ -396,7 +480,7 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         if: steps.changed.outputs.run == 'true'
-      - name: Download dist/ (built by the frontend job)
+      - name: Download dist/ (built by the dist job)
         # Also sidesteps the local build-order trap: dist/ is embedded at
         # compile time, so it must exist and be current before cargo runs.
         if: steps.changed.outputs.run == 'true'

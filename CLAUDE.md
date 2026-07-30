@@ -71,7 +71,8 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   so it likewise covers `e2e/`).
   The clippy/test gates need `dist/` to exist — `src-tauri` embeds it via
   `tauri::generate_context!`, which fails the compile when it's missing — so in a fresh worktree
-  run `pnpm install --frozen-lockfile && pnpm build` first (CI's Rust jobs do the same).
+  run `pnpm install --frozen-lockfile && pnpm build` first (CI builds it once in its `dist` job
+  and every Rust job downloads it as an artifact rather than rebuilding it).
   `kodabi-transcribe`'s `parakeet` feature (sherpa-onnx), `vad` feature, and `whisper` feature
   (whisper.cpp via whisper-rs) are off by default, so the gates above don't compile or lint them —
   before committing a change under `crates/kodabi-transcribe`, also run
@@ -93,12 +94,13 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   bge-small-en-v1.5 directory to exercise the `#[ignore]`d integration tests.
   `src-tauri` forwards the engine features (`parakeet`, `whisper`) and is likewise never
   compiled with one by the `--workspace` gates — before committing a change under `src-tauri`
-  **or `crates/`** (CI's app job path-filters on both, plus the workspace manifests, since the app
-  compiles the crates it forwards features to), also run
+  **or `crates/`** (CI's two app jobs share a path filter covering both, plus the workspace
+  manifests, since the app compiles the crates it forwards features to), also run
   `cargo clippy -p kodabi --features parakeet --all-targets --locked -- -D warnings`
-  (CI's app job runs that exact leg, plus the release build, the real-model transcription tests,
-  and the release-guard check). Don't run the full release build per commit: it's the slowest
-  step, and `/pull-request` pays it once per PR via `pnpm tauri:build --no-bundle`.
+  (CI's `app-dev` job runs that exact leg plus the real-model transcription tests; its `app`
+  sibling runs the release build and the release-guard check in parallel). Don't run the full
+  release build per commit: it's the slowest step, and `/pull-request` pays it once per PR via
+  `pnpm tauri:build --no-bundle`.
 - **Release builds ship a real STT engine.** `pnpm tauri:build` passes `--features parakeet`
   (the engine locked in by `docs/benchmarks/stt-engine-benchmark.md`). A release-profile build
   with no engine feature **fails to compile by design** — the `compile_error!` guard in

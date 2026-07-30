@@ -14,7 +14,7 @@ kangentic.local.json
 # Rust / Cargo — workspace target lives at the repo root (not src-tauri/target)
 /target
 
-# STT model files downloaded and cached by CI's app job (and handy locally)
+# STT model files downloaded and cached by CI's app-dev job (and handy locally)
 /.ci-models
 
 # Tauri generated capability schemas
