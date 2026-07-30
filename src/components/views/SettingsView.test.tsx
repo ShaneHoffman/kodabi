@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsView } from "./SettingsView";
@@ -41,12 +41,22 @@ async function renderSeeded(
   return result;
 }
 
+/** The two pill toggles. Each one's accessible name IS its visible row label —
+ * exact strings rather than a loose regex, because that parity is the thing the
+ * rename bought: the "Capture pill" group supplies the context the old
+ * "Show the capture pill during captures you start" had to carry alone. */
 function manualToggle(): HTMLElement {
-  return screen.getByRole("switch", { name: /during captures you start/i });
+  return screen.getByRole("switch", { name: "Captures you start" });
 }
 
 function autoToggle(): HTMLElement {
-  return screen.getByRole("switch", { name: /auto detected captures/i });
+  return screen.getByRole("switch", { name: "Auto detected captures" });
+}
+
+/** The pill cluster's `role="group"`, which is where its rows and its one error
+ * slot live. */
+function pillGroup(): HTMLElement {
+  return screen.getByRole("group", { name: "Capture pill" });
 }
 
 /** The `overlay` argument of the last `set_capture_overlay` call. */
@@ -123,7 +133,10 @@ describe("SettingsView capture overlay", () => {
 
     await user.click(manualToggle());
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
+    // Inside the group, not merely somewhere on the page. It used to render at
+    // the foot of the tab, below Echo check and Search index, where it read as
+    // THEIR failure.
+    expect(await within(pillGroup()).findByRole("alert")).toHaveTextContent(
       "settings.toml is read only",
     );
     // Nothing was persisted, so the control must not imply otherwise.
@@ -138,6 +151,90 @@ describe("SettingsView capture overlay", () => {
     expect(
       screen.getByText(/does not detect meetings on its own yet/i),
     ).toBeInTheDocument();
+  });
+
+  it("reads the two toggles as one concept: a named group with a heading", async () => {
+    await renderSeeded(DEFAULTS, "Capture");
+
+    // The relationship is in the accessibility tree, not only in the indent.
+    expect(within(pillGroup()).getAllByRole("switch")).toHaveLength(2);
+    // "Capture pill" is a concept and owns no control of its own, so the group
+    // draws it as a heading rather than borrowing one of its two rows — which is
+    // also what stops the indent claiming one toggle depends on the other.
+    expect(within(pillGroup()).getByText("Capture pill")).toBeInTheDocument();
+  });
+
+  it("gives each toggle the same accessible name as the row you can see", async () => {
+    await renderSeeded(DEFAULTS, "Capture");
+
+    // These used to diverge: the visible row said "Capture pill" while the
+    // switch answered to "Show the capture pill during captures you start", so
+    // what someone reads was not what they could say to a voice-control tool.
+    for (const label of ["Captures you start", "Auto detected captures"]) {
+      expect(screen.getByRole("switch", { name: label })).toBeInTheDocument();
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+  });
+});
+
+describe("SettingsView retention", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  it("nests the day count under the policy it depends on", async () => {
+    await renderSeeded({ ...DEFAULTS, retention: { policy: "keep_days", days: 30 } });
+
+    // The policy owns a control, so its row heads the group and the group draws
+    // no heading of its own. That is what licenses the short child label: the
+    // group's name carries the rest, so "Days" and not "Days to keep".
+    const group = screen.getByRole("group", { name: "Retention" });
+    expect(within(group).getByRole("combobox", { name: /Retention/ })).toBeInTheDocument();
+    expect(within(group).getByRole("spinbutton", { name: "Days" })).toHaveValue(30);
+  });
+
+  it("has no day count while the policy does not keep days", async () => {
+    await renderSeeded();
+
+    expect(screen.queryByRole("spinbutton", { name: "Days" })).not.toBeInTheDocument();
+  });
+
+  it("acknowledges the day field's own commit, at the day field's indent", async () => {
+    const user = userEvent.setup();
+    const stored: Settings = { ...DEFAULTS, retention: { policy: "keep_days", days: 45 } };
+    onCommand("set_retention_policy", () => stored);
+    await renderSeeded({ ...DEFAULTS, retention: { policy: "keep_days", days: 30 } });
+
+    const field = screen.getByRole("spinbutton", { name: "Days" });
+    await user.clear(field);
+    await user.type(field, "45{Enter}");
+
+    expect(invoke).toHaveBeenCalledWith("set_retention_policy", {
+      policy: { policy: "keep_days", days: 45 },
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("Saved.");
+  });
+
+  it("does not acknowledge the day field when it was the policy that changed", async () => {
+    // The line is indented under the day count, and an indent claims the line
+    // belongs to that field. Choosing a policy used to print "Saved." there
+    // without the field having been touched — the group's own rule broken by
+    // its own screen. The Select is committed-on-select, so the value it now
+    // shows is its confirmation, exactly as Theme's is.
+    const user = userEvent.setup();
+    const stored: Settings = { ...DEFAULTS, retention: { policy: "keep_days", days: 30 } };
+    onCommand("set_retention_policy", () => stored);
+    await renderSeeded();
+
+    await user.click(screen.getByRole("combobox", { name: /Retention/ }));
+    await user.click(screen.getByRole("option", { name: "Keep for a number of days" }));
+
+    // The policy did persist, and the day row it reveals is the visible result.
+    expect(invoke).toHaveBeenCalledWith("set_retention_policy", {
+      policy: { policy: "keep_days", days: 30 },
+    });
+    expect(await screen.findByRole("spinbutton", { name: "Days" })).toBeInTheDocument();
+    expect(screen.queryByText("Saved.")).not.toBeInTheDocument();
   });
 });
 
