@@ -16,10 +16,16 @@
 //! so what the chat leg is really for is where they *diverge*: a second raw
 //! store with its own claim list ([`chats::list_undistilled_chats`], and
 //! deliberately never [`sessions::list_failed_sessions`] — a chat transcript
-//! must not read as an unclaimed capture), a `date` recovered from the
-//! transcript's own `Meta` record rather than from its filename, and a note type
-//! [`meeting::meeting_facts_for`] declines to derive facts for, so a chat's
-//! rendered action items never reach the index tables.
+//! must not read as an unclaimed capture), and a `date` recovered from the
+//! transcript's own `Meta` record rather than from its filename.
+//!
+//! Facts are *not* a divergence: [`meeting::meeting_facts_for`] derives a chat's
+//! decisions and action items exactly as it does a meeting's
+//! ([`meeting::derives_facts`]), so a commitment made in a chat reaches
+//! `note_action_items` and the outstanding-items surface. What does diverge is
+//! the two session-derived scalars — a chat has no recording to measure, so
+//! `duration_seconds` and `speaker_count` are always `None`, and its `source` is
+//! never read as a transcript. The chat leg asserts both halves below.
 //!
 //! Deliberately a scripted [`MockRunner`], never a real `claude`: the subject is
 //! composition, not model quality. That is what keeps this file out of the
@@ -46,8 +52,8 @@ use kodabi_core::distill::{self, DistillOutput};
 use kodabi_core::embed::{index_note, FakeEmbedder};
 use kodabi_core::glossary::{Glossary, GlossaryTerm, OnConflict};
 use kodabi_core::index::{
-    normalize_date_to_utc, IndexedNote, NoteIndex, NoteType as IndexedNoteType, ProjectScope,
-    SearchParams, SearchResults, TagMatch,
+    normalize_date_to_utc, IndexedNote, NoteIndex, NoteType as IndexedNoteType, OutstandingParams,
+    ProjectScope, SearchParams, SearchResults, TagMatch,
 };
 use kodabi_core::llm::{HeadlessClaude, LlmRequest, LlmRunError};
 use kodabi_core::meeting;
@@ -690,26 +696,52 @@ fn a_chat_transcript_distills_routes_writes_indexes_and_searches_back() {
         "the note body should have been chunked and embedded"
     );
 
-    // Where the two legs part. `meeting::meeting_facts_for` gates on
-    // `NoteType::Meeting`, so a chat note is indexed with no facts at all — and
-    // that holds even though its body renders a decision and an action item the
-    // meeting leg would have parsed straight into those tables. A commitment
-    // made in a chat is invisible to the outstanding-items surfaces today; this
-    // is the test that makes changing that a decision rather than a side effect.
+    // A chat's rendered commitments reach the index, exactly as a meeting's do.
+    // The body assertion is what makes the rest meaningful: the same grammar
+    // `distill::render_body` emitted is what `meeting::parse_body` reads back.
     assert!(
         note.body
             .contains("- [ ] Jane to ask MERIDIAN for a bridge line item by 2026-08-07."),
         "body: {}",
         note.body
     );
-    assert!(
-        index.get_meeting_facts(id).unwrap().is_none(),
-        "a chat note carries no meeting facts"
+    let facts = index
+        .get_meeting_facts(id)
+        .unwrap()
+        .expect("a chat note carries facts");
+    assert_eq!(
+        facts.decisions,
+        vec!["Price the GreenFlow controller with the protocol bridge included.".to_string()]
     );
+    // Where the two legs actually part: a chat has no recording to measure, and
+    // its `chats/*.jsonl` source is never read as a session transcript.
+    assert_eq!(facts.duration_seconds, None);
+    assert_eq!(facts.speaker_count, None);
+
+    let items = index.get_action_items(id).unwrap();
+    assert_eq!(items.len(), 1, "items: {items:?}");
+    assert_eq!(items[0].owner, "Jane");
+    assert_eq!(items[0].description, "ask MERIDIAN for a bridge line item");
+    assert_eq!(items[0].due_date.as_deref(), Some("2026-08-07"));
+    assert!(!items[0].done);
     assert!(
-        index.get_action_items(id).unwrap().is_empty(),
-        "and no action-item rows, however its body reads"
+        items[0].id.starts_with("a_") && items[0].id.len() >= 8,
+        "item id should be a well-formed content hash: {}",
+        items[0].id
     );
+
+    // And the whole chain lands where it is meant to be read: chat JSONL →
+    // distill → write → index → the outstanding-items surface, with the item
+    // pointing back at the chat note it was made in.
+    let outstanding = index
+        .list_outstanding_items(
+            &OutstandingParams::default(),
+            chrono::NaiveDate::from_ymd_opt(2026, 7, 24).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(outstanding.items.len(), 1, "{outstanding:?}");
+    assert_eq!(outstanding.items[0].id, items[0].id);
+    assert_eq!(outstanding.items[0].source.id, id);
 
     // A phrase that only ever existed in the distilled body.
     let hits = search(&index, "pump house telemetry gap").hits;

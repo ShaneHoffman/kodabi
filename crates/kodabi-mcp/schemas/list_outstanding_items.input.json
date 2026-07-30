@@ -8,7 +8,7 @@
     "owner": { "type": "string", "minLength": 1, "description": "Restrict to items with this owner (e.g. \"you\" or a person's name)." },
     "status": { "type": "array", "items": { "$ref": "#/$defs/ActionItemStatus" }, "uniqueItems": true, "default": ["open", "overdue"], "description": "Statuses to include. Defaults to the not-done set (open + overdue)." },
     "due_before": { "$ref": "#/$defs/IsoDate", "description": "Only items with a due date strictly before this date (items with no due date are excluded when this is set)." },
-    "source_note_id": { "$ref": "#/$defs/NoteId", "description": "Restrict to items extracted from this specific meeting note." },
+    "source_note_id": { "$ref": "#/$defs/NoteId", "description": "Restrict to items extracted from this specific note." },
     "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 50, "description": "Max items per page." },
     "cursor": { "type": "string", "description": "Opaque pagination token from a prior response's page.next_cursor." }
   },

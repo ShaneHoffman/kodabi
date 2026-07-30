@@ -137,15 +137,27 @@ CREATE TABLE note_chunks (
 }
 
 /// v3 — structured meeting facts for the MCP `get_note` tool. Adds three tables
-/// holding what a meeting note's Markdown body (decisions, action items) and its
-/// raw session transcript (duration, distinct speaker channels) contain, so
+/// holding what a distilled note's Markdown body (decisions, action items) and
+/// its raw session transcript (duration, distinct speaker channels) contain, so
 /// `get_note` can serve `MeetingMeta` + `ActionItem` without re-parsing the body
 /// or re-reading the JSONL on every call.
 ///
-/// - `note_meetings` — one row per meeting note: the two session-derived scalars
-///   (`duration_seconds`, `speaker_count`), both nullable because a note whose
-///   `source` is a keyword (e.g. `manual`) or whose transcript was pruned by
-///   retention has no transcript to measure.
+/// **These tables serve meeting *and* chat notes** (`meeting::derives_facts`);
+/// the `note_meetings` name is historical, predating the chat leg, and was kept
+/// because renaming it would cost a migration for no behavior change while the
+/// MCP wire object is still `meeting`/`MeetingMeta`. Nothing here is type-aware:
+/// `note_id` is a bare key and no column records the note type.
+///
+/// - `note_meetings` — one row per meeting or chat note: the two session-derived
+///   scalars (`duration_seconds`, `speaker_count`), both nullable because a note
+///   whose `source` is a keyword (e.g. `manual`) or whose transcript was pruned
+///   by retention has no transcript to measure. **Both are always `NULL` for a
+///   chat**, whose `source` is a chat transcript, not a session recording — that
+///   pre-existing nullability is why adding chats needed no migration at all.
+///   A note with zero decisions and zero action items still gets a row, and that
+///   row is deliberate: it is the sentinel that makes
+///   `note_ids_missing_meeting_facts` converge instead of re-deriving the same
+///   empty note on every backfill pass.
 /// - `note_decisions` — the ordered `## Decisions` bullets.
 /// - `note_action_items` — the ordered `## Action items` lines, parsed into the
 ///   grammar's fields; `item_id` is a deterministic hash of the note id + the
@@ -158,7 +170,9 @@ CREATE TABLE note_chunks (
 /// are cleared explicitly in `delete_note`/`clear`. Because the whole index is a
 /// rebuildable cache (FOUNDING_DOC §3.6), a field database gains three empty
 /// tables on upgrade and repopulates them via the meeting-facts backfill pass
-/// (`reconcile::reconcile_missing_meeting_facts`) — nothing is lost.
+/// (`reconcile::reconcile_missing_meeting_facts`) — nothing is lost. That pass
+/// covers every chat note too, so a database indexed before chats carried facts
+/// converges on the next launch with no schema change.
 fn migration_0003_meeting_facts() -> String {
     r#"
 CREATE TABLE note_meetings (

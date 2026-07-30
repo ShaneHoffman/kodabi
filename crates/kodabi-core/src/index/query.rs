@@ -103,9 +103,9 @@ impl NoteIndex {
             }
         }
         // Replace the meeting facts wholesale, mirroring the tag set: they are a
-        // derived cache of the body + session file, and `None` (a non-meeting
-        // note, or one whose facts the caller did not derive) clears any prior
-        // rows.
+        // derived cache of the body + session file, and `None` (a type that
+        // carries no facts, or a note whose facts the caller did not derive)
+        // clears any prior rows.
         write_meeting_facts(&tx, &note.id, note.meeting.as_ref())?;
         tx.commit()?;
         Ok(())
@@ -113,8 +113,9 @@ impl NoteIndex {
 
     /// Writes (or clears, with `None`) a note's meeting facts in its own
     /// transaction. The meeting-facts backfill's entry point: it derives facts
-    /// for an already-indexed meeting note (`note_ids_missing_meeting_facts`)
-    /// without re-running a full [`upsert_note`](NoteIndex::upsert_note).
+    /// for an already-indexed meeting or chat note
+    /// (`note_ids_missing_meeting_facts`) without re-running a full
+    /// [`upsert_note`](NoteIndex::upsert_note).
     pub fn set_meeting_facts(&mut self, note_id: &str, facts: Option<&MeetingFacts>) -> Result<()> {
         let tx = self.conn.transaction()?;
         write_meeting_facts(&tx, note_id, facts)?;
@@ -336,10 +337,11 @@ impl NoteIndex {
         Ok(tags_by_id)
     }
 
-    /// Fetches a meeting note's scalar facts (`duration_seconds`,
-    /// `speaker_count`) plus its ordered decisions, or `None` when the note has
-    /// no `note_meetings` row — a non-meeting note, or a meeting note not yet
-    /// backfilled after the v3 migration. The action items are a separate read
+    /// Fetches a note's scalar facts (`duration_seconds`, `speaker_count`) plus
+    /// its ordered decisions, or `None` when the note has no `note_meetings` row
+    /// — a type that carries no facts ([`crate::meeting::derives_facts`]), or a
+    /// meeting/chat note not yet backfilled after the v3 migration. Both scalars
+    /// are always `None` for a chat. The action items are a separate read
     /// ([`get_action_items`](NoteIndex::get_action_items)), so `search` and
     /// `notes_by_project` never join these tables.
     pub fn get_meeting_facts(&self, id: &str) -> Result<Option<MeetingFactsRow>> {
@@ -396,15 +398,21 @@ impl NoteIndex {
         Ok(items)
     }
 
-    /// Every meeting note id with no `note_meetings` row yet, ordered by `id` —
-    /// the meeting-facts backfill's work list, mirroring
+    /// Every fact-carrying note id with no `note_meetings` row yet, ordered by
+    /// `id` — the meeting-facts backfill's work list, mirroring
     /// [`note_ids_missing_embeddings`](NoteIndex::note_ids_missing_embeddings).
     /// The v3 migration adds the meeting tables empty, so every existing meeting
-    /// note appears here until the backfill derives its facts.
+    /// and chat note appears here until the backfill derives its facts.
+    ///
+    /// **The `type` list below must match [`crate::meeting::derives_facts`],**
+    /// which is the authority. They are the same gate in two languages: if they
+    /// drift, a type either never backfills or is re-scanned on every pass
+    /// forever (a note with zero decisions and zero action items still gets a
+    /// `note_meetings` row, and that row is what makes this list converge).
     pub fn note_ids_missing_meeting_facts(&self) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
             "SELECT id FROM notes
-             WHERE type = 'meeting'
+             WHERE type IN ('meeting', 'chat')
                AND id NOT IN (SELECT note_id FROM note_meetings)
              ORDER BY id",
         )?;
@@ -416,9 +424,13 @@ impl NoteIndex {
 }
 
 /// Replaces a note's meeting-facts rows across all three tables in the caller's
-/// transaction. `None` clears them without inserting — a non-meeting note, or a
-/// note whose facts were not derived — mirroring how the tag set is replaced
-/// wholesale so a re-index reflects removed decisions/items too.
+/// transaction. `None` clears them without inserting — a type that carries no
+/// facts, or a note whose facts were not derived — mirroring how the tag set is
+/// replaced wholesale so a re-index reflects removed decisions/items too.
+///
+/// Takes no note type: the gate is entirely upstream in
+/// [`crate::meeting::derives_facts`], and a chat's row is written here exactly
+/// like a meeting's, with both scalars `NULL`.
 fn write_meeting_facts(
     tx: &rusqlite::Transaction<'_>,
     note_id: &str,
@@ -638,7 +650,7 @@ mod tests {
     }
 
     #[test]
-    fn note_ids_missing_meeting_facts_lists_only_unbackfilled_meetings() {
+    fn note_ids_missing_meeting_facts_lists_unbackfilled_meetings_and_chats() {
         let mut index = NoteIndex::open_in_memory().unwrap();
         // A meeting note with no facts derived yet — the backfill's target.
         index
@@ -648,15 +660,73 @@ mod tests {
         let mut filled = note("n_full01", Some("Growth"), "2026-07-10");
         filled.meeting = Some(meeting_facts());
         index.upsert_note(&filled).unwrap();
-        // A non-meeting note is never in the list.
+        // An unbackfilled chat note is a target too: its body carries the same
+        // rendered grammar a meeting's does.
+        let mut chat = note("n_chat01", Some("Growth"), "2026-07-10");
+        chat.note_type = NoteType::Chat;
+        index.upsert_note(&chat).unwrap();
+        // A plain note is never in the list.
         let mut plain = note("n_note01", Some("Growth"), "2026-07-10");
         plain.note_type = NoteType::Note;
         index.upsert_note(&plain).unwrap();
 
         assert_eq!(
             index.note_ids_missing_meeting_facts().unwrap(),
-            vec!["n_bare01".to_string()]
+            vec!["n_bare01".to_string(), "n_chat01".to_string()]
         );
+    }
+
+    /// The work list's `type IN (…)` and `meeting::derives_facts` are the same
+    /// gate written twice, in SQL and in Rust. Drift either way is silent and
+    /// nasty: a type that derives facts but is absent here never backfills, and a
+    /// type present here that derives none is re-scanned on every pass forever.
+    /// So assert them against each other over the whole `NoteType` set rather
+    /// than hard-coding the expected ids.
+    #[test]
+    fn the_work_list_agrees_with_the_rust_derive_gate_for_every_note_type() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        let all = [
+            (NoteType::Meeting, "n_type01"),
+            (NoteType::Note, "n_type02"),
+            (NoteType::Chat, "n_type03"),
+        ];
+        for (note_type, id) in all {
+            let mut input = note(id, Some("Growth"), "2026-07-10");
+            input.note_type = note_type;
+            index.upsert_note(&input).unwrap();
+        }
+
+        let expected: Vec<String> = all
+            .iter()
+            .filter(|(note_type, _)| crate::meeting::derives_facts((*note_type).into()))
+            .map(|(_, id)| (*id).to_string())
+            .collect();
+
+        assert_eq!(index.note_ids_missing_meeting_facts().unwrap(), expected);
+    }
+
+    /// A chat that genuinely committed to nothing still gets a `note_meetings`
+    /// row. Without it the work list would hand the same empty note back on every
+    /// backfill pass and never converge.
+    #[test]
+    fn a_chat_with_no_items_still_gets_a_row_so_the_backfill_converges() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        let mut chat = note("n_chat01", Some("Growth"), "2026-07-10");
+        chat.note_type = NoteType::Chat;
+        chat.meeting = Some(MeetingFacts {
+            duration_seconds: None,
+            speaker_count: None,
+            decisions: Vec::new(),
+            action_items: Vec::new(),
+        });
+        index.upsert_note(&chat).unwrap();
+
+        let scalars = index.get_meeting_facts("n_chat01").unwrap().unwrap();
+        assert_eq!(scalars.duration_seconds, None);
+        assert_eq!(scalars.speaker_count, None);
+        assert!(scalars.decisions.is_empty());
+        assert!(index.get_action_items("n_chat01").unwrap().is_empty());
+        assert!(index.note_ids_missing_meeting_facts().unwrap().is_empty());
     }
 
     #[test]

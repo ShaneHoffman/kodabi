@@ -7,7 +7,7 @@
     "note": { "$ref": "#/$defs/NoteSummary", "description": "Note metadata (frontmatter-derived)." },
     "meeting": { "oneOf": [ { "$ref": "#/$defs/MeetingMeta" }, { "type": "null" } ], "description": "Meeting metadata (including extracted decisions) when type is meeting; null otherwise. Always present." },
     "body_markdown": { "type": ["string", "null"], "description": "The note's distilled markdown body, or null when include_body is false." },
-    "action_items": { "type": "array", "items": { "$ref": "#/$defs/ActionItem" }, "description": "Extracted action items (empty for non-meetings or when include_action_items is false)." }
+    "action_items": { "type": "array", "items": { "$ref": "#/$defs/ActionItem" }, "description": "Extracted action items (empty when the note carries none or include_action_items is false)." }
   },
   "$defs": {
     "NoteId": {
@@ -90,8 +90,8 @@
         "owner": { "type": "string", "description": "Who owns it (e.g. \"you\" or a person's name)." },
         "due_date": { "oneOf": [ { "$ref": "#/$defs/IsoDate" }, { "type": "null" } ], "description": "Due date, or null if none." },
         "status": { "$ref": "#/$defs/ActionItemStatus" },
-        "source": { "$ref": "#/$defs/NoteRef", "description": "The meeting note this item was extracted from." },
-        "extracted_date": { "oneOf": [ { "$ref": "#/$defs/IsoDate" }, { "type": "null" } ], "description": "Date the item was extracted (usually the meeting date)." }
+        "source": { "$ref": "#/$defs/NoteRef", "description": "The note this item was extracted from (a meeting or a chat)." },
+        "extracted_date": { "oneOf": [ { "$ref": "#/$defs/IsoDate" }, { "type": "null" } ], "description": "Date the item was extracted (usually the source note's date)." }
       },
       "description": "An extracted action / outstanding item linked to its source note."
     }

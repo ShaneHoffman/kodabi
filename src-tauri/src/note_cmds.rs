@@ -159,8 +159,9 @@ fn write_note_impl(app: &AppHandle, mut input: NewNoteInput) -> Result<WrittenNo
         &vault::effective_title(&note, &path),
         &rel.to_string_lossy().replace('\\', "/"),
     );
-    // Derive structured meeting facts (`None` for a non-meeting note) so the
-    // index can serve `get_note`'s `meeting`/`action_items` without re-reading.
+    // Derive structured facts (`None` for a type that carries none, per
+    // `meeting::derives_facts`) so the index can serve `get_note`'s
+    // `meeting`/`action_items` without re-reading.
     indexed.meeting = meeting::meeting_facts_for(&note, &kb);
     app.state::<IndexState>().index_note_best_effort(indexed);
     broadcast_vault_changed(app);

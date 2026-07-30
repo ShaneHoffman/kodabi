@@ -335,7 +335,17 @@ fn vault_grown_index_serves_what_the_markdown_on_disk_says() {
         "2026-07-10T03:00:00+02:00", // 2026-07-10T01:00:00Z
         vec![],
         Source::parse("chat").unwrap(),
-        "Asked about Briarwood pricing tiers and got the standard rate card back.",
+        // A chat body carries the same rendered grammar a meeting's does, and it
+        // is indexed the same way — so this note's commitment has to survive the
+        // whole trip through the built binary. Undated → `open` whenever this
+        // runs, like the meeting's second item.
+        concat!(
+            "Asked about Briarwood pricing tiers and got the standard rate card back.\n\n",
+            "## Decisions\n\n",
+            "- Price the protocol bridge as a separate line.\n\n",
+            "## Action items\n\n",
+            "- [ ] Jane to ask MERIDIAN for a bridge line item.",
+        ),
     )
     .unwrap()
     .with_title(Some("Briarwood pricing questions".to_string()));
@@ -526,7 +536,21 @@ fn vault_grown_index_serves_what_the_markdown_on_disk_says() {
     // The `tags:` key is absent from the frontmatter, never `tags: []`.
     assert_eq!(chat["note"]["tags"], json!([]));
     assert_eq!(chat["note"]["confidence"].as_f64(), Some(0.62));
+    // `meeting` stays null for a chat: `MeetingMeta` leads with the two session
+    // scalars, which a chat can never carry.
     assert_eq!(chat["meeting"], Value::Null);
+    // Its action items, though, come back like any other note's — through the
+    // real binary, with `status` derived against `Local::now()` server-side.
+    let chat_items = chat["action_items"].as_array().unwrap();
+    assert_eq!(chat_items.len(), 1);
+    assert_eq!(chat_items[0]["owner"], "Jane");
+    assert_eq!(
+        chat_items[0]["description"],
+        "ask MERIDIAN for a bridge line item"
+    );
+    assert_eq!(chat_items[0]["due_date"], Value::Null);
+    assert_eq!(chat_items[0]["status"], "open");
+    assert_eq!(chat_items[0]["source"]["id"], "n_chat01");
 
     // --- id 6: list_projects ------------------------------------------------
 
@@ -571,7 +595,9 @@ fn vault_grown_index_serves_what_the_markdown_on_disk_says() {
         counts["notes_by_type"],
         json!({ "meeting": 1, "note": 1, "chat": 1 })
     );
-    assert_eq!(counts["outstanding_open"], 1);
+    // Two open: the meeting's undated item and the chat's. A chat's commitments
+    // count here exactly as a meeting's do.
+    assert_eq!(counts["outstanding_open"], 2);
     assert_eq!(counts["outstanding_overdue"], 1);
     assert_eq!(counts["glossary_terms"], 0);
     assert_eq!(context["description"], Value::Null);

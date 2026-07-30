@@ -71,6 +71,20 @@ impl From<crate::note::NoteType> for NoteType {
     }
 }
 
+/// The inverse of the impl above — the same closed three-variant set, so this is
+/// total in both directions. Needed by the meeting-facts backfill, which holds a
+/// stored row's index-side type and must hand a vault-side one to
+/// [`crate::meeting::derive_meeting_facts`].
+impl From<NoteType> for crate::note::NoteType {
+    fn from(ty: NoteType) -> Self {
+        match ty {
+            NoteType::Meeting => crate::note::NoteType::Meeting,
+            NoteType::Note => crate::note::NoteType::Note,
+            NoteType::Chat => crate::note::NoteType::Chat,
+        }
+    }
+}
+
 /// A string that isn't one of the three allowed [`NoteType`] values.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnknownNoteType(pub String);
@@ -130,9 +144,13 @@ pub struct IndexedNote {
     pub confidence: Option<f64>,
     /// Note body (frontmatter stripped) — the full-text search content.
     pub body: String,
-    /// Structured meeting facts (decisions, action items, duration, speaker
-    /// count) for a meeting note, or `None` for a non-meeting note (or when the
-    /// caller has not derived them). Populated by the write path via
+    /// Structured facts (decisions, action items, and for a meeting the duration
+    /// and speaker count) for a meeting or chat note, or `None` for a type that
+    /// carries none (see [`crate::meeting::derives_facts`]) or when the caller has
+    /// not derived them. Historical field name, matching the MCP wire object,
+    /// which stays meeting-only.
+    ///
+    /// Populated by the write path via
     /// [`crate::meeting::meeting_facts_for`]; [`from_note`](IndexedNote::from_note)
     /// leaves it `None`, since deriving it reads the session file the note's
     /// `source` points at, which the plain frontmatter/body mapping does not do.

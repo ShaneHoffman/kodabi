@@ -184,11 +184,11 @@ world is the local knowledge base only.
 ### 2. `get_note`
 
 Fetch a note's full distilled content by stable id — frontmatter metadata plus the rendered
-markdown body, and for meetings, extracted decisions and action items. Use after `search_notes` to
-read a hit in full.
+markdown body, along with its extracted action items, and for meetings the decisions and session
+metadata as well. Use after `search_notes` to read a hit in full.
 
 - **title:** `Get note`
-- **description:** `Fetch a note's full distilled content by stable id: frontmatter metadata plus the rendered markdown body. For meetings, also returns extracted decisions and action items. Use after search_notes to read a hit in full.`
+- **description:** `Fetch a note's full distilled content by stable id: frontmatter metadata plus the rendered markdown body, and any extracted action items. For meetings, also returns extracted decisions and session metadata. Use after search_notes to read a hit in full.`
 
 **inputSchema**
 ```json
@@ -200,7 +200,7 @@ read a hit in full.
   "properties": {
     "id": { "$ref": "#/$defs/NoteId", "description": "Stable id of the note to read." },
     "include_body": { "type": "boolean", "default": true, "description": "Include the full distilled markdown body. Set false for metadata + decisions + action items only." },
-    "include_action_items": { "type": "boolean", "default": true, "description": "Include extracted action items (meetings only)." }
+    "include_action_items": { "type": "boolean", "default": true, "description": "Include extracted action items (meeting and chat notes carry them)." }
   }
 }
 ```
@@ -216,7 +216,7 @@ read a hit in full.
     "note": { "$ref": "#/$defs/NoteSummary", "description": "Note metadata (frontmatter-derived)." },
     "meeting": { "oneOf": [ { "$ref": "#/$defs/MeetingMeta" }, { "type": "null" } ], "description": "Meeting metadata (including extracted decisions) when type is meeting; null otherwise. Always present." },
     "body_markdown": { "type": ["string", "null"], "description": "The note's distilled markdown body, or null when include_body is false." },
-    "action_items": { "type": "array", "items": { "$ref": "#/$defs/ActionItem" }, "description": "Extracted action items (empty for non-meetings or when include_action_items is false)." }
+    "action_items": { "type": "array", "items": { "$ref": "#/$defs/ActionItem" }, "description": "Extracted action items (empty when the note carries none or include_action_items is false)." }
   }
 }
 ```
@@ -282,11 +282,11 @@ Read-only fetch of stored data; closed world. Not-found id and "not a meeting" a
 
 ### 4. `list_outstanding_items`
 
-List action items that are not yet done (open or overdue), each linked back to its source meeting
-note.
+List action items that are not yet done (open or overdue), each linked back to its source note (a
+meeting or a chat).
 
 - **title:** `List outstanding items`
-- **description:** `List action items that are not done (open/overdue), extracted from meetings and linked to their source note. Filter by project subtree, owner, status, due-before date, or source meeting.`
+- **description:** `List action items that are not done (open/overdue), extracted from meetings and chats and linked to their source note. Filter by project subtree, owner, status, due-before date, or source note.`
 
 **inputSchema**
 ```json
@@ -300,7 +300,7 @@ note.
     "owner": { "type": "string", "minLength": 1, "description": "Restrict to items with this owner (e.g. \"you\" or a person's name)." },
     "status": { "type": "array", "items": { "$ref": "#/$defs/ActionItemStatus" }, "uniqueItems": true, "default": ["open", "overdue"], "description": "Statuses to include. Defaults to the not-done set (open + overdue)." },
     "due_before": { "$ref": "#/$defs/IsoDate", "description": "Only items with a due date strictly before this date (items with no due date are excluded when this is set)." },
-    "source_note_id": { "$ref": "#/$defs/NoteId", "description": "Restrict to items extracted from this specific meeting note." },
+    "source_note_id": { "$ref": "#/$defs/NoteId", "description": "Restrict to items extracted from this specific note." },
     "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 50, "description": "Max items per page." },
     "cursor": { "type": "string", "description": "Opaque pagination token from a prior response's page.next_cursor." }
   }
@@ -697,8 +697,8 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
         "owner": { "type": "string", "description": "Who owns it (e.g. \"you\" or a person's name)." },
         "due_date": { "oneOf": [ { "$ref": "#/$defs/IsoDate" }, { "type": "null" } ], "description": "Due date, or null if none." },
         "status": { "$ref": "#/$defs/ActionItemStatus" },
-        "source": { "$ref": "#/$defs/NoteRef", "description": "The meeting note this item was extracted from." },
-        "extracted_date": { "oneOf": [ { "$ref": "#/$defs/IsoDate" }, { "type": "null" } ], "description": "Date the item was extracted (usually the meeting date)." }
+        "source": { "$ref": "#/$defs/NoteRef", "description": "The note this item was extracted from (a meeting or a chat)." },
+        "extracted_date": { "oneOf": [ { "$ref": "#/$defs/IsoDate" }, { "type": "null" } ], "description": "Date the item was extracted (usually the source note's date)." }
       },
       "description": "An extracted action / outstanding item linked to its source note."
     },
@@ -821,8 +821,8 @@ meeting history* — traces through this surface as:
 
 1. `list_projects()` → resolve the free-text name "Briarwood Golf" to its slug (e.g. `"Briarwood Golf"`
    or a nested slug if it's a sub-project).
-2. `list_outstanding_items(project: "Briarwood Golf")` or `get_project_context(project: "Briarwood Golf", include_outstanding: true)` → the not-done action items for that project, each carrying a `source` (`NoteRef`) back to its meeting.
-3. `get_note(id: <source.id>)` → full body of the source meeting, if the answer needs to quote or
+2. `list_outstanding_items(project: "Briarwood Golf")` or `get_project_context(project: "Briarwood Golf", include_outstanding: true)` → the not-done action items for that project, each carrying a `source` (`NoteRef`) back to the note it was made in (a meeting or a chat).
+3. `get_note(id: <source.id>)` → full body of the source note, if the answer needs to quote or
    explain an item in more detail than the `ActionItem.description` provides.
 
 All three calls are read-only and already in the v1 surface — no gap remains for this flow.

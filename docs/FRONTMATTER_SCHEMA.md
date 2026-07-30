@@ -194,6 +194,13 @@ than auto-routed, so there is no routing score to record. A chat note that came 
 the distill pass (`kodabi-core`'s `chat_distill`) does carry one, exactly like a meeting: it is
 routed by the same confidence split, and lands in `Inbox` with its score when uncertain.
 
+Its **body** matches a meeting's too. The chat pass shares the meeting pass's renderer, so a
+distilled chat carries the same `# Summary` / `## Decisions` / `## Action items` / `## Open
+questions` scaffolding (each section omitted when empty), and its decisions and action items are
+parsed back out into the index like a meeting's — so a commitment made in a chat reaches
+`list_outstanding_items` and `get_note`'s `action_items`. A hand-filed note (`type: note`) is not
+parsed this way: its body is stored verbatim, so a checkbox in it is prose, not a tracked item.
+
 The `source` path is the chat transcript under `chats/`, written by the chat view one JSONL record
 per turn. Unlike the `sessions/` scheme it carries no title slug — a chat is named only by when it
 started and which device it started on.

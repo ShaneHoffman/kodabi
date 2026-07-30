@@ -15,7 +15,7 @@ pub const PROTOCOL_VERSION: &str = "2025-06-18";
 /// The server instructions surfaced at `initialize`. Must stay under 2 KB —
 /// Claude Code truncates this (and every tool description) at that size, which
 /// would silently drop the "when to use this" guidance a client relies on.
-const INSTRUCTIONS: &str = "Kodabi tools over your local knowledge base of distilled, routed Markdown notes. Read: search_notes for hybrid full-text and semantic retrieval (ranked snippets), get_note to read a hit in full by its stable id, get_meeting_transcript for a meeting's per-channel transcript segments, list_outstanding_items for not-done action items linked to their source meeting, list_projects to resolve a project name to its slug before filtering, and get_project_context for a one-call briefing on a project (description, glossary, recent notes, outstanding items, counts). Write (the human correction loop): file_note_to_project re-files a note to a project while preserving its stable id, and add_glossary_term adds or updates a project glossary term (upsert by normalized term). Ids and slugs are the handles: a note id looks like n_a1b2c3, a project slug is a folder path like Growth/Q3, and the reserved slug Inbox means unfiled. Lists paginate with limit plus an opaque cursor; an empty result is a valid answer, while a lookup by an id that does not exist is an error.";
+const INSTRUCTIONS: &str = "Kodabi tools over your local knowledge base of distilled, routed Markdown notes. Read: search_notes for hybrid full-text and semantic retrieval (ranked snippets), get_note to read a hit in full by its stable id, get_meeting_transcript for a meeting's per-channel transcript segments, list_outstanding_items for not-done action items linked to their source note, list_projects to resolve a project name to its slug before filtering, and get_project_context for a one-call briefing on a project (description, glossary, recent notes, outstanding items, counts). Write (the human correction loop): file_note_to_project re-files a note to a project while preserving its stable id, and add_glossary_term adds or updates a project glossary term (upsert by normalized term). Ids and slugs are the handles: a note id looks like n_a1b2c3, a project slug is a folder path like Growth/Q3, and the reserved slug Inbox means unfiled. Lists paginate with limit plus an opaque cursor; an empty result is a valid answer, while a lookup by an id that does not exist is an error.";
 
 const _: () = assert!(INSTRUCTIONS.len() < 2048);
 
@@ -72,13 +72,15 @@ mod tests {
 
     use crate::config::ServerConfig;
 
-    /// A server backed by an in-memory index seeded with one meeting note (with
-    /// structured meeting facts) and one plain note, plus a temp vault holding one
-    /// project folder on disk (for `list_projects`). The returned `TempDir` must
-    /// be kept alive for the vault to exist.
+    /// A server backed by an in-memory index seeded with meeting notes (with
+    /// structured meeting facts), one plain note, and one chat note that also
+    /// carries facts, plus a temp vault holding the project folders on disk (for
+    /// `list_projects`). The returned `TempDir` must be kept alive for the vault
+    /// to exist.
     fn seeded_server() -> (Server, tempfile::TempDir) {
         let vault = tempfile::tempdir().unwrap();
         fs::create_dir(vault.path().join("Growth")).unwrap();
+        fs::create_dir(vault.path().join("Ops")).unwrap();
 
         let mut index = NoteIndex::open_in_memory().unwrap();
         index
@@ -190,6 +192,39 @@ mod tests {
                         due_date: Some("2099-12-31".to_string()),
                         done: false,
                         extracted_date: Some("2026-07-13".to_string()),
+                    }],
+                }),
+            })
+            .unwrap();
+
+        // A chat note that carries facts too: its commitments are indexed exactly
+        // as a meeting's are. Filed in a sibling project so the `Growth`-scoped
+        // tests are untouched by it, and undated so it sorts last among the open
+        // items rather than reshuffling the dated ones.
+        index
+            .upsert_note(&IndexedNote {
+                id: "n_chat01".to_string(),
+                path: "Ops/greenflow.md".to_string(),
+                title: "GreenFlow options".to_string(),
+                note_type: NoteType::Chat,
+                project: Some("Ops".to_string()),
+                date: "2026-07-14".to_string(),
+                tags: vec![],
+                source: "chats/greenflow.jsonl".to_string(),
+                confidence: Some(0.8),
+                body: "Talked through the controller options.".to_string(),
+                meeting: Some(MeetingFacts {
+                    // Always `None` for a chat: there is no recording to measure.
+                    duration_seconds: None,
+                    speaker_count: None,
+                    decisions: vec!["Price the bridge separately".to_string()],
+                    action_items: vec![ActionItemFact {
+                        id: "a_bridge1".to_string(),
+                        description: "ask MERIDIAN for a bridge line item".to_string(),
+                        owner: "Jane".to_string(),
+                        due_date: None,
+                        done: false,
+                        extracted_date: Some("2026-07-14".to_string()),
                     }],
                 }),
             })
@@ -376,6 +411,28 @@ mod tests {
         assert_eq!(structured["note"]["type"], "note");
         assert_eq!(structured["meeting"], Value::Null);
         assert_eq!(structured["action_items"], json!([]));
+    }
+
+    /// The two halves of the chat decision, pinned together: action items are
+    /// *not* meeting-only, but `meeting` is. `MeetingMeta` leads with
+    /// `duration_seconds` + `speaker_count`, which a chat can never populate, so
+    /// it stays null rather than being served hollow.
+    #[test]
+    fn get_note_returns_action_items_but_a_null_meeting_for_a_chat() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(&server, "get_note", json!({ "id": "n_chat01" }));
+        let structured = &response["result"]["structuredContent"];
+
+        assert_eq!(response["result"]["isError"], Value::Bool(false));
+        assert_eq!(structured["note"]["type"], "chat");
+        assert_eq!(structured["meeting"], Value::Null);
+
+        let items = structured["action_items"].as_array().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0]["id"], "a_bridge1");
+        assert_eq!(items[0]["owner"], "Jane");
+        assert_eq!(items[0]["status"], "open");
+        assert_eq!(items[0]["source"]["id"], "n_chat01");
     }
 
     #[test]
@@ -568,27 +625,36 @@ mod tests {
 
         assert_eq!(response["result"]["isError"], Value::Bool(false));
         let items = structured["items"].as_array().unwrap();
-        // The overdue 2020 item sorts before the 2099 one; the done item and
-        // the undated-but-done one are excluded by the default status set.
+        // The overdue 2020 item sorts before the 2099 one, and the undated chat
+        // item sorts last; the done item and the undated-but-done one are
+        // excluded by the default status set.
         let ids: Vec<&str> = items
             .iter()
             .map(|item| item["id"].as_str().unwrap())
             .collect();
-        assert_eq!(ids, ["a_recap1", "a_plan01"]);
+        assert_eq!(ids, ["a_recap1", "a_plan01", "a_bridge1"]);
 
         assert_eq!(items[0]["status"], "overdue");
         assert_eq!(items[0]["owner"], "You");
         assert_eq!(items[0]["due_date"], "2020-01-01");
-        // Each item carries a NoteRef back to the meeting it came from.
+        // Each item carries a NoteRef back to the note it came from.
         assert_eq!(items[0]["source"]["id"], "n_meet01");
         assert_eq!(items[0]["source"]["path"], "Growth/kickoff.md");
         assert_eq!(items[1]["status"], "open");
 
-        assert_eq!(structured["summary"]["open"], 1);
+        // The chat-sourced commitment is here on equal footing, pointing back at
+        // its chat note. Nothing in this tool filters by note type.
+        assert_eq!(items[2]["status"], "open");
+        assert_eq!(items[2]["owner"], "Jane");
+        assert_eq!(items[2]["due_date"], Value::Null);
+        assert_eq!(items[2]["source"]["id"], "n_chat01");
+        assert_eq!(items[2]["source"]["path"], "Ops/greenflow.md");
+
+        assert_eq!(structured["summary"]["open"], 2);
         assert_eq!(structured["summary"]["overdue"], 1);
         assert_eq!(structured["summary"]["done"], 0);
         assert_eq!(structured["page"]["has_more"], Value::Bool(false));
-        assert_eq!(structured["page"]["total_estimate"], 2);
+        assert_eq!(structured["page"]["total_estimate"], 3);
     }
 
     #[test]
@@ -687,7 +753,7 @@ mod tests {
                 seen.push(item["id"].as_str().unwrap().to_string());
             }
             // The totals hold across every page, not just the first.
-            assert_eq!(structured["summary"]["open"], 1);
+            assert_eq!(structured["summary"]["open"], 2);
             assert_eq!(structured["summary"]["overdue"], 1);
             match structured["page"]["next_cursor"].as_str() {
                 Some(cursor) => arguments["cursor"] = json!(cursor),
@@ -695,7 +761,9 @@ mod tests {
             }
         }
 
-        assert_eq!(seen, ["a_recap1", "a_plan01"]);
+        // Three single-item pages spanning both note types, ending on the
+        // undated item — the keyset edge, since undated sorts after every date.
+        assert_eq!(seen, ["a_recap1", "a_plan01", "a_bridge1"]);
     }
 
     #[test]
