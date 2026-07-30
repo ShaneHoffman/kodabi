@@ -113,8 +113,14 @@ describe("ViewFrame", () => {
     );
     expect(rejected).toBeTruthy();
 
-    // And the runtime still draws nothing for it, so an untyped caller (a
-    // spread, a JS consumer) cannot smuggle one in either.
+    // And the render half, which is where the old silent drop happened: with
+    // no `eyebrow` and no `title`, `renderHeader` returns before it reaches
+    // the action, so nothing is drawn. Be precise about what that does NOT
+    // lock — unlike `summary`, whose render is gated on `SUMMARY_CLASS[variant]`
+    // being non-empty, `action` has no variant check at all. The guard is
+    // `!eyebrow && !title`, so an untyped caller that passed a title as well
+    // WOULD get the action, in a header nobody designed. The type above is the
+    // enforcement here, not this render (docs/UI_CONVENTIONS.md says the same).
     render(
       // @ts-expect-error same, for the render half.
       <ViewFrame variant="doc" action={<button type="button">Edit</button>}>
