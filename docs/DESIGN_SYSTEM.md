@@ -516,17 +516,22 @@ regardless. Anything with a third state or a repeat (the breath, the waveform, t
 stays an animation. The dividing line is now checkable: **every `@keyframes` left in `src/` loops.**
 
 **Reduced motion is one declaration, and still two rules.** `transition: none` in both blocks (see
-below), so the element paints at rest under either switch.
+below) leaves `@starting-style` with nothing to run from, so the element paints at rest. The
+app-wide 1ms floor is not enough on its own — it shortens the entrance rather than removing it, so a
+frame of the starting style can still show.
 
-**Why state both, given the floor already covers it.** Measured in the shipping WebView2
-(150.0.4078.105) against the built CSS: the app-wide floor is `transition-duration: 1ms !important`,
-and a 1ms transition completes before the next frame boundary — an element entering under either
-switch computes `opacity: 1` at insertion and at both following frames, so **no frame of the starting
-style paints**. A component's own `transition: none` is a plain declaration and cannot outrank that
-`!important`, so it is not what does the work today. State it anyway: it is what still holds if the
-floor ever loses its `!important`, and an entrance with no reduced-motion block beside it reads as an
-oversight. (This corrects an earlier claim here that the floor "is not enough on its own, so a frame
-of the starting style can still show" — it is enough, and none does.)
+**And the component's own declaration is what does the removing — not the floor.** The two look
+redundant, and the cascade is why they are not. The floor sets `animation-duration`,
+`animation-iteration-count`, `transition-duration` and `scroll-behavior` with `!important`; it never
+touches `transition-property`. `transition: none` sets `transition-property: none`, which is
+therefore uncontested, so the plain component rule wins outright and the transition stops *existing*
+rather than being shortened to 1ms. Measured in the shipping WebView2 (150.0.4078.105) against the
+built CSS, under `:root[data-reduce-motion="on"]`: with the component rule present the menu computes
+`transition-property: none` and `opacity: 1` at insertion and at every following frame; restore
+`transition-property` alone and leave the 1ms floor to do the work, and the same menu computes
+`opacity: 0` at `scale(0.96)` **at insertion**, reaching rest a frame later. **So an entrance shipped
+without its two reduced-motion rules is a bug, not a belt-and-braces omission** — which is the whole
+reason this section states them.
 
 **No `@supports` guard.** `@starting-style` is Chromium 117; the shipped WebView2 is 150.0.4078.105
 and Tauri v2's own documented floor is 125, both above it. (CSS anchor positioning, at 131, is the

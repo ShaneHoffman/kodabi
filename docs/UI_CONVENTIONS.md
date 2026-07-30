@@ -316,9 +316,18 @@ edge, flips above when there is no room below, escapes a clipping ancestor with 
 used to carry as utilities — so a WebView2 below 131 renders exactly what shipped before, entrance
 included. There is no exit transition: closing unmounts the list. See
 [`docs/decisions/popover-primitive.md`](decisions/popover-primitive.md) §5–§6 for the measurements and
-the two caveats a reader will otherwise re-discover (a flipped menu keeps its top-edge origin; the
-anchored menu sits ~10px right and ~5px down of the old one, because it anchors to the trigger's border
-box rather than the wrapper).
+the two caveats a reader will otherwise re-discover.
+
+The second of those caveats has a **live consequence worth knowing before you place a `Select`**: the
+menu anchors to the *trigger's* border box, not to the wrapper. Where the wrapper shrink-wraps its
+trigger — both Settings rows (`justify-self: end` on an `auto` track, `hideLabel`) and the Inbox token
+(a flex row) — the two boxes coincide and nothing moved but the token's 10px/5px pill bleed. Where the
+wrapper *stretches* and the trigger is narrow, they do not: `ConsentNudge` passes a visible label into
+a `flex flex-col` dialog panel, so its 253px menu right-aligns to a 176px trigger pinned at the panel's
+left edge and overhangs the panel by 53px onto the scrim. **A `Select` whose wrapper is wider than its
+trigger will hang its menu off the trigger, wherever that lands.** This is unresolved, not a documented
+intent: [`popover-primitive.md`](decisions/popover-primitive.md) §8.2 has the measurements and the
+three candidate remedies.
 
 ```tsx
 import { Select } from "./ui/Select";

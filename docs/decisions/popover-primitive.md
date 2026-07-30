@@ -385,25 +385,67 @@ the five-surface enumeration stays the operative list rather than the plane's to
 toasts wear `--lift-menu` while stacking at `--layer-overlay`. The entrance runs at `--dur-plane`, with
 `transition: none` in **both** reduced-motion branches, which §5.2's prototype omitted.
 
-**A finding that outran this ticket, measured on the way:** those two branches are *inert*, and so are
-every other component's. The app-wide floor in `index.css` is `transition-duration: 1ms !important`,
-which a plain declaration cannot outrank — and it needs no help, because a 1ms transition completes
-before the next frame boundary. Probed in the shipping WebView2 against the built CSS: a menu inserted
-under either switch computes `opacity: 1` at insertion and at both following frames, so no frame of the
-starting style paints. `docs/DESIGN_SYSTEM.md` §4 asserted the opposite ("the 1ms floor is not enough on
-its own"); that sentence was corrected in the same change, and the prescription — state both rules
-anyway — was kept, since they are what holds if the floor ever loses its `!important`. Whether the
-floor should instead drop `!important`, and whether `ChatView.css` / `QuickCapture.css` should keep
-their equally-inert overrides, is left open rather than settled here.
+**Why those two branches are load-bearing, measured on the way:** they look redundant beside the
+app-wide floor in `index.css` and are not. The floor is `transition-duration: 1ms !important`, which a
+plain declaration cannot outrank — but it never touches `transition-property`, and `transition: none`
+sets that to `none`. That half is uncontested, so the component rule wins outright and the transition
+stops existing rather than being shortened. Probed in the shipping WebView2 (150.0.4078.105) against
+the built CSS under `:root[data-reduce-motion="on"]`: with the component rule, the menu computes
+`transition-property: none` and `opacity: 1` at insertion and at every following frame; restore
+`transition-property` inline — the exact cascade the app would have if the component dropped its
+override — and the same menu computes `opacity: 0` at `scale(0.96)` **at insertion**, reaching rest a
+frame later. So `docs/DESIGN_SYSTEM.md` §4's standing claim that the 1ms floor "is not enough on its
+own" holds, and the same reasoning says `ChatView.css` / `QuickCapture.css` must keep their overrides
+too. Nothing here argues for dropping the floor's `!important`.
 
-The first caveat in §6 is carried as a comment in `Select.css` rather than worked around. The second is
-accepted uncompensated: compensating per variant would mean two rule sets where
-`docs/UI_CONVENTIONS.md` promises the dropdown is one, and anchoring to the trigger's own border box is
-the more defensible behaviour anyway. The third is settled as **entrance-only** — the list is
+The first caveat in §6 is carried as a comment in `Select.css` rather than worked around. **The second
+is not settled, and is larger than §6 measured** — see §8.2. The third is settled as
+**entrance-only** — the list is
 conditionally rendered, so closing unmounts it, and keeping a listbox mounted at all times to
 transition `display` would cost the ARIA wiring and ten "the list is gone" assertions in
 `Select.test.tsx` for a 180ms fade-out. §5.2's condition was used verbatim, including `anchor-scope`.
 The right-alignment comment was rewritten in the same change.
+
+### 8.2 The second §6 caveat is bigger than "~10px right", and is still open
+
+§6 measured the wrapper-to-trigger shift as `dxRight −10, dyTop 3` → `dxRight 0, dyTop 8`, and the
+resolution above first accepted it uncompensated on that reading. **That measurement only covers the
+call sites whose wrapper shrink-wraps its trigger.** `.settings__control` is `justify-self: end` on an
+`auto` grid track and both Settings selects pass `hideLabel`, so there the wrapper *is* the trigger
+(measured: wrapper 175.8 wide, trigger 175.8, list right edge identical before and after). The Inbox
+token sits in a flex `.inbox__rowActions`, likewise shrink-wrapped, which is where the 10px/5px pill
+bleed is the whole delta.
+
+**`ConsentNudge` is not that shape.** It passes a visible `label`, and `.ui-select` is a stretched
+flex item in the dialog's `flex flex-col` panel, so the wrapper spans the panel's content box while
+the trigger (`self-start w-auto`) sits at its left edge. Measured against the built CSS in
+Edg/150.0.4078.105 at 1440×900, resting (post-entrance):
+
+| Box | left | right | width |
+| --- | --- | --- | --- |
+| `.ui-overlay__panel` | 428 | 988 | 560 |
+| `.ui-select` (wrapper) | 452 | 964 | 512 |
+| `.ui-select__trigger` | 452 | 627.8 | 175.8 |
+| `.ui-select__list` (anchored) | **374.8** | 627.8 | 253.1 |
+
+The menu right-aligns to the trigger, and because it is 253px wide against a 176px trigger pinned to
+the panel's left content edge, its left edge lands **53px outside the dialog panel, over the scrim.**
+The previous stance right-aligned to the 512px wrapper and put the same list at left 710.9, well
+inside. So the shift at this call site is 336px, not 10px, and it is visible as a menu hanging off the
+side of a 560px centred modal.
+
+CSS anchor positioning cannot fix this on its own: `position-try-fallbacks` reacts to overflow of the
+*containing block* (the viewport, or the scrim, which is `fixed inset-0` and the same size), and the
+menu is nowhere near overflowing that. It never learns the panel exists. Three remedies, and the
+choice is a design call rather than a review one:
+
+1. **Accept it**, and say so in `docs/UI_CONVENTIONS.md` with the real number instead of "~10px".
+2. **Move `anchor-name` to `.ui-select`** (the wrapper). One line; restores the pre-change geometry at
+   every call site exactly, keeps the flip, the clipping escape and the entrance, and costs only the
+   token variant's 10px/5px pill-bleed gain — which §6 itself called "arguably a fix" rather than a
+   requirement. It does contradict "anchored to its own trigger" as the stated framing.
+3. **Restructure the consent dialog's retention row** so its trigger is not a narrow box at the left
+   of a wide panel.
 
 ## 9. Does adopting it in one control imply adopting it everywhere?
 

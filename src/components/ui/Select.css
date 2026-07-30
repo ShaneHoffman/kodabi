@@ -188,8 +188,14 @@
      free — any ancestor carrying transform, filter, backdrop-filter,
      perspective, contain, will-change on one of those, or container-type
      becomes the containing block, and in a harness one of them cost
-     hit-testing rather than layout. No ancestor of any call site has one today;
-     that list of seven is the standing grep (§6).
+     hit-testing rather than layout. That list of seven is the standing grep
+     (§6), and it is not empty today: `.ui-overlay` carries
+     backdrop-filter (Overlay.css), so ConsentNudge's menu is contained by the
+     scrim rather than the viewport, and `.inbox__rowActions` — the token
+     trigger's own parent — carries a transform for the length of a fresh row's
+     entrance (InboxView.css). Neither moves the menu, because the scrim is
+     `fixed inset-0` and no menu is open mid-entrance; both are why the grep is
+     worth re-running rather than trusted as clean.
 
      The two `auto`s release the base branch's own insets, which position-area
      has no say over. The offset turns symmetric with them — margin-block, not
@@ -243,16 +249,17 @@
      inside the guard because the transition they answer does
      (docs/DESIGN_SYSTEM.md §4).
 
-     Measured, and NOT what §4 currently claims: index.css's app-wide floor is
-     `transition-duration: 1ms !important`, which a plain declaration cannot
-     outrank — so neither of these two wins the cascade, and neither needs to.
-     That floor already suppresses the entrance by itself. In the shipping
-     WebView2 (150.0.4078.105) a menu inserted under either switch computes
-     opacity 1 at insertion and at both following frames, so no frame of the
-     starting style paints and §4's "the 1ms floor is not enough on its own"
-     does not hold here. They stay because every other entrance in the app
-     states them and because they are what holds if that floor ever loses its
-     !important — not because they are doing the work today. */
+     These two are LOAD-BEARING, and the reason is a cascade detail worth
+     stating once: index.css's app-wide floor is `transition-duration: 1ms
+     !important`, which a plain declaration cannot outrank — but the floor
+     never touches `transition-property`, and `transition: none` sets it to
+     `none`. That half is uncontested, so this rule wins outright and the
+     transition stops existing rather than being shortened. Measured in the
+     shipping WebView2 (150.0.4078.105): with this rule the list computes
+     opacity 1 at insertion; with `transition-property` restored and the 1ms
+     floor left to do the work alone, it computes opacity 0 at scale(0.96) at
+     insertion. Deleting either of these would put a frame of the starting
+     style back on screen under reduced motion. */
   @media (prefers-reduced-motion: reduce) {
     .ui-select__list {
       transition: none;
