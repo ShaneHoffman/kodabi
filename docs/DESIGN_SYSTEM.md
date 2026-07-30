@@ -446,6 +446,23 @@ content moving under the reader, and neither of these does:
 Recorded here so the next audit does not re-flag them. Anything else animating a layout property is
 still a bug.
 
+**Considered and refused.** A restraint-first sweep of the app's quiet surfaces found nothing that
+should move: every one of them is correctly still. Three of those refusals were close, and the first
+reads as *permitted* by the narrowing just above — a disclosure that reveals content *below* its own
+control moves nothing the reader is already reading. It is refused anyway, for a reason that has
+nothing to do with the layout bullet.
+
+| Candidate | Where | Why it stays still |
+| --- | --- | --- |
+| A disclosure revealing content *below* its own control | `NeedsAttentionView.tsx` | Not the hazard the layout bullet names, but the collapsed state here is a **resting** state, not a `--dur-settle` transient. The shelf is conditionally rendered, and an eased collapse needs it mounted — a mounted zero-height shelf leaves its Restore and Delete buttons tabbable behind `aria-expanded="false"`, which clipping does not fix. `InboxView.css` scopes `overflow: hidden` to `.inbox__slot--leaving > *` for the mirror-image reason: at rest that slot has to let the picker's menu overflow the row. And `SessionArtifactsSection.tsx` is the paired control — the same utility classes, deliberately matched in CSS — over a transcript of unknown length, so one could ease and the other could not. |
+| A row leaving a list on a `vault:changed` refetch | `NeedsAttentionView.tsx` | `retryDistill` resolves when the run is *queued*, not when it finishes (the outcome arrives on `distill:state`), so a leaving collapse would assert a state that is not true yet. Dismiss and Restore are moves across a parent boundary, not exits. `runAction` fires `notifyVaultChanged()` in the same `.then()` by design, so holding the card back would either desync the sidebar count or fight the render-phase prune that clears its row error. |
+| The terminal's session-ended bar | `TerminalView.tsx` | `useXterm`'s `ResizeObserver` calls `fit.fit()` and a `resizeTerminal()` PTY IPC on every size change. Easing that height buys a full buffer reflow and an IPC round-trip per frame. |
+
+None of the three carries a transition today — `.attention__dismissed-stack`,
+`.session-artifacts__panel` and `.terminal-view__ended` are layout only — so "stays still" describes
+the code rather than an intention. Recorded for the same reason as the table above, inverted: a later
+proposal for any of these answers the reason given here, not just the layout narrowing.
+
 ### An entrance is a starting style, not a mount flag
 
 **Where the list above sanctions an entrance, it is a `transition` plus `@starting-style` in the
