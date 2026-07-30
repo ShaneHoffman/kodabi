@@ -452,6 +452,21 @@ describe("Select", () => {
       expectActive(trigger, "Cedar Point");
     });
 
+    it("matches a row typed in capitals", async () => {
+      // Shift or Caps Lock sends "C", not "c". The labels are compared
+      // lowercased, so the typed character has to be folded to match them —
+      // otherwise typeahead silently does nothing for anyone holding Shift,
+      // and the first letter of a proper noun is exactly where a hand rests
+      // on it.
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const { trigger } = renderProjects();
+      await user.keyboard("{ArrowDown}");
+
+      await user.keyboard("C");
+
+      expectActive(trigger, "Cedar Point");
+    });
+
     it("accumulates keystrokes, so later letters narrow the earlier ones", async () => {
       // No label starts with "g", so a matcher that only looked at the latest
       // keystroke would still be sitting on Briarwood Golf. Reaching Brightside
@@ -515,6 +530,40 @@ describe("Select", () => {
 
       expect(screen.getByRole("listbox")).toBeInTheDocument();
       expectActive(trigger, "Cedar Point");
+    });
+  });
+
+  describe("modified keys", () => {
+    it("leaves a chord to the app instead of eating it as typeahead", async () => {
+      // Typeahead takes single characters, so a chord looks exactly like one
+      // until the modifiers are checked — and swallowing it is not a small
+      // mistake. The global Ctrl-K palette toggle is a `window` keydown
+      // listener (src/useCommandPalette.ts) while React's handlers sit on the
+      // root container, so a `stopPropagation()` here stops the chord ever
+      // reaching it: the palette would go dead for as long as any picker was
+      // open.
+      const user = userEvent.setup();
+      const onWindowKeyDown = vi.fn<(event: KeyboardEvent) => void>();
+      window.addEventListener("keydown", onWindowKeyDown);
+      try {
+        const { trigger } = renderProjects();
+        await user.keyboard("{ArrowDown}");
+        onWindowKeyDown.mockClear();
+
+        await user.keyboard("{Control>}k{/Control}");
+
+        const seen = onWindowKeyDown.mock.calls.map(([event]) => event.key);
+        expect(seen).toContain("k");
+
+        // Alt+C is the other half of the guard, and its letter would have
+        // matched a row — AltGr is ctrl+alt on Windows, so a modified letter is
+        // a character the layout is composing, never a jump.
+        await user.keyboard("{Alt>}c{/Alt}");
+
+        expectActive(trigger, "Brightside Media");
+      } finally {
+        window.removeEventListener("keydown", onWindowKeyDown);
+      }
     });
   });
 
