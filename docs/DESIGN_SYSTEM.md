@@ -362,7 +362,7 @@ disappears before the user can see the result — quick capture flashes its dest
 | Token | Value | Spent on |
 | --- | --- | --- |
 | `--dur-quick` | 150ms | Hover and colour changes on a control |
-| `--dur-plane` | 180ms | A row rising onto the raised plane; the toggle knob's travel; a fresh-filed row's fill-in |
+| `--dur-plane` | 180ms | A row rising onto the raised plane; a `Select` menu opening onto the overlay one; the toggle knob's travel; a fresh-filed row's fill-in |
 | `--dur-settle` | 200ms | A row leaving or entering a list; the Inbox placeholder's vanish-left; the filed toast's entrance and fade; the chat answer's arrival |
 | `--dur-enter` | 280ms | The Inbox placeholder arriving at the top of the queue |
 | `--dur-wake` | 450ms | The spirit-mark waking and settling |
@@ -408,16 +408,37 @@ such blocks (prose, tool line, more prose), and each one is a real arrival, so e
 entrance — what stays banned is a *stagger*, not a second arrival. See the list-of-unknown-length
 bullet below for the boundary this sits inside.
 
+And **the `Select` menu's entrance** (`--dur-plane`): the open list grows from `scale(0.96)` out of the
+trigger's own corner rather than fading in place, so what the motion says is *where it came from*. The
+`transform-origin` is the anchored placement's own geometry, not a flourish laid over it — which is why
+the entrance and the positioning are one rule block in `Select.css` and not two. Never from `scale(0)`:
+nothing arrives from nothing. Note what is *not* animating: the exit. The list is conditionally
+rendered, so closing unmounts it, and a dismissal is allowed to be instant.
+
 **Never animates:**
 
 - **A data refresh.** `vault:changed` refetches constantly. Animating it would make the app twitch
   whenever a file changed on disk.
-- **Overlay entrance, with one sanctioned exception.** The palette, the consent nudge, quick
-  capture, the capture pill, and `CaptureToast` all appear instantly — showing the surface *is* the
-  transition, and a hotkey surface that fades in feels slow. The Inbox's filed toast (`InboxView.tsx`)
-  is the exception: it is not a surface arriving cold, it is the second half of a gesture already in
-  motion (the placeholder's vanish, immediately before it), so its own short entrance (`--dur-settle`)
-  reads as one continuous motion rather than two unrelated ones.
+- **A window-plane overlay's entrance, with one sanctioned exception.** The palette, the consent
+  nudge, quick capture, the capture pill, and `CaptureToast` all appear instantly — showing the
+  surface *is* the transition, and a hotkey surface that fades in feels slow. The Inbox's filed toast
+  (`InboxView.tsx`) is the exception: it is not a surface arriving cold, it is the second half of a
+  gesture already in motion (the placeholder's vanish, immediately before it), so its own short
+  entrance (`--dur-settle`) reads as one continuous motion rather than two unrelated ones.
+
+  **This bullet is about the window plane, which is what every surface it names is.** §5's
+  **Overlay — window** (`--lift-palette` / `--lift-capture`, at `--layer-overlay`) is where a
+  *summoned* surface lives, and summoned is the whole rationale: the user asked for it from a
+  keystroke, reflexively, and the surface appearing *is* the answer. **Overlay — dropdown**
+  (`--lift-menu` / `--lift-toolbar`, at `--layer-dropdown`) is not that. A `Select` menu is not
+  summoned — it is opened by a click on its own trigger, it belongs to that trigger, and it is opened
+  occasionally rather than a hundred times a day — so it scales out of the trigger's edge as it opens
+  (`--dur-plane`, `Select.css`). That **scopes** this ban rather than widening the licence: the
+  palette and quick capture stay instant on the reason above, not by omission, and the enumeration
+  stays the operative list rather than the plane names, because both toasts wear `--lift-menu` while
+  stacking at `--layer-overlay` — keying the rule to tokens alone would read as reclassifying
+  `CaptureToast` onto the dropdown plane, which is the one thing this rewording must not do. One
+  dropdown has earned one entrance, on the same terms this section applies to everything else.
 - **Layout.** Nothing reflows under the user.
 - **Anything on a list of unknown length.** Staggered row animations are decoration. The
   placeholder's arrival, a fresh-filed row's fill-in, and the chat answer's arrival are each a
@@ -495,14 +516,27 @@ regardless. Anything with a third state or a repeat (the breath, the waveform, t
 stays an animation. The dividing line is now checkable: **every `@keyframes` left in `src/` loops.**
 
 **Reduced motion is one declaration, and still two rules.** `transition: none` in both blocks (see
-below) leaves `@starting-style` with nothing to run from, so the element paints at rest. The
-app-wide 1ms floor is not enough on its own — it shortens the entrance rather than removing it, so a
-frame of the starting style can still show.
+below), so the element paints at rest under either switch.
+
+**Why state both, given the floor already covers it.** Measured in the shipping WebView2
+(150.0.4078.105) against the built CSS: the app-wide floor is `transition-duration: 1ms !important`,
+and a 1ms transition completes before the next frame boundary — an element entering under either
+switch computes `opacity: 1` at insertion and at both following frames, so **no frame of the starting
+style paints**. A component's own `transition: none` is a plain declaration and cannot outrank that
+`!important`, so it is not what does the work today. State it anyway: it is what still holds if the
+floor ever loses its `!important`, and an entrance with no reduced-motion block beside it reads as an
+oversight. (This corrects an earlier claim here that the floor "is not enough on its own, so a frame
+of the starting style can still show" — it is enough, and none does.)
 
 **No `@supports` guard.** `@starting-style` is Chromium 117; the shipped WebView2 is 150.0.4078.105
 and Tauri v2's own documented floor is 125, both above it. (CSS anchor positioning, at 131, is the
 case that *does* need gating.) Measured inside the running app's WebView2 rather than read off the
 registry — [`docs/decisions/popover-primitive.md`](decisions/popover-primitive.md) §5.1.
+
+**The one `@supports` block in `src/` is not a counterexample.** `Select.css` nests its menu entrance
+inside an anchor-positioning guard because the transform it animates is only meaningful against the
+anchored placement — the origin *is* that placement's geometry — so an engine below 131 gets the old
+static menu, entrance included. The guard is for the geometry, not for `@starting-style`.
 
 ### Reduced motion
 

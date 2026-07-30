@@ -229,7 +229,10 @@ export function Select({
   return (
     <div
       ref={rootRef}
-      className={`relative flex flex-col${hideLabel ? "" : " gap-2xs"}`}
+      // `ui-select` carries the anchor-scope that keeps each instance's menu on
+      // its OWN trigger; `relative` is the containing block the un-anchored
+      // fallback still needs (Select.css, the two branches of its @supports).
+      className={`ui-select relative flex flex-col${hideLabel ? "" : " gap-2xs"}`}
     >
       <span
         id={labelId}
@@ -308,7 +311,11 @@ export function Select({
           id={listboxId}
           role="listbox"
           aria-labelledby={labelId}
-          className="ui-select__list absolute right-0 top-full mt-2xs max-h-64 overflow-y-auto"
+          // Placement lives in Select.css, which states it twice: anchored to
+          // the trigger where the engine supports it, and the old
+          // `absolute right-0 top-full mt-2xs` where it does not. Only the
+          // list's own scroll box stays here.
+          className="ui-select__list max-h-64 overflow-y-auto"
         >
           {options.length === 0 && (
             // Not a role=option: there is nothing to choose, so it must not be

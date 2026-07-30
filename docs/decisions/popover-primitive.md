@@ -378,6 +378,33 @@ While that ticket is open, `Select.css`'s comment justifying right-alignment as 
 workaround becomes false and should be rewritten — with real flipping, right-alignment reverts to a
 free design choice rather than a necessity.
 
+**Resolved 2026-07-30**, on board card **#126** — the ticket this document calls #109 throughout,
+filed as `feat/select-origin-entrance`. The §4 bullet was scoped to the window plane as recommended, with a
+paragraph naming the dropdown plane's distinction and stating that it licenses nothing above itself;
+the five-surface enumeration stays the operative list rather than the plane's tokens, because both
+toasts wear `--lift-menu` while stacking at `--layer-overlay`. The entrance runs at `--dur-plane`, with
+`transition: none` in **both** reduced-motion branches, which §5.2's prototype omitted.
+
+**A finding that outran this ticket, measured on the way:** those two branches are *inert*, and so are
+every other component's. The app-wide floor in `index.css` is `transition-duration: 1ms !important`,
+which a plain declaration cannot outrank — and it needs no help, because a 1ms transition completes
+before the next frame boundary. Probed in the shipping WebView2 against the built CSS: a menu inserted
+under either switch computes `opacity: 1` at insertion and at both following frames, so no frame of the
+starting style paints. `docs/DESIGN_SYSTEM.md` §4 asserted the opposite ("the 1ms floor is not enough on
+its own"); that sentence was corrected in the same change, and the prescription — state both rules
+anyway — was kept, since they are what holds if the floor ever loses its `!important`. Whether the
+floor should instead drop `!important`, and whether `ChatView.css` / `QuickCapture.css` should keep
+their equally-inert overrides, is left open rather than settled here.
+
+The first caveat in §6 is carried as a comment in `Select.css` rather than worked around. The second is
+accepted uncompensated: compensating per variant would mean two rule sets where
+`docs/UI_CONVENTIONS.md` promises the dropdown is one, and anchoring to the trigger's own border box is
+the more defensible behaviour anyway. The third is settled as **entrance-only** — the list is
+conditionally rendered, so closing unmounts it, and keeping a listbox mounted at all times to
+transition `display` would cost the ARIA wiring and ten "the list is gone" assertions in
+`Select.test.tsx` for a 180ms fade-out. §5.2's condition was used verbatim, including `anchor-scope`.
+The right-alignment comment was rewritten in the same change.
+
 ## 9. Does adopting it in one control imply adopting it everywhere?
 
 The ticket asks this directly. **No — and the reason is structural: the app has exactly one anchored

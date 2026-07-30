@@ -309,6 +309,17 @@ Escape closes and returns focus to the trigger, click-outside closes, and typing
 open list sits on the **overlay** plane (`--overlay` + `--lift-menu`, at `--layer-dropdown`); the active
 row is the value wash (never the reserved green).
 
+The list is **anchored to its trigger** with CSS anchor positioning: it hangs off the trigger's right
+edge, flips above when there is no room below, escapes a clipping ancestor with no portal
+(`position: fixed`), and scales up out of that edge as it opens (`--dur-plane`). All of it sits behind an
+`@supports` test for `anchor-scope`, whose base branch is the plain `position: absolute` stance the list
+used to carry as utilities — so a WebView2 below 131 renders exactly what shipped before, entrance
+included. There is no exit transition: closing unmounts the list. See
+[`docs/decisions/popover-primitive.md`](decisions/popover-primitive.md) §5–§6 for the measurements and
+the two caveats a reader will otherwise re-discover (a flipped menu keeps its top-edge origin; the
+anchored menu sits ~10px right and ~5px down of the old one, because it anchors to the trigger's border
+box rather than the wrapper).
+
 ```tsx
 import { Select } from "./ui/Select";
 
@@ -352,7 +363,8 @@ choosing** — that is the idea the two triggers split on.
 - **`token`** rests as quiet mono text with **no box at all** — transparent, `font-mono text-cap
   tracking-token text-text-faint`, and no chevron. It takes a soft `--token-active` pill (at
   `--radius-item`) under the pointer and holds it while open, stepping its colour to `--text`; the pill
-  bleeds past the text on a negative margin so nothing in the row shifts when it appears. Its arrow *is*
+  bleeds past the text on a negative margin so nothing in the row shifts when it appears — and its menu
+  anchors to that bled box, so the menu hangs off the pill's edge rather than the text's. Its arrow *is*
   the state — `→` at rest, `↓` the moment the menu is under it — and its menu rows render mono, because
   what they list are paths.
 
