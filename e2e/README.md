@@ -75,6 +75,19 @@ Two constraints the page CSP imposes on evaluated expressions, both free to
 honour: never inject a `<script>` element (page-originated, and blocked), and
 never use `eval`/`new Function`. Plain expressions only.
 
+## The CSP gate
+
+The buffered webview console is not only diagnostic any more. This is the only
+build in the repo that *enforces* the shipping Content Security Policy — under
+`pnpm tauri dev` the frontend comes from Vite, which sends no CSP header at all,
+so the whole policy is inert in the one build mode anyone runs day to day and
+first bites in the build that ships. Two scenarios in
+`quick-capture.test.mjs` close that gap: one asserts the inlined `data:` font
+face actually loads, then one asserts neither webview logged a CSP refusal or
+Tauri's `IPC custom protocol failed` fallback warning. The policy is annotated
+source-by-source at the top of that file, since `tauri.conf.json` is strict JSON
+and cannot hold a comment.
+
 ## Isolation
 
 Each run gets a throwaway vault and index under the system temp dir, via **two**

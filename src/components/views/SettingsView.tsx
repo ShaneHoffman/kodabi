@@ -61,23 +61,97 @@ type RebuildStatus = { status: "idle" } | IndexStateEvent;
 
 /**
  * One setting: its name on the left, its control right-aligned into the
- * shared column. Everything on this screen is one of these, which is what
- * makes the column scannable — the eye runs down the controls, not the prose.
+ * shared column. Nearly everything on this screen is one of these, which is
+ * what makes the column scannable — the eye runs down the controls, not the
+ * prose.
+ *
+ * `nested` marks a row that depends on the one above it, inside a `Group`. It
+ * indents the LABEL and nothing else: the row still spans --measure-setting,
+ * so the 1fr label track absorbs the indent and the `auto` control track stays
+ * flush to exactly the same right edge. The single scannable column survives
+ * the hierarchy, which is the only reason the hierarchy is drawn this way.
  */
-function Row({ label, children }: { label: string; children: ReactNode }) {
+function Row({
+  label,
+  nested = false,
+  children,
+}: {
+  label: string;
+  nested?: boolean;
+  children: ReactNode;
+}) {
   return (
-    <div className="settings__row">
+    <div className={`settings__row${nested ? " settings__row--nested" : ""}`}>
       <span className="text-label text-text-soft">{label}</span>
       <div className="settings__control">{children}</div>
     </div>
   );
 }
 
+/**
+ * A cluster of settings that only reads correctly as one thing: an option and
+ * the option it depends on, or two halves of one concept. `role="group"` plus a
+ * name, so the relationship reaches a screen reader rather than living only in
+ * the indent — the same shape the command palette gives its sections.
+ *
+ * Two shapes, and one question picks between them: DOES THE CONCEPT ALREADY OWN
+ * A CONTROL?
+ *
+ *   It does — that row heads the group, and `hideLabel` keeps `label` as the
+ *     accessible name alone (the same prop `Select` takes, for the same
+ *     reason). Retention heads its own group; "Days" nests under it.
+ *   It does not — the group draws `label` as a heading row and the rows under
+ *     it are PEERS at one indent. "Capture pill" is a concept rather than a
+ *     setting, and its two toggles are independent booleans: nesting one under
+ *     the other would draw a dependency that is not there. An indent is a
+ *     mapping claim, so it has to be true.
+ *
+ * Deliberately NOT a disclosure. An expander is a control, and this screen sits
+ * exactly on the four-control ceiling (docs/UI_CONVENTIONS.md, "How much one
+ * surface may hold"). A group adds rank without adding anything to press.
+ *
+ * The heading ranks up with weight and ink, never with size and never with a
+ * fourth eyebrow tracking step (docs/DESIGN_SYSTEM.md §1).
+ */
+function Group({
+  label,
+  hideLabel = false,
+  children,
+}: {
+  label: string;
+  hideLabel?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div className="settings__group" role="group" aria-label={label}>
+      {!hideLabel && (
+        <p className="settings__groupLabel text-label font-medium text-text">{label}</p>
+      )}
+      {children}
+    </div>
+  );
+}
+
 /** The one short line a setting is allowed to explain itself with. Never a
  * paragraph: a config panel that argues with you is a config panel nobody
- * finishes reading. */
-function SubLabel({ children }: { children: ReactNode }) {
-  return <p className="settings__sublabel text-cap text-text-faint">{children}</p>;
+ * finishes reading. `nested` puts it at its row's indent — it belongs to the
+ * line above it, so it travels with it. */
+function SubLabel({
+  nested = false,
+  children,
+}: {
+  nested?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <p
+      className={`settings__sublabel${
+        nested ? " settings__sublabel--nested" : ""
+      } text-cap text-text-faint`}
+    >
+      {children}
+    </p>
+  );
 }
 
 /** A boolean whose state is its geometry. `role="switch"` rather than a
@@ -208,6 +282,10 @@ function RebuildIndexControl() {
  * are raised chips; read-only values stay plain text or a mono chip and take
  * no chevron, so "you can change this" and "this is how it is" are told apart
  * by shape rather than by being greyed out.
+ *
+ * Where a setting only means something given another one, the two sit in a
+ * `Group`: the dependent row indents, and the indent comes out of the LABEL
+ * column, so the control column never moves.
  */
 export function SettingsView() {
   const { settings, error, setSettings } = useSettings();
@@ -276,14 +354,34 @@ export function SettingsView() {
     }
   };
 
-  const apply = async (nextKind: RetentionKind, nextDays: number) => {
+  // `acknowledge` is the day field saying "this commit was mine", and only it
+  // ever passes it. "Saved." is indented under that field, and an indent is a
+  // claim about what a line belongs to (docs/UI_CONVENTIONS.md, *A dependent
+  // setting is grouped, not just listed*) — so the line has to be raised by the
+  // control it points at. The Select raising it too meant that merely choosing
+  // "Keep for a number of days" printed "Saved." under a day count nobody had
+  // touched, which is the group's own rule broken by its own screen.
+  //
+  // The Select needs no acknowledgement of its own, and per docs/DESIGN_SYSTEM.md
+  // §3 it may not have one: a control that visibly moved is its own
+  // confirmation, which is why Theme has none either. The day field is the
+  // exception that whole state exists for — it persists on Enter or blur and
+  // the number it holds looks identical saved or unsaved, so it is the one
+  // control here whose success is not self-evident.
+  const apply = async (
+    nextKind: RetentionKind,
+    nextDays: number,
+    acknowledge = false,
+  ) => {
     setSaveError(null);
     setSavingRetention(true);
     try {
       const updated = await setRetentionPolicy(buildRetentionPolicy(nextKind, nextDays));
       setSettings(updated);
-      setDaysSaved(true);
-      setDaysSavedTick((tick) => tick + 1);
+      if (acknowledge) {
+        setDaysSaved(true);
+        setDaysSavedTick((tick) => tick + 1);
+      }
     } catch (err) {
       setSaveError(String(err));
       setDaysSaved(false);
@@ -295,7 +393,12 @@ export function SettingsView() {
   // Both flags travel together (the command takes the whole struct), so each
   // toggle sends the stored pair with its own field replaced. Its own error
   // slot, not the retention one: an error has to appear beside the control
-  // that failed, or it reads as a failure of whatever it sits under.
+  // that failed, or it reads as a failure of whatever it sits under. It now
+  // renders inside the "Capture pill" group for that same reason — it used to
+  // sit at the foot of the tab, under Echo check and Search index, which is
+  // exactly the failure this comment warns about. One slot for both toggles is
+  // right, not a shortcut: this command writes the whole struct and holds one
+  // error, so the pair IS the unit that fails.
   const applyOverlay = async (change: Partial<OverlaySettings>) => {
     if (!settings) return;
     setOverlayError(null);
@@ -425,57 +528,76 @@ export function SettingsView() {
                 </span>
               </Row>
 
-              <Row label="Retention">
-                <Select
-                  hideLabel
-                  label="Retention"
-                  value={kind}
-                  onChange={(value) => apply(value as RetentionKind, Number(days))}
-                  options={RETENTION_OPTIONS}
-                  busy={savingRetention}
-                />
-              </Row>
-              <SubLabel>
-                Kodabi deletes raw transcripts and recordings past this age.
-                Your notes are never removed.
-              </SubLabel>
-
-              {kind === "keep_days" && (
-                <Row label="Days to keep">
-                  <input
-                    type="number"
-                    min={1}
-                    value={days}
-                    aria-label="Days to keep"
-                    className="settings__chip ui-focus-ring w-24 text-right text-label text-text"
-                    onChange={(event) => {
-                      setDays(event.target.value);
-                      setDaysSaved(false);
-                    }}
-                    // Enter as well as blur. Blur-only made this the one setting
-                    // a keyboard user could change without ever being told it
-                    // saved, and without a way to commit it deliberately
-                    // (docs/DESIGN_SYSTEM.md §6).
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        event.preventDefault();
-                        void apply("keep_days", Number(days));
-                      }
-                    }}
-                    onBlur={() => apply("keep_days", Number(days))}
+              {/* The policy owns a control, so its row heads the group and the
+                  group's name is the accessible one alone. */}
+              <Group hideLabel label="Retention">
+                <Row label="Retention">
+                  <Select
+                    hideLabel
+                    label="Retention"
+                    value={kind}
+                    onChange={(value) => apply(value as RetentionKind, Number(days))}
+                    options={RETENTION_OPTIONS}
+                    busy={savingRetention}
                   />
                 </Row>
-              )}
-              {daysSaved && kind === "keep_days" && (
-                <StatusMessage variant="status" compact>
-                  Saved.
-                </StatusMessage>
-              )}
-              {saveError && (
-                <StatusMessage variant="error" compact>
-                  Couldn&apos;t save the retention policy: {saveError}
-                </StatusMessage>
-              )}
+                {/* Explains the head row, so it sits at the head row's rank. */}
+                <SubLabel>
+                  Kodabi deletes raw transcripts and recordings past this age.
+                  Your notes are never removed.
+                </SubLabel>
+
+                {/* "Days", not "Days to keep". The group is named Retention and
+                    that name is what a screen reader announces on entry, so the
+                    child only has to name what it ADDS. ConsentNudge keeps the
+                    long form on purpose (see the note at its call site): that
+                    dialog is a flat column of fields with no group to lean on,
+                    so the field there has to carry the whole meaning itself. */}
+                {kind === "keep_days" && (
+                  <Row nested label="Days">
+                    <input
+                      type="number"
+                      min={1}
+                      value={days}
+                      aria-label="Days"
+                      className="settings__chip ui-focus-ring w-24 text-right text-label text-text"
+                      onChange={(event) => {
+                        setDays(event.target.value);
+                        setDaysSaved(false);
+                      }}
+                      // Enter as well as blur. Blur-only made this the one setting
+                      // a keyboard user could change without ever being told it
+                      // saved, and without a way to commit it deliberately
+                      // (docs/DESIGN_SYSTEM.md §6).
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void apply("keep_days", Number(days), true);
+                        }
+                      }}
+                      onBlur={() => apply("keep_days", Number(days), true)}
+                    />
+                  </Row>
+                )}
+                {/* The DAY FIELD's acknowledgement, so it sits at the day
+                    field's indent. The error below it is the GROUP's: the Select
+                    and the field both call apply(), so either can raise it, and
+                    it belongs at the rank the two of them share. */}
+                {daysSaved && kind === "keep_days" && (
+                  <StatusMessage
+                    variant="status"
+                    compact
+                    className="settings__status--nested"
+                  >
+                    Saved.
+                  </StatusMessage>
+                )}
+                {saveError && (
+                  <StatusMessage variant="error" compact>
+                    Couldn&apos;t save the retention policy: {saveError}
+                  </StatusMessage>
+                )}
+              </Group>
             </>
           )}
 
@@ -535,30 +657,58 @@ export function SettingsView() {
               </Row>
               <SubLabel>Starts and stops a capture from anywhere.</SubLabel>
 
-              <Row label="Capture pill">
-                <Toggle
-                  label="Show the capture pill during captures you start"
-                  checked={settings.overlay.manual_captures}
-                  busy={savingOverlay}
-                  onChange={(checked) => applyOverlay({ manual_captures: checked })}
-                />
-              </Row>
-              <SubLabel>
-                Stays on top of full screen apps, so a recording is never invisible.
-              </SubLabel>
+              {/* The pill is a concept and owns no control of its own, so the
+                  group draws it as a heading and the two toggles under it are
+                  PEERS. They are independent flags: nesting the auto one under
+                  the manual one would claim turning the pill off silences the
+                  auto pill too, and it does not.
 
-              <Row label="Pill for auto detected captures">
-                <Toggle
-                  label="Show the capture pill for auto detected captures"
-                  checked={settings.overlay.auto_captures}
-                  busy={savingOverlay}
-                  onChange={(checked) => applyOverlay({ auto_captures: checked })}
-                />
-              </Row>
-              <SubLabel>
-                Kodabi does not detect meetings on its own yet, so this has nothing
-                to act on today.
-              </SubLabel>
+                  Each toggle's accessible name is now its visible row label,
+                  verbatim. It used to be neither: the row read "Capture pill"
+                  while the switch answered to "Show the capture pill during
+                  captures you start", so what you read was not what you could
+                  say to a voice-control tool. The context those long names
+                  carried is the group's name now, which is where it belongs. */}
+              <Group label="Capture pill">
+                {/* Under the heading, not under a row: it describes the pill,
+                    which is what both toggles switch. It used to hang off the
+                    manual toggle and explain the auto one by accident. */}
+                <SubLabel>
+                  Stays on top of full screen apps, so a recording is never invisible.
+                </SubLabel>
+
+                <Row nested label="Captures you start">
+                  <Toggle
+                    label="Captures you start"
+                    checked={settings.overlay.manual_captures}
+                    busy={savingOverlay}
+                    onChange={(checked) => applyOverlay({ manual_captures: checked })}
+                  />
+                </Row>
+
+                <Row nested label="Auto detected captures">
+                  <Toggle
+                    label="Auto detected captures"
+                    checked={settings.overlay.auto_captures}
+                    busy={savingOverlay}
+                    onChange={(checked) => applyOverlay({ auto_captures: checked })}
+                  />
+                </Row>
+                <SubLabel nested>
+                  Kodabi does not detect meetings on its own yet, so this has nothing
+                  to act on today.
+                </SubLabel>
+
+                {/* Moved here from the foot of the tab, where it sat below Echo
+                    check and Search index and read as THEIR failure. One slot
+                    for both toggles, at the group's own rank rather than
+                    indented under one of the two — see applyOverlay. */}
+                {overlayError && (
+                  <StatusMessage variant="error" compact>
+                    Couldn&apos;t save the capture pill setting: {overlayError}
+                  </StatusMessage>
+                )}
+              </Group>
 
               <Row label="Echo check">
                 <Button
@@ -587,12 +737,6 @@ export function SettingsView() {
               )}
 
               <RebuildIndexControl />
-
-              {overlayError && (
-                <StatusMessage variant="error" compact>
-                  Couldn&apos;t save the capture pill setting: {overlayError}
-                </StatusMessage>
-              )}
             </>
           )}
         </div>

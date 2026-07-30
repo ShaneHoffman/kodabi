@@ -75,11 +75,58 @@
 }
 
 /* A sub-label is one short muted line, never a serif paragraph: it belongs to
-   the row above it, so it is pulled up tight against it and given room below
-   instead. */
+   the row (or the group heading) above it, so it is pulled up tight against it
+   and given room below instead. */
 .settings__sublabel {
   margin-top: var(--sublabel-tuck);
   padding-bottom: var(--space-3xs);
+}
+
+/* ---------- groups ----------
+   A cluster of settings that only reads correctly as one thing: an option and
+   the option it depends on, or two halves of one concept. It is a role="group"
+   carrying a name, so the relationship is in the accessibility tree and not only
+   in the pixels — the same shape the command palette gives its sections.
+
+   THE HIERARCHY IS INDENT, PROXIMITY AND THOSE SEMANTICS. No left rail, no
+   border, no zebra: a list is not a table, and separation is space and value
+   (docs/DESIGN_SYSTEM.md §1). No disclosure either — an expander is a control,
+   and this screen already sits exactly on the documented four-control ceiling
+   (docs/UI_CONVENTIONS.md).
+
+   The air grows AROUND the group. The rhythm inside it is the panel's own
+   --row-panel-y, unchanged: a nested row is still a whole setting, and a shorter
+   box would say otherwise. */
+.settings__group {
+  padding-top: var(--gap-setting-group);
+  padding-bottom: var(--gap-setting-group);
+}
+
+/* A group that no row heads draws its own name. It ranks up with weight and ink
+   rather than size (docs/DESIGN_SYSTEM.md §1), and it takes a row's TOP rhythm
+   and none of its bottom — so it sits nearer what it heads than what sits above
+   it, which is the whole of what makes it read as a heading. */
+.settings__groupLabel {
+  padding: var(--row-panel-y) 0 0;
+}
+
+/* One level of nesting, for every line that belongs to a nested row. The `sm`
+   step, not a Layer 4 one-off: 16px is a number the ladder explains, and the
+   named-steps rule takes the step whenever it does (the same reason
+   .settings__sublabel above spends --space-3xs).
+
+   Padding on the row, never a narrower box: the row still spans
+   --measure-setting, so the 1fr label track absorbs the indent and the
+   right-aligned control column stays flush to exactly the same edge. That column
+   is this view's identity, and the hierarchy is not allowed to cost it.
+
+   The row's selector is compound so it beats `.settings__row`'s `padding`
+   shorthand on specificity rather than on source order — provable rather than
+   remembered, the same discipline as --toggle-travel's calc. */
+.settings__row.settings__row--nested,
+.settings__sublabel--nested,
+.settings__status--nested {
+  padding-left: var(--space-sm);
 }
 
 /* ---------- read-only chips ----------

@@ -401,11 +401,14 @@ the event.
 ```tsx
 import { Checkbox } from "./ui/Checkbox";
 
+// Illustrative, and deliberately not a shipped control: every boolean the app
+// ships today is a `Toggle`. This is the shape the second kind would take — one
+// of several things you are about to submit.
 <Checkbox
-  label="Show the capture pill during captures you start"
-  hint="A small pill stays on top of full screen apps while a capture is running."
-  checked={enabled}
-  onChange={setEnabled}
+  label="Include the raw transcript"
+  hint="Attaches the verbatim transcript alongside the distilled note."
+  checked={includeTranscript}
+  onChange={setIncludeTranscript}
 />
 ```
 
@@ -708,6 +711,67 @@ the cap on what it holds: a section that only exists once asked for cannot out-m
 way an always-open block below it would (§1 of [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md)), so what it
 reveals does not additionally need a scroller.
 
+### A dependent setting is grouped, not just listed
+
+The six slots above govern where an *action* goes. This is the same question one level down, for a
+surface made of settings rather than actions: **what expresses that one option is subordinate to
+another.** `SettingsView` renders every setting through one `Row` on one grid, which is exactly what
+makes its column scannable — and it is also what flattens rank. Two clusters were lying about their
+structure: a day count that means nothing without the retention policy above it, and two toggles that
+are two halves of one concept. At one indent on one grid, a dependent option sits at exactly the rank
+of an independent one, and the reader is left to work out which is which.
+
+**A cluster becomes a `role="group"` carrying an `aria-label`, and the rows inside it indent one `sm`
+step.** The group's name is what a screen reader announces on entry, and that is what lets a nested
+row's own label be short: `Days`, not `Days to keep`.
+
+**Two shapes, chosen by one question: does the concept already own a control?**
+
+- **It does** — the row carrying that control heads the group, and the group's label is only its
+  accessible name. It takes `hideLabel`, the same prop `Select` takes for the same reason. Retention
+  is this shape: `Retention` with its `Select`, and `Days` indented under it.
+- **It does not** — the group draws its label as a visible heading row (`--fw-medium` + `text-text`,
+  per [`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §1) and the rows under it are *peers* at one indent.
+  `Capture pill` is this shape: it is a concept, not a setting.
+
+**An indent is a mapping claim, so it has to be true.** That is why the headless shape has to exist.
+The two pill toggles are independent booleans — `manual_captures` and `auto_captures`, and a test
+pins that they move independently — so nesting the auto one under the manual one would tell the
+reader that switching the pill off silences the auto pill too. It doesn't. A shape that reads well
+and says something false is worse than the flat list it replaced.
+
+**The indent comes out of the label column, never the control column.** A nested row still spans
+`--measure-setting`, so the `1fr` label track absorbs the `padding-left` and the `auto` control track
+stays flush to the same right edge. Settings' one scannable column of controls is the view's
+identity; hierarchy is not allowed to cost it.
+
+**A group adds no control.** A disclosure is the obvious alternative and it is refused here:
+`SettingsView` sits *exactly* on the four-control ceiling in the table below, and an expander is a
+fifth. Rank comes from indent, proximity and the group semantics — never a left rail, a border or a
+zebra ([`docs/DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §1, *a list is not a table*), and never a fourth
+eyebrow tracking step (§1's eyebrow ladder is three deep and stays three deep). Proximity is bought
+with air *around* the group; the rhythm inside it stays the panel's own `--row-panel-y`, because a
+nested row is a whole setting and a shorter box would claim it is not.
+
+**Grouping does not move the count.** The two pill toggles now sit in one named group and
+`SettingsView` is still 1 cluster, 4 controls. A *cluster* in that table is a **place you look** —
+which is what makes `NoteEditorView`'s four the problem it is — and a group is rank *inside* one
+place, not a second place. Counting it would inflate every view that ever groups two rows, and would
+penalise the change that made the screen easier to sweep. That is the point of preferring a group in
+the first place: a screen already on the ceiling can still afford the kind of hierarchy that adds
+nothing to press.
+
+**A control's accessible name is its visible label, verbatim.** Once the group carries the context,
+the toggle's `label` (which becomes its `aria-label`) says exactly what the row says —
+`Captures you start`, not `Show the capture pill during captures you start`. Those two used to
+diverge on both pill rows, which leaves a voice-control user guessing between two names for one
+switch. If a control still needs a long accessible name after grouping, the group is named wrong.
+
+**A label written for a group is not a label written flat.** `ConsentNudge` keeps `Days to keep` on
+purpose: its dialog is a flat column of fields with no group to lean on, so the field has to carry
+the whole meaning itself. Copying the short form there would copy the shape without the thing that
+makes the shape work.
+
 ### How much one surface may hold
 
 **At rest, a view shows at most three clusters and four controls** — counting one representative row
@@ -732,7 +796,7 @@ The number is read off what already ships rather than picked:
 | `InboxView` | 1 | 2 — a row's Delete and its File picker |
 | `ProjectView` | 1 | 2 — New note, Delete project |
 | `NeedsAttentionView` | 2 | 3 — a card's Retry and Dismiss, plus the shelf toggle |
-| `SettingsView` (its heaviest tab, Capture) | 1 | 4 — two toggles, Run test, Rebuild: one per row |
+| `SettingsView` (its heaviest tab, Capture) | 1 | 4 — two pill toggles in one group, Run test, Rebuild |
 | `SearchView` | 0 | 0 — the query field is the surface |
 | `TerminalView` | 0 | 0 — Restart appears only once the session has exited |
 | `ChatView` | 1 | 1 — the composer's Send, which Stop replaces mid-turn |
@@ -833,7 +897,7 @@ new screen should find its shape here rather than inventing one.
 | `DeleteProjectDialog` | `DestructiveConfirmDialog` | — |
 | `NoteEditorView` | `ViewFrame variant="doc"`, `Button`, `StatusMessage` | its own header, and raw `<textarea>` / `<input>` elements with `aria-label` + `ui-writing` |
 | `SessionArtifactsSection` | `Button variant="quiet"` (one disclosure toggle, one Reveal), `StatusMessage` | the disclosure below a document (`.session-artifacts`, one hairline and one summoned panel) and the transcript's three-column turns; the recording is a native `<audio controls>` |
-| `SettingsView` | `ViewFrame variant="panel"`, `Select`, `Button`, `StatusMessage` | a local `role="switch"` `Toggle`, and a raw number `<input>` (`.settings__chip`) |
+| `SettingsView` | `ViewFrame variant="panel"`, `Select`, `Button`, `StatusMessage` | a local `role="switch"` `Toggle`, a local `Group` (`role="group"` + `aria-label`, `.settings__group`) in both its shapes — headless over Retention, headed over the two pill toggles — and a raw number `<input>` (`.settings__chip`) |
 | `SearchView` | `ViewFrame variant="search"`, `StatusMessage` | its own query field (`.ui-focus-ring-within`) |
 | `TerminalView` | `ViewFrame variant="terminal"`, `Button` | the xterm mount and the session-ended notice (`TerminalView.css`) |
 | `ChatView` | `ViewFrame variant="chat"`, `Button`, `StatusMessage` | the conversation log (`.chat-view__log`, entries on the shared `.md-reading` surface), the inline permission card (`.chat-view__card`, `ui-raised`), and a raw `<textarea>` composer (`.chat-view__input ui-writing`) |
@@ -891,7 +955,8 @@ So they are a **fourth token layer** in `design/tokens.css`: `--sidebar-*`,
 (`--row-*`, `--card-pad-*`, `--gap-row-columns`), the control insets
 (`--chip-pad-y`, `--btn-filled-x`, `--tag-*`, `--toolbar-*`, `--token-pill-*`,
 `--field-search-y`, `--mark-pad-*`), the Settings panel's own furniture
-(`--gap-tab`, `--tab-pad-*`, `--gap-setting`, `--sublabel-tuck`), the two
+(`--gap-tab`, `--tab-pad-*`, `--gap-setting`, `--sublabel-tuck`,
+`--gap-setting-group`), the two
 boolean controls' geometry (`--check-*`, `--toggle-*`), the writing surfaces'
 floors (`--measure-body-min`, `--measure-capture-min`) and the summoned
 surfaces (`--palette-*`, `--menu-*`, `--capture-*`).
@@ -910,6 +975,14 @@ precisely *because* they are off it: a number that no ladder explains is one
 that only its own name can. Equal values with different jobs stay apart —
 a menu option and a palette row are both 13px across, but one is chosen and
 the other is read, and their vertical insets were tuned apart.
+
+**The converse is the sharper rule: a value the ladder explains does not belong
+here at all.** A nested settings row is indented 16px, and 16px is `--space-sm`,
+so it is spent as the step rather than named a second time — Layer 4 is for the
+numbers no ladder accounts for, and a Layer-4 alias for `sm` would be a step
+wearing a disguise. `--gap-setting-group` (14) earns its name because nothing on
+the ladder is 14; that it *composes* to the 40px section gap out of a row's own
+13px padding is exactly why the increment, not the total, is what gets named.
 
 **The gutter is not part of the stance.** Each view type used to set its own
 padding and its own column alignment — the Inbox pinned left at 44/60, the
