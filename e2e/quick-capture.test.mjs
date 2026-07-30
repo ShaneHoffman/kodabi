@@ -25,6 +25,7 @@ import { join } from "node:path";
 
 import { attach, findTarget } from "./lib/cdp.mjs";
 import { launchKodabi, WINDOW } from "./lib/app.mjs";
+import { cspComplaints } from "./lib/console.mjs";
 import { allTextOf, clickWhenEnabled, textOf, typeInto, waitForOneOf } from "./lib/page.mjs";
 
 const EXE = process.env.KODABI_E2E_EXE ?? "target/debug/kodabi.exe";
@@ -80,48 +81,6 @@ const MARKER = `e2e quick capture ${process.pid}-${Date.now()}`;
  * a real <img> through ReactMarkdown (NoteEditorView.tsx), and blocking that is
  * the point — it is the remote-tracking-pixel block, not a bug to fix.
  */
-
-/**
- * Console lines meaning the policy refused something, or that Tauri gave up on it.
- *
- * Targeted rather than a blanket "no console errors": WebView2 emits noise that
- * varies by runtime build, and docs/UI_E2E_HARNESS.md commits to *retiring* this
- * tier if a flake that is not a real bug goes unfixed for one attempt. A gate a
- * WebView2 auto-update can turn red is a gate that gets deleted.
- *
- * Two patterns rather than one. The first is Chromium's wording for every refusal
- * whatever the directive, so it also catches a future img-src or media-src
- * regression. The second pins this specific symptom, and stays valid if Chromium
- * ever rewords the first.
- */
-const CSP_COMPLAINTS = [/Content Security Policy/i, /IPC custom protocol failed/i];
-
-/**
- * A refusal line with any inlined `data:` payload elided.
- *
- * Chromium quotes the refused URL, and for a font that URL *is* the base64
- * woff2. It caps its own quoting near a kilobyte, so this is not unbounded —
- * but a `font-src` regression refuses six faces per webview, each line is then
- * a kilobyte of base64, and the `after` hook prints the whole buffer again.
- * Left verbatim that buries the one part worth reading, and it is not the
- * head: the directive that names the cause comes *after* the URL, so a plain
- * truncation would drop exactly it. Eliding the blob in place keeps both ends
- * and the length, which is all the payload was ever going to tell anyone.
- */
-function elideDataUrls(line) {
-  return line.replace(
-    /data:[^'"\s)]{60,}/g,
-    (blob) => `${blob.slice(0, 40)}…<${blob.length} chars elided>`,
-  );
-}
-
-/** Every buffered console line from `session` that matches a complaint pattern. */
-function cspComplaints(session) {
-  return session
-    .consoleLog()
-    .filter((line) => CSP_COMPLAINTS.some((re) => re.test(line)))
-    .map(elideDataUrls);
-}
 
 let app;
 let capture;

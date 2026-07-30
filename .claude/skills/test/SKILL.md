@@ -27,8 +27,10 @@ default to **quick** for a diff-scoped check.
   CDP against a temp vault, so it is the only tier that crosses the real IPC bridge.
   Windows-only; **never gates a commit**. Run it after a change to a control's wiring,
   a command's name, or a DTO's shape. `pnpm e2e:build` is not optional — `dist/` is
-  embedded at compile time, so `cargo build` alone tests a stale frontend. See
-  [`docs/UI_E2E_HARNESS.md`](../../../docs/UI_E2E_HARNESS.md).
+  embedded at compile time, so `cargo build` alone tests a stale frontend. A slice
+  that needs notes or sessions on disk seeds them from the named catalogue in
+  `e2e/lib/vault.mjs` (`launchKodabi({ seed: [...] })`) rather than building state by
+  hand. See [`docs/UI_E2E_HARNESS.md`](../../../docs/UI_E2E_HARNESS.md).
 - **audit** — spawn `test-builder` in **audit** mode with the diff scope; it returns
   a read-only coverage-gap table.
 - **write** — spawn `test-builder` in **write** mode for the target; then run

@@ -507,10 +507,17 @@ jobs:
         # is silently ignored on this runner image.
         if: steps.changed.outputs.run == 'true'
         run: node e2e/build.mjs
-      - name: Run the end-to-end slice
+      - name: Run the end-to-end slices
         # No pnpm install: the harness is Node built-ins only.
+        #
+        # --test-concurrency=1 is mandatory, not a tuning knob: node:test runs
+        # test FILES in parallel by default, and every slice launches the app on
+        # the same fixed CDP port (it is baked in at compile time, so a run
+        # cannot pick its own). Two slices at once means one of them attaches to
+        # the other's webview and dies when that app is reaped. Keep this in
+        # lockstep with the `test:e2e` script in package.json.
         if: steps.changed.outputs.run == 'true'
-        run: node --test "e2e/**/*.test.mjs"
+        run: node --test --test-concurrency=1 "e2e/**/*.test.mjs"
       - name: Reap any surviving app or WebView2 processes
         if: always()
         shell: bash

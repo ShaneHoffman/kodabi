@@ -137,7 +137,11 @@ function ReadNote({
 
   return (
     <ViewFrame variant="doc">
-      <article>
+      {/* The one signal that read mode has rendered. The E2E harness needs a
+          deterministic wait for "the note screen is up" that is not any of the
+          things the source-pairing slice is about to assert on, or the wait
+          would beg the question. */}
+      <article data-testid="note-read">
         <BackLink project={project} />
 
         <header className="note__title-row">
