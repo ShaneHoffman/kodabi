@@ -32,9 +32,15 @@ const FOLLOW_SLACK_PX = 40;
  * — with tool use as quiet mono lines and MCP write approvals as inline
  * cards.
  *
- * Streamed tokens just appear: no animation (docs/DESIGN_SYSTEM.md §4 — a
- * token feed is not a licence to animate), and the streamed prose is not a
- * live region; one offscreen `role="status"` line narrates the turn instead.
+ * A token feed is still not a licence to animate (docs/DESIGN_SYSTEM.md §4):
+ * nothing here reacts to a delta. What does animate is the live answer block's
+ * one-shot arrival — `.chat-view__answer` fades and rises in as it first
+ * appears, because an answer materialising fully formed reads as breakage
+ * rather than as arriving. The completed entry it hands off to is deliberately
+ * left without that class (see `ChatEntryRow`), so the handoff is invisible.
+ *
+ * The streamed prose is not a live region; one offscreen `role="status"` line
+ * narrates the turn instead.
  */
 export function ChatView() {
   const chat = useChatSession();
@@ -117,7 +123,7 @@ export function ChatView() {
             <ChatEntryRow key={index} entry={entry} />
           ))}
           {chat.streamingText && (
-            <div className="md-reading font-serif">
+            <div className="chat-view__answer md-reading font-serif">
               <ReactMarkdown remarkPlugins={[remarkGfm]}>
                 {chat.streamingText}
               </ReactMarkdown>
@@ -180,6 +186,14 @@ function ChatEntryRow({ entry }: { entry: ChatEntry }) {
         </div>
       );
     case "assistant":
+      // No `.chat-view__answer` here, and that asymmetry with the streaming
+      // block above is the design, not an oversight. `assistant_done` clears
+      // the streamed text and appends this entry in the same update, so the
+      // block unmounts and THIS div mounts in its place holding the same
+      // prose. Giving it the entrance class would fade in an answer the reader
+      // has already been reading, once per turn. Mounting at rest makes the
+      // handoff invisible. Every entry in the log stays still for the same
+      // reason scrollback must: none of them is an arrival.
       return (
         <div className="md-reading font-serif">
           <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.text}</ReactMarkdown>

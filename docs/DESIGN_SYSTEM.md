@@ -363,7 +363,7 @@ disappears before the user can see the result — quick capture flashes its dest
 | --- | --- | --- |
 | `--dur-quick` | 150ms | Hover and colour changes on a control |
 | `--dur-plane` | 180ms | A row rising onto the raised plane; the toggle knob's travel; a fresh-filed row's fill-in |
-| `--dur-settle` | 200ms | A row leaving or entering a list; the Inbox placeholder's vanish-left; the filed toast's entrance and fade |
+| `--dur-settle` | 200ms | A row leaving or entering a list; the Inbox placeholder's vanish-left; the filed toast's entrance and fade; the chat answer's arrival |
 | `--dur-enter` | 280ms | The Inbox placeholder arriving at the top of the queue |
 | `--dur-wake` | 450ms | The spirit-mark waking and settling |
 | `--dur-wave` | 1000ms | One waveform bar's rise and fall |
@@ -397,6 +397,17 @@ vanishes (`--dur-settle`) before handing off to the filed toast. Resolved to the
 is nowhere to travel to, so nothing travels: the placeholder's slot fills in with the routed note
 using a plain fade (`--dur-plane`) instead.
 
+And **the chat answer's arrival** (`--dur-settle`): the live answer block in `ChatView` fades and
+rises a few px into place as it first appears, matching the filed toast's direction because it is the
+same gesture — content joining a surface at its live edge. An answer materialising fully formed reads as
+breakage rather than as arriving, which is this section's whole warrant for spending motion. Note
+what is *not* animating: **a token feed is not a licence to animate**, and nothing here reacts to a
+delta. The block mounts once per assistant block and then grows in place, so its `@starting-style`
+resolves once per arrival rather than once per delta. A turn that stops to call a tool has several
+such blocks (prose, tool line, more prose), and each one is a real arrival, so each gets the
+entrance — what stays banned is a *stagger*, not a second arrival. See the list-of-unknown-length
+bullet below for the boundary this sits inside.
+
 **Never animates:**
 
 - **A data refresh.** `vault:changed` refetches constantly. Animating it would make the app twitch
@@ -409,8 +420,20 @@ using a plain fade (`--dur-plane`) instead.
   reads as one continuous motion rather than two unrelated ones.
 - **Layout.** Nothing reflows under the user.
 - **Anything on a list of unknown length.** Staggered row animations are decoration. The
-  placeholder's arrival and a fresh-filed row's fill-in are each a one-shot reaction to a real event
-  on exactly one row, not a stagger applied across a list of unknown length.
+  placeholder's arrival, a fresh-filed row's fill-in, and the chat answer's arrival are each a
+  one-shot reaction to a real event on exactly one row, not a stagger applied across a list of
+  unknown length.
+
+  **The chat log is the case that shows where the line is**, because it is both a list of unknown
+  length and a surface with a real arrival on it. Only the *live* answer block animates. Every
+  entry in the log — your messages, completed answers, tool lines, permission cards, errors —
+  carries no entrance transition, which is what makes "scrollback never animates" provable rather
+  than asserted: there is nothing to fire on arrival. (The approval card's Allow/Deny buttons keep
+  the ordinary `--dur-quick` control states every `Button` has; a control answering the pointer is
+  not the log animating.) The completed entry an answer hands off to is
+  deliberately denied the entrance class, so finishing a turn does not re-fade prose already being
+  read. A per-entry or staggered entrance across that log stays banned, and adopting
+  `@starting-style` for the one block does not license it (see below: it settles how, not whether).
 
 **Two sanctioned layout transitions, and they are the only two.** "Never animates: layout" is about
 content moving under the reader, and neither of these does:
