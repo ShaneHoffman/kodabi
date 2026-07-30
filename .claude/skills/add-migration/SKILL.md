@@ -50,10 +50,11 @@ Run `cargo test -p kodabi-core index` (no `dist/` needed for a `-p` run).
 
 ## 6. Gates
 
-Run the full Rust gates (fmt + clippy + test, `dist/` present). Three CI jobs are
+Run the full Rust gates (fmt + clippy + test, `dist/` present). Four CI jobs are
 path-filtered to `crates/` and so cover `kodabi-core` too. Two of them add a
-clippy leg to run here (the third, `UI (E2E, quick capture)`, adds no gate — it
-is non-required and never gates a commit):
+clippy leg to run here; the other two add no gate (`App (release + Parakeet)`
+only release-builds, which is `/pull-request`'s job, and `UI (E2E, quick
+capture)` is non-required and never gates a commit):
 
 - `cargo clippy -p kodabi-embed --features bge --all-targets --locked -- -D warnings`
 - `cargo clippy -p kodabi --features parakeet --all-targets --locked -- -D warnings`

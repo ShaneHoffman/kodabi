@@ -204,8 +204,8 @@ Tauri-level mechanism.
 **The build-order trap is real and bit us during the spike.** `dist/` is
 embedded at compile time, so `cargo build` without a preceding `pnpm build`
 tests a stale frontend and produces confidently wrong results. `pnpm e2e:build`
-exists to make that unforgettable; CI sidesteps it by downloading the `dist`
-artifact the frontend job already publishes.
+exists to make that unforgettable; CI sidesteps it by downloading the artifact
+the `dist` job already publishes.
 
 ## Promotion / retirement criteria
 
@@ -216,7 +216,8 @@ never merge, because the check does not yet exist on `main`.
 
 - **Promote to required** after 20 consecutive green runs on `main` with zero
   failures that were not real bugs. The job already copies the in-job change gate
-  used by the `app` job, so it always reports — promotion needs no YAML change.
+  the `app-dev`/`app` jobs share, so it always reports — promotion needs no YAML
+  change.
 - **Retire it** if a flake that is not a real bug is not fixed within one
   attempt. Delete the job, keep the harness local-only, and amend this doc to
   say so. A merge-blocking check nobody can fix from the tree is worse than no

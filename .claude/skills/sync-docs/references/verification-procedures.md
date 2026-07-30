@@ -33,10 +33,11 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 - **Verify:** read the workflow's `run:` steps and confirm `CLAUDE.md` lists the same
   commands. In particular the transcribe matrix runs **three** feature legs
   (`parakeet`, `vad`, `whisper`), the embed `bge` leg is path-filtered to
-  changes under `crates/kodabi-embed` **or** `crates/kodabi-core`, and the `app` job
-  runs four steps for the shipping configuration (the `--test parakeet_real --ignored`
-  real-model run, `cargo clippy -p kodabi --features parakeet …`, the
-  `--release --features parakeet` build, and the release-guard check). Only the clippy
+  changes under `crates/kodabi-embed` **or** `crates/kodabi-core`, and the shipping
+  configuration is covered by **two** parallel jobs sharing one identical path filter:
+  `app-dev` runs the `--test parakeet_real --ignored` real-model run and
+  `cargo clippy -p kodabi --features parakeet …`, while `app` runs the
+  `--release --features parakeet` build and the release-guard check. Only the clippy
   leg is a per-commit gate in `CLAUDE.md`; the release build is `/pull-request`'s.
 - **Failure:** a gate CI runs that `CLAUDE.md` omits (or vice versa). The pre-commit
   gates promise to "mirror CI exactly", so any difference is a gap.
@@ -81,7 +82,7 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 - **Source of truth:** each crate's `Cargo.toml` `[features]` (e.g.
   `kodabi-transcribe`'s `parakeet`/`vad`/`whisper`, `kodabi-embed`'s `bge`,
   `src-tauri`'s forwarded `parakeet`/`whisper`/`embed`) and the ci.yml matrix plus
-  the `app` job.
+  the `app-dev`/`app` jobs.
 - **Mirror:** the feature-leg instructions in `CLAUDE.md` (which crates need which
   `cargo clippy --features …` legs before commit).
 - **Verify:** confirm every off-by-default feature that CI clippy-checks is named in
