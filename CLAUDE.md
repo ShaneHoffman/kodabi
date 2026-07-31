@@ -141,7 +141,9 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   **It gates more contrast the same way**, as a token remap on `--contrast` (`docs/DESIGN_SYSTEM.md`
   §6): it fails a `prefers-contrast` query in any component stylesheet, a `--contrast` thrown down
   only one of its two branches or set to anything but `0`/`1`, a gate written at a `--k-*` pigment
-  instead of a per-theme recipe, and a `backdrop-filter` outside `src/components/ui/Overlay.css` (the
+  instead of a per-theme recipe, a semantic token §6 says the switch moves that no longer gates
+  (followed through the theme-block → recipe hop, so re-pointing one back at a pigment is caught),
+  and a `backdrop-filter` outside `src/components/ui/Overlay.css` (the
   app's only translucency, and the only place `prefers-reduced-transparency` is answered). Two
   further structural assertions cover the palette itself: every semantic token is mapped in all four
   theme blocks, and the two copies of each theme mapping are identical.

@@ -804,8 +804,13 @@ Everything above is an argument against darkening the pigment *unconditionally*,
 and it still holds; it is not an argument against darkening it for someone who
 has explicitly asked. `--k-stone-hc` is #6F6C5F, the value this paragraph
 estimated. `--k-paper-faint-hc` is **#A09D8E**, not the #93907F estimated here:
-that one measures 3.95 on the dark active-row wash and misses the floor, which
-is the kind of thing only measuring finds.
+both clear the three planes, but #93907F does it with a fifth of the headroom over
+4.5 on the overlay — 4.71 against this one's 5.55 — and the overlay is the tightest
+of the three in the dark theme. The active-row wash decides nothing here: **it gates
+too**, so under the switch neither candidate clears the floor on it (3.28 and
+3.87), and that pair is deliberately below it. Measure a gated ink against the
+*gated* ground; against the resting wash both flatter themselves by most of a
+point, which is the kind of thing only measuring finds.
 
 **It had already been widened well past its brief**, which is what forced the
 issue. Twelve sites wore it on things that are not metadata at all — the
@@ -1061,16 +1066,24 @@ only on the stylesheet side, because that is the only place it is written.
   var(--move)))` is gated correctly but is checked by nobody. Widening the check to any
   literal-bearing `transform` would cost five escape hatches on static geometry that is not motion at
   all (the checkbox tick, the editor toolbar's tail, a 1px optical nudge), which is the worse trade.
-- **The same file carries four contrast and transparency assertions**, which make §6's *More
+- **The same file carries five contrast and transparency assertions**, which make §6's *More
   contrast* section a gate on the same principle. They fail: a `prefers-contrast` query in any
   component stylesheet (it belongs at the token, and `tokens.css` must actually throw it); a
   `--contrast` thrown down only one of its two branches, set to anything but `0` or `1`, or reached
   through a second attribute value — the last pins "can add, never overrule" in one line; a gate
   written at a `--k-*` pigment, which would apply to both themes at once and be invisible to the
-  theme-mapping checks above; and a `backdrop-filter` outside `Overlay.css`, or an `Overlay.css` that
+  theme-mapping checks above; **a semantic token this section says the switch moves that no longer
+  gates**; and a `backdrop-filter` outside `Overlay.css`, or an `Overlay.css` that
   no longer answers `prefers-reduced-transparency`. That last one guards the *cause* rather than the
   override: a second blurring surface is two problems at once, since it is also a new containing
   block for `position: fixed` and `Select.css`'s standing grep would not know about it.
+
+  **The fourth is the one that keeps this section honest**, and it is the only check that follows
+  the switch through its indirection: a theme block maps `--edge: var(--bound-06-day)` and the
+  recipe is where `var(--contrast)` actually appears, so a token re-pointed straight back at a
+  pigment still declares its key, still matches its twin, and silently stops honouring the
+  preference. Its list of gated tokens is the executable copy of the *What does not move* paragraph
+  above — the two are edited together or one of them is lying.
 
   Note the mechanism is already half-enforced by the four-theme-block assertion above. A
   `@media (prefers-contrast: more)` block that remapped a semantic token directly would be a *fifth*

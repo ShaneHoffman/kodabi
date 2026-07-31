@@ -78,11 +78,17 @@
   --k-sumi-body: #2E2C24; /* ink-body — long-form reading body (note editor) */
   --k-stone-ink: #55524A; /* ink-2 — secondary text, nav labels, control values */
   --k-stone: #8B8879; /* ink-3 — muted: metadata, counts, eyebrows, placeholders */
-  --k-stone-hc: #6F6C5F; /* ink-3 once the OS asks for more contrast. 4.62 on the
-                            page plane and 4.54 on the active-row wash, so metadata
-                            clears the 4.5 text floor everywhere ink-3 misses it —
-                            and it still sits between ink-2 and ink-3, so the
-                            three-step ladder stays three steps. */
+  --k-stone-hc: #6F6C5F; /* ink-3 once the OS asks for more contrast. 4.62 / 5.04 /
+                            5.18 on the three planes, so metadata clears the 4.5
+                            text floor on every plane ink-3 misses it on — and it
+                            still sits between ink-2 and ink-3, so the three-step
+                            ladder stays three steps. NOT on the active-row wash:
+                            that ground gates too (--k-menu-day → --k-token-hover-day),
+                            so the pair reaches 3.91 and stays forbidden — see
+                            DESIGN_SYSTEM §2 and the §6 table. MEASURE A GATED INK
+                            AGAINST THE GATED GROUND. Against the resting wash this
+                            same pigment reads 4.53, which is a ratio nothing ever
+                            renders. */
   --k-menu-day: #F0EEE6; /* hovered menu item / active-control fill */
   --k-token-day: #EBE9E1; /* open file-token & stop-button fill */
   --k-token-hover-day: #E1DED3; /* that fill under the pointer */
@@ -99,11 +105,17 @@
   --k-paper-body: #DCD8CC; /* ink-body */
   --k-paper-soft: #B3AFA1; /* ink-2 */
   --k-paper-faint: #7B7768; /* ink-3 */
-  --k-paper-faint-hc: #A09D8E; /* ink-3 under more contrast — 6.65 / 5.55 on the
-                                  page and overlay planes, 4.65 on the active-row
-                                  wash. Lighter than the value DESIGN_SYSTEM §6
-                                  once estimated (#93907F), which measures 3.95 on
-                                  that wash and misses the floor. */
+  --k-paper-faint-hc: #A09D8E; /* ink-3 under more contrast — 6.66 / 6.04 / 5.55 on
+                                  the three planes. Lighter than the value
+                                  DESIGN_SYSTEM §6 once estimated (#93907F), which
+                                  clears the planes too (5.65 / 5.13 / 4.71) but
+                                  with a fifth of the headroom over 4.5 on the
+                                  overlay, the tightest of the three. The
+                                  active-row wash is NOT the reason: it gates as
+                                  well, so #93907F reads 3.28 there and this one
+                                  3.87, and neither clears the floor — that pair
+                                  is deliberately below it (see --k-stone-hc's
+                                  note, DESIGN_SYSTEM §2 and §6). */
   --k-menu-night: #37331F; /* hovered menu item / active-control fill; toggle-on track */
   --k-token-night: #26231A; /* open file-token fill */
   --k-token-hover-night: #43401F; /* the stop button under the pointer */

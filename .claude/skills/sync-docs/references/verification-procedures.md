@@ -109,9 +109,18 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   The switch tokens need naming explicitly because neither is a `--dur-*` or an
   `--ease-*`, so the first check does not reach them.
 - **Failure:** a motion token the table omits, a contrast figure that no longer matches
-  the pigments in either state, a token §6 says the contrast switch moves that
-  `tokens.css` no longer gates, or an enforcement claim the guards do not make.
+  the pigments in either state, or an enforcement claim the guards do not make.
   (`pnpm test` covers the token/theme structure itself — this anchor covers the prose.)
+- **Recompute a gated pair against the GATED ground, both sides.** The switch moves
+  grounds as well as inks (`--menu-hover`, `--track`, `--highlight`), so measuring a
+  `--contrast: 1` ink against the resting fill reads high by most of a point and
+  invents a floor the app never clears. That mistake shipped once, in the two `-hc`
+  pigment notes, and §6's table was the thing that caught it.
+- **Coverage is already a gate; the figures are not.** "A token §6 says the switch
+  moves that `tokens.css` no longer gates" is asserted by `src/designTokens.test.ts`
+  ("spends the contrast switch on every token that promises it"), which follows the
+  theme-block → recipe hop. Don't hand-audit it — audit the numbers, which nothing
+  can check mechanically.
 
 ## Anchor 7 — MCP tool surface ↔ the server's committed schemas
 
