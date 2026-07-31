@@ -99,12 +99,18 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 - **Source of truth:** `design/tokens.css` (the token families) and the two guards,
   `src/designTokens.test.ts` plus the `no-restricted-syntax` block in `eslint.config.js`.
 - **Mirror:** `docs/DESIGN_SYSTEM.md` — the motion table (`--dur-*` / `--ease-*`), the
-  layer names, the contrast matrix in §6, and the enforcement claims in §7.
+  layer names, the contrast matrices in §6, the switch tokens (`--move`, `--contrast`)
+  and what each one is documented to move, and the enforcement claims in §7.
 - **Verify:** every `--dur-*` and `--ease-*` token in `tokens.css` appears in the §4 table
-  and vice versa; the contrast figures match a recomputation from the Layer-1 pigments;
+  and vice versa; the contrast figures match a recomputation from the Layer-1 pigments,
+  **in both states** — §6 carries a resting matrix and a `--contrast: 1` one, and an
+  auditor who recomputes only the first will report PASS on a stale second;
   §7's description of what each guard catches matches what the guard actually asserts.
+  The switch tokens need naming explicitly because neither is a `--dur-*` or an
+  `--ease-*`, so the first check does not reach them.
 - **Failure:** a motion token the table omits, a contrast figure that no longer matches
-  the pigments, or an enforcement claim the guards do not make.
+  the pigments in either state, a token §6 says the contrast switch moves that
+  `tokens.css` no longer gates, or an enforcement claim the guards do not make.
   (`pnpm test` covers the token/theme structure itself — this anchor covers the prose.)
 
 ## Anchor 7 — MCP tool surface ↔ the server's committed schemas

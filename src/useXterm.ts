@@ -34,6 +34,41 @@ function readSizeToken(styles: CSSStyleDeclaration, name: string, fallback: numb
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+/** `color(srgb r g b / a)` — how Chromium serialises a resolved `color-mix()`.
+ * Matched strictly rather than loosely so an engine that ever hands back some
+ * other form falls through to the value as-is instead of being mis-parsed. */
+const RESOLVED_SRGB = /^color\(srgb ([\d.]+) ([\d.]+) ([\d.]+)(?: \/ ([\d.]+))?\)$/;
+
+/**
+ * A token's value in a form xterm's colour parser can actually read.
+ *
+ * `getComputedStyle` on an unregistered custom property returns the substituted
+ * token STREAM, not a resolved colour — which is why `token()` below needs its
+ * `.trim()` at all. That was harmless while every colour token was a plain
+ * `rgba()`, and stopped being harmless when `--highlight` became a
+ * contrast-gated `color-mix()`: xterm substring-matches the first `rgb(` it
+ * finds, so it would quietly read the ungated half of the mix and report
+ * nothing wrong.
+ *
+ * Resolving a mix takes the engine, so the value goes through a real colour
+ * property on a live element. Chromium returns `color(srgb …)` for that, which
+ * xterm cannot read either, hence the conversion back to the legacy form. A
+ * value that is already legacy passes through untouched, so every ungated token
+ * reads exactly as it did before.
+ */
+function resolveColour(probe: HTMLElement, value: string): string {
+  probe.style.color = "";
+  probe.style.color = value;
+  const computed = getComputedStyle(probe).color;
+  probe.style.color = "";
+
+  const match = RESOLVED_SRGB.exec(computed);
+  if (!match) return computed || value;
+  const [, red, green, blue, alpha] = match;
+  const channel = (part: string) => Math.round(Number(part) * 255);
+  return `rgba(${channel(red)}, ${channel(green)}, ${channel(blue)}, ${alpha ?? "1"})`;
+}
+
 /**
  * The current theme's terminal colours, read from the design tokens so xterm
  * matches the app and re-themes with it. The base planes reuse existing
@@ -41,15 +76,21 @@ function readSizeToken(styles: CSSStyleDeclaration, name: string, fallback: numb
  * caret); the 16 ANSI colours come from the `--ansi-*` group in
  * design/tokens.css. xterm's theme is set in JS, so this is where the tokens are
  * consumed — not a `.css` file the token guard would police.
+ *
+ * `probe` is any mounted element, borrowed for one synchronous style read per
+ * gated token. Only `--highlight` needs it today: it is the single token here
+ * that the contrast switch moves, and the ANSI palette deliberately stays
+ * ungated (docs/DESIGN_SYSTEM.md §6 — xterm's own `minimumContrastRatio` is the
+ * right lever for a hosted TUI, not a palette swap).
  */
-function readTerminalTheme(styles: CSSStyleDeclaration): ITheme {
+function readTerminalTheme(styles: CSSStyleDeclaration, probe: HTMLElement): ITheme {
   const token = (name: string) => styles.getPropertyValue(name).trim();
   return {
     background: token("--surface"),
     foreground: token("--text-read"),
     cursor: token("--accent-dot"),
     cursorAccent: token("--surface"),
-    selectionBackground: token("--highlight"),
+    selectionBackground: resolveColour(probe, token("--highlight")),
     black: token("--ansi-black"),
     red: token("--ansi-red"),
     green: token("--ansi-green"),
@@ -105,8 +146,9 @@ export function useXterm(container: RefObject<HTMLDivElement | null>): XtermHand
   useTauriEvent(SETTINGS_CHANGED_EVENT, () => {
     requestAnimationFrame(() => {
       const term = termRef.current;
-      if (term) {
-        term.options.theme = readTerminalTheme(getComputedStyle(document.documentElement));
+      const node = container.current;
+      if (term && node) {
+        term.options.theme = readTerminalTheme(getComputedStyle(document.documentElement), node);
       }
     });
   });
@@ -117,7 +159,7 @@ export function useXterm(container: RefObject<HTMLDivElement | null>): XtermHand
 
     const styles = getComputedStyle(document.documentElement);
     const term = new Terminal({
-      theme: readTerminalTheme(styles),
+      theme: readTerminalTheme(styles, node),
       fontFamily: styles.getPropertyValue("--mono").trim() || "monospace",
       // --fs-action is the 13px mono metadata step; a comfortable terminal size.
       fontSize: readSizeToken(styles, "--fs-action", 13),

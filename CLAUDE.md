@@ -138,6 +138,13 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   `--dur-move-*` on an `animation` (gate animations by amplitude, never by duration), and any
   `scroll-behavior: smooth`. See `docs/DESIGN_SYSTEM.md` §4 for which of the two gates a given site
   needs.
+  **It gates more contrast the same way**, as a token remap on `--contrast` (`docs/DESIGN_SYSTEM.md`
+  §6): it fails a `prefers-contrast` query in any component stylesheet, a `--contrast` thrown down
+  only one of its two branches or set to anything but `0`/`1`, a gate written at a `--k-*` pigment
+  instead of a per-theme recipe, and a `backdrop-filter` outside `src/components/ui/Overlay.css` (the
+  app's only translucency, and the only place `prefers-reduced-transparency` is answered). Two
+  further structural assertions cover the palette itself: every semantic token is mapped in all four
+  theme blocks, and the two copies of each theme mapping are identical.
   Off-scale per-view geometry is not an exception: it is named in Layer 4 of `design/tokens.css`
   (`--row-*`, `--lead-*`, `--palette-*`) and consumed from a co-located `Component.css`.
   `docs/DESIGN_SYSTEM.md` decides every visual question the tokens don't

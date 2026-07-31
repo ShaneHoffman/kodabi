@@ -20,6 +20,12 @@ import { describe, expect, it } from "vitest";
 
 const ROOT = process.cwd();
 const TOKENS = join(ROOT, "design", "tokens.css");
+/** The one stylesheet allowed to blur, and therefore the one that has to answer
+ * `prefers-reduced-transparency`. Built with `join` rather than compared by
+ * suffix: `styleSheets()` builds every path with `join`, so a POSIX-slash
+ * comparison would exclude nothing on Windows and the guard below would pass
+ * vacuously. */
+const OVERLAY = join(ROOT, "src", "components", "ui", "Overlay.css");
 
 /** Every CSS file that must consume tokens rather than restate values. */
 function styleSheets(dir: string, found: string[] = []): string[] {
@@ -231,6 +237,59 @@ const SEMANTIC = [
   "--lift-capture",
 ];
 
+/** The semantic tokens the contrast switch has to move, in every theme block.
+ *
+ * Named explicitly for the same reason SEMANTIC is: the failure worth catching
+ * is a token that quietly stops being gated, and a prefix match would not see
+ * it. The planes, the top three ink steps and the one green are absent on
+ * purpose — docs/DESIGN_SYSTEM.md §6 argues each one, and tokens.css repeats
+ * the short version above the recipes.
+ *
+ * `--edge-dot` is the one edge missing here: its night value already sits on
+ * the boundary the rest climb to, so gating it in that theme would be an
+ * identity mix claiming to switch something. It gates in day only. */
+const GATED = [
+  "--text-faint",
+  "--edge-faint",
+  "--edge",
+  "--edge-rule",
+  "--edge-strong",
+  "--edge-open",
+  "--edge-check",
+  "--tint",
+  "--track",
+  "--highlight",
+  "--menu-hover",
+  "--scrim",
+];
+
+/**
+ * The blocks in tokens.css that map semantic tokens — the four theme blocks.
+ *
+ * Derived in one place so the three checks that need them cannot drift apart
+ * about what a theme block is. The `{…}` split is naive about nesting on
+ * purpose: for `@media (…) { :root { … } }` it captures the inner rule, which
+ * is the one carrying the declarations, and a block that maps no semantic token
+ * (either switch, any scale) drops out.
+ */
+function themeBlocks(): string[] {
+  const css = withoutComments(readFileSync(TOKENS, "utf8"));
+  return [...css.matchAll(/\{([^}]*)\}/g)]
+    .map((match) => match[1])
+    .filter((block) => SEMANTIC.some((key) => new RegExp(`^\\s*${key}:`, "m").test(block)));
+}
+
+/** Each theme block's whole mapping as one comparable string. Whitespace is
+ * normalised so the media block's extra indent does not read as a difference. */
+function themeMappings(): string[] {
+  return themeBlocks().map((block) =>
+    SEMANTIC.map((key) => {
+      const declaration = block.match(new RegExp(`^\\s*${key}:([^;]*);`, "m"));
+      return `${key}: ${declaration?.[1].trim().replace(/\s+/g, " ") ?? "MISSING"}`;
+    }).join("\n"),
+  );
+}
+
 describe("design tokens are the single source of truth", () => {
   it("declares no literal colour outside design/tokens.css", () => {
     // Hex, the colour functions, and the common named colours. `transparent`,
@@ -334,6 +393,89 @@ describe("design tokens are the single source of truth", () => {
     expect(scan(sheets, /scroll-behavior\s*:\s*smooth/)).toEqual([]);
   });
 
+  /*
+   * The contrast and transparency guards.
+   *
+   * More contrast is a token remap on `--contrast` (design/tokens.css), the
+   * same shape reduced motion takes on `--move` and for the same reason: a
+   * per-component override is how the motion floor drifted twice before anyone
+   * noticed. These make the doctrine a gate before it gets the chance to.
+   *
+   * Note the mechanism is already half-enforced by the theme-block count below.
+   * A `@media (prefers-contrast: more)` block that remapped a semantic token
+   * directly would be a FIFTH themed block, and that assertion fails on it — so
+   * the switch is not merely the tidy way to do this, it is the only way that
+   * passes. The first naive attempt at this feature will discover that.
+   *
+   * What these deliberately cannot see: whether `src/contrast.ts`'s attribute
+   * constants agree with the `[data-contrast="more"]` selector pinned below.
+   * The CSS side is asserted here and the DOM side in SettingsView.test.tsx,
+   * independently — the same gap reduced motion already carries.
+   */
+
+  it("handles contrast at the token, never in a component stylesheet", () => {
+    expect(scan(sheets, /prefers-contrast/)).toEqual([]);
+    // …and the switch really is thrown, so the check above cannot pass on an
+    // empty premise. `withoutComments` is load-bearing: tokens.css discusses
+    // the feature in prose, which would satisfy a raw match on its own.
+    const css = withoutComments(readFileSync(TOKENS, "utf8"));
+    expect(css).toMatch(/@media\s*\(prefers-contrast:\s*more\)/);
+  });
+
+  it("throws --contrast both ways, and only ever as a switch", () => {
+    const css = withoutComments(readFileSync(TOKENS, "utf8"));
+
+    // Two branches: the OS setting, and Settings → Appearance. A media query
+    // and a plain selector cannot share a rule, and a surface honouring only
+    // one of the two is the recorded shape of the reduced-motion failure.
+    const [media] = atRuleBlocks(css, /@media\s*\(prefers-contrast:\s*more\)/);
+    expect(media?.body).toMatch(/--contrast:\s*1\s*;/);
+    expect(css).toMatch(/:root\[data-contrast="more"\][^{]*\{[^}]*--contrast:\s*1\s*;/);
+
+    // A switch, not a slider: a value in between is half-contrast nobody asked
+    // for, and the recipes read it as a mix weight where that would show.
+    const values = [...css.matchAll(/--contrast:\s*([^;]*);/g)].map((match) => match[1].trim());
+    expect(values.length).toBeGreaterThan(0);
+    expect(values.every((value) => value === "0" || value === "1")).toBe(true);
+
+    // There is no "off" value, so the in-app switch can add contrast but never
+    // overrule an OS request for it — which is why the media block above is an
+    // unconditional `:root` rather than the `:not([data-…])` form the theme
+    // blocks use. One attribute value, and this is it.
+    expect(css.match(/\[data-contrast[^\]]*\]/g)).toEqual(['[data-contrast="more"]']);
+  });
+
+  it("throws the contrast switch at a recipe, never at a pigment", () => {
+    // Layer 1 defines every literal exactly once and is not per theme, so a
+    // gate written there would apply to both themes at once and be invisible to
+    // the theme-mapping checks below — it would route around them entirely. A
+    // conditional choice between two pigments is a remap, which is what the
+    // recipes are for.
+    const css = withoutComments(readFileSync(TOKENS, "utf8"));
+    const gatedPigments = [...css.matchAll(/^\s*(--k-[\w-]+):([^;]*);/gm)]
+      .filter((match) => match[2].includes("var(--contrast)"))
+      .map((match) => match[1]);
+    expect(gatedPigments).toEqual([]);
+  });
+
+  it("blurs in exactly one place, and answers the preference there", () => {
+    // The 1.5px scrim blur is the app's only translucency — the palette is
+    // paper, not glass — and it is also the only entry on Select.css's standing
+    // grep of containing-block-forming properties. A second one would be two
+    // problems at once: a surface ignoring prefers-reduced-transparency, and an
+    // anchored menu whose containing block moved with nobody auditing it.
+    const others = sheets.filter((file) => file !== OVERLAY);
+    const blur = /(?:-webkit-)?backdrop-filter\s*:/;
+    expect(scan(others, blur)).toEqual([]);
+    expect(scan(others, /prefers-reduced-transparency/)).toEqual([]);
+
+    const overlay = withoutComments(readFileSync(OVERLAY, "utf8"));
+    expect(overlay).toMatch(blur);
+    expect(overlay).toMatch(
+      /@media\s*\(prefers-reduced-transparency:\s*reduce\)[\s\S]*?backdrop-filter\s*:\s*none/,
+    );
+  });
+
   it("declares no literal spacing outside design/tokens.css", () => {
     // Padding, margin and gap only, and PROPERTY-SCOPED on purpose: sizing
     // (`width: 17px`), edges (`border: 3px`), radii and offsets
@@ -375,24 +517,56 @@ describe("design tokens are the single source of truth", () => {
 
   it("maps the same semantic tokens in every theme block", () => {
     // The dark mapping is stated twice (a media query cannot be merged with a
-    // plain selector). Both copies only reference Layer 1, but they still have
-    // to cover the same keys, or a token silently keeps its light value in one
-    // dark path and not the other.
-    const css = withoutComments(readFileSync(TOKENS, "utf8"));
-    const blocks = [...css.matchAll(/\{([^}]*)\}/g)].map((match) => match[1]);
-
-    const themed = blocks
-      .map((block) =>
-        SEMANTIC.filter((key) =>
-          new RegExp(`^\\s*${key}:`, "m").test(block),
-        ),
-      )
-      .filter((keys) => keys.length > 0);
+    // plain selector). Both copies only reference pigments and the recipes
+    // built from them, but they still have to cover the same keys, or a token
+    // silently keeps its light value in one dark path and not the other.
+    const themed = themeBlocks().map((block) =>
+      SEMANTIC.filter((key) => new RegExp(`^\\s*${key}:`, "m").test(block)),
+    );
 
     // Four theme blocks: default light, media dark, forced dark, forced light.
     expect(themed.length).toBe(4);
     for (const keys of themed) {
       expect(keys).toEqual(SEMANTIC);
     }
+  });
+
+  it("states each theme mapping identically in both of its blocks", () => {
+    // The four blocks are two mappings written twice each. The check above
+    // proves all four cover the same KEYS; this proves the two copies of a
+    // mapping agree on every VALUE, which is the half that check cannot see —
+    // a token gated down one dark path and left plain down the other is
+    // present in both, and passes there while rendering differently.
+    const mappings = themeMappings();
+    expect(mappings).toHaveLength(4);
+    expect(new Set(mappings).size).toBe(2);
+    for (const mapping of new Set(mappings)) {
+      expect(mappings.filter((other) => other === mapping)).toHaveLength(2);
+    }
+  });
+
+  it("spends the contrast switch on every token that promises it", () => {
+    // The switch reaches a semantic token through one hop: a theme block maps
+    // `--edge: var(--bound-06-day)`, and the recipe is where `var(--contrast)`
+    // actually appears. Following that hop is the point — a token re-pointed
+    // straight back at a pigment still declares the key, still matches its
+    // twin, and silently stops honouring the preference.
+    const css = withoutComments(readFileSync(TOKENS, "utf8"));
+    const declarationOf = (name: string) =>
+      css.match(new RegExp(`^\\s*${name}:([^;]*);`, "m"))?.[1] ?? "";
+    const gated = (value: string): boolean => {
+      if (value.includes("var(--contrast)")) return true;
+      const reference = /^\s*var\((--[\w-]+)\)\s*$/.exec(value);
+      return reference !== null && declarationOf(reference[1]).includes("var(--contrast)");
+    };
+
+    const ungated: string[] = [];
+    for (const block of themeBlocks()) {
+      for (const key of GATED) {
+        const declaration = block.match(new RegExp(`^\\s*${key}:([^;]*);`, "m"));
+        if (declaration === null || !gated(declaration[1])) ungated.push(key);
+      }
+    }
+    expect(ungated).toEqual([]);
   });
 });

@@ -15,6 +15,7 @@ import {
   type RetentionKind,
   type Theme,
 } from "../../useSettings";
+import { applyContrast, readContrast } from "../../contrast";
 import { applyReduceMotion, readReduceMotion } from "../../reduceMotion";
 import { INDEX_STATE_EVENT } from "../../events";
 import { useTauriEvent } from "../../useTauriEvent";
@@ -315,9 +316,10 @@ export function SettingsView() {
   // This counter is the timer's `resetKey`: it changes on each save even when
   // the flag does not, which is exactly the case `useTimeout`'s resetKey is for.
   const [daysSavedTick, setDaysSavedTick] = useState(0);
-  // Seeded from storage during render rather than an effect — it is a plain
-  // synchronous read (src/reduceMotion.ts).
+  // Seeded from storage during render rather than an effect — both are plain
+  // synchronous reads (src/reduceMotion.ts, src/contrast.ts).
   const [reduceMotion, setReduceMotion] = useState(readReduceMotion);
+  const [contrast, setContrast] = useState(readContrast);
 
   // Seed the day field from the stored policy the first time a keep_days value
   // is seen, so editing starts from the stored value rather than the
@@ -637,6 +639,24 @@ export function SettingsView() {
                 Nothing slides, grows or spins. Fades and colour changes stay.
                 Your OS setting already does this; here it applies to Kodabi
                 alone.
+              </SubLabel>
+
+              <Row label="Increase contrast">
+                <Toggle
+                  label="Increase contrast"
+                  checked={contrast}
+                  onChange={(next) => {
+                    // Applied in the handler, not an effect: it happens
+                    // because the user did something
+                    // (.claude/rules/no-use-effect.md).
+                    setContrast(next);
+                    applyContrast(next);
+                  }}
+                />
+              </Row>
+              <SubLabel>
+                Faint text and hairline edges take a stronger value. Your OS
+                setting already does this; here it applies to Kodabi alone.
               </SubLabel>
 
               {appearanceError && (

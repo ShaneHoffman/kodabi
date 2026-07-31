@@ -190,12 +190,17 @@
      becomes the containing block, and in a harness one of them cost
      hit-testing rather than layout. That list of seven is the standing grep
      (§6), and it is not empty today: `.ui-overlay` carries
-     backdrop-filter (Overlay.css), so ConsentNudge's menu is contained by the
-     scrim rather than the viewport, and `.inbox__rowActions` — the token
-     trigger's own parent — carries a transform for the length of a fresh row's
-     entrance (InboxView.css). Neither moves the menu, because the scrim is
-     `fixed inset-0` and no menu is open mid-entrance; both are why the grep is
-     worth re-running rather than trusted as clean.
+     backdrop-filter (Overlay.css) UNLESS the OS asks for reduced transparency,
+     so ConsentNudge's menu is contained by the scrim rather than the viewport
+     in one of those two states and not the other, and `.inbox__rowActions` —
+     the token trigger's own parent — carries a transform for the length of a
+     fresh row's entrance (InboxView.css). None of the three moves the menu,
+     because the scrim is `fixed inset-0` and therefore geometrically identical
+     to the viewport either way, and no menu is open mid-entrance; all are why
+     the grep is worth re-running rather than trusted as clean. Note what the
+     first one now demonstrates: an accessibility preference can add or remove
+     a containing block, so "which ancestors carry one of the seven" is not a
+     property of the stylesheet alone.
 
      The two `auto`s release the base branch's own insets, which position-area
      has no say over. The offset turns symmetric with them — margin-block, not
