@@ -321,9 +321,9 @@
    of the distill-and-route motion (FOUNDING_DOC §4). The pipeline
    placeholder plays the same collapse alongside its own vanish above.
 
-   Both legs take `--dur-exit`: the slot has no entrance to pair with — `1fr`
-   is its resting state and there is no `@starting-style` — so this shorthand
-   serves the exit alone and can simply be the quicker one.
+   Both legs take `--dur-exit`: a filed row's slot has no entrance to pair
+   with — `1fr` is its resting state and there is no `@starting-style` — so
+   this shorthand serves the exit alone and can simply be the quicker one.
 
    The collapse is a layout property, so it takes the gated duration: under
    reduced motion the track closes at once and the row simply disappears on
@@ -335,6 +335,21 @@
   transition:
     grid-template-rows var(--dur-move-exit) var(--ease-standard),
     opacity var(--dur-exit) var(--ease-standard);
+}
+
+/* The placeholder's slot is the exception, and DESIGN_SYSTEM.md §4 records
+   why: its exit pairs with `--dur-enter`, not `--dur-settle`, so at 200ms it
+   already runs the two thirds this scale asks for and `--dur-exit` would be
+   over-applying the rule. It has to be said HERE and not only on the vanish
+   above, because the two are nested: a parent at `opacity: 0` after 130ms
+   ends the child's 200ms travel wherever it has got to, and the collapsing
+   track under it would close 70ms before the hand-off to the toast that
+   `VANISH_MS` times — a dead beat inside a gesture that is meant to read as
+   one continuous motion. */
+.inbox__slot:has(.inbox__row--placeholder) {
+  transition:
+    grid-template-rows var(--dur-move-settle) var(--ease-standard),
+    opacity var(--dur-settle) var(--ease-standard);
 }
 
 .inbox__slot--leaving {

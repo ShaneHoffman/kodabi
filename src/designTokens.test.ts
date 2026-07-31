@@ -336,9 +336,11 @@ describe("design tokens are the single source of truth", () => {
 
   it("keeps an exit quicker than the entrance it undoes", () => {
     // An exit runs at roughly 2/3 of its paired entrance: by the time it plays
-    // the user has already decided, and the surface is only in the way. Both
-    // `--dur-exit` sites (`.inbox__slot`'s collapse, the filed toast's fade)
-    // pair with `--dur-settle`, so that is the comparison worth gating.
+    // the user has already decided, and the surface is only in the way. The
+    // filed toast is the `--dur-exit` site that has a pair, and its entrance is
+    // `--dur-settle`, so that is the comparison worth gating. (Its other site,
+    // a filed row's collapsing slot, is a pure exit with nothing to measure
+    // against — see docs/DESIGN_SYSTEM.md §4.)
     //
     // This is the one motion rule that a plain rebalance of the scale could
     // quietly invert — every other check here is about which token a leg took,

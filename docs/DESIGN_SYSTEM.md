@@ -386,14 +386,22 @@ against the specific entrance it reverses, not against the fastest number availa
 | Surface | Entrance | Exit | Ratio |
 | --- | --- | --- | --- |
 | The filed toast | `--dur-settle` 200ms | `--dur-exit` 130ms | 65% |
-| `.inbox__slot`'s collapse | *(none — `1fr` is its resting state)* | `--dur-exit` 130ms | pure exit |
-| The Inbox placeholder | `--dur-enter` 280ms | `--dur-settle` 200ms | 71% |
+| A filed row's `.inbox__slot` collapse | *(none — `1fr` is its resting state)* | `--dur-exit` 130ms | pure exit |
+| The Inbox placeholder, slot included | `--dur-enter` 280ms | `--dur-settle` 200ms | 71% |
 
 **The placeholder is the case that already obeyed the rule before it had a name**, and it is why the
 vanish-left keeps `--dur-settle` instead of being swept onto `--dur-exit` with the others. Its
 entrance is `--dur-enter`, not `--dur-settle`, so at 200ms it is already within a whisker of two
 thirds. Moving it to 130ms would not be applying this rule — it would be over-applying it, and
 compressing the one motion FOUNDING_DOC §4 reserves for distill-and-route. Pair first, then measure.
+
+**That carve-out is a rule of its own, not just an unretimed declaration**, because the placeholder
+sits *inside* an `.inbox__slot` that the row above retimes: `InboxView.css` scopes the slot's
+`--dur-settle` legs back on with `.inbox__slot:has(.inbox__row--placeholder)`. Nesting makes the
+outer duration the binding one — a parent at `opacity: 0` after 130ms ends a child's 200ms travel
+wherever it has got to, and the track under it would close before `VANISH_MS` hands off to the
+toast, putting a dead beat inside a gesture the Never-animates list below calls one continuous
+motion. **An exit nested in another exit is timed by the outer one.**
 
 **The spirit-mark's aura is the other exit that keeps its own duration**, and for a different reason.
 Removing `.is-listening` fades it out over `--dur-wake` (450ms) through the same reversible shorthand
@@ -415,9 +423,9 @@ is movement rather than value. They are the duration half of the reduced-motion 
 
 | Token | Wraps | Spent on |
 | --- | --- | --- |
-| `--dur-move-exit` | `--dur-exit` | `.inbox__slot`'s collapsing track |
+| `--dur-move-exit` | `--dur-exit` | A filed row's collapsing `.inbox__slot` track |
 | `--dur-move-plane` | `--dur-plane` | The toggle knob's travel; the fresh-filed row's picker sliding in; a `Select` menu's scale-in |
-| `--dur-move-settle` | `--dur-settle` | The vanish-left; the filed toast's rise; the chat answer's rise; `.inbox__fill`'s width |
+| `--dur-move-settle` | `--dur-settle` | The vanish-left and the placeholder slot's track under it; the filed toast's rise; the chat answer's rise; `.inbox__fill`'s width |
 | `--dur-move-enter` | `--dur-enter` | The Inbox placeholder's drop from above |
 | `--dur-move-wake` | `--dur-wake` | The spirit-mark core's transform easing back to rest |
 
@@ -1011,7 +1019,8 @@ only on the stylesheet side, because that is the only place it is written.
   literal-bearing `transform` would cost five escape hatches on static geometry that is not motion at
   all (the checkbox tick, the editor toolbar's tail, a 1px optical nudge), which is the worse trade.
 - **One more motion assertion holds the pair rule**: `--dur-exit` must be shorter than `--dur-settle`,
-  the entrance both of its sites reverse. It is the odd one out here in reading the token *values*
+  the entrance the filed toast reverses (its other site, a filed row's collapsing slot, is a pure exit
+  with no entrance to measure against). It is the odd one out here in reading the token *values*
   rather than which token a leg took, and that is exactly why it exists — a later rebalance of the
   scale could nudge the exit past its entrance while every leg stayed on a correctly named token, and
   every other check in the file would pass. The defect it blocks is the one §4's pair rule was
