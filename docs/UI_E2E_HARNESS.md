@@ -65,6 +65,17 @@ Two always-on environment seams point a run at a throwaway vault:
 already reads and the generated `.mcp.json` already writes. They must be set
 together — see **Caveats**. Details in [`e2e/README.md`](../e2e/README.md).
 
+That vault starts empty unless a slice asks for content:
+`launchKodabi({ seed: ["retention/both", …] })` writes named scenarios from the
+fixture catalogue (`e2e/lib/vault.mjs`) into it, and `handle.seeded` returns a
+manifest of what landed. The seeding happens between the `mkdtemp` and the
+`spawn`, and that ordering is load-bearing twice over: `IndexState::initialize`
+reconciles over whatever is on disk at launch, and the vault watcher ignores
+everything under `sessions/`, so a transcript written after launch is not merely
+late to the index — it is never seen at all. The same catalogue drives
+`pnpm seed:vault <dir>` for a manual preview, which is what makes a review note
+saying "open `retention/recording-only`" mean something.
+
 Teardown is `taskkill /PID <pid> /T /F`: `/T` because WebView2 spawns
 `msedgewebview2.exe` children that do not reliably die with the host, `/F`
 because the app intercepts `CloseRequested` and hides to tray, so a polite kill
@@ -157,10 +168,11 @@ beyond Windows, revisit A on the cross-platform row alone.
 
 ## Caveats / threats to validity
 
-**One slice is not a suite.** Exactly one *path* is covered — quick capture into
-the Inbox. A green run says that path is wired, nothing more. The value is the
-harness plus the precedent; further slices are cheap only in proportion to how
-many `data-testid`s exist.
+**Two slices are not a suite.** Two *paths* are covered — quick capture into the
+Inbox, and the source-pairing disclosure across the retention matrix. A green run
+says those paths are wired, nothing more. The value is the harness plus the
+precedent; further slices are cheap in proportion to how many `data-testid`s
+exist and how much of the state they need already sits in the fixture catalogue.
 
 The one thing the tier gates beyond that path is the **shipping CSP**, and only
 because it is structurally the only place that can: `pnpm tauri dev` serves the
@@ -171,11 +183,23 @@ one asserts neither webview logged a refusal or Tauri's postMessage-fallback
 warning. That is how the `connect-src` omission that silently degraded every
 `invoke()` to the slow bridge was found in the first place.
 
+`media-src` was the one directive still annotated but unexercised: the app's only
+asset-protocol consumer is the `<audio>` in `SessionArtifactsSection`, and the
+quick-capture slice never opens a note with a recording. The source-pairing slice
+mounts one, so dropping the directive now turns something red. Reaching that
+state also surfaced a real bug in the vault seam — `assetProtocol.scope` in
+`tauri.conf.json` can only name a static path (`$APPDATA/sessions/*.wav`), so a
+vault relocated by `KODABI_KB_ROOT` had its recordings refused before the CSP was
+consulted, and playback failed for every note. `setup` now widens the scope to
+the resolved KB root, which is what makes the seam whole rather than half.
+
 **The two vault seams are a pair, and the pairing is load-bearing.**
 `IndexState::initialize` hands the KB root to the watcher and to a startup
 reconcile job. Setting `KODABI_KB_ROOT` while the index stayed under the real
-app-data dir would converge a developer's real index against the empty temp
-vault and delete every row for the notes it could no longer see. The seams are
+app-data dir would converge a developer's real index against the harness's temp
+vault and delete every row for the notes it could no longer see — and once that
+vault is *seeded*, the surviving rows are fixtures rather than nothing, which is
+worse, not better. The seams are
 always-on rather than `#[cfg(debug_assertions)]` precisely so the tier exercises
 the code path that ships — but that means an environment variable can now
 relocate a user's notes.
@@ -231,6 +255,17 @@ pnpm e2e:build
 pnpm test:e2e
 ```
 
+To reach the same states by hand, seed a vault from the catalogue the slices use
+and point a dev build at it (both variables, always together):
+
+```powershell
+pnpm seed:vault -- --list        # the ten scenarios and what each one is for
+pnpm seed:vault C:\kodabi-fixture
+$env:KODABI_KB_ROOT="C:\kodabi-fixture"
+$env:KODABI_INDEX_DB="C:\kodabi-fixture\.index\index.db"
+pnpm tauri dev
+```
+
 Prerequisites: Windows and the WebView2 Evergreen runtime. Node 24+ is the repo
 prerequisite; the harness itself needs only 22+, for the global `WebSocket`. No
 npm dependencies are added by this tier.
@@ -245,3 +280,6 @@ these was run for this decision:
 | Rename `inbox_note_count` in `note_cmds.rs` | **only** the sidebar-count assertion goes red |
 | Drop `connect-src` from the CSP in `src-tauri/tauri.conf.json` | **only** the console-clean scenario goes red |
 | Drop `data:` from the CSP's `font-src` | **both** CSP scenarios go red (the refusal is logged, *and* the face fails to load) |
+| Cap `Turns` at 20 segments in `SessionArtifactsSection.tsx` | **only** the fifty-turns scenario goes red (the toggle still reads 50) |
+| Drop `media-src` from the CSP | **only** source-pairing's console scenario goes red |
+| Drop the asset-scope widening from `lib.rs` setup | **only** the asset-protocol scenario goes red, with `media error code 4` — and the console scenario stays green, because Tauri refuses an out-of-scope asset before the CSP is consulted |

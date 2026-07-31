@@ -10,7 +10,28 @@ Launch the desktop app from the **current working tree** (usually a Kangentic ta
 `.kangentic/worktrees/<slug>`) and confirm it is healthy before/after a change. Extra focus from
 the caller (may be empty): $ARGUMENTS
 
-## 1. Launch
+## 1. Pick the vault
+
+By default the app opens the real vault, whose contents are whatever they happen
+to be. For a change to a note, session or retention surface, seed a throwaway one
+first so every state is reachable:
+
+```powershell
+pnpm seed:vault -- --list                    # the scenario catalogue (pnpm eats bare flags)
+pnpm seed:vault C:\kodabi-fixture            # all of them
+pnpm seed:vault C:\kodabi-fixture retention/recording-only sessions/needs-attention
+```
+
+**Set both variables it prints, in the shell you launch from.** Setting only
+`KODABI_KB_ROOT` is destructive: the startup reconcile job converges the real
+index against the fixture and drops every row for the notes it can no longer see.
+`Remove-Item Env:KODABI_KB_ROOT, Env:KODABI_INDEX_DB` when done, or the next
+preview silently keeps using the fixture.
+
+Scenario list, the marker-file rule, and why the seeder writes files rather than
+index rows: [`e2e/README.md`](../../../e2e/README.md).
+
+## 2. Launch
 
 ```sh
 pnpm install          # worktrees start without node_modules — run on first preview or after package.json changes
@@ -26,7 +47,7 @@ over the port.
 changes, but it exercises none of the Rust backend, so it never substitutes for a Tauri preview
 on backend-touching changes.
 
-## 2. What "healthy" looks like
+## 3. What "healthy" looks like
 
 - The dev command reaches Vite "ready" with **no Rust compile errors** in the output. (Dev mode
   transpiles without typechecking, runs no linter, and runs no tests, so a clean console says
@@ -36,13 +57,14 @@ on backend-touching changes.
   means the frontend crashed; check the webview devtools console).
 - No panic or error spam in the terminal while idling.
 
-## 3. Smoke-test the change
+## 4. Smoke-test the change
 
 Exercise the specific flow the current change touches (capture toggle, indicator state, etc.) —
 observing the affected behavior in the running app, not just a clean compile. If the change has
 no visible surface, say so explicitly rather than claiming it was verified.
 
-## 4. Shut down
+## 5. Shut down
 
 Stop the dev process cleanly (Ctrl-C / kill the background task) so the port and lock files are
-released. Report what was exercised and what was observed.
+released, and clear the vault variables if step 1 set them. Report what was exercised and what was
+observed.

@@ -52,7 +52,7 @@ export function SessionArtifactsSection({ source }: { source: string }) {
 
   if (error !== null) {
     return (
-      <section className="session-artifacts">
+      <section className="session-artifacts" data-testid="session-artifacts">
         <StatusMessage variant="error">{error}</StatusMessage>
       </section>
     );
@@ -70,7 +70,14 @@ export function SessionArtifactsSection({ source }: { source: string }) {
   const open = expanded && summonable;
 
   return (
-    <section className="session-artifacts" aria-label="Session source">
+    // The testid is on the error branch above too, so it means "this section
+    // exists at all" rather than "the fetch succeeded" — which is the claim a
+    // keyword-sourced note has to fail.
+    <section
+      className="session-artifacts"
+      aria-label="Session source"
+      data-testid="session-artifacts"
+    >
       {summonable && (
         <Button
           variant="quiet"
@@ -90,13 +97,16 @@ export function SessionArtifactsSection({ source }: { source: string }) {
           transcript even when the audio is gone too, because `audio_path: null`
           cannot tell "pruned" from "never retained". */}
       {!artifacts.transcript_available && (
-        <p className="session-artifacts__unavailable text-cap text-text-faint">
+        <p
+          className="session-artifacts__unavailable text-cap text-text-faint"
+          data-testid="session-source-pruned"
+        >
           The raw transcript for this note is no longer stored.
         </p>
       )}
 
       {open && (
-        <div className="session-artifacts__panel">
+        <div className="session-artifacts__panel" data-testid="source-panel">
           {artifacts.audio_path !== null && (
             <Recording audioPath={artifacts.audio_path} />
           )}
@@ -158,11 +168,15 @@ function Recording({ audioPath }: { audioPath: string }) {
           Reveal in Explorer
         </Button>
       </div>
+      {/* The app's only asset-protocol consumer, and the reason the E2E tier can
+          gate `media-src` at all — plus the reason the asset scope has to follow
+          `KODABI_KB_ROOT` (see the scope widening in `lib.rs` setup). */}
       <audio
         controls
         preload="metadata"
         src={convertFileSrc(audioPath)}
         aria-label="Meeting recording"
+        data-testid="recording-player"
         className="session-artifacts__player mt-2xs"
       />
       {revealError !== null && (
@@ -188,7 +202,11 @@ function Turns({ segments }: { segments: TranscriptSegment[] }) {
       {segments.map((segment) => {
         const channel = CHANNEL_LABELS[segment.channel];
         return (
-          <li key={segment.index} className="session-artifacts__turn">
+          // Counting these is a different claim from reading the toggle's
+          // count: the toggle reads `segments.length`, this reads what was
+          // actually rendered. A future cap or virtualization breaks only the
+          // second, which is what the doc comment above promises never happens.
+          <li key={segment.index} className="session-artifacts__turn" data-testid="session-turn">
             <span className="ui-tnum font-mono text-meta text-text-faint">
               {formatOffset(segment.start_ms)}
             </span>
