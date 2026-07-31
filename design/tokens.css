@@ -363,10 +363,20 @@
      and keeps everything else near-instant, so this scale stays short at the
      top and is spent only where docs/DESIGN_SYSTEM.md says it may be. The
      long durations all belong to the listening state, which is the one thing
-     in the app that is genuinely still happening while you look at it. */
+     in the app that is genuinely still happening while you look at it.
+
+     An exit runs shorter than the entrance it undoes — roughly two thirds —
+     because by the time it plays the user has already decided and the surface
+     is only in the way. That is why the scale opens on --dur-exit rather than
+     on a hover: leaving is the quickest thing the app does. See
+     docs/DESIGN_SYSTEM.md §4 for which entrance each exit is paired with. */
+  --dur-exit: 130ms; /* a surface leaving: ~2/3 of --dur-settle, the entrance
+                        the filed toast pairs with (its other site, a filed
+                        row's collapsing slot, is a pure exit) */
   --dur-quick: 150ms; /* a control's own colour / fill change */
   --dur-plane: 180ms; /* a row rising onto the raised plane; a toggle knob */
-  --dur-settle: 200ms; /* a row leaving a list */
+  --dur-settle: 200ms; /* a row entering a list; the filed toast's arrival —
+                          the leaving half of both is --dur-exit above */
   --dur-enter: 280ms; /* the Inbox placeholder row arriving at the top of the
                          queue — the one entrance in the app, earned by being
                          the other half of distill-and-route (FOUNDING_DOC §4) */
@@ -390,7 +400,7 @@
 
      It drives two INDEPENDENT gates, and neither alone covers every case:
 
-       1. The four durations below, for a `transition` leg whose property is
+       1. The five durations below, for a `transition` leg whose property is
           transform / position / layout. Under reduce the leg's duration is 0s,
           so no transition runs and the end state is reached at once — which is
           what a leg whose destination is load-bearing needs (the toggle knob's
@@ -409,6 +419,7 @@
      A new movement leg adds its --dur-move-* here beside the base duration it
      wraps; src/designTokens.test.ts fails a movement leg that took a bare one. */
   --move: 1;
+  --dur-move-exit: calc(var(--dur-exit) * var(--move));
   --dur-move-plane: calc(var(--dur-plane) * var(--move));
   --dur-move-settle: calc(var(--dur-settle) * var(--move));
   --dur-move-enter: calc(var(--dur-enter) * var(--move));
@@ -427,7 +438,16 @@
      whose symmetric ease-IN makes a 150ms hover feel like it hesitates before
      it starts. Every state change in the app runs on this one curve, so the
      shape of the motion is a single decision made here, not a per-component
-     one. */
+     one.
+
+     It runs BOTH directions, and that is a decision rather than an omission.
+     The textbook split gives an exit an accelerating curve, but this app's
+     exits are opacity fades and one layout collapse: a decelerating curve
+     front-loads the visible change, so the fade is perceptually over early,
+     while an accelerating one would hold the surface at full opacity and then
+     snap it away — the same hesitation this curve was chosen to remove. The
+     exit gets --dur-exit instead. DESIGN_SYSTEM.md §4 records the argument so
+     it is not re-derived. */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1); /* entrances, exits, state changes */
   --ease-breath: ease-in-out; /* the continuous listening motion — symmetric on
                                  purpose: a breath has no direction */

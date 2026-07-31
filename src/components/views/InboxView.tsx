@@ -33,8 +33,10 @@ const VANISH_MS = 200;
 /** How long "Filed to <project>" stays up before it fades — the same dwell
  * `CaptureToast` used to give a success notice. */
 const TOAST_DWELL_MS = 3500;
-/** Mirrors `--dur-settle`: the toast's own fade-out, once the dwell ends. */
-const TOAST_FADE_MS = 200;
+/** Mirrors `--dur-exit`: the toast's own fade-out, once the dwell ends. It is
+ * shorter than the entrance it undoes, which is the rule for every exit in the
+ * app (docs/DESIGN_SYSTEM.md §4). */
+const TOAST_FADE_MS = 130;
 /** Covers `--dur-plane` with a little room: how long after an Inbox-routed
  * note lands before its outcome counts as fully presented — the fill-in has
  * played and there is nothing left for a remount to replay. */
