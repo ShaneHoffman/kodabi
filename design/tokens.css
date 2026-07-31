@@ -406,13 +406,34 @@
      is how the spirit-mark's lopsided aura lobes once froze mid-drift. An
      animation is gated by amplitude, in its own @keyframes.
 
+     A press takes BOTH gates, and is the only state that does. Its release leg
+     is a transition, so it takes gate 1; the pressed shape really paints for as
+     long as the finger is down, so by the rule above it also needs gate 2. That
+     second half is pre-composed into --press-scale below rather than spelled
+     out at each site, because a gate repeated at five call sites is a gate that
+     gets forgotten at one of them.
+
      A new movement leg adds its --dur-move-* here beside the base duration it
      wraps; src/designTokens.test.ts fails a movement leg that took a bare one. */
   --move: 1;
+  --dur-move-quick: calc(var(--dur-quick) * var(--move));
   --dur-move-plane: calc(var(--dur-plane) * var(--move));
   --dur-move-settle: calc(var(--dur-settle) * var(--move));
   --dur-move-enter: calc(var(--dur-enter) * var(--move));
   --dur-move-wake: calc(var(--dur-wake) * var(--move));
+
+  /* The press amplitude, with gate 2 already applied. Inverted from the usual
+     calc(<value> * var(--move)) shape because a scale's identity is 1, not 0:
+     shrink by 3% while --move is 1, land back on 1 when it is 0. Same gate as
+     the Select menu's entrance scale, same inverted arithmetic.
+
+     3% is deliberately one number for every control that takes it, even though
+     a scale's effect is proportional to width — so it is ~0.5px on the 17px
+     checkbox and ~7px across a wide Select trigger. A second, larger token for
+     the small controls would recreate the exact problem that got the first
+     attempt at this reverted: controls that shrink by different amounts read as
+     an inconsistency, where one amount reads as a material. */
+  --press-scale: calc(1 - 0.03 * var(--move));
 
   /* the waveform's four bars are one animation started at four offsets, so
      the group reads as a voice rather than a metronome. The order is

@@ -24,7 +24,9 @@
   box-shadow: var(--lift-chip);
   border-radius: var(--radius-md);
   padding: var(--chip-pad-y) var(--space-xs);
-  transition: box-shadow var(--dur-quick) var(--ease-standard);
+  transition:
+    box-shadow var(--dur-quick) var(--ease-standard),
+    transform var(--dur-move-quick) var(--ease-standard);
 }
 
 /* Every interactive state is guarded on BOTH inert forms, the same way
@@ -36,11 +38,18 @@
   box-shadow: var(--lift-chip-hover);
 }
 
-/* A press settles the chip back onto the page, immediately — the same
-   treatment Button's primary chip gets (docs/DESIGN_SYSTEM.md §2). */
-.ui-select__trigger--boxed:active:not(:disabled):not([aria-disabled="true"]) {
+/* A press settles the chip back onto the page and shrinks it, immediately — the
+   same treatment Button's primary chip gets (docs/DESIGN_SYSTEM.md §2).
+
+   NOT while the menu is open, and that exclusion is load-bearing rather than
+   taste: an open list is anchored to this trigger, and CSS anchor positioning
+   reads the anchor's TRANSFORMED border box. Scaling it while the list hangs off
+   it would drag the whole menu a few px sideways on the press that dismisses it.
+   The element is a chip being pressed or it is an anchor, never both at once. */
+.ui-select__trigger--boxed:active:not(:disabled):not([aria-disabled="true"]):not([aria-expanded="true"]) {
   box-shadow: var(--lift-chip);
   background: color-mix(in srgb, var(--text) 6%, var(--surface));
+  transform: scale(var(--press-scale));
   transition: none;
 }
 

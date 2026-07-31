@@ -146,11 +146,17 @@ const MOVEMENT =
   "grid-template-rows|grid-template-columns|all";
 
 /**
- * Each `@keyframes` / `@starting-style` body in `css`, with the line its head
- * sits on. Found by brace counting, because these at-rules nest a whole rule
- * inside them and `scan()` is line-based — it cannot see a block at all.
+ * Each block in `css` whose head matches `head`, with the line that head sits
+ * on. Found by brace counting, because `scan()` is line-based — it cannot see a
+ * block at all.
+ *
+ * `head` matches anywhere in the head text and the body is taken from the next
+ * `{`, which makes this work for a plain selector (`/:active/`) exactly as it
+ * does for an at-rule. A selector list spanning several lines is still one
+ * block, and a head regex that matches twice inside one selector list still
+ * yields one block, because the scan resumes past the closing brace.
  */
-function atRuleBlocks(css: string, head: RegExp): { body: string; line: number }[] {
+function blocksHeadedBy(css: string, head: RegExp): { body: string; line: number }[] {
   const blocks: { body: string; line: number }[] = [];
   const finder = new RegExp(head.source, "g");
   let match = finder.exec(css);
@@ -255,7 +261,7 @@ describe("design tokens are the single source of truth", () => {
    * timing. That split used to be prose in docs/DESIGN_SYSTEM.md §4, and it
    * failed twice — a component shipped honouring only one of the two switches,
    * and a *duration* floor was used where a resting *shape* was needed, which
-   * froze the spirit-mark's aura mid-drift. These four make it a gate.
+   * froze the spirit-mark's aura mid-drift. These five make it a gate.
    */
 
   it("gates every movement transition leg on --dur-move-*", () => {
@@ -297,8 +303,47 @@ describe("design tokens are the single source of truth", () => {
       const raw = readFileSync(file, "utf8");
       const blanked = withoutComments(raw);
       const allowed = allowedLines(raw, blanked);
-      for (const block of atRuleBlocks(blanked, /@(?:keyframes\s+[\w-]+|starting-style)/)) {
+      for (const block of blocksHeadedBy(blanked, /@(?:keyframes\s+[\w-]+|starting-style)/)) {
         if (!moving.test(block.body) || block.body.includes("var(--move)")) continue;
+        if (allowed[block.line - 1]) continue;
+        offences.push({
+          file: relative(ROOT, file),
+          line: block.line,
+          text: raw.split(/\r?\n/)[block.line - 1]?.trim() ?? "",
+        });
+      }
+    }
+    expect(offences).toEqual([]);
+  });
+
+  it("gates every press transform on --press-scale", () => {
+    // The press is the one state change allowed to move its own box without
+    // moving the layout (docs/DESIGN_SYSTEM.md §2), and without this assertion
+    // it is the one that could move it UNGATED. Neither check above can see it:
+    // the leg check needs
+    // a `transition` naming a movement property, and a press sets
+    // `transition: none` precisely so the press-down lands immediately; the
+    // block check walks only @keyframes and @starting-style, and a press is a
+    // plain rule. A bare `:active { transform: scale(0.97) }` would have passed
+    // the entire guard while ignoring reduced motion outright.
+    //
+    // Rather than widen the block check to every literal-bearing `transform` —
+    // which its own note rejects, at a cost of five escape hatches on static
+    // geometry that is not motion — this scopes to the one selector that can
+    // carry a press. The amplitude gate lives inside `--press-scale` itself, so
+    // requiring the token IS requiring the gate.
+    //
+    // BLOCK-scoped for the same reason as the check above: `:active` sits in the
+    // head, `transform` in the body, and a line-based scan cannot relate them.
+    const pressing = /(?<![\w-])transform\s*:/;
+    const offences: Offence[] = [];
+    for (const file of sheets) {
+      const raw = readFileSync(file, "utf8");
+      const blanked = withoutComments(raw);
+      const allowed = allowedLines(raw, blanked);
+      for (const block of blocksHeadedBy(blanked, /:active/)) {
+        if (!pressing.test(block.body)) continue;
+        if (block.body.includes("var(--press-scale)")) continue;
         if (allowed[block.line - 1]) continue;
         offences.push({
           file: relative(ROOT, file),

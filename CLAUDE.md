@@ -134,7 +134,10 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   **`designTokens.test.ts` also gates reduced motion**, which is a token remap on `--move` rather
   than an app-wide floor: it fails a `transition` leg on a movement property (`transform`, `width`,
   `grid-template-rows`, `all`, …) that took a bare `--dur-*` instead of `--dur-move-*`, an
-  `@keyframes` or `@starting-style` block that moves something without referencing `var(--move)`, a
+  `@keyframes` or `@starting-style` block that moves something without referencing `var(--move)`, an
+  `:active` rule that declares a `transform` without `--press-scale` (the press is the one state
+  allowed to move its own box without moving the layout, and the only one the two checks before it
+  cannot see), a
   `--dur-move-*` on an `animation` (gate animations by amplitude, never by duration), and any
   `scroll-behavior: smooth`. See `docs/DESIGN_SYSTEM.md` §4 for which of the two gates a given site
   needs.

@@ -115,7 +115,7 @@ component (the pattern established by `Sidebar.css`, `SpiritMark.css`, and each 
 | --- | --- | --- |
 | Edges / hairlines | the `--edge-*` ladder (`--edge-faint` … `--edge-dot`) | rendered as **inset shadows** |
 | Elevation | `--lift`, plus one recipe per plane role (`--lift-card`, `--lift-row`, `--lift-menu`, …) | rendered as `box-shadow` |
-| Motion | `--dur-*`, `--ease-*` | `transition` / `animation` shorthands, and `@starting-style` |
+| Motion | `--dur-*`, `--ease-*`, plus the reduced-motion switch `--move` and the amplitudes gated on it (`--press-scale`) | `transition` / `animation` shorthands, `@starting-style`, and `transform` values |
 | Focus | `--focus-width`, `--focus-offset`, `--radius-focus` | rendered as `outline` |
 | Derived recipes | `--wash-active`, `--selection`, `--scrim`, `--scrollbar-*` | composed values |
 | Sheen | `--sheen` | specialised |
@@ -233,6 +233,13 @@ its co-located CSS.
 
 **Hover belongs to the primitive.** Callers used to add their own, in two different destination colours;
 there is one hover step and it is toward `--text`.
+
+**So does the press, and it follows the padding rule.** `primary` and `filled` shrink 3% under the
+pointer via `--press-scale` — the one state change allowed to move its own box without moving the
+layout (docs/DESIGN_SYSTEM.md §2). `quiet` and `destructive` do not, for the same reason they carry no padding: a quiet button has
+no box of its own to shrink, and scaling a full-width sidebar nav row moves its edges far more than
+it moves a chip's. Never write the scale at a call site; it is one token with one amplitude, and
+`src/designTokens.test.ts` fails an `:active` transform that does not use it.
 
 ```tsx
 import { Button } from "./ui/Button";

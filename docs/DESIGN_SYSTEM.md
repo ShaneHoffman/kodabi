@@ -193,7 +193,7 @@ so a screen composing primitives gets them for free and must not restate them.
 | **Rest** | Per variant | — |
 | **Hover** | Value step toward `--text`, over `--dur-quick` | `--dur-quick`, `--ease-standard` |
 | **Focus-visible** | 2px **ink** outline, offset by its own width | `.ui-focus-ring` |
-| **Active** (pressed) | One value step past hover, no transition (a press must feel immediate) | — |
+| **Active** (pressed) | One value step past hover, plus a 3% scale on control chips. Asymmetric: no transition down (a press must feel immediate), eased back up on release | `--press-scale`, `--dur-move-quick` |
 | **Disabled** | `text-text-faint` + `cursor-not-allowed`; controls with no text to fade use `--disabled-opacity` | `--disabled-opacity` |
 | **Destructive** | See below — a confirmation, not a colour | — |
 
@@ -260,7 +260,7 @@ above lives in one place. Both destructive flows compose it: **Delete project** 
 Attention **capture delete**, which replaced an inline second-click confirm with the same modal.
 Every new destructive action confirms through it rather than hand-rolling a fourth dialog.
 
-### A state change never changes the box
+### A state change never changes the layout box
 
 **Hover, focus and selection may change the fill, the elevation and the weight.
 They may not change the padding, the size, or the position of anything.**
@@ -274,6 +274,36 @@ now has exactly one box in every state.
 The same rule is why an Inbox row's hover lift is `background` and `box-shadow`
 only, why the Settings tab's underline is a `box-shadow` rather than a border,
 and why `Button loading` swaps the label instead of the control.
+
+**One sanctioned exception, and it is `:active` only.** A press scales its
+control down 3% through `--press-scale`. The word above is *layout*: what the
+sidebar pill did was reflow — it moved its neighbours and everything below them.
+`transform` cannot do that. It runs on the compositor, takes the element's
+rendered pixels out of flow's reach, and moves no sibling by a pixel, which is
+the entire failure this rule exists to stop. So the rule holds and the press is
+not a hole in it.
+
+The exception is bounded to exactly one state and one value, and both bounds are
+load-bearing. A press is the only state the user is *causing right now*, so it
+is the only one where a physical answer means anything; hover and focus describe
+where the pointer or the keyboard happens to be, and a control that flinched at
+either would be noise. **It expires the moment a transform is spent on hover,
+focus or selection, or on a second amplitude.** `src/designTokens.test.ts` holds
+the second half of that: an `:active` rule that declares `transform` without
+`--press-scale` fails the gate.
+
+**A control that is also an anchor does not press.** `Select`'s boxed trigger takes the scale only
+while its menu is closed (`:not([aria-expanded="true"])`). CSS anchor positioning resolves against
+the anchor's *transformed* border box, so scaling the trigger while a list hangs off it drags the
+whole menu sideways — on the very press that dismisses it. This is the general shape of the one
+thing compositor-only motion still touches, and any future anchor that presses needs the same
+exclusion.
+
+This reverses a decision. `Checkbox.css` carried a `scale(0.92)` press, pulled
+because it "made this the only control in the app that shrank under the pointer"
+— an objection about being alone, not about the mechanism, and one that a rule
+applied to every control chip answers directly. What survives from that reversal
+is the amplitude: 0.92 was far too much, and 0.97 is the whole of the effect.
 
 ### Selected is value, never hue
 
@@ -372,19 +402,23 @@ disappears before the user can see the result — quick capture flashes its dest
 | `--dur-breath` | 4200ms | The listening breath cycle |
 | `--dur-drift` / `--dur-drift-slow` | 15s / 21s | The aura's counter-rotating blobs |
 
-And four **gated** durations, each `calc(<base> * var(--move))`, for a transition leg whose property
+And five **gated** durations, each `calc(<base> * var(--move))`, for a transition leg whose property
 is movement rather than value. They are the duration half of the reduced-motion remap below;
 `--move` is `1` normally and `0` under reduced motion, so the leg becomes instant.
 
 | Token | Wraps | Spent on |
 | --- | --- | --- |
+| `--dur-move-quick` | `--dur-quick` | A press releasing back to rest, and nothing else |
 | `--dur-move-plane` | `--dur-plane` | The toggle knob's travel; the fresh-filed row's picker sliding in; a `Select` menu's scale-in |
 | `--dur-move-settle` | `--dur-settle` | The vanish-left; the filed toast's rise; the chat answer's rise; `.inbox__slot`'s collapse; `.inbox__fill`'s width |
 | `--dur-move-enter` | `--dur-enter` | The Inbox placeholder's drop from above |
 | `--dur-move-wake` | `--dur-wake` | The spirit-mark core's transform easing back to rest |
 
-There is deliberately no `--dur-move-quick`: nothing at 150ms moves. A new movement leg adds its
-`--dur-move-*` in `tokens.css` beside the base duration it wraps.
+`--dur-move-quick` is spent on exactly one thing, and the *other* half of that leg is why: a press
+does not ease down at all. It lands the moment the pointer does, and only the release is timed. So
+this is not "movement at 150ms" in general — it is the return trip from a shape the user is already
+looking at, where 150ms is the shortest duration that reads as elastic rather than as a glitch. A
+new movement leg adds its `--dur-move-*` in `tokens.css` beside the base duration it wraps.
 
 `--delay-wave-1` … `--delay-wave-4` (0 / 220 / 420 / 140ms) are the four offsets one waveform
 animation is started at, so the group reads as a voice rather than a metronome. The order is
@@ -402,7 +436,8 @@ purpose: a breath has no direction.
 
 ### What animates
 
-**Animates:** a control's own state change (`--dur-quick`); a row leaving a list (`--dur-settle`);
+**Animates:** a control's own state change (`--dur-quick`, plus `--dur-move-quick` for a press
+releasing); a row leaving a list (`--dur-settle`);
 the spirit-mark, which is the app's one continuous motion; and the Inbox pipeline placeholder,
 which spends both halves of the "one deliberate motion" FOUNDING_DOC §4 reserves for
 distill-and-route. It arrives at the top of the queue (`--dur-enter`) as a capture stops, and when
@@ -464,7 +499,7 @@ rendered, so closing unmounts it, and a dismissal is allowed to be instant.
   entry in the log — your messages, completed answers, tool lines, permission cards, errors —
   carries no entrance transition, which is what makes "scrollback never animates" provable rather
   than asserted: there is nothing to fire on arrival. (The approval card's Allow/Deny buttons keep
-  the ordinary `--dur-quick` control states every `Button` has; a control answering the pointer is
+  the ordinary control states every `Button` has, press included; a control answering the pointer is
   not the log animating.) The completed entry an answer hands off to is
   deliberately denied the entrance class, so finishing a turn does not re-fade prose already being
   read. A per-entry or staggered entrance across that log stays banned, and adopting
@@ -571,6 +606,13 @@ displacement site anyway — every `@starting-style` and every exit — so the g
 exceptions there. The three duration-only sites are the ones in the Duration row above, where an
 amplitude gate would be actively wrong.)
 
+**The press takes both gates, and it is the only state that does.** Its release is a transition, so
+it takes the duration gate; the pressed shape really paints for as long as the finger is down, so by
+the paragraph above it needs the amplitude gate too. The difference is that the amplitude half is
+pre-composed into `--press-scale` rather than spelled out at the call site — a gate repeated at five
+sites is a gate that gets forgotten at one of them, and `--press-scale` makes writing the press at
+all mean writing it gated. That is what the press guard in §7 checks for.
+
 **Never put `--dur-move-*` on an `animation`.** Collapsing an animation's duration is the bug this
 replaced: it shortens the motion without restoring a resting **shape**. An animation is gated by
 amplitude, inside its own `@keyframes`, where multiplying each transform stop by `--move` makes both
@@ -609,6 +651,8 @@ third-party CSS that cannot be tokenised anyway. And `Select.css`'s menu entranc
 *scale*, not a displacement, so it is not `calc(<value> * var(--move))` — a displacement's identity
 is `0`, a scale's is `1`, so it reads `calc(1 - 0.04 * var(--move))` instead: shrink by 4% while
 `--move` is `1`, land back on the identity when it is `0`. Same gate, inverted arithmetic.
+`--press-scale` is that same arithmetic at 3%, and the reason it is a token rather than another
+hand-written `calc()` is that it has five call sites where the entrance has one.
 
 **What went wrong before, recorded so the shape of the mistake stays legible.** The old floor
 collapsed every duration to 1ms app-wide, and it failed in both directions. It threw away the
@@ -927,16 +971,25 @@ only on the stylesheet side, because that is the only place it is written.
   theme blocks**. The second one is the quiet one and it earns its place: a new semantic key added to
   `:root` and forgotten in one of the two dark paths keeps its *light* value down that path, and
   nothing about that looks broken until someone runs the app in the OS-dark theme specifically.
-- **The same file carries four reduced-motion assertions**, which make §4's movement/value split a
+- **The same file carries five reduced-motion assertions**, which make §4's movement/value split a
   gate rather than prose. They fail: a `transition` leg on a movement property (`transform`,
   `width`, `grid-template-rows`, `all`, …) that took a bare `--dur-*` instead of `--dur-move-*`; an
-  `@keyframes` or `@starting-style` block that moves something without referencing `var(--move)`; a
+  `@keyframes` or `@starting-style` block that moves something without referencing `var(--move)`; an
+  `:active` rule that declares a `transform` without `--press-scale`; a
   `--dur-move-*` used on an `animation` rather than a `transition`; and a `scroll-behavior: smooth`
-  anywhere. The third blocks *re-introducing the shape of* the original bug: collapsing an
+  anywhere. The fourth blocks *re-introducing the shape of* the original bug: collapsing an
   animation's duration is what froze the spirit-mark's aura mid-drift. It would not have caught the
   original, which was a literal `1ms` waved through with a `token-guard-allow` — no guard catches a
-  deliberate escape hatch, which is the point of making them noisy and greppable. The fourth replaces
+  deliberate escape hatch, which is the point of making them noisy and greppable. The fifth replaces
   an inert `scroll-behavior: auto !important` the old floor carried on `*`.
+
+  The press check exists because a press is the one movement neither of the first two can see: it
+  sets `transition: none` so it has no leg to inspect, and it is a plain rule rather than an at-rule
+  block. A bare `:active { transform: scale(0.97) }` would have passed the whole guard while ignoring
+  reduced motion outright. Scoping it to `:active` rather than to every literal-bearing `transform`
+  is what keeps it from needing the escape hatches that widening the keyframe check would have cost
+  (next paragraph), and because the amplitude gate lives *inside* `--press-scale`, requiring the
+  token is requiring the gate.
 
   The keyframe check is scoped to a **block**, not a declaration, which saves four escape hatches on
   transform stops that are correctly ungated: three that are already the identity (`scale(1)`, two
