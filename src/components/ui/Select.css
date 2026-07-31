@@ -24,7 +24,9 @@
   box-shadow: var(--lift-chip);
   border-radius: var(--radius-md);
   padding: var(--chip-pad-y) var(--space-xs);
-  transition: box-shadow var(--dur-quick) var(--ease-standard);
+  transition:
+    box-shadow var(--dur-quick) var(--ease-standard),
+    transform var(--dur-move-quick) var(--ease-standard);
 }
 
 /* Every interactive state is guarded on BOTH inert forms, the same way
@@ -36,16 +38,33 @@
   box-shadow: var(--lift-chip-hover);
 }
 
-/* A press settles the chip back onto the page, immediately — the same
-   treatment Button's primary chip gets (docs/DESIGN_SYSTEM.md §2). */
-.ui-select__trigger--boxed:active:not(:disabled):not([aria-disabled="true"]) {
+/* A press settles the chip back onto the page and shrinks it, immediately — the
+   same treatment Button's primary chip gets (docs/DESIGN_SYSTEM.md §2).
+
+   NOT while the menu is open, and that exclusion is load-bearing rather than
+   taste: an open list is anchored to this trigger, and CSS anchor positioning
+   reads the anchor's TRANSFORMED border box, live and per frame rather than once
+   at open. Scaling it while the list hangs off it would drag the whole menu a
+   few px sideways on the press that dismisses it. The element is a chip being
+   pressed or it is an anchor, never both at once. */
+.ui-select__trigger--boxed:active:not(:disabled):not([aria-disabled="true"]):not([aria-expanded="true"]) {
   box-shadow: var(--lift-chip);
   background: color-mix(in srgb, var(--text) 6%, var(--surface));
+  transform: scale(var(--press-scale));
   transition: none;
 }
 
+/* The RELEASE needs that same exclusion, and the selector above cannot give it.
+   The menu opens on CLICK, so `:active` drops and the eased scale-back begins at
+   the same moment `aria-expanded` turns true: for the length of that leg the
+   trigger would be both a releasing chip and an anchor, dragging the menu it
+   just opened. Same failure as above, arriving on the press that OPENS rather
+   than the one that dismisses. Restating the transition without its transform
+   leg cancels that leg, so the chip is back at rest the instant it becomes an
+   anchor. Nothing is lost: while open there is no press to ease. */
 .ui-select__trigger--boxed[aria-expanded="true"] {
   box-shadow: var(--lift-chip-open);
+  transition: box-shadow var(--dur-quick) var(--ease-standard);
 }
 
 .ui-select__trigger--boxed:disabled,

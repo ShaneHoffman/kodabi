@@ -38,7 +38,8 @@
   place-content: center;
   transition:
     background-color var(--dur-quick) var(--ease-standard),
-    box-shadow var(--dur-quick) var(--ease-standard);
+    box-shadow var(--dur-quick) var(--ease-standard),
+    transform var(--dur-move-quick) var(--ease-standard);
 }
 
 /* Hover firms the ring on an unchecked box — the same "step toward --text"
@@ -47,13 +48,21 @@
   box-shadow: 0 0 0 var(--check-ring) var(--text-faint);
 }
 
-/* A press deepens the ring and the fill. It deliberately does NOT scale:
-   "a state change never changes the box … not the padding, the size, or the
-   position of anything" (docs/DESIGN_SYSTEM.md §2), and a 0.92 scale made
-   this the only control in the app that shrank under the pointer. */
+/* A press deepens the ring and the fill, and now also shrinks the box.
+
+   This reverses a decision recorded here: a 0.92 scale was tried and pulled,
+   on the grounds that it "made this the only control in the app that shrank
+   under the pointer." That objection was about being alone, not about the
+   mechanism, and it is spent — the Buttons, the Select trigger and the settings
+   toggle all take --press-scale now.
+   What stands from the old note is the amplitude: 0.92 was far too much for a
+   17px box. At 3% the scale here is sub-pixel, so the RING is still what
+   carries this control's press; the scale is what makes it the same press the
+   rest of the app performs (docs/DESIGN_SYSTEM.md §2). */
 .ui-checkbox:active:not(:disabled) {
   transition: none;
   box-shadow: 0 0 0 var(--check-ring) var(--text-soft);
+  transform: scale(var(--press-scale));
 }
 
 .ui-checkbox:checked:active:not(:disabled) {
