@@ -60,6 +60,58 @@ export async function clickWhenEnabled(session, testId, { timeoutMs = 5_000 } = 
   return session.evaluate(`(${byTestId(testId)}.click(), true)`);
 }
 
+/**
+ * Clicks the one element carrying `testId` whose descendant `labelTestId` reads
+ * exactly `label`.
+ *
+ * `clickWhenEnabled` takes `querySelector`'s first match, which is right for a
+ * singleton control and wrong for a list: a seeded vault puts nine rows in the
+ * Inbox and a slice has to open a named one. Throws rather than no-op'ing when
+ * nothing matches, because a click that lands nowhere fails much later,
+ * somewhere unrelated.
+ */
+export async function clickRowLabelled(session, testId, labelTestId, label) {
+  await session.waitFor(
+    `[...document.querySelectorAll('[data-testid="${testId}"]')]
+       .some((row) => row.querySelector('[data-testid="${labelTestId}"]')?.textContent.trim() === ${lit(label)})`,
+    { label: `a ${testId} labelled ${lit(label)}` },
+  );
+  return session.evaluate(`
+    (() => {
+      const row = [...document.querySelectorAll('[data-testid="${testId}"]')].find(
+        (candidate) =>
+          candidate.querySelector('[data-testid="${labelTestId}"]')?.textContent.trim() === ${lit(label)},
+      );
+      if (!row) {
+        throw new Error("no " + ${lit(testId)} + " labelled " + ${lit(label)});
+      }
+      row.click();
+      return true;
+    })()
+  `);
+}
+
+/**
+ * Waits out two animation frames plus `ms`, for the one thing a `waitFor`
+ * cannot express: proving something never appears.
+ *
+ * Used only for the two "this note must NOT pair" assertions. The artifact
+ * section is absent both while its fetch is in flight and when it was never
+ * mounted at all, so there is no positive signal to wait on — only a bounded
+ * window after which a section that was coming would have arrived. The window
+ * is defensible rather than arbitrary: every other scenario in that file
+ * observes its own section resolve, and they do it in a small fraction of this.
+ */
+export async function settle(session, ms = 400) {
+  return session.evaluate(`
+    new Promise((resolve) =>
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => setTimeout(() => resolve(true), ${ms})),
+      ),
+    )
+  `);
+}
+
 /** The trimmed text of a testid'd element, or null when it is absent. */
 export async function textOf(session, testId) {
   return session.evaluate(`${byTestId(testId)}?.textContent.trim() ?? null`);

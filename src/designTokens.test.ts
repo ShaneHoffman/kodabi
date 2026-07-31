@@ -152,11 +152,29 @@ const MOVEMENT =
   "grid-template-rows|grid-template-columns|all";
 
 /**
- * Each `@keyframes` / `@starting-style` body in `css`, with the line its head
- * sits on. Found by brace counting, because these at-rules nest a whole rule
- * inside them and `scan()` is line-based — it cannot see a block at all.
+ * The four properties that MOVE an element by declaring a new shape, rather
+ * than by transitioning toward one: the `transform` shorthand and the three
+ * individual properties that compose into it.
+ *
+ * One constant, shared by both block-scoped checks below, for the same reason
+ * `MOVEMENT` is one list: a press written as `scale: 0.9` is exactly as ungated
+ * as one written as `transform: scale(0.9)`, and a guard that saw only the
+ * shorthand would wave the individual property straight through.
  */
-function atRuleBlocks(css: string, head: RegExp): { body: string; line: number }[] {
+const MOVING_DECLARATION = /(?<![\w-])(?:transform|translate|rotate|scale)\s*:/;
+
+/**
+ * Each block in `css` whose head matches `head`, with the line that head sits
+ * on. Found by brace counting, because `scan()` is line-based — it cannot see a
+ * block at all.
+ *
+ * `head` matches anywhere in the head text and the body is taken from the next
+ * `{`, which makes this work for a plain selector (`/:active/`) exactly as it
+ * does for an at-rule. A selector list spanning several lines is still one
+ * block, and a head regex that matches twice inside one selector list still
+ * yields one block, because the scan resumes past the closing brace.
+ */
+function blocksHeadedBy(css: string, head: RegExp): { body: string; line: number }[] {
   const blocks: { body: string; line: number }[] = [];
   const finder = new RegExp(head.source, "g");
   let match = finder.exec(css);
@@ -314,7 +332,7 @@ describe("design tokens are the single source of truth", () => {
    * timing. That split used to be prose in docs/DESIGN_SYSTEM.md §4, and it
    * failed twice — a component shipped honouring only one of the two switches,
    * and a *duration* floor was used where a resting *shape* was needed, which
-   * froze the spirit-mark's aura mid-drift. These four make it a gate.
+   * froze the spirit-mark's aura mid-drift. These five make it a gate.
    */
 
   it("gates every movement transition leg on --dur-move-*", () => {
@@ -350,14 +368,54 @@ describe("design tokens are the single source of truth", () => {
     // Widening it to any literal-bearing `transform` costs five escape hatches
     // on static geometry that is not motion at all (the checkbox tick, the
     // editor toolbar's tail, an optical 1px nudge), which is a worse trade.
-    const moving = /(?<![\w-])(?:transform|translate|rotate|scale)\s*:/;
     const offences: Offence[] = [];
     for (const file of sheets) {
       const raw = readFileSync(file, "utf8");
       const blanked = withoutComments(raw);
       const allowed = allowedLines(raw, blanked);
-      for (const block of atRuleBlocks(blanked, /@(?:keyframes\s+[\w-]+|starting-style)/)) {
-        if (!moving.test(block.body) || block.body.includes("var(--move)")) continue;
+      for (const block of blocksHeadedBy(blanked, /@(?:keyframes\s+[\w-]+|starting-style)/)) {
+        if (!MOVING_DECLARATION.test(block.body) || block.body.includes("var(--move)")) continue;
+        if (allowed[block.line - 1]) continue;
+        offences.push({
+          file: relative(ROOT, file),
+          line: block.line,
+          text: raw.split(/\r?\n/)[block.line - 1]?.trim() ?? "",
+        });
+      }
+    }
+    expect(offences).toEqual([]);
+  });
+
+  it("gates every press transform on --press-scale", () => {
+    // The press is the one state change allowed to move its own box without
+    // moving the layout (docs/DESIGN_SYSTEM.md §2), and without this assertion
+    // it is the one that could move it UNGATED. Neither check above can see it:
+    // the leg check needs
+    // a `transition` naming a movement property, and a press sets
+    // `transition: none` precisely so the press-down lands immediately; the
+    // block check walks only @keyframes and @starting-style, and a press is a
+    // plain rule. A bare `:active { transform: scale(0.97) }` would have passed
+    // the entire guard while ignoring reduced motion outright.
+    //
+    // Rather than widen the block check to every literal-bearing `transform` —
+    // which its own note rejects, at a cost of five escape hatches on static
+    // geometry that is not motion — this scopes to the one selector that can
+    // carry a press. The amplitude gate lives inside `--press-scale` itself, so
+    // requiring the token IS requiring the gate.
+    //
+    // BLOCK-scoped for the same reason as the check above: `:active` sits in the
+    // head, `transform` in the body, and a line-based scan cannot relate them.
+    // And it takes the same MOVING_DECLARATION list, so a press spelled with the
+    // individual `scale:` / `translate:` / `rotate:` property is caught rather
+    // than waved through the one hole this check exists to close.
+    const offences: Offence[] = [];
+    for (const file of sheets) {
+      const raw = readFileSync(file, "utf8");
+      const blanked = withoutComments(raw);
+      const allowed = allowedLines(raw, blanked);
+      for (const block of blocksHeadedBy(blanked, /:active/)) {
+        if (!MOVING_DECLARATION.test(block.body)) continue;
+        if (block.body.includes("var(--press-scale)")) continue;
         if (allowed[block.line - 1]) continue;
         offences.push({
           file: relative(ROOT, file),
@@ -391,6 +449,31 @@ describe("design tokens are the single source of truth", () => {
     // scrolling ever arrives, the answer is a gate at that site, and this is
     // what will force someone to think about it.
     expect(scan(sheets, /scroll-behavior\s*:\s*smooth/)).toEqual([]);
+  });
+
+  it("keeps an exit quicker than the entrance it undoes", () => {
+    // An exit runs at roughly 2/3 of its paired entrance: by the time it plays
+    // the user has already decided, and the surface is only in the way. The
+    // filed toast is the `--dur-exit` site that has a pair, and its entrance is
+    // `--dur-settle`, so that is the comparison worth gating. (Its other site,
+    // a filed row's collapsing slot, is a pure exit with nothing to measure
+    // against — see docs/DESIGN_SYSTEM.md §4.)
+    //
+    // This is the one motion rule that a plain rebalance of the scale could
+    // quietly invert — every other check here is about which token a leg took,
+    // not about what the numbers are relative to each other. Nudging
+    // `--dur-exit` past `--dur-settle` would keep every leg on a correctly
+    // NAMED token while making the exits slower than the entrances, which is
+    // the exact defect this pair was introduced to fix.
+    const css = withoutComments(readFileSync(TOKENS, "utf8"));
+    const durationMs = (name: string): number => {
+      const match = css.match(new RegExp(`^\\s*--${name}:\\s*(\\d+)ms`, "m"));
+      // Fail on the token's absence rather than coercing undefined to NaN,
+      // which would make the comparison below silently pass.
+      expect(match, `design/tokens.css declares no --${name}`).not.toBeNull();
+      return Number(match?.[1]);
+    };
+    expect(durationMs("dur-exit")).toBeLessThan(durationMs("dur-settle"));
   });
 
   /*
@@ -428,7 +511,7 @@ describe("design tokens are the single source of truth", () => {
     // Two branches: the OS setting, and Settings → Appearance. A media query
     // and a plain selector cannot share a rule, and a surface honouring only
     // one of the two is the recorded shape of the reduced-motion failure.
-    const [media] = atRuleBlocks(css, /@media\s*\(prefers-contrast:\s*more\)/);
+    const [media] = blocksHeadedBy(css, /@media\s*\(prefers-contrast:\s*more\)/);
     expect(media?.body).toMatch(/--contrast:\s*1\s*;/);
     expect(css).toMatch(/:root\[data-contrast="more"\][^{]*\{[^}]*--contrast:\s*1\s*;/);
 

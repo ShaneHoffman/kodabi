@@ -84,6 +84,39 @@ pub fn run() {
             let settings = kodabi_core::settings::load_or_create(&settings_config)?;
             app.manage(settings_cmds::SettingsState::new(settings_config, settings));
 
+            // Point the asset protocol at wherever the vault actually is.
+            //
+            // `tauri.conf.json` can only name a static scope, and it names
+            // `$APPDATA/sessions/*.wav` — but `transcribe::knowledge_base_dir`
+            // honours `KODABI_KB_ROOT`. A relocated vault's recordings
+            // therefore sat outside the scope, so the `<audio>` element that
+            // `SessionArtifactsSection` feeds through `convertFileSrc` was
+            // refused before the CSP was even consulted, and playback failed
+            // for every note. That made the environment seam a half-seam: it
+            // moved the notes but not the recordings.
+            //
+            // `allow_directory` is the narrowest grant the scope API exposes —
+            // there is no way to append a `*.wav` glob, since `allow_file`
+            // escapes patterns rather than compiling them. So this also admits
+            // the `.jsonl` and `.dismissed` siblings in that one directory.
+            // They hold nothing the webview cannot already read: the transcript
+            // arrives wholesale over `read_session_artifacts`, and the marker is
+            // a timestamp.
+            //
+            // Best-effort, like the index below: a vault that cannot be
+            // resolved is not a reason to refuse to launch.
+            match transcribe::knowledge_base_dir(app.handle()) {
+                Ok(kb_root) => {
+                    if let Err(err) = app
+                        .asset_protocol_scope()
+                        .allow_directory(kb_root.join("sessions"), false)
+                    {
+                        eprintln!("failed to widen the asset protocol scope: {err}");
+                    }
+                }
+                Err(err) => eprintln!("failed to resolve the knowledge base directory: {err}"),
+            }
+
             // Open the note index (best-effort — a cache, never a launch
             // blocker) so the note commands can keep it in sync on write/edit.
             app.manage(index_state::IndexState::initialize(app.handle()));

@@ -750,7 +750,7 @@ describe("InboxView", () => {
       );
 
       await act(async () => {
-        vi.advanceTimersByTime(200); // TOAST_FADE_MS
+        vi.advanceTimersByTime(130); // TOAST_FADE_MS
       });
       expect(screen.queryByRole("button", { name: /Open the note filed to/ })).not.toBeInTheDocument();
     });
@@ -963,7 +963,7 @@ describe("InboxView", () => {
         vi.advanceTimersByTime(3500); // TOAST_DWELL_MS
       });
       await act(async () => {
-        vi.advanceTimersByTime(200); // TOAST_FADE_MS — seen out in full
+        vi.advanceTimersByTime(130); // TOAST_FADE_MS — seen out in full
       });
       expect(
         screen.queryByRole("button", { name: /Open the note filed to/ }),
