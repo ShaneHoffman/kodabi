@@ -1,12 +1,30 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsView } from "./SettingsView";
 import type { OverlaySettings, Settings } from "../../useSettings";
 import { invoke, onCommand, resetTauriMocks } from "../../test/tauri";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
+
+/**
+ * The two display preferences write to localStorage and to <html>, and neither
+ * is torn down for us: jsdom is per FILE, and `src/test/setup.ts` resets only
+ * the RTL tree. Left alone, a toggle flipped in one test is still flipped in
+ * the next, and the next Appearance render seeds its switch from it — so a
+ * later toggle-twice test would run backwards and assert the opposite of what
+ * it reads. The reduce-motion test below stayed honest only by ending clean;
+ * this makes that a property of the file rather than of each test.
+ */
+afterEach(() => {
+  const root = document.documentElement;
+  for (const key of ["kodabi:reduce-motion", "kodabi:contrast"]) {
+    window.localStorage.removeItem(key);
+  }
+  root.removeAttribute("data-reduce-motion");
+  root.removeAttribute("data-contrast");
+});
 
 /** The shipped defaults: no pill for captures you start, one for auto-detected
  * captures (dormant until detection exists). */
@@ -345,6 +363,36 @@ describe("SettingsView appearance", () => {
     await user.click(screen.getByRole("switch", { name: "Reduce motion" }));
 
     expect(document.documentElement).not.toHaveAttribute("data-reduce-motion");
+  });
+
+  it("applies more contrast to the document, so every window sharpens", async () => {
+    // Same shape as reduce motion, and it carries more weight: on Windows the
+    // OS query is reached only through a Contrast theme, which takes the
+    // palette over wholesale, so this override is the branch that actually
+    // delivers the high-contrast palette (src/contrast.ts).
+    const user = userEvent.setup();
+    await renderSeeded(DEFAULTS, "Appearance");
+
+    await user.click(screen.getByRole("switch", { name: "Increase contrast" }));
+
+    // "more", not "on": the attribute mirrors the media feature's own
+    // vocabulary, and this is the literal `:root[data-contrast="more"]` in
+    // design/tokens.css keys off.
+    expect(document.documentElement).toHaveAttribute("data-contrast", "more");
+
+    await user.click(screen.getByRole("switch", { name: "Increase contrast" }));
+
+    expect(document.documentElement).not.toHaveAttribute("data-contrast");
+  });
+
+  it("shows a stored display preference without an effect", async () => {
+    // Seeded from storage during render (src/contrast.ts), which is what lets
+    // the preference be a plain synchronous read rather than a bridge hook.
+    window.localStorage.setItem("kodabi:contrast", "more");
+
+    await renderSeeded(DEFAULTS, "Appearance");
+
+    expect(screen.getByRole("switch", { name: "Increase contrast" })).toBeChecked();
   });
 });
 

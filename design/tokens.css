@@ -35,6 +35,12 @@
      4. geometry  (--sidebar-*, --gutter-*, --measure-*)  the per-view stance
         …plus a few DERIVED values (--wash-active, --selection, --scrollbar-*)
         that reference Layer 2, so they re-theme with it. Recipes, not literals.
+        …and the RECIPES built beside Layer 1 — the elevation set
+        (--lift-*-day/-night) and the contrast set (--bound-*, --faint-*,
+        --tint-*, --track-*, --highlight-*, --menu-hover-*, --scrim-*). Each is
+        one per theme, made only of pigments, and referenced by Layer 2, which
+        is what keeps the two copies of a theme mapping from drifting: there is
+        one place per theme to edit, not two.
 
    A NOTE ON THE ALPHA LADDERS. The translucent inks and shadows below are
    named by their alpha (`--k-ink-07-day`), not by a role. That reads
@@ -52,11 +58,13 @@
      :root[data-theme="dark"]                               → dark, forced
      :root[data-theme="light"]                              → light, forced (wins over OS dark)
 
-   Two further blocks sit between the first of those and the three dark/forced
-   ones, and they are NOT theme blocks: they set `--move: 0` — the motion
-   switch, likewise reached two ways (the OS setting and Settings → Appearance).
-   They are kept out of the four on purpose, so "four theme blocks" stays true
-   of the palette.
+   Four further blocks sit between the first of those and the three dark/forced
+   ones, and none of them is a theme block: two set `--move: 0` and two set
+   `--contrast: 1` — the motion and contrast switches, each likewise reached two
+   ways (the OS setting, and Settings → Appearance). They are kept out of the
+   four on purpose, so "four theme blocks" stays true of the palette. Neither
+   switch maps a semantic token itself; what each one changes is stated in the
+   recipes the theme blocks reference.
    ============================================================ */
 
 :root {
@@ -70,6 +78,17 @@
   --k-sumi-body: #2E2C24; /* ink-body — long-form reading body (note editor) */
   --k-stone-ink: #55524A; /* ink-2 — secondary text, nav labels, control values */
   --k-stone: #8B8879; /* ink-3 — muted: metadata, counts, eyebrows, placeholders */
+  --k-stone-hc: #6F6C5F; /* ink-3 once the OS asks for more contrast. 4.62 / 5.04 /
+                            5.18 on the three planes, so metadata clears the 4.5
+                            text floor on every plane ink-3 misses it on — and it
+                            still sits between ink-2 and ink-3, so the three-step
+                            ladder stays three steps. NOT on the active-row wash:
+                            that ground gates too (--k-menu-day → --k-token-hover-day),
+                            so the pair reaches 3.91 and stays forbidden — see
+                            DESIGN_SYSTEM §2 and the §6 table. MEASURE A GATED INK
+                            AGAINST THE GATED GROUND. Against the resting wash this
+                            same pigment reads 4.53, which is a ratio nothing ever
+                            renders. */
   --k-menu-day: #F0EEE6; /* hovered menu item / active-control fill */
   --k-token-day: #EBE9E1; /* open file-token & stop-button fill */
   --k-token-hover-day: #E1DED3; /* that fill under the pointer */
@@ -86,6 +105,17 @@
   --k-paper-body: #DCD8CC; /* ink-body */
   --k-paper-soft: #B3AFA1; /* ink-2 */
   --k-paper-faint: #7B7768; /* ink-3 */
+  --k-paper-faint-hc: #A09D8E; /* ink-3 under more contrast — 6.66 / 6.04 / 5.55 on
+                                  the three planes. Lighter than the value
+                                  DESIGN_SYSTEM §6 once estimated (#93907F), which
+                                  clears the planes too (5.65 / 5.13 / 4.71) but
+                                  with a fifth of the headroom over 4.5 on the
+                                  overlay, the tightest of the three. The
+                                  active-row wash is NOT the reason: it gates as
+                                  well, so #93907F reads 3.28 there and this one
+                                  3.87, and neither clears the floor — that pair
+                                  is deliberately below it (see --k-stone-hc's
+                                  note, DESIGN_SYSTEM §2 and §6). */
   --k-menu-night: #37331F; /* hovered menu item / active-control fill; toggle-on track */
   --k-token-night: #26231A; /* open file-token fill */
   --k-token-hover-night: #43401F; /* the stop button under the pointer */
@@ -106,6 +136,13 @@
   --k-ink-14-day: rgba(30, 28, 20, 0.14); /* a control with its menu open; the "+ tag" ghost */
   --k-ink-28-day: rgba(30, 28, 20, 0.28); /* an unchecked checkbox's ring */
   --k-ink-40-day: rgba(30, 28, 20, 0.4); /* the neutral record ring-dot */
+  --k-ink-50-day: rgba(30, 28, 20, 0.5); /* every boundary, once the OS asks for
+                                            more contrast. The ladder's own top
+                                            rung reaches only 2.43:1 on washi, so
+                                            a hairline that a high-contrast user
+                                            can actually see needs one more step —
+                                            the 0.5 DESIGN_SYSTEM §6 named and
+                                            declined to spend unconditionally. */
   --k-scrim-day: rgba(28, 25, 16, 0.34); /* the dimmed backdrop behind an overlay */
 
   /* ---------- Layer 1 — translucent inks (night) ---------- */
@@ -152,6 +189,91 @@
   --k-shade-70-night: rgba(0, 0, 0, 0.7);
   --k-shade-75-night: rgba(0, 0, 0, 0.75);
 
+  /* ---------- the contrast recipes ----------
+     What `--contrast` actually buys, stated once per theme instead of four
+     times in the mappings below. Each is a mix between the resting pigment and
+     the one the switch asks for, weighted by the switch itself: at
+     `--contrast: 0` the mix is 100% the resting value and RENDERS pixel for
+     pixel identically to it, so the default palette is untouched. Measured over
+     every ground, opaque and translucent alike.
+
+     Its computed VALUE does change form, though — `color(srgb …)` rather than
+     `rgba(…)`, with alpha quantised to 8 bits (0.06 serialises as 0.0588235).
+     Nothing on screen depends on that, but anything reading a token back
+     through getComputedStyle does: see the note in src/useXterm.ts, which has
+     to resolve `--highlight` before handing it to a parser that only knows the
+     legacy spelling.
+
+     These are RECIPES, not pigments — the same standing as the elevation
+     recipes just below, which is why they take a `-day` / `-night` suffix and
+     no `--k-` prefix. That prefix is the whole disambiguator in this file:
+     `--k-scrim-day` is a pigment, `--scrim-day` is the gated pair built from
+     it. The theme mappings reference these exactly as they already reference
+     `--lift-*-day`, which is what stops the two copies of each theme from
+     drifting — there is one place per theme to edit, not two.
+
+     THE BOUNDARY LADDER AND THE RING LADDER ARE ONE LADDER. Eight of the nine
+     ring pigments the elevation recipes below reach for are already the target
+     of an `--edge-*` token, so `--bound-NN-*` serves both. Named by resting
+     alpha for the reason the ladders themselves are (see the note above them):
+     the same alpha genuinely serves several roles, and Layer 2 is where roles
+     get their names.
+
+     THE BOUNDARIES COLLAPSE TO ONE RUNG. The seven-step edge ladder is a
+     ladder because a divider rule and a checkbox ring say different things
+     while both are visible. Once someone has asked for more contrast,
+     "visible" IS the request and the gradation is what stood in the way, so
+     every edge lands on the same boundary ink.
+
+     WHAT IS DELIBERATELY NOT GATED. The three planes: no darker washi or
+     lighter sumi exists that would not flatten the value ladder the whole
+     system rests on. `--text`, `--text-read` and `--text-soft`, which already
+     measure 6.84 and up in both themes. And the one green — a switch must
+     never change what a colour MEANS, and `--accent-dot` is a graphic that
+     clears its 3:1 everywhere. `--glow-out` especially must never be gated:
+     its alpha is 0 on purpose, and color-mix un-premultiplies that to
+     transparent BLACK, which is exactly the grey-ward fade its own note
+     forbids. docs/DESIGN_SYSTEM.md §6 carries the measured tables. */
+  --bound-05-day: color-mix(in srgb, var(--k-ink-05-day), var(--k-ink-50-day) calc(var(--contrast) * 100%));
+  --bound-06-day: color-mix(in srgb, var(--k-ink-06-day), var(--k-ink-50-day) calc(var(--contrast) * 100%));
+  --bound-07-day: color-mix(in srgb, var(--k-ink-07-day), var(--k-ink-50-day) calc(var(--contrast) * 100%));
+  --bound-08-day: color-mix(in srgb, var(--k-ink-08-day), var(--k-ink-50-day) calc(var(--contrast) * 100%));
+  --bound-09-day: color-mix(in srgb, var(--k-ink-09-day), var(--k-ink-50-day) calc(var(--contrast) * 100%));
+  --bound-14-day: color-mix(in srgb, var(--k-ink-14-day), var(--k-ink-50-day) calc(var(--contrast) * 100%));
+  --bound-28-day: color-mix(in srgb, var(--k-ink-28-day), var(--k-ink-50-day) calc(var(--contrast) * 100%));
+  --bound-40-day: color-mix(in srgb, var(--k-ink-40-day), var(--k-ink-50-day) calc(var(--contrast) * 100%));
+  /* night tops out at the ladder's own 0.45, which already measures 4.37:1 on
+     the page plane — so unlike day it needs no new rung, and the dot edge that
+     already sits there is left mapped straight to the pigment rather than
+     given an identity mix that would claim to gate something. */
+  --bound-06-night: color-mix(in srgb, var(--k-paper-06-night), var(--k-paper-45-night) calc(var(--contrast) * 100%));
+  --bound-08-night: color-mix(in srgb, var(--k-paper-08-night), var(--k-paper-45-night) calc(var(--contrast) * 100%));
+  --bound-12-night: color-mix(in srgb, var(--k-paper-12-night), var(--k-paper-45-night) calc(var(--contrast) * 100%));
+  --bound-18-night: color-mix(in srgb, var(--k-paper-18-night), var(--k-paper-45-night) calc(var(--contrast) * 100%));
+  --bound-32-night: color-mix(in srgb, var(--k-paper-32-night), var(--k-paper-45-night) calc(var(--contrast) * 100%));
+
+  /* the ink register, and the fills that are not planes. `--track` moves less
+     than the others on purpose: the Inbox progress instrument fills its track
+     with `--text-faint`, so the two have to move TOGETHER and the ground has to
+     move less than the mark, or the bar reads backwards. */
+  --faint-day: color-mix(in srgb, var(--k-stone), var(--k-stone-hc) calc(var(--contrast) * 100%));
+  --faint-night: color-mix(in srgb, var(--k-paper-faint), var(--k-paper-faint-hc) calc(var(--contrast) * 100%));
+  --tint-day: color-mix(in srgb, var(--k-ink-035-day), var(--k-ink-10-day) calc(var(--contrast) * 100%));
+  --tint-night: color-mix(in srgb, var(--k-paper-045-night), var(--k-paper-12-night) calc(var(--contrast) * 100%));
+  --track-day: color-mix(in srgb, var(--k-ink-10-day), var(--k-ink-14-day) calc(var(--contrast) * 100%));
+  --track-night: color-mix(in srgb, var(--k-paper-10-night), var(--k-paper-18-night) calc(var(--contrast) * 100%));
+  --highlight-day: color-mix(in srgb, var(--k-ink-11-day), var(--k-ink-28-day) calc(var(--contrast) * 100%));
+  --highlight-night: color-mix(in srgb, var(--k-paper-15-night), var(--k-paper-32-night) calc(var(--contrast) * 100%));
+  /* the active-row wash cannot reach 3:1 without becoming a dark bar, and is
+     not asked to: the 3:1 around a focused row is carried by its gated ring.
+     What this buys is roughly four times the separation from the page plane. */
+  --menu-hover-day: color-mix(in srgb, var(--k-menu-day), var(--k-token-hover-day) calc(var(--contrast) * 100%));
+  --menu-hover-night: color-mix(in srgb, var(--k-menu-night), var(--k-token-hover-night) calc(var(--contrast) * 100%));
+  /* a scrim's whole job is to say the panel is the only thing that matters, and
+     0.34 is thin for that once someone has asked for more contrast. */
+  --scrim-day: color-mix(in srgb, var(--k-scrim-day), var(--k-deep-55-day) calc(var(--contrast) * 100%));
+  --scrim-night: color-mix(in srgb, var(--k-scrim-night), var(--k-shade-70-night) calc(var(--contrast) * 100%));
+
   /* ---------- Layer 1 — elevation ----------
      Every plane above the page is RING + SHADOW in one declaration, never a
      border. The ring makes the edge read crisp; the shadow says how far off
@@ -162,28 +284,35 @@
      Note that three of these change GEOMETRY between themes, not just alpha
      (the card, the dropdown, the toolbar): a night shadow has to throw
      further to register at all. That is why there are two full sets rather
-     than one recipe with a swapped colour. */
-  --lift-day: 0 0 0 1px var(--k-ink-05-day), 0 4px 14px var(--k-shade-08-day);
-  --lift-card-day: 0 0 0 1px var(--k-ink-05-day), 0 6px 18px var(--k-shade-09-day);
-  --lift-row-day: 0 0 0 1px var(--k-ink-05-day), 0 8px 22px var(--k-shade-10-day);
-  --lift-chip-day: 0 0 0 1px var(--k-ink-07-day), 0 1px 2px var(--k-shade-05-day);
-  --lift-chip-hover-day: 0 0 0 1px var(--k-ink-09-day), 0 4px 12px var(--k-shade-10-day);
-  --lift-chip-open-day: 0 0 0 1px var(--k-ink-14-day), 0 4px 12px var(--k-shade-12-day);
-  --lift-menu-day: 0 0 0 1px var(--k-ink-06-day), 0 16px 44px var(--k-shade-18-day);
-  --lift-toolbar-day: 0 0 0 1px var(--k-ink-06-day), 0 12px 30px var(--k-shade-22-day);
-  --lift-palette-day: 0 0 0 1px var(--k-ink-05-day), 0 40px 90px -20px var(--k-deep-55-day), 0 12px 30px var(--k-deep-28-day);
-  --lift-capture-day: 0 0 0 1px var(--k-ink-05-day), 0 30px 70px -18px var(--k-deep-50-day), 0 10px 24px var(--k-deep-22-day);
+     than one recipe with a swapped colour.
 
-  --lift-night: 0 0 0 1px var(--k-paper-06-night), 0 4px 14px var(--k-shade-45-night);
-  --lift-card-night: 0 0 0 1px var(--k-paper-06-night), 0 8px 22px var(--k-shade-45-night);
-  --lift-row-night: 0 0 0 1px var(--k-paper-06-night), 0 10px 26px var(--k-shade-50-night);
-  --lift-chip-night: 0 0 0 1px var(--k-paper-08-night), 0 1px 2px var(--k-shade-30-night);
-  --lift-chip-hover-night: 0 0 0 1px var(--k-paper-12-night), 0 4px 12px var(--k-shade-40-night);
-  --lift-chip-open-night: 0 0 0 1px var(--k-paper-18-night), 0 4px 12px var(--k-shade-45-night);
-  --lift-menu-night: 0 0 0 1px var(--k-paper-08-night), 0 18px 46px var(--k-shade-60-night);
-  --lift-toolbar-night: 0 0 0 1px var(--k-paper-08-night), 0 14px 34px var(--k-shade-60-night);
-  --lift-palette-night: 0 0 0 1px var(--k-paper-08-night), 0 40px 90px -20px var(--k-shade-75-night), 0 12px 30px var(--k-shade-50-night);
-  --lift-capture-night: 0 0 0 1px var(--k-paper-08-night), 0 30px 70px -18px var(--k-shade-70-night), 0 10px 24px var(--k-shade-45-night);
+     THE RING LEG IS GATED, THE SHADOW LEGS ARE NOT. On a raised plane the ring
+     is the only boundary there is, and a 5%-alpha hairline is not a border to
+     someone who asked for more contrast — so it takes a `--bound-*` pair and
+     `--ring-width`, which doubles it. A shadow is depth rather than a
+     boundary; darkening it would only muddy the plane it belongs to. Neither
+     affects layout, so nothing reflows when the switch is thrown. */
+  --lift-day: 0 0 0 var(--ring-width) var(--bound-05-day), 0 4px 14px var(--k-shade-08-day);
+  --lift-card-day: 0 0 0 var(--ring-width) var(--bound-05-day), 0 6px 18px var(--k-shade-09-day);
+  --lift-row-day: 0 0 0 var(--ring-width) var(--bound-05-day), 0 8px 22px var(--k-shade-10-day);
+  --lift-chip-day: 0 0 0 var(--ring-width) var(--bound-07-day), 0 1px 2px var(--k-shade-05-day);
+  --lift-chip-hover-day: 0 0 0 var(--ring-width) var(--bound-09-day), 0 4px 12px var(--k-shade-10-day);
+  --lift-chip-open-day: 0 0 0 var(--ring-width) var(--bound-14-day), 0 4px 12px var(--k-shade-12-day);
+  --lift-menu-day: 0 0 0 var(--ring-width) var(--bound-06-day), 0 16px 44px var(--k-shade-18-day);
+  --lift-toolbar-day: 0 0 0 var(--ring-width) var(--bound-06-day), 0 12px 30px var(--k-shade-22-day);
+  --lift-palette-day: 0 0 0 var(--ring-width) var(--bound-05-day), 0 40px 90px -20px var(--k-deep-55-day), 0 12px 30px var(--k-deep-28-day);
+  --lift-capture-day: 0 0 0 var(--ring-width) var(--bound-05-day), 0 30px 70px -18px var(--k-deep-50-day), 0 10px 24px var(--k-deep-22-day);
+
+  --lift-night: 0 0 0 var(--ring-width) var(--bound-06-night), 0 4px 14px var(--k-shade-45-night);
+  --lift-card-night: 0 0 0 var(--ring-width) var(--bound-06-night), 0 8px 22px var(--k-shade-45-night);
+  --lift-row-night: 0 0 0 var(--ring-width) var(--bound-06-night), 0 10px 26px var(--k-shade-50-night);
+  --lift-chip-night: 0 0 0 var(--ring-width) var(--bound-08-night), 0 1px 2px var(--k-shade-30-night);
+  --lift-chip-hover-night: 0 0 0 var(--ring-width) var(--bound-12-night), 0 4px 12px var(--k-shade-40-night);
+  --lift-chip-open-night: 0 0 0 var(--ring-width) var(--bound-18-night), 0 4px 12px var(--k-shade-45-night);
+  --lift-menu-night: 0 0 0 var(--ring-width) var(--bound-08-night), 0 18px 46px var(--k-shade-60-night);
+  --lift-toolbar-night: 0 0 0 var(--ring-width) var(--bound-08-night), 0 14px 34px var(--k-shade-60-night);
+  --lift-palette-night: 0 0 0 var(--ring-width) var(--bound-08-night), 0 40px 90px -20px var(--k-shade-75-night), 0 12px 30px var(--k-shade-50-night);
+  --lift-capture-night: 0 0 0 var(--ring-width) var(--bound-08-night), 0 30px 70px -18px var(--k-shade-70-night), 0 10px 24px var(--k-shade-45-night);
 
   /* ---------- Layer 1 — pigments: terminal ANSI palette ----------
      The 16 ANSI colours the embedded terminal renders `claude`'s TUI in
@@ -433,6 +562,39 @@
   --dur-move-enter: calc(var(--dur-enter) * var(--move));
   --dur-move-wake: calc(var(--dur-wake) * var(--move));
 
+  /* ---------- the contrast switch ----------
+     The palette is deliberately quiet: metadata sits in a faint register, a
+     boundary is a hairline rather than a frame, and docs/DESIGN_SYSTEM.md §6
+     defends both with measurements. That is the right default and it is
+     precisely why someone whose OS asks for more contrast has to get something
+     back. This is that something.
+
+     `--contrast` is unitless and is 0 or 1 — a switch, not a slider, for the
+     same reason `--move` is. NOTE THE POLARITY IS THE OPPOSITE OF `--move`'s:
+     both name the thing they enable, but motion is on at rest and more
+     contrast is not, so `--move: 1` and `--contrast: 0` are both the resting
+     state. It is thrown in exactly two places, the blocks beside the motion
+     switch's below.
+
+     It drives two gates, and unlike `--move`'s they are not alternatives —
+     most sites want both:
+
+       1. VALUE, written `color-mix(in srgb, <rest>, <asked-for>
+          calc(var(--contrast) * 100%))` in the contrast recipes above. At 0
+          the mix renders pixel for pixel as the resting pigment, so the default
+          palette is exactly what it was before this switch existed.
+       2. WIDTH, written `calc(<rest> + var(--contrast) * <step>)`, for the
+          three boundaries whose thickness is as much of the problem as their
+          value. None of the three affects layout — an outline and a
+          box-shadow ring are both outside the box — so nothing reflows.
+
+     A new gated token adds its recipe beside the others above, in BOTH themes;
+     src/designTokens.test.ts fails a semantic token gated down one theme path
+     and not its twin, and fails a gate written at a `--k-*` pigment, where it
+     would be invisible to that check. */
+  --contrast: 0;
+  --ring-width: calc(1px + var(--contrast) * 1px);
+
   /* The press amplitude, with gate 2 already applied. Inverted from the usual
      calc(<value> * var(--move)) shape because a scale's identity is 1, not 0:
      shrink by 3% while --move is 1, land back on 1 when it is 0. Same gate as
@@ -649,7 +811,13 @@
      sans label it is bound to, and the extra pixel is what makes the two read
      as level. --check-mark-* is the tick itself, drawn from two borders. */
   --check-box: 17px;
-  --check-ring: 1.4px;
+  /* the box's only boundary, so it thickens under more contrast as well as
+     darkening (--edge-check gates too). Drawn as a box-shadow ring rather than
+     a border, so the box itself never changes size. The focus ring deliberately
+     does NOT gate alongside it: that one is already --text at 2px, the highest
+     contrast in the app, and thickening it would crowd a dense list for no
+     legibility the user does not already have. */
+  --check-ring: calc(1.4px + var(--contrast) * 0.6px);
   --check-mark-w: 0.55rem;
   --check-mark-h: 0.3rem;
   --check-mark-stroke: 2px;
@@ -740,32 +908,36 @@
   --sheen: rgba(255, 255, 255, 0.16);
 
   /* ---------- Layer 2 — semantic tokens: light (day washi) is the default ----------
-     All four theme blocks below are pure references to Layer 1 — no literals. */
+     All four theme blocks are pure references — no literals. Most point
+     straight at a pigment; the rest point at a recipe built from pigments (the
+     elevation set, and the contrast set for anything the contrast switch
+     moves), which is the only way a value can be conditional and still be
+     stated once per theme rather than once per block. */
   --bg: var(--k-washi);
   --surface: var(--k-washi-raised);
   --overlay: var(--k-washi-over);
   --text: var(--k-sumi);
   --text-read: var(--k-sumi-body);
   --text-soft: var(--k-stone-ink);
-  --text-faint: var(--k-stone);
+  --text-faint: var(--faint-day);
   --accent-dot: var(--k-green);
   --glow: var(--k-glow-day);
   --glow-out: var(--k-glow-day-out);
-  --edge-faint: var(--k-ink-05-day);
-  --edge: var(--k-ink-06-day);
-  --edge-rule: var(--k-ink-08-day);
-  --edge-strong: var(--k-ink-09-day);
-  --edge-open: var(--k-ink-14-day);
-  --edge-check: var(--k-ink-28-day);
-  --edge-dot: var(--k-ink-40-day);
-  --tint: var(--k-ink-035-day);
-  --track: var(--k-ink-10-day);
-  --highlight: var(--k-ink-11-day);
-  --menu-hover: var(--k-menu-day);
+  --edge-faint: var(--bound-05-day);
+  --edge: var(--bound-06-day);
+  --edge-rule: var(--bound-08-day);
+  --edge-strong: var(--bound-09-day);
+  --edge-open: var(--bound-14-day);
+  --edge-check: var(--bound-28-day);
+  --edge-dot: var(--bound-40-day);
+  --tint: var(--tint-day);
+  --track: var(--track-day);
+  --highlight: var(--highlight-day);
+  --menu-hover: var(--menu-hover-day);
   --token-active: var(--k-token-day);
   --token-hover: var(--k-token-hover-day);
   --toggle-on: var(--k-toggle-on-day);
-  --scrim: var(--k-scrim-day);
+  --scrim: var(--scrim-day);
   --lift: var(--lift-day);
   --lift-card: var(--lift-card-day);
   --lift-row: var(--lift-row-day);
@@ -834,6 +1006,42 @@
   --move: 0;
 }
 
+/* ============================================================
+   The contrast switch, reached two ways
+
+   `--contrast: 1` steps metadata out of the faint register, collapses the
+   seven-step edge ladder onto one defined boundary, and thickens the two rings
+   that are a control's only outline. The switch's own note in Layer 3 says what
+   the two gates are and what the recipes look like; docs/DESIGN_SYSTEM.md §6
+   says what moves, what deliberately does not, and carries the measured tables
+   for both states.
+
+   Everything above about the motion switch applies here unchanged: these are
+   NOT theme blocks (they map no semantic token, which is what keeps "four theme
+   blocks" true both above and in src/designTokens.test.ts); ORDER MATTERS,
+   because the media block is a plain `:root` tying with the default that sets
+   `--contrast: 0` and winning only by coming after it; and the attribute block
+   is the in-app switch (Settings → Appearance, src/contrast.ts) rather than the
+   OS one.
+
+   The media block is likewise an unconditional `:root` with no "off" value, so
+   the in-app switch can ADD contrast but never overrule an OS request for it.
+   That matters more here than it does for motion: on Windows this media query
+   is reached through a Contrast theme, which also turns on forced-colors and
+   overrides the palette wholesale — so `data-contrast` is the branch that does
+   the real work on the platform Kodabi ships to, and it must never be able to
+   turn the OS request back off.
+   ============================================================ */
+@media (prefers-contrast: more) {
+  :root {
+    --contrast: 1;
+  }
+}
+
+:root[data-contrast="more"] {
+  --contrast: 1;
+}
+
 /* ---------- Layer 2 — dark (night sumi): auto when the OS asks and not forced light ---------- */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -843,25 +1051,25 @@
     --text: var(--k-paper);
     --text-read: var(--k-paper-body);
     --text-soft: var(--k-paper-soft);
-    --text-faint: var(--k-paper-faint);
+    --text-faint: var(--faint-night);
     --accent-dot: var(--k-green-night);
     --glow: var(--k-glow-night);
     --glow-out: var(--k-glow-night-out);
-    --edge-faint: var(--k-paper-06-night);
-    --edge: var(--k-paper-08-night);
-    --edge-rule: var(--k-paper-08-night);
-    --edge-strong: var(--k-paper-12-night);
-    --edge-open: var(--k-paper-18-night);
-    --edge-check: var(--k-paper-32-night);
+    --edge-faint: var(--bound-06-night);
+    --edge: var(--bound-08-night);
+    --edge-rule: var(--bound-08-night);
+    --edge-strong: var(--bound-12-night);
+    --edge-open: var(--bound-18-night);
+    --edge-check: var(--bound-32-night);
     --edge-dot: var(--k-paper-45-night);
-    --tint: var(--k-paper-045-night);
-    --track: var(--k-paper-10-night);
-    --highlight: var(--k-paper-15-night);
-    --menu-hover: var(--k-menu-night);
+    --tint: var(--tint-night);
+    --track: var(--track-night);
+    --highlight: var(--highlight-night);
+    --menu-hover: var(--menu-hover-night);
     --token-active: var(--k-token-night);
     --token-hover: var(--k-token-hover-night);
     --toggle-on: var(--k-menu-night);
-    --scrim: var(--k-scrim-night);
+    --scrim: var(--scrim-night);
     --lift: var(--lift-night);
     --lift-card: var(--lift-card-night);
     --lift-row: var(--lift-row-night);
@@ -900,25 +1108,25 @@
   --text: var(--k-paper);
   --text-read: var(--k-paper-body);
   --text-soft: var(--k-paper-soft);
-  --text-faint: var(--k-paper-faint);
+  --text-faint: var(--faint-night);
   --accent-dot: var(--k-green-night);
   --glow: var(--k-glow-night);
   --glow-out: var(--k-glow-night-out);
-  --edge-faint: var(--k-paper-06-night);
-  --edge: var(--k-paper-08-night);
-  --edge-rule: var(--k-paper-08-night);
-  --edge-strong: var(--k-paper-12-night);
-  --edge-open: var(--k-paper-18-night);
-  --edge-check: var(--k-paper-32-night);
+  --edge-faint: var(--bound-06-night);
+  --edge: var(--bound-08-night);
+  --edge-rule: var(--bound-08-night);
+  --edge-strong: var(--bound-12-night);
+  --edge-open: var(--bound-18-night);
+  --edge-check: var(--bound-32-night);
   --edge-dot: var(--k-paper-45-night);
-  --tint: var(--k-paper-045-night);
-  --track: var(--k-paper-10-night);
-  --highlight: var(--k-paper-15-night);
-  --menu-hover: var(--k-menu-night);
+  --tint: var(--tint-night);
+  --track: var(--track-night);
+  --highlight: var(--highlight-night);
+  --menu-hover: var(--menu-hover-night);
   --token-active: var(--k-token-night);
   --token-hover: var(--k-token-hover-night);
   --toggle-on: var(--k-menu-night);
-  --scrim: var(--k-scrim-night);
+  --scrim: var(--scrim-night);
   --lift: var(--lift-night);
   --lift-card: var(--lift-card-night);
   --lift-row: var(--lift-row-night);
@@ -956,25 +1164,25 @@
   --text: var(--k-sumi);
   --text-read: var(--k-sumi-body);
   --text-soft: var(--k-stone-ink);
-  --text-faint: var(--k-stone);
+  --text-faint: var(--faint-day);
   --accent-dot: var(--k-green);
   --glow: var(--k-glow-day);
   --glow-out: var(--k-glow-day-out);
-  --edge-faint: var(--k-ink-05-day);
-  --edge: var(--k-ink-06-day);
-  --edge-rule: var(--k-ink-08-day);
-  --edge-strong: var(--k-ink-09-day);
-  --edge-open: var(--k-ink-14-day);
-  --edge-check: var(--k-ink-28-day);
-  --edge-dot: var(--k-ink-40-day);
-  --tint: var(--k-ink-035-day);
-  --track: var(--k-ink-10-day);
-  --highlight: var(--k-ink-11-day);
-  --menu-hover: var(--k-menu-day);
+  --edge-faint: var(--bound-05-day);
+  --edge: var(--bound-06-day);
+  --edge-rule: var(--bound-08-day);
+  --edge-strong: var(--bound-09-day);
+  --edge-open: var(--bound-14-day);
+  --edge-check: var(--bound-28-day);
+  --edge-dot: var(--bound-40-day);
+  --tint: var(--tint-day);
+  --track: var(--track-day);
+  --highlight: var(--highlight-day);
+  --menu-hover: var(--menu-hover-day);
   --token-active: var(--k-token-day);
   --token-hover: var(--k-token-hover-day);
   --toggle-on: var(--k-toggle-on-day);
-  --scrim: var(--k-scrim-day);
+  --scrim: var(--scrim-day);
   --lift: var(--lift-day);
   --lift-card: var(--lift-card-day);
   --lift-row: var(--lift-row-day);

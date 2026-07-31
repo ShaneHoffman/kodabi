@@ -295,6 +295,14 @@ Three things the prototype does **not** do, and one prediction it falsified.
   nothing to clip. Benign today, by computation rather than assumption. It is one CSS property away
   from not being, in a file nobody would think to check, so the grep is the standing guard:
 
+  **Update:** that blur is now conditional — `Overlay.css` drops it under
+  `prefers-reduced-transparency: reduce` — so `.ui-overlay` carries one of the seven in one OS state
+  and not the other. Still benign, and for a reason that survives both: the scrim is `fixed inset-0`,
+  which is geometrically identical to the viewport, so a menu contained by it lands where a menu
+  contained by the viewport would. The sharper lesson is that "one CSS property away" understated it:
+  an **accessibility preference** can add or remove a containing block, so the grep's answer is not a
+  property of the stylesheet alone and re-running it means re-running it in both states.
+
   ```
   transform | filter | backdrop-filter | perspective | contain | will-change | container-type
   ```

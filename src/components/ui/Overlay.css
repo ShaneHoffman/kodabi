@@ -10,6 +10,16 @@
    1.5px blur is what turns "dimmed" into "out of focus", so the eye stops
    trying to read the view behind the panel.
 
+   THAT BLUR IS THE ONLY TRANSLUCENCY IN THE APP, which is why the one
+   prefers-reduced-transparency rule in the tree lives here. The washi/sumi
+   palette is paper rather than glass by choice (docs/DESIGN.md), so there is no
+   frosted chrome to thin out and nothing else to answer — the switch is a
+   near-no-op on purpose, not by omission. What it drops is the out-of-focus
+   half only: `--scrim` is a real alpha fill rather than a filter, so the panel
+   still reads as being in front of a dimmed app. Dropping the blur also drops
+   this element's containing block for `position: fixed` descendants; that is
+   benign, and Select.css's standing grep is where it is written down.
+
    No entrance animation, and nothing for prefers-reduced-motion to disable:
    FOUNDING_DOC §4 reserves "one deliberate motion" for the distill-and-route
    moment and keeps everything else near-instant. Showing the surface IS the
@@ -24,6 +34,16 @@
      going to type into this, and a box that opens under your eyeline is a box
      you have to look down at. */
   padding-top: var(--palette-top);
+}
+
+/* One rule rather than the two an OS preference usually needs here: unlike
+   motion and contrast there is no in-app transparency override to catch, since
+   there is no second surface a user could want thinned. If one ever ships, this
+   becomes a `--clear` switch in tokens.css and this rule goes away. */
+@media (prefers-reduced-transparency: reduce) {
+  .ui-overlay {
+    backdrop-filter: none;
+  }
 }
 
 /* The third and highest plane. Lighter fill than raised, a hairline ring, and

@@ -838,6 +838,11 @@ near-black page, and a 34% warm ink over washi is exactly enough to say the pale
 used to mix from `--bg-sink`, which meant the day theme dimmed washi with washi and a palette opened
 over the app barely registered as being in front of it; that token is gone.
 
+**The scrim also carries the app's only blur**, 1.5px, which is what turns "dimmed" into "out of
+focus" so the eye stops trying to read the view behind the panel. It is the one thing
+`prefers-reduced-transparency` has to answer, and the only place translucency appears at all — see
+§6, *Reduced transparency*. The scrim itself survives that query; only the blur goes.
+
 `--sheen` is the genuinely theme-independent one — white in both themes, and it lives once in Layer 3
 rather than per theme.
 
@@ -893,6 +898,14 @@ misses even the 3:1 a *graphic* is held to. Two things wore it: the command
 palette's `↵` hint on the active row, and `Select`'s check glyph on the chosen
 option — which is very often also the active one. Both are `--text-soft` now.
 
+**More contrast does not lift this pair over the line, and the prohibition
+stands.** Both halves move under the switch — the ink steps up *and* the wash
+steps up to keep the row visible — so the two gains partly cancel: 3.07 → 3.91
+light, 2.83 → 3.87 dark. That clears the 3:1 a graphic is held to, in both
+themes, and still misses the 4.5 this is text. Optimising it further would mean
+holding the wash still and leaving the active row at 1.02:1, which is the worse
+trade for a combination nothing is allowed to render anyway.
+
 ### `--text-faint` is a metadata register, and it is not spent on anything else
 
 **It measures 3.12–3.50 in the light theme and 3.37–4.04 in the dark one,
@@ -907,6 +920,19 @@ design specifies, and both flatten the gap between `text-soft` and `text-faint`
 that the three-step ink ladder depends on), or stop spending it where it
 carries weight. **The second one is taken, applied narrowly.** The pigment is
 unchanged; what changed is which sites consume it.
+
+**The first exit is now taken too, conditionally** — see *More contrast* below.
+Everything above is an argument against darkening the pigment *unconditionally*,
+and it still holds; it is not an argument against darkening it for someone who
+has explicitly asked. `--k-stone-hc` is #6F6C5F, the value this paragraph
+estimated. `--k-paper-faint-hc` is **#A09D8E**, not the #93907F estimated here:
+both clear the three planes, but #93907F does it with a fifth of the headroom over
+4.5 on the overlay — 4.71 against this one's 5.55 — and the overlay is the tightest
+of the three in the dark theme. The active-row wash decides nothing here: **it gates
+too**, so under the switch neither candidate clears the floor on it (3.28 and
+3.87), and that pair is deliberately below it. Measure a gated ink against the
+*gated* ground; against the resting wash both flatter themselves by most of a
+point, which is the kind of thing only measuring finds.
 
 **It had already been widened well past its brief**, which is what forced the
 issue. Twelve sites wore it on things that are not metadata at all — the
@@ -953,6 +979,15 @@ roughly 0.5 alpha, which is a visible frame and against DESIGN.md's *space
 instead of borders and boxes*. If a second toggle-like control ever ships, this
 is the paragraph to revisit.
 
+**`prefers-contrast: more` is what revisited it**, and it spends exactly the
+0.5 alpha named above — because a visible frame is not a cost to someone who
+has asked for one, it is the request. `--edge-check` measures **1.82 → 3.27**
+in the light theme and **2.83 → 4.26** in the dark one, so the ring both
+booleans wear clears 3:1 in both themes under the switch, and `--check-ring`
+thickens from 1.4px to 2px alongside it. At rest nothing here moves: the
+paragraph above still describes the default, and the knob is still what carries
+the control.
+
 **`--accent-dot` is a graphic, never text.** At 4.06–4.56 in the light theme it
 does not meet the text floor, and it never has to: it is spent on the listening
 dot, the waveform, and the text caret, where 3:1 applies and it passes
@@ -961,6 +996,88 @@ everywhere in both themes. The label beside it is `--text` when live and
 status line, and the green stays the mark's alone.
 
 Any new colour pair is measured before it ships.
+
+### More contrast
+
+Everything above is the *default*, and it is deliberately quiet: metadata sits in a faint register, a
+boundary is a hairline rather than a frame, and two of the paragraphs above defend a measurement that
+sits under its floor. All of that is right for a reading surface, and it is exactly why someone whose
+OS asks for more contrast has to get something back. `prefers-contrast: more` is the third exit the
+two paragraphs above never considered: both of them refuse an *unconditional* change, and neither is
+an argument against changing for a user who asked.
+
+It is a token remap on **one switch**, `--contrast` in `design/tokens.css` — unitless, `0` or `1`, a
+switch rather than a slider, the same shape `--move` takes. **Note the polarity is inverted from
+`--move`'s:** both name what they enable, but motion is on at rest and more contrast is not, so
+`--move: 1` and `--contrast: 0` are both the resting state.
+
+`--contrast` drives two gates, and unlike `--move`'s they are not alternatives — most sites want both:
+
+| Gate | What it looks like | Where |
+| --- | --- | --- |
+| **Value** | `color-mix(in srgb, <rest>, <asked-for> calc(var(--contrast) * 100%))` | The contrast recipes in `tokens.css`, one per theme. At `0` the mix renders pixel for pixel as the resting pigment, so the default palette is exactly what it was before the switch existed. Its computed *value* serialises differently (`color(srgb …)`, alpha quantised to 8 bits), which is invisible on screen but matters to anything reading a token back through `getComputedStyle` — see `src/useXterm.ts`. |
+| **Width** | `calc(<rest> + var(--contrast) * <step>)` | `--ring-width` (1 → 2px) and `--check-ring` (1.4 → 2px), where a boundary's thickness is as much of the problem as its value. Both are outside the box (a shadow ring, not a border), so nothing reflows. |
+
+**An override is still TWO rules, not one**, for the same reason §4 gives: the OS setting
+(`@media (prefers-contrast: more)`) and Settings → Appearance, which sets `:root[data-contrast="more"]`
+(`src/contrast.ts`). The in-app switch can only *add* contrast, never overrule an OS request for it —
+`contrast.ts` has no "off" value, only set-or-remove. **That second branch carries more weight here
+than it does for motion.** On Windows this media query is reached only by turning on a Contrast theme,
+which also flips `forced-colors: active` and replaces the palette wholesale — so on the platform
+Kodabi ships to, the in-app toggle is what actually delivers this palette to someone who wants Kodabi
+sharper without handing their whole desktop over. (`forced-colors` itself is not handled yet; it is a
+different problem — the OS replaces the colours and drops `box-shadow`, which is most of what is
+gated here — and it has its own ticket.)
+
+**Measured, both states.** Same method as the tables above.
+
+| Pair | Light: rest → more | Dark: rest → more |
+| --- | --- | --- |
+| `--text-faint` on `bg` | 3.12 → **4.62** | 4.04 → **6.66** |
+| `--text-faint` on `surface` | 3.41 → **5.04** | 3.67 → **6.04** |
+| `--text-faint` on `overlay` | 3.50 → **5.18** | 3.37 → **5.55** |
+| a 1px hairline on `bg` (the whole edge ladder) | 1.10–2.43 → **3.20** | 1.16–2.83 → **4.37** |
+| `--edge-check` on `surface` (both booleans) | 1.82 → **3.27** | 2.83 → **4.26** |
+| the Inbox progress fill on its track | 2.57 → **3.49** | 3.09 → **3.87** |
+| the search mark on `bg` | 1.24 → **1.81** | 1.55 → **2.83** |
+| the active-row wash on `bg` | 1.02 → **1.18** | 1.43 → **1.72** |
+
+`--text-faint` clears the 4.5 text floor on all three planes in both themes, which is the headline:
+the residual gap the register carries by default closes exactly where someone asked it to. Every
+boundary clears the 3:1 a graphic is held to. Text *on* the two fills that move stays far above its
+floor (`--text` on the search mark 8.01 light / 5.46 dark; on the active row 12.25 / 8.98), which is
+what bounds how far those two are allowed to travel.
+
+**Two pairs deliberately do not reach their floor, and both are argued above:** `--text-faint` on the
+active-row wash (3.91 / 3.87, still forbidden), and the pill toggle's track, whose ring is what moved.
+
+**What does not move, and why.** The three planes: no darker washi or lighter sumi exists that would
+not flatten the value ladder the whole system rests on. `--text`, `--text-read` and `--text-soft`,
+which already measure 6.84 and up. And **the one green** — a contrast switch must never change what a
+colour *means*, and `--accent-dot` already clears the 3:1 it is held to everywhere. `--glow-out` is
+the sharpest case of that rule: its alpha is `0` on purpose so the listening glow fades out through
+its own hue, and mixing it un-premultiplies to transparent *black*, which is the grey-ward fade that
+token exists to prevent. The 16 `--ansi-*` are out of scope too: they colour a hosted TUI whose slot
+choices we do not control, and xterm's own `minimumContrastRatio` adjusts each glyph against its
+actual rendered background, which no palette swap can.
+
+### Reduced transparency
+
+`prefers-reduced-transparency` is very nearly a no-op here, and that is a property of the design
+rather than an omission. The washi/sumi palette is **paper, not glass** (`docs/DESIGN.md`): there is
+no frosted chrome, no translucent sidebar, no vibrancy. `backdrop-filter` appears exactly **once** in
+the whole tree — the 1.5px blur on `.ui-overlay`'s scrim — and that one usage is answered where it
+lives, with `backdrop-filter: none` under the query.
+
+What survives is the half that carries information: `--scrim` is a real alpha fill rather than a
+filter, so a panel still reads as being in front of a dimmed app. What goes is the out-of-focus half,
+which is decoration. Dropping the blur also drops that element's containing block for
+`position: fixed` descendants — benign, because the scrim is `fixed inset-0` and therefore
+geometrically identical to the viewport, and recorded on `Select.css`'s standing grep either way.
+
+There is one rule rather than two because there is no in-app transparency override: nothing else in
+the app is translucent, so there is no second surface a user could want thinned. **Do not add
+translucency in order to have something to reduce.**
 
 ### Focus order
 
@@ -1044,11 +1161,14 @@ only on the stylesheet side, because that is the only place it is written.
 
 - **[`src/designTokens.test.ts`](../src/designTokens.test.ts)** (`pnpm test`) reads `design/tokens.css`
   and every `src/**/*.css`, and fails on a literal colour, font-family, duration, or spacing value
-  (padding / margin / gap, in px, rem or em) outside `tokens.css` — plus two structural assertions:
-  each `--k-*` pigment is declared exactly once, and **every semantic token is mapped in all four
-  theme blocks**. The second one is the quiet one and it earns its place: a new semantic key added to
+  (padding / margin / gap, in px, rem or em) outside `tokens.css` — plus three structural assertions:
+  each `--k-*` pigment is declared exactly once, **every semantic token is mapped in all four
+  theme blocks**, and **the two copies of each theme mapping are identical**. The second is the quiet
+  one and it earns its place: a new semantic key added to
   `:root` and forgotten in one of the two dark paths keeps its *light* value down that path, and
-  nothing about that looks broken until someone runs the app in the OS-dark theme specifically.
+  nothing about that looks broken until someone runs the app in the OS-dark theme specifically. The
+  third closes that check's own gap — it compares *keys*, so a token gated down one dark path and
+  left plain down the other is present in both and passes, while rendering differently.
 - **The same file carries five reduced-motion assertions**, which make §4's movement/value split a
   gate rather than prose. They fail: a `transition` leg on a movement property (`transform`,
   `width`, `grid-template-rows`, `all`, …) that took a bare `--dur-*` instead of `--dur-move-*`; an
@@ -1089,6 +1209,31 @@ only on the stylesheet side, because that is the only place it is written.
   scale could nudge the exit past its entrance while every leg stayed on a correctly named token, and
   every other check in the file would pass. The defect it blocks is the one §4's pair rule was
   introduced to fix, re-introduced by arithmetic instead of by a selector.
+- **The same file carries five contrast and transparency assertions**, which make §6's *More
+  contrast* section a gate on the same principle. They fail: a `prefers-contrast` query in any
+  component stylesheet (it belongs at the token, and `tokens.css` must actually throw it); a
+  `--contrast` thrown down only one of its two branches, set to anything but `0` or `1`, or reached
+  through a second attribute value — the last pins "can add, never overrule" in one line; a gate
+  written at a `--k-*` pigment, which would apply to both themes at once and be invisible to the
+  theme-mapping checks above; **a semantic token this section says the switch moves that no longer
+  gates**; and a `backdrop-filter` outside `Overlay.css`, or an `Overlay.css` that
+  no longer answers `prefers-reduced-transparency`. That last one guards the *cause* rather than the
+  override: a second blurring surface is two problems at once, since it is also a new containing
+  block for `position: fixed` and `Select.css`'s standing grep would not know about it.
+
+  **The fourth is the one that keeps this section honest**, and it is the only check that follows
+  the switch through its indirection: a theme block maps `--edge: var(--bound-06-day)` and the
+  recipe is where `var(--contrast)` actually appears, so a token re-pointed straight back at a
+  pigment still declares its key, still matches its twin, and silently stops honouring the
+  preference. Its list of gated tokens is the executable copy of the *What does not move* paragraph
+  above — the two are edited together or one of them is lying.
+
+  Note the mechanism is already half-enforced by the four-theme-block assertion above. A
+  `@media (prefers-contrast: more)` block that remapped a semantic token directly would be a *fifth*
+  themed block and fail there — so the switch is not merely the tidy way to do this, it is the only
+  way that passes. What none of them can see is whether `contrast.ts`'s attribute constants agree
+  with the selector in `tokens.css`; the CSS side is pinned here and the DOM side in
+  `SettingsView.test.tsx`, independently, which is the same gap reduced motion already carries.
 - **[`eslint.config.js`](../eslint.config.js)** (`pnpm exec eslint .`) fails numeric spacing utilities
   (`p-3`, `gap-4`) and arbitrary values (`text-[13px]`) inside `className`.
 

@@ -99,13 +99,28 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 - **Source of truth:** `design/tokens.css` (the token families) and the two guards,
   `src/designTokens.test.ts` plus the `no-restricted-syntax` block in `eslint.config.js`.
 - **Mirror:** `docs/DESIGN_SYSTEM.md` — the motion table (`--dur-*` / `--ease-*`), the
-  layer names, the contrast matrix in §6, and the enforcement claims in §7.
+  layer names, the contrast matrices in §6, the switch tokens (`--move`, `--contrast`)
+  and what each one is documented to move, and the enforcement claims in §7.
 - **Verify:** every `--dur-*` and `--ease-*` token in `tokens.css` appears in the §4 table
-  and vice versa; the contrast figures match a recomputation from the Layer-1 pigments;
+  and vice versa; the contrast figures match a recomputation from the Layer-1 pigments,
+  **in both states** — §6 carries a resting matrix and a `--contrast: 1` one, and an
+  auditor who recomputes only the first will report PASS on a stale second;
   §7's description of what each guard catches matches what the guard actually asserts.
+  The switch tokens need naming explicitly because neither is a `--dur-*` or an
+  `--ease-*`, so the first check does not reach them.
 - **Failure:** a motion token the table omits, a contrast figure that no longer matches
-  the pigments, or an enforcement claim the guards do not make.
+  the pigments in either state, or an enforcement claim the guards do not make.
   (`pnpm test` covers the token/theme structure itself — this anchor covers the prose.)
+- **Recompute a gated pair against the GATED ground, both sides.** The switch moves
+  grounds as well as inks (`--menu-hover`, `--track`, `--highlight`), so measuring a
+  `--contrast: 1` ink against the resting fill reads high by most of a point and
+  invents a floor the app never clears. That mistake shipped once, in the two `-hc`
+  pigment notes, and §6's table was the thing that caught it.
+- **Coverage is already a gate; the figures are not.** "A token §6 says the switch
+  moves that `tokens.css` no longer gates" is asserted by `src/designTokens.test.ts`
+  ("spends the contrast switch on every token that promises it"), which follows the
+  theme-block → recipe hop. Don't hand-audit it — audit the numbers, which nothing
+  can check mechanically.
 
 ## Anchor 7 — MCP tool surface ↔ the server's committed schemas
 
