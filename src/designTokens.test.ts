@@ -146,6 +146,18 @@ const MOVEMENT =
   "grid-template-rows|grid-template-columns|all";
 
 /**
+ * The four properties that MOVE an element by declaring a new shape, rather
+ * than by transitioning toward one: the `transform` shorthand and the three
+ * individual properties that compose into it.
+ *
+ * One constant, shared by both block-scoped checks below, for the same reason
+ * `MOVEMENT` is one list: a press written as `scale: 0.9` is exactly as ungated
+ * as one written as `transform: scale(0.9)`, and a guard that saw only the
+ * shorthand would wave the individual property straight through.
+ */
+const MOVING_DECLARATION = /(?<![\w-])(?:transform|translate|rotate|scale)\s*:/;
+
+/**
  * Each block in `css` whose head matches `head`, with the line that head sits
  * on. Found by brace counting, because `scan()` is line-based — it cannot see a
  * block at all.
@@ -297,14 +309,13 @@ describe("design tokens are the single source of truth", () => {
     // Widening it to any literal-bearing `transform` costs five escape hatches
     // on static geometry that is not motion at all (the checkbox tick, the
     // editor toolbar's tail, an optical 1px nudge), which is a worse trade.
-    const moving = /(?<![\w-])(?:transform|translate|rotate|scale)\s*:/;
     const offences: Offence[] = [];
     for (const file of sheets) {
       const raw = readFileSync(file, "utf8");
       const blanked = withoutComments(raw);
       const allowed = allowedLines(raw, blanked);
       for (const block of blocksHeadedBy(blanked, /@(?:keyframes\s+[\w-]+|starting-style)/)) {
-        if (!moving.test(block.body) || block.body.includes("var(--move)")) continue;
+        if (!MOVING_DECLARATION.test(block.body) || block.body.includes("var(--move)")) continue;
         if (allowed[block.line - 1]) continue;
         offences.push({
           file: relative(ROOT, file),
@@ -335,14 +346,16 @@ describe("design tokens are the single source of truth", () => {
     //
     // BLOCK-scoped for the same reason as the check above: `:active` sits in the
     // head, `transform` in the body, and a line-based scan cannot relate them.
-    const pressing = /(?<![\w-])transform\s*:/;
+    // And it takes the same MOVING_DECLARATION list, so a press spelled with the
+    // individual `scale:` / `translate:` / `rotate:` property is caught rather
+    // than waved through the one hole this check exists to close.
     const offences: Offence[] = [];
     for (const file of sheets) {
       const raw = readFileSync(file, "utf8");
       const blanked = withoutComments(raw);
       const allowed = allowedLines(raw, blanked);
       for (const block of blocksHeadedBy(blanked, /:active/)) {
-        if (!pressing.test(block.body)) continue;
+        if (!MOVING_DECLARATION.test(block.body)) continue;
         if (block.body.includes("var(--press-scale)")) continue;
         if (allowed[block.line - 1]) continue;
         offences.push({

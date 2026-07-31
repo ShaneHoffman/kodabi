@@ -289,15 +289,22 @@ is the only one where a physical answer means anything; hover and focus describe
 where the pointer or the keyboard happens to be, and a control that flinched at
 either would be noise. **It expires the moment a transform is spent on hover,
 focus or selection, or on a second amplitude.** `src/designTokens.test.ts` holds
-the second half of that: an `:active` rule that declares `transform` without
-`--press-scale` fails the gate.
+the second half of that: an `:active` rule that declares `transform` (or the
+individual `scale` / `translate` / `rotate`) without `--press-scale` fails the
+gate.
 
 **A control that is also an anchor does not press.** `Select`'s boxed trigger takes the scale only
 while its menu is closed (`:not([aria-expanded="true"])`). CSS anchor positioning resolves against
-the anchor's *transformed* border box, so scaling the trigger while a list hangs off it drags the
-whole menu sideways — on the very press that dismisses it. This is the general shape of the one
-thing compositor-only motion still touches, and any future anchor that presses needs the same
-exclusion.
+the anchor's *transformed* border box, and it re-resolves per frame, so scaling the trigger while a
+list hangs off it drags the whole menu sideways — on the very press that dismisses it. This is the
+general shape of the one thing compositor-only motion still touches, and any future anchor that
+presses needs the same exclusion.
+
+**That exclusion has to cover the release, not just the press.** A menu opens on *click*, so
+`:active` drops and the eased scale-back starts at the same moment the control becomes an anchor —
+and the same drag arrives on the press that OPENS the menu. So the open state also drops `transform`
+from its `transition`, which cancels that leg and puts the chip back at rest the instant the list
+appears. A press exclusion written only as an `:active` selector is half a fix.
 
 This reverses a decision. `Checkbox.css` carried a `scale(0.92)` press, pulled
 because it "made this the only control in the app that shrank under the pointer"
@@ -975,7 +982,8 @@ only on the stylesheet side, because that is the only place it is written.
   gate rather than prose. They fail: a `transition` leg on a movement property (`transform`,
   `width`, `grid-template-rows`, `all`, …) that took a bare `--dur-*` instead of `--dur-move-*`; an
   `@keyframes` or `@starting-style` block that moves something without referencing `var(--move)`; an
-  `:active` rule that declares a `transform` without `--press-scale`; a
+  `:active` rule that declares a `transform` (or a bare `scale` / `translate` / `rotate`) without
+  `--press-scale`; a
   `--dur-move-*` used on an `animation` rather than a `transition`; and a `scroll-behavior: smooth`
   anywhere. The fourth blocks *re-introducing the shape of* the original bug: collapsing an
   animation's duration is what froze the spirit-mark's aura mid-drift. It would not have caught the
@@ -986,7 +994,11 @@ only on the stylesheet side, because that is the only place it is written.
   The press check exists because a press is the one movement neither of the first two can see: it
   sets `transition: none` so it has no leg to inspect, and it is a plain rule rather than an at-rule
   block. A bare `:active { transform: scale(0.97) }` would have passed the whole guard while ignoring
-  reduced motion outright. Scoping it to `:active` rather than to every literal-bearing `transform`
+  reduced motion outright. It reads the same four properties the keyframe check does — the shorthand
+  and the three individual ones — from one shared constant, because `scale: 0.9` moves a pressed
+  control exactly as far as `transform: scale(0.9)` and a guard that saw only the shorthand would
+  leave open the hole it was written to close. Scoping it to `:active` rather than to every
+  literal-bearing `transform`
   is what keeps it from needing the escape hatches that widening the keyframe check would have cost
   (next paragraph), and because the amplitude gate lives *inside* `--press-scale`, requiring the
   token is requiring the gate.
