@@ -33,7 +33,8 @@ you are changing the mark rather than reasoning about it.
   3200 ms (the concept's indicative ~4.2 s), the counter-rotating lobes 7000 ms and 9500 ms, and
   the starting / reconnecting pulse is `animate-pending` at 1600 ms. The wake and settle transition
   is **300 ms** (was ~450 ms), which is the app's one morph length — the same one the listen pill's
-  fill takes, so the pill and the mark inside it arrive together.
+  fill takes, so the pill and the mark inside it arrive together. It is a canonical duration, so it
+  is in [`DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §4's table with the other four, not only here.
 - **The ring variant.** `variant="ring"` trades the soft field for a single crisp pulse leaving the
   core (2200 ms ease-out, `animate-ring`), for chrome where the mark reads as an *instrument*
   metering the capture rather than a creature sitting in it. It follows the same reservation as the
@@ -41,6 +42,12 @@ you are changing the mark rather than reasoning about it.
 - **Reduced motion is an animation swap,** not the amplitude gate the pre-Grove mark used: the
   moving animation is replaced by its opacity-only partner (`animate-halo` → `animate-halo-still`),
   and the lobes settle round. See [`DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §4 for the table.
+  **An opacity partner also needs somewhere visible to breathe.** The lobes settle to a resting
+  shape; the ring settles to a resting *radius* (`motion-reduce:scale-[1.7]`, midway through its
+  1 → 2.4 travel), because the ring span's box is the core's box — held at rest with no scale it
+  would pulse underneath an opaque disc, and the reduced ring variant would show nothing moving at
+  all. That is the failure the swap exists to prevent, so check the resting frame, not just that a
+  `motion-reduce:` partner is present.
 - **The pairing is a component.** `src/components/shell/ListenPill.tsx` is the mark plus the text
   label the concept requires, plus the elapsed clock. Look at both on `/gallery.html` under
   `pnpm dev` — the Kodama section renders every mode across all four grounds.

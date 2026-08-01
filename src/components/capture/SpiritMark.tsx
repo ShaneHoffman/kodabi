@@ -75,7 +75,13 @@ export function SpiritMark({
         // rule of its own in index.css, where unlayered CSS would outrank
         // them. `spirit-mark__ring` is a test hook, not a style.
         mode === "listening" && (
-          <span className="spirit-mark__ring pointer-events-none absolute inset-0 animate-ring rounded-full border border-kodama motion-reduce:animate-halo-still" />
+          // `motion-reduce:scale-[1.7]` is load-bearing, not decoration. The
+          // swap partner is opacity-only, and this span's box IS the core's
+          // box — so held at rest the ring sits exactly under an opaque disc
+          // and the reduced mark would show nothing at all moving. The lobes
+          // settle to a resting SHAPE for the same reason; this is the
+          // resting RADIUS, parked midway through the ring's travel (1 → 2.4).
+          <span className="spirit-mark__ring pointer-events-none absolute inset-0 animate-ring rounded-full border border-kodama motion-reduce:animate-halo-still motion-reduce:scale-[1.7]" />
         )
       ) : (
         <span className="spirit-mark__aura">

@@ -62,6 +62,10 @@ describe("SpiritMark", () => {
       "animate-ring",
       // Movement stops, the breath does not (DESIGN_SYSTEM §4).
       "motion-reduce:animate-halo-still",
+      // And the breath has to be visible to be a breath: the ring's box is
+      // the core's box, so without a resting radius the opacity-only partner
+      // pulses underneath an opaque disc and the reduced mark reads dead.
+      "motion-reduce:scale-[1.7]",
     );
     expect(container.querySelector(".spirit-mark__aura")).not.toBeInTheDocument();
     expect(container.querySelector(".spirit-mark__core")).toBeInTheDocument();

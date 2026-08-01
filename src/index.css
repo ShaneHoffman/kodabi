@@ -205,7 +205,7 @@
 
      Durations are call-site utilities (`duration-140`), not tokens: the
      canonical values are press 140 · exit 110–130 · materialize 220 ·
-     rise-in 280, and they are written down in DESIGN_SYSTEM §4. */
+     rise-in 280 · morph 300, and they are written down in DESIGN_SYSTEM §4. */
   --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
 
@@ -840,7 +840,14 @@
 /* The core is a clean disc, so the mark survives at 14px and in one ink value.
    The sheen is a caught highlight, not a specular dot: it keeps the core from
    reading as a mechanical LED. `transform` is transitioned alongside the
-   colour so a breath in flight eases back to rest instead of snapping. */
+   colour so a breath in flight eases back to rest instead of snapping.
+
+   White at 0.16 is the specified value, not a taste: it is what
+   design/spirit-mark.html carries and what the legacy `--sheen` held, and at
+   14px anything stronger stops being caught light and becomes the specular
+   dot the line above says it must not be. The literal is spelled out rather
+   than tokenised because it has exactly one consumer and does not move
+   between grounds. */
 .spirit-mark__core {
   position: absolute;
   inset: 0;
@@ -848,7 +855,7 @@
   background-color: var(--color-ink);
   background-image: radial-gradient(
     circle at 42% 38%,
-    rgb(255 255 255 / 0.55),
+    rgb(255 255 255 / 0.16),
     transparent 52%
   );
   transition:
