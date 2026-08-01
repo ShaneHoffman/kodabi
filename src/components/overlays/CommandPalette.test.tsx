@@ -67,6 +67,15 @@ describe("CommandPalette", () => {
     expect(screen.getByRole("group", { name: "Actions" })).toBeInTheDocument();
   });
 
+  it("names the list itself, rather than taking the library's default", async () => {
+    // cmdk spreads the caller's props before its own aria-label, so the name
+    // has to arrive through `label` — passed any other way it is silently
+    // replaced by the word "Suggestions", which is not what this list is.
+    await renderPalette();
+
+    expect(screen.getByRole("listbox", { name: "Commands" })).toBeInTheDocument();
+  });
+
   it("tags each row with the kind of thing it is", async () => {
     await renderPalette();
 

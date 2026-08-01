@@ -164,7 +164,11 @@ function PaletteContent({ onClose }: { onClose: () => void }) {
           scroll on a five-project vault would hide the two commands that never
           depend on what is in the vault. A large vault still scrolls, which is
           what the filter is for. */}
-      <Command.List className="max-h-[60vh] overflow-y-auto pt-1.5">
+      {/* `label` and not `aria-label`: cmdk spreads the caller's props before
+          its own `aria-label`, so a hand-passed one is overwritten by the
+          library's default — and that default is the word "Suggestions", which
+          is not what this list is. */}
+      <Command.List label="Commands" className="max-h-[60vh] overflow-y-auto pt-1.5">
         {/* Headings are screen-reader only. Sighted users get the hairlines,
             which say the same thing in less space, but a group of options with
             no name is a group a screen reader cannot describe. cmdk hides both
