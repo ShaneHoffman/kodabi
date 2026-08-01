@@ -180,8 +180,10 @@
 
   /* ---------- radii ----------
      The ladder reads as depth: the bigger the thing, the rounder it is.
-     A panel holds a card holds a button. Dialog and palette sit between
-     panel and card because they are card-sized but window-like.
+     A panel holds a card holds a button. A dialog sits between panel and
+     card because it is card-sized but window-like; the palette stays at
+     the card rung, since it is a list of rows and a rounder corner would
+     bow out past the topmost of them.
 
      A NAME HERE MUST NOT ALSO EXIST IN design/tokens.css, and radii are
      where the two vocabularies overlap most. `@theme` emits into
@@ -435,7 +437,7 @@
 }
 
 /* ---------- glass ----------
-   One material, six thicknesses. Each recipe is the four things
+   One material, seven thicknesses. Each recipe is the four things
    docs/DESIGN_SYSTEM.md §5 says glass is — a translucent fill, a backdrop
    blur with a little saturation, an inset lit top edge, and a deep soft
    shadow — plus its rung of the radius ladder, so a surface cannot be
@@ -623,14 +625,52 @@
   }
 }
 
-/* Dialogs and the command palette: the overlay material at the dialog rung
-   of the radius ladder, with the longest shadow the app casts. They are
-   card-sized but window-like, and they are what the scrim is under. */
+/* Dialogs: the overlay material at the dialog rung of the radius ladder, with
+   the longest shadow the app casts. They are card-sized but window-like, and
+   they are what the scrim is under. */
 @utility glass-dialog {
   background: rgb(24 32 20 / 0.88);
   backdrop-filter: blur(32px) saturate(160%);
   border: 1px solid var(--color-edge);
   border-radius: var(--radius-dialog);
+  box-shadow:
+    inset 0 1px 0 var(--color-edge-lit),
+    0 32px 90px rgb(2 4 1 / 0.7);
+
+  &:where(.day, .day *) {
+    background: rgb(250 252 246 / 0.85);
+    border-color: rgb(24 32 16 / 0.16);
+    box-shadow:
+      inset 0 1px 0 var(--color-edge-lit),
+      0 32px 90px rgb(46 60 36 / 0.28);
+  }
+
+  /* The overlay's contrast carve-out, for the same reason. */
+  &:where(.hc.day, .hc.day *) {
+    border-color: var(--color-edge);
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    background: #1a2315;
+    backdrop-filter: none;
+
+    &:where(.day, .day *) {
+      background: #fbfcf6;
+    }
+  }
+}
+
+/* The command palette. The thickest rung: a dialog's shadow, because it floats
+   over everything and is summoned rather than opened; the card's radius, because
+   what it holds is a list of rows and the dialog's 16px would bow out past
+   them; and the deepest blur in the set, because a surface this large has the
+   most of the app to push back — a bigger pane has to read as a thicker one, or
+   it reads as a hole (docs/DESIGN_SYSTEM.md §5). */
+@utility glass-palette {
+  background: rgb(24 32 20 / 0.88);
+  backdrop-filter: blur(36px) saturate(160%);
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-card);
   box-shadow:
     inset 0 1px 0 var(--color-edge-lit),
     0 32px 90px rgb(2 4 1 / 0.7);

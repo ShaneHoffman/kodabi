@@ -33,8 +33,10 @@ type Props = {
  * `aria-modal` and its labelling. The pre-Grove `Overlay` deliberately did NOT
  * trap focus, and each of its callers hand-rolled a Tab strategy — that is the
  * duplication this replaces. `Overlay` stays for the callers that have not
- * migrated (the palette, the consent nudge, the create-project dialog); each
- * moves in its own screen ticket.
+ * migrated (the consent nudge, the create-project dialog); each moves in its
+ * own screen ticket. The palette composes base-ui's dialog parts directly
+ * rather than using this, because it is top-anchored and holds cmdk's list
+ * instead of this one's centred panel.
  *
  * Two details are load-bearing and easy to undo by accident:
  *

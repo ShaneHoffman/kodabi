@@ -1,254 +1,271 @@
-import {
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from "react";
-import { COMMAND_GROUP_LABEL, useCommands, type Command } from "../../useCommands";
-import { useDialogFocus } from "../../useDialogFocus";
-import { useFilteredCommands } from "../../useFilteredCommands";
+import { Dialog as BaseDialog } from "@base-ui/react/dialog";
+import { clsx } from "clsx";
+import { Command, useCommandState } from "cmdk";
+import { useState } from "react";
+import { useCommands, type Command as PaletteCommand, type CommandKind } from "../../useCommands";
 import { useNavigation } from "../../useNavigation";
-import { useScrollIntoView } from "../../useScrollIntoView";
-import { Overlay } from "../ui/Overlay";
-// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this overlay's Grove ticket deletes it
-import "./CommandPalette.css";
+import type { FolderHue } from "../../useProjects";
 
 type Props = {
+  /** Whether the palette is on screen. `useCommandPalette` owns this. */
+  open: boolean;
   onClose: () => void;
 };
 
-const LISTBOX_ID = "command-palette-listbox";
+/*
+ * The primary navigation surface (FOUNDING_DOC §4), on cmdk inside base-ui's
+ * dialog parts. Two libraries because they answer two different questions and
+ * neither answers both:
+ *
+ *   cmdk owns the list — fuzzy scoring, the arrow keys and Home/End, the
+ *   listbox/option ARIA, and keeping one row highlighted whether the pointer or
+ *   the keyboard put it there. The hand-rolled version of that was 255 lines
+ *   and still filtered by substring only.
+ *
+ *   base-ui owns the modal — the focus trap, focus returning to whatever opened
+ *   the palette, Escape, the outside press, and the inert page behind. This is
+ *   the `Menu` precedent (docs/UI_CONVENTIONS.md §4), and it is why cmdk's own
+ *   `Command.Dialog` is NOT used: that one wraps @radix-ui/react-dialog, which
+ *   would put a second dialog implementation in the app beside base-ui's.
+ *
+ * What stays ours is the whole appearance: the glass, the rows, the motion.
+ */
 
-/** Option ids are index-based — command ids may hold slashes and spaces. */
-function optionId(index: number): string {
-  return `command-palette-option-${index}`;
+/** The panel. Placement is `inset-x-0 … mx-auto`, NOT a translate: the
+ * `materialize` keyframe animates `transform`, so a translate-centred panel is
+ * overwritten by the animation's `scale()` and opens in the corner. The same
+ * trap is documented on `Dialog`, which centres by margin for this reason.
+ *
+ * Durations are spelled here rather than taken from `--animate-materialize`
+ * because this one is faster than the shared 220ms: Ctrl K is a hundred-times-
+ * a-day action, and theatrics on the way in are what make a tool feel slow.
+ * Which is what DESIGN_SYSTEM §4 means by durations being call-site utilities.
+ * The keyframes are still the shared ones, named rather than redefined —
+ * Tailwind emits every `@keyframes` declared inside the `@theme` block whether
+ * or not its `animate-*` utility is used, so an arbitrary value may reference
+ * one by name without the surface that owns it. */
+const PALETTE_SURFACE = clsx(
+  "glass-palette fixed inset-x-0 top-[12%] mx-auto h-fit w-[min(480px,calc(100vw-2rem))]",
+  "origin-top p-2 font-ui outline-hidden",
+  "animate-[materialize_200ms_var(--ease-out-strong)] motion-reduce:animate-[fade-in_200ms_ease_both]",
+  "data-ending-style:animate-[dissolve_110ms_ease_forwards]",
+  "motion-reduce:data-ending-style:animate-[fade-out_110ms_ease_forwards]",
+);
+
+/** A row. `data-[selected=true]` and not `data-selected`, because cmdk writes
+ * the attribute on every row and sets it to `"false"` on the unselected ones —
+ * the bare variant would light the whole list.
+ *
+ * There is deliberately no `hover:` here. cmdk moves the selection on pointer
+ * move, so the pointer and the keyboard drive the same one attribute, which is
+ * the never-two-rows-lit-at-once invariant of docs/UI_CONVENTIONS.md §4. */
+const PALETTE_ROW = clsx(
+  "group flex w-full cursor-default select-none items-center gap-2.5 rounded-[9px] px-2.5 py-2.5",
+  "text-[13px] font-medium leading-none text-ink-dim outline-hidden",
+  "transition-[background-color,color] duration-140 ease-out-strong",
+  "data-[selected=true]:bg-wash data-[selected=true]:text-ink",
+);
+
+/** The mono slot on the right. Faint ink on the wash of a selected row measures
+ * under the 3:1 floor a graphic gets, so it steps up for the one row the user
+ * is looking at (docs/DESIGN_SYSTEM.md §6).
+ *
+ * `uppercase` belongs to the kind tag alone, and is added by the call site: a
+ * kind is an eyebrow, but a shortcut is a literal, and "CTRL+ALT+SPACE" is not
+ * how Windows writes the binding the user has to recognise. */
+const PALETTE_TAG = clsx(
+  "ml-auto flex-none font-data text-[10px] tracking-[0.14em] text-ink-faint",
+  "group-data-[selected=true]:text-ink-dim",
+);
+
+/** Written out rather than interpolated, so Tailwind's scanner sees each class
+ * as a literal and emits it. */
+const HUE_DOT: Record<FolderHue, string> = {
+  coral: "bg-coral",
+  cobalt: "bg-cobalt",
+  teal: "bg-teal",
+  plum: "bg-plum",
+};
+
+export function CommandPalette({ open, onClose }: Props) {
+  return (
+    <BaseDialog.Root
+      open={open}
+      onOpenChange={(next) => {
+        // One direction only: Ctrl K and the sidebar's Commands row own opening.
+        if (!next) onClose();
+      }}
+    >
+      <BaseDialog.Portal>
+        {/* A veil, not a blackout. The palette's glass can only read as glass
+            if the app stays visible enough beneath it to blur — and the scrim
+            only fades, so it needs no reduced-motion partner (that swap turns
+            everything else INTO a fade). Same recipe and same testid as
+            `Dialog`: it is the one part of a modal with no role and no
+            accessible name to find it by. */}
+        <BaseDialog.Backdrop
+          data-testid="dialog-scrim"
+          className="glass-scrim fixed inset-0 animate-fade-in data-ending-style:animate-fade-out"
+        />
+        <BaseDialog.Popup aria-label="Command palette" className={PALETTE_SURFACE}>
+          {/* Inside the popup, so it unmounts with it and every open starts on
+              a blank query rather than resuming the last one. */}
+          <PaletteContent onClose={onClose} />
+        </BaseDialog.Popup>
+      </BaseDialog.Portal>
+    </BaseDialog.Root>
+  );
 }
 
-/**
- * The primary navigation surface (FOUNDING_DOC §4), hand-rolled as a
- * combobox: focus never leaves the input (Tab is held); ↑/↓ move a virtual
- * highlight via aria-activedescendant, Enter runs it, Escape closes.
- */
-export function CommandPalette({ onClose }: Props) {
-  const { navigate } = useNavigation();
+function PaletteContent({ onClose }: { onClose: () => void }) {
   const commands = useCommands();
   const [query, setQuery] = useState("");
-  const [activeIndex, setActiveIndex] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
-  // Last pointer position over the list: scrolling shifts rows under a
-  // stationary cursor and Chromium re-fires boundary/move events, which
-  // must not yank the keyboard highlight to whatever lands under the mouse.
-  const lastPointer = useRef<{ x: number; y: number } | null>(null);
 
-  const filtered = useFilteredCommands(commands, query);
-
-  // When nothing matches a non-empty query, the query itself becomes the
-  // command — a synthetic search row, so typed text always leads somewhere.
-  const rows: Command[] = useMemo(() => {
-    const trimmed = query.trim();
-    if (filtered.length === 0 && trimmed) {
-      return [
-        {
-          id: "search-fallback",
-          group: "action",
-          title: `Search for “${trimmed}”`,
-          run: () => navigate({ kind: "search", query: trimmed }),
-        },
-      ];
-    }
-    return filtered;
-  }, [filtered, query, navigate]);
-
-  const active = rows.length > 0 ? Math.min(activeIndex, rows.length - 1) : 0;
-
-  // Sections, carrying each row's index in the flat `rows` array so the option
-  // ids (and so aria-activedescendant and the arrow keys) stay a single
-  // sequence over the whole list, whatever it is broken into visually.
-  //
-  // Only while unfiltered. A filtered list is a set of matches, not a table of
-  // contents, and a heading over it would be labelling a section that no longer
-  // exists; the per-row hint takes over there instead.
-  const sections = useMemo(() => {
-    const numbered = rows.map((command, index) => ({ command, index }));
-    if (query.trim()) return [{ label: null, rows: numbered }];
-    return (["jump", "action"] as const)
-      .map((group) => ({
-        label: COMMAND_GROUP_LABEL[group],
-        rows: numbered.filter(({ command }) => command.group === group),
-      }))
-      .filter((section) => section.rows.length > 0);
-  }, [rows, query]);
-
-  // Focus the input on open; on close hand focus back to wherever it came
-  // from — unless a run command unmounted that element in the meantime.
-  useDialogFocus(() => inputRef.current);
-
-  // Keep the keyboard highlight visible when it walks past the list's edge.
-  // `rows` is the refresh key: re-filtering can swap what sits at a given
-  // option id while the highlight stays put.
-  useScrollIntoView(optionId(active), rows);
-
-  const runCommand = (command: Command) => {
+  const runCommand = (command: PaletteCommand) => {
     command.run();
     onClose();
   };
 
-  // Bound to the PANEL, not to the input, and it reaches the input's keys all
-  // the same because they bubble. Bound to the input it was one blur away from
-  // being gone: clicking the palette's own padding moves focus off the input,
-  // and Escape then closed nothing at all. The panel is `tabIndex={-1}` so it
-  // can hold that focus rather than dropping it to <body>.
-  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    // Keys pressed mid-IME-composition belong to the composition (committing
-    // with Enter, cancelling with Escape), never to the palette.
-    if (event.nativeEvent.isComposing) return;
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      setActiveIndex(Math.min(active + 1, rows.length - 1));
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      setActiveIndex(Math.max(active - 1, 0));
-    } else if (event.key === "Enter") {
-      event.preventDefault();
-      const command = rows[active];
-      if (command) runCommand(command);
-    } else if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-    } else if (event.key === "Tab") {
-      // The dialog's only tabbable element is the query input — hold focus
-      // here so Tab can't reach controls hidden behind the overlay
-      // (aria-modal). Refocus it too: if the click that blurred it landed on
-      // the panel, Tab should put the caret back rather than go nowhere.
-      event.preventDefault();
-      inputRef.current?.focus();
-    }
-  };
+  // Partitioned, never re-sorted: useCommands already emits Inbox first and the
+  // folders in backend slug order.
+  const rowsOfKind = (kind: CommandKind) => commands.filter((command) => command.kind === kind);
+  const navigateRows = rowsOfKind("navigate");
+  const folderRows = rowsOfKind("folder");
+  const actionRows = rowsOfKind("action");
 
   return (
-    <Overlay
-      onDismiss={onClose}
-      label="Command palette"
-      className="overflow-hidden"
-      onKeyDown={onKeyDown}
-    >
-      {/* Magnifier first, then the query. The same glyph at the same size as
-          the Search view's field, so a place you type a query is recognisable
-          wherever it turns up. */}
-      <div className="command-palette__search">
-        <svg
-          width="17"
-          height="17"
-          viewBox="0 0 18 18"
-          fill="none"
-          aria-hidden="true"
-          className="block flex-none text-text-faint"
-        >
-          <circle cx="8" cy="8" r="6.2" stroke="currentColor" strokeWidth="1.4" />
-          <path
-            d="M12.4 12.4L16 16"
-            stroke="currentColor"
-            strokeWidth="1.4"
-            strokeLinecap="round"
-          />
-        </svg>
-        <input
-          ref={inputRef}
-          role="combobox"
-          // Reflects the list, rather than being pinned open. It was hardcoded
-          // `"true"`, which told a screen reader there were options to walk
-          // even on the branch that renders none.
-          aria-expanded={rows.length > 0}
-          aria-controls={LISTBOX_ID}
-          aria-activedescendant={rows.length > 0 ? optionId(active) : undefined}
-          aria-label="Type a command or search"
-          placeholder="Type a command or search…"
-          autoComplete="off"
-          spellCheck={false}
+    // `vimBindings` off: cmdk binds Ctrl+K to "move the selection up", and the
+    // app binds it to "toggle the palette" (useCommandPalette). Left on, one
+    // press would do both.
+    <Command label="Command palette" vimBindings={false}>
+      <div className="flex items-center gap-2.5 border-b border-edge px-2.5 pt-2 pb-2.5">
+        <span aria-hidden="true" className="flex-none text-[13px] text-ink-faint">
+          ⌕
+        </span>
+        {/* The one place in Grove a focus ring is dropped on purpose: the input
+            is the dialog's only tab stop, it takes focus the moment the palette
+            opens, and it already shows focus the way a text field does — with a
+            caret (docs/DESIGN_SYSTEM.md §2). The caret is kodama green, which
+            is green's own job: the system is listening for your words. */}
+        <Command.Input
           value={query}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setActiveIndex(0);
-          }}
-          className="command-palette__input text-input text-text placeholder:text-text-faint"
+          onValueChange={setQuery}
+          placeholder="Type a command or a place…"
+          className="w-full bg-transparent text-[14px] text-ink caret-kodama outline-hidden placeholder:text-ink-faint"
         />
       </div>
-      <hr className="command-palette__rule" />
-      <ul
-        id={LISTBOX_ID}
-        role="listbox"
-        aria-label="Commands"
-        className="command-palette__list"
-      >
-        {/* There is deliberately no empty row here. One used to sit at this
-            spot saying "No commands available yet.", justified as the branch
-            taken "when the project listing failed" — but `rows` cannot reach
-            zero: useCommands unconditionally pushes four actions, and a query
-            that matches nothing is answered by the synthetic search row. It
-            was a state vocabulary for a state that does not exist, and it was
-            a bare <li> with no role sitting directly inside role="listbox",
-            which is not a valid owned element either. */}
-        {sections.map((section, sectionIndex) => (
-          // role="presentation" on the wrapper so the ul/li scaffolding does
-          // not put listitem semantics between the listbox and its options;
-          // the inner role="group" is what actually carries the section name.
-          <li key={section.label ?? "matches"} role="presentation">
-            {section.label && (
-              <p
-                className={`command-palette__section${
-                  sectionIndex > 0 ? " command-palette__section--later" : ""
-                } font-mono text-eyebrow uppercase tracking-eyebrow-menu text-text-faint`}
-              >
-                {section.label}
-              </p>
-            )}
-            <ul role="group" aria-label={section.label ?? undefined}>
-              {section.rows.map(({ command, index }) => (
-                <li
-                  key={command.id}
-                  id={optionId(index)}
-                  role="option"
-                  aria-selected={index === active}
-                  onPointerDown={(event) => event.preventDefault()}
-                  onMouseMove={(event) => {
-                    const moved =
-                      lastPointer.current?.x !== event.clientX ||
-                      lastPointer.current?.y !== event.clientY;
-                    lastPointer.current = { x: event.clientX, y: event.clientY };
-                    if (moved && index !== active) setActiveIndex(index);
-                  }}
-                  onClick={() => runCommand(command)}
-                  className={`command-palette__row text-body ${
-                    index === active ? "ui-wash" : "text-text"
-                  }`}
-                >
-                  <span>{command.title}</span>
-                  {/* The focused row says how to run it; any row with a real
-                      global binding says what that is. Mono, because both are
-                      keys. A row with neither shows nothing — the palette
-                      teaches shortcuts, so filling this with a restatement of
-                      the section heading taught nothing. */}
-                  {(index === active || command.hint) && (
-                    // --text-soft on the active row, --text-faint on the rest.
-                    // The active row's ground is --menu-hover, not the overlay
-                    // plane, and faint ink on that fill measures 3.07:1 in the
-                    // day theme and 2.83:1 at night — under even the 3:1 floor
-                    // a graphic gets, for the one row the user is looking at
-                    // (docs/DESIGN_SYSTEM.md §6).
-                    <span
-                      className={`flex-none font-mono text-eyebrow ${
-                        index === active ? "text-text-soft" : "text-text-faint"
-                      }`}
-                    >
-                      {index === active ? "↵" : command.hint}
-                    </span>
-                  )}
-                </li>
+      {/* No `Command.Empty`. The list cannot come back empty: a query that
+          matches nothing is answered by the fallback row below, so an empty
+          state here would be vocabulary for a state that does not exist.
+
+          60vh is what is left under a panel that starts at 12%, and it is sized
+          so an ordinary vault does not scroll at all: the action rows are last,
+          they are always there, and a max-height that hides them behind a
+          scroll on a five-project vault would hide the two commands that never
+          depend on what is in the vault. A large vault still scrolls, which is
+          what the filter is for. */}
+      <Command.List className="max-h-[60vh] overflow-y-auto pt-1.5">
+        {/* Headings are screen-reader only. Sighted users get the hairlines,
+            which say the same thing in less space, but a group of options with
+            no name is a group a screen reader cannot describe. cmdk hides both
+            heading and separator while filtering, which is the old behaviour
+            exactly: a filtered list is a set of matches, not a table of
+            contents. */}
+        <Command.Group heading={<span className="sr-only">Jump to</span>}>
+          {navigateRows.map((command) => (
+            <PaletteRow key={command.id} command={command} onRun={runCommand} />
+          ))}
+        </Command.Group>
+        {folderRows.length > 0 && (
+          <>
+            <Command.Separator className="my-1.5 h-px bg-edge" />
+            <Command.Group heading={<span className="sr-only">Folders</span>}>
+              {folderRows.map((command) => (
+                <PaletteRow key={command.id} command={command} onRun={runCommand} />
               ))}
-            </ul>
-          </li>
-        ))}
-      </ul>
-    </Overlay>
+            </Command.Group>
+          </>
+        )}
+        <Command.Separator className="my-1.5 h-px bg-edge" />
+        <Command.Group heading={<span className="sr-only">Actions</span>}>
+          {actionRows.map((command) => (
+            <PaletteRow key={command.id} command={command} onRun={runCommand} />
+          ))}
+        </Command.Group>
+        {query.trim() !== "" && <SearchFallbackRow query={query.trim()} onClose={onClose} />}
+      </Command.List>
+    </Command>
+  );
+}
+
+function PaletteRow({
+  command,
+  onRun,
+}: {
+  command: PaletteCommand;
+  onRun: (command: PaletteCommand) => void;
+}) {
+  return (
+    // Scored on the title, not the id: `jump:` and the slashes in a nested slug
+    // are filing, not something anybody types. `keywords` keeps the hint
+    // searchable, which is how "ctrl alt space" still finds Quick capture.
+    <Command.Item
+      value={command.title}
+      keywords={command.hint ? [command.hint] : undefined}
+      onSelect={() => onRun(command)}
+      className={PALETTE_ROW}
+    >
+      {command.hue && (
+        <span
+          aria-hidden="true"
+          className={clsx("size-2 flex-none rounded-[2px]", HUE_DOT[command.hue])}
+        />
+      )}
+      <span className="truncate">{command.title}</span>
+      {/* A row with a real global binding says what it is; every other row says
+          what kind of thing it is. The shortcut wins the slot because the
+          palette is where people learn the bindings, and a row that teaches one
+          is worth more than a row that repeats its own group's name. */}
+      {command.hint ? (
+        <span className={PALETTE_TAG}>{command.hint}</span>
+      ) : (
+        <span className={clsx(PALETTE_TAG, "uppercase")}>{command.kind}</span>
+      )}
+    </Command.Item>
+  );
+}
+
+/**
+ * When nothing matches, the query itself becomes the command, so typed text
+ * always leads somewhere.
+ *
+ * `forceMount` is what makes this work: a force-mounted item is not registered
+ * with cmdk's filter store, so it can never inflate the very count it is
+ * reading, but it is still a real `[cmdk-item]` in the DOM and so still
+ * reachable by the arrow keys and still eligible to be selected first.
+ *
+ * It lives in its own component because `useCommandState` has to be called
+ * inside the `Command` context.
+ */
+function SearchFallbackRow({ query, onClose }: { query: string; onClose: () => void }) {
+  const { navigate } = useNavigation();
+  const matchCount = useCommandState((state) => state.filtered.count);
+
+  if (matchCount > 0) return null;
+
+  return (
+    <Command.Item
+      forceMount
+      // Distinct from any command title, so the selection cannot land on a real
+      // row's value by accident.
+      value={`search-fallback ${query}`}
+      onSelect={() => {
+        navigate({ kind: "search", query });
+        onClose();
+      }}
+      className={PALETTE_ROW}
+    >
+      <span className="truncate">Search for “{query}”</span>
+    </Command.Item>
   );
 }
