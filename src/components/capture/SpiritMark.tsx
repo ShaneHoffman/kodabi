@@ -1,6 +1,4 @@
 import type { CSSProperties } from "react";
-// eslint-disable-next-line no-restricted-syntax -- pre-Grove; the capture windows' Grove ticket deletes it
-import "./SpiritMark.css";
 
 /**
  * What the mark depicts. A *visual* mode rather than the capture phase
@@ -16,8 +14,18 @@ export type SpiritMarkMode =
   | "degraded"
   | "reconnecting";
 
+/**
+ * How the mark spends its motion while listening. `halo` is the default: a
+ * soft field of ma around the core, for surfaces where the mark is a presence
+ * (the capture windows). `ring` trades that field for a single crisp pulse
+ * leaving the core, for chrome where the mark reads as an instrument metering
+ * the capture rather than a creature sitting in it.
+ */
+export type SpiritMarkVariant = "halo" | "ring";
+
 type Props = {
   mode: SpiritMarkMode;
+  variant?: SpiritMarkVariant;
   /** Core diameter, e.g. "2.5rem". Falls back to the CSS default. */
   size?: string;
   /** Aura reach beyond the core, e.g. "2.4rem". Falls back to the CSS default. */
@@ -37,8 +45,18 @@ const MODE_CLASS: Record<SpiritMarkMode, string> = {
  * The runtime listening indicator — the kodama spirit-mark. Decorative
  * (aria-hidden); pair it with a visible text label reflecting the same state
  * so it isn't conveyed by color and motion alone.
+ *
+ * Its material lives in the spirit-mark block of src/index.css §3 (the lobes
+ * are pseudo-elements, which take no utility class); the `is-*` classes below
+ * are that block's other half.
  */
-export function SpiritMark({ mode, size, halo, className }: Props) {
+export function SpiritMark({
+  mode,
+  variant = "halo",
+  size,
+  halo,
+  className,
+}: Props) {
   const style: CSSProperties = {
     ...(size ? { "--mark-size": size } : {}),
     ...(halo ? { "--halo-spread": halo } : {}),
@@ -50,9 +68,20 @@ export function SpiritMark({ mode, size, halo, className }: Props) {
       style={style}
       aria-hidden="true"
     >
-      <span className="spirit-mark__aura">
-        <span className="spirit-mark__bloom" />
-      </span>
+      {variant === "ring" ? (
+        // Only while listening: degraded drops its field for the same reason
+        // the halo variant does, and the ink modes never pulse outward. The
+        // ring is a plain bordered circle, so it stays utilities-only — no
+        // rule of its own in index.css, where unlayered CSS would outrank
+        // them. `spirit-mark__ring` is a test hook, not a style.
+        mode === "listening" && (
+          <span className="spirit-mark__ring pointer-events-none absolute inset-0 animate-ring rounded-full border border-kodama motion-reduce:animate-halo-still" />
+        )
+      ) : (
+        <span className="spirit-mark__aura">
+          <span className="spirit-mark__bloom" />
+        </span>
+      )}
       <span className="spirit-mark__core" />
     </span>
   );

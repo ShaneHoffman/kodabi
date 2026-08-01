@@ -219,6 +219,7 @@ animation for its opacity-only partner, at the call site, with the `motion-reduc
 | `animate-rise-in` | `animate-fade-in` |
 | `animate-dissolve` | `animate-fade-out` |
 | `animate-halo` | `animate-halo-still` |
+| `animate-ring` | `animate-halo-still` |
 | `animate-breathe`, `animate-drift`, `animate-drift-back` | none |
 | `active:scale-97` | no press transform |
 

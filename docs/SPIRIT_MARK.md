@@ -13,6 +13,40 @@ way and is still when idle.
 
 ---
 
+## As built
+
+The concept below is intact and still the intent. This section says where the mark actually lives
+and which of the indicative numbers above were superseded when Grove locked them; read it first if
+you are changing the mark rather than reasoning about it.
+
+- **Two files, one contract.** `src/components/capture/SpiritMark.tsx` emits the DOM and the `is-*`
+  mode classes; the *spirit-mark* block in `src/index.css` §3 is its material. The CSS is a
+  sanctioned exception — the aura's two lobes are pseudo-elements and the core's sheen is a gradient
+  over a themed fill, neither of which a utility class can reach.
+  `src/components/capture/SpiritMark.test.tsx` pins the class contract, because the two halves live
+  in different files and a renamed class fails silently: the mark still renders, just inert and ink,
+  which is the one failure a listening indicator must never have.
+- **Colour is a token.** `--color-kodama` (`#96ce7c` night, `#4f7b3f` day) and `--color-ink`, so
+  `.day` and `.hc` carry the mark with no rule of its own. This supersedes the indicative
+  `#5F7E5A` / `#86A67E` pair named under *Accessibility & consent*.
+- **The clocks are the shared Grove animations,** not values local to the mark: breath and halo
+  3200 ms (the concept's indicative ~4.2 s), the counter-rotating lobes 7000 ms and 9500 ms, and
+  the starting / reconnecting pulse is `animate-pending` at 1600 ms. The wake and settle transition
+  is **300 ms** (was ~450 ms), which is the app's one morph length — the same one the listen pill's
+  fill takes, so the pill and the mark inside it arrive together.
+- **The ring variant.** `variant="ring"` trades the soft field for a single crisp pulse leaving the
+  core (2200 ms ease-out, `animate-ring`), for chrome where the mark reads as an *instrument*
+  metering the capture rather than a creature sitting in it. It follows the same reservation as the
+  aura: listening only. Degraded drops it exactly as it drops the aura.
+- **Reduced motion is an animation swap,** not the amplitude gate the pre-Grove mark used: the
+  moving animation is replaced by its opacity-only partner (`animate-halo` → `animate-halo-still`),
+  and the lobes settle round. See [`DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §4 for the table.
+- **The pairing is a component.** `src/components/shell/ListenPill.tsx` is the mark plus the text
+  label the concept requires, plus the elapsed clock. Look at both on `/gallery.html` under
+  `pnpm dev` — the Kodama section renders every mode across all four grounds.
+
+---
+
 ## North star
 
 > **Calm you notice before you notice why.**
