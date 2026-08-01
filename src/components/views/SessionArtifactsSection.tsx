@@ -84,7 +84,7 @@ export function SessionArtifactsSection({ source }: { source: string }) {
           variant="quiet"
           aria-expanded={open}
           data-testid="session-source"
-          className="session-artifacts__toggle font-mono text-meta text-text-soft"
+          className="session-artifacts__toggle"
           onClick={() => setExpanded((isOpen) => !isOpen)}
         >
           Source
@@ -158,7 +158,6 @@ function Recording({ audioPath }: { audioPath: string }) {
         <Button
           variant="quiet"
           data-testid="reveal-recording"
-          className="text-label text-text-soft"
           onClick={() => {
             setRevealError(null);
             revealSessionAudio(audioPath).catch((thrown: unknown) => {

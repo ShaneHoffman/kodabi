@@ -68,11 +68,7 @@ function BackLink({ project }: { project: string }) {
   const { navigate } = useNavigation();
   const { view, label } = backTarget(project);
   return (
-    <Button
-      variant="quiet"
-      onClick={() => navigate(view)}
-      className="flex items-center gap-2xs self-start py-3xs text-label text-text-soft"
-    >
+    <Button variant="quiet" onClick={() => navigate(view)} className="self-start">
       <span aria-hidden="true">←</span>
       <span>{label}</span>
     </Button>
@@ -152,18 +148,13 @@ function ReadNote({
               {note.title}
             </h2>
             <div className="flex flex-none items-center gap-sm">
-              <Button
-                variant="quiet"
-                onClick={onEdit}
-                className="py-3xs text-label text-text-soft"
-              >
+              <Button variant="quiet" onClick={onEdit}>
                 Edit
               </Button>
               <Button
                 variant="quiet"
                 aria-haspopup="dialog"
                 onClick={() => setConfirmingDelete(true)}
-                className="py-3xs text-label text-text-soft"
               >
                 Delete note
               </Button>
@@ -386,21 +377,10 @@ function EditNote({
             {/* The way out that does not write. Without it the only exit from
                 compose mode was Done, so changing your mind still rewrote the
                 file on disk. */}
-            <Button
-              variant="quiet"
-              onClick={() => onDone(null)}
-              disabled={saving}
-              className="py-3xs text-label text-text-soft"
-            >
+            <Button variant="quiet" onClick={() => onDone(null)} disabled={saving}>
               Cancel
             </Button>
-            <Button
-              type="submit"
-              variant="filled"
-              loading={saving}
-              loadingLabel="Saving…"
-              className="text-label"
-            >
+            <Button type="submit" loading={saving} loadingLabel="Saving…">
               Done
             </Button>
           </div>
@@ -600,11 +580,9 @@ function CreateNote({ initialProject }: { initialProject: string | null }) {
           </p>
           <Button
             type="submit"
-            variant="filled"
             disabled={!trimmedProject}
             loading={submitting}
             loadingLabel="Creating…"
-            className="text-label"
           >
             Create
           </Button>

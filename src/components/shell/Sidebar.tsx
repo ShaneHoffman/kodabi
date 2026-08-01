@@ -138,7 +138,7 @@ export function Sidebar({ onOpenPalette }: Props) {
             aria-haspopup="dialog"
             aria-label="New project"
             onClick={() => setCreatingProject(true)}
-            className="px-2xs py-3xs text-cap text-text-soft"
+            className="text-cap text-text-soft"
           >
             New
           </Button>

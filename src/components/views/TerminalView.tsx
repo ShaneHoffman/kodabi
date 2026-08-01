@@ -26,9 +26,7 @@ export function TerminalView() {
               Session ended
               {exit.code != null && exit.code !== 0 ? ` (exit ${exit.code})` : ""}.
             </span>
-            <Button variant="primary" onClick={restart} className="text-action">
-              Restart
-            </Button>
+            <Button onClick={restart}>Restart</Button>
           </div>
         )}
       </div>

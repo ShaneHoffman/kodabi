@@ -29,8 +29,9 @@
 const STORAGE_KEY = "kodabi:contrast";
 const ATTRIBUTE = "data-contrast";
 /** The Grove high-contrast class, which combines with `day`: `.hc.day` is the
- * high-contrast day grove. */
-const HC_CLASS = "hc";
+ * high-contrast day grove. Exported for the same reason as `DAY_CLASS`: the
+ * primitive gallery's toggle writes this, not a copy of it. */
+export const HC_CLASS = "hc";
 
 /** The OS request, which is the other way into high contrast. The pre-Grove
  * tokens.css answers this media query itself; Grove's `.hc` block is plain CSS

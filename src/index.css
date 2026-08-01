@@ -44,6 +44,41 @@
 @custom-variant day (&:where(.day, .day *));
 @custom-variant hc (&:where(.hc, .hc *));
 
+/* Two built-in variants, narrowed. Both are redefinitions rather than new
+   names, so every existing `hover:` and `motion-reduce:` in the app picks the
+   new behaviour up without a sweep.
+
+   `hover` also requires a fine pointer. Tailwind's own version gates on
+   `(hover: hover)` alone, which a touch device can satisfy while still
+   emulating hover on tap — leaving a pressed control stuck in its hover state
+   until something else is touched. Grove's hover is an enhancement for a
+   mouse, and this is the media query that says so.
+
+   `motion-reduce` also matches the in-app toggle. Reduced motion has two
+   sources here — the OS preference and the Settings switch, which sets
+   `data-reduce-motion="on"` on the root (src/reduceMotion.ts) — and the
+   built-in variant only sees the first. Without this the toggle would keep
+   working on legacy screens (it remaps `--move` in design/tokens.css) and
+   silently stop working on every Grove primitive. Two `@slot`s means two
+   emitted rules per call site, which is the point: they are two independent
+   conditions, not a duplicate. */
+@custom-variant hover {
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      @slot;
+    }
+  }
+}
+
+@custom-variant motion-reduce {
+  @media (prefers-reduced-motion: reduce) {
+    @slot;
+  }
+  &:where([data-reduce-motion="on"], [data-reduce-motion="on"] *) {
+    @slot;
+  }
+}
+
 /* Plain `@theme`, not `@theme inline`: v4 emits these on `:root` inside
    `@layer theme` and every utility references the var, so the unlayered
    `.day` / `.hc` blocks below re-theme the whole app live. (`inline`
@@ -100,6 +135,31 @@
   --color-cobalt: #7a93f2;
   --color-teal: #52b8a8;
   --color-plum: #b48ee0;
+
+  /* ---------- control surfaces ----------
+     A button is glass too, at the smallest size the material comes in: a
+     translucent fill, an edge, and the lit top edge every Grove surface
+     carries. These are tokens rather than values in a cva table because the
+     alpha inverts between grounds — night lightens with white, day darkens
+     with ink — and a `day:` in a className would be a claim that no token
+     could have carried it (see the note above the variants).
+
+     `wash` is the faintest fill in the system and does double duty: it is
+     what a quiet control gains on hover, and what a pill rests at. Its hover
+     step is the pill's, since a quiet button's hover is a wash appearing
+     rather than deepening. A menu row's highlight is the same wash.
+
+     Danger's TEXT is --color-danger; these three are the box it sits in. */
+  --color-action-bg: rgb(255 255 255 / 0.07);
+  --color-action-bg-hover: rgb(255 255 255 / 0.11);
+  --color-action-edge: rgb(255 255 255 / 0.14);
+
+  --color-danger-bg: rgb(240 95 70 / 0.12);
+  --color-danger-bg-hover: rgb(240 95 70 / 0.2);
+  --color-danger-edge: rgb(240 95 70 / 0.45);
+
+  --color-wash: rgb(255 255 255 / 0.05);
+  --color-wash-hover: rgb(255 255 255 / 0.09);
 
   /* ---------- type ----------
      Three faces, three jobs, no overlap. UI is the interface's own
@@ -305,6 +365,21 @@
   --color-cobalt: #3a57cf;
   --color-teal: #22766a;
   --color-plum: #7647b8;
+
+  /* Control fills invert with the ground: night lays white over a dark
+     plane, day lays ink over a pale one. The alphas are not the night
+     values mirrored — ink over pale carries further than white over dark,
+     so day's steps are shallower. */
+  --color-action-bg: rgb(24 32 16 / 0.06);
+  --color-action-bg-hover: rgb(24 32 16 / 0.1);
+  --color-action-edge: rgb(24 32 16 / 0.16);
+
+  --color-danger-bg: rgb(168 58 32 / 0.08);
+  --color-danger-bg-hover: rgb(168 58 32 / 0.15);
+  --color-danger-edge: rgb(168 58 32 / 0.4);
+
+  --color-wash: rgb(24 32 16 / 0.06);
+  --color-wash-hover: rgb(24 32 16 / 0.09);
 }
 
 /* More contrast is a promotion, not a palette. Faint ink is promoted to
@@ -324,7 +399,7 @@
 /* ============================================================
    3. SANCTIONED CSS
 
-   Two things utilities genuinely cannot express, and the global chrome
+   The things utilities genuinely cannot express, and the global chrome
    that belongs to no component.
    ============================================================ */
 
@@ -357,6 +432,310 @@
       radial-gradient(900px 600px at 100% 110%, rgb(214 166 60 / 0.12), transparent 60%),
       var(--color-ground);
   }
+}
+
+/* ---------- glass ----------
+   One material, six thicknesses. Each recipe is the four things
+   docs/DESIGN_SYSTEM.md §5 says glass is — a translucent fill, a backdrop
+   blur with a little saturation, an inset lit top edge, and a deep soft
+   shadow — plus its rung of the radius ladder, so a surface cannot be
+   spelled at the wrong roundness.
+
+   They are `@utility` recipes rather than a stack of utilities at the call
+   site for three reasons, in order of weight:
+
+     1. eslint forbids a colour literal in a className (a hex survives both
+        variants unchanged, which is the one literal that is not merely
+        untidy but wrong), and these fills are alphas over two different
+        grounds — nine of them, each used once. Nine tokens whose only
+        consumer is one recipe are not tokens, they are this file with extra
+        steps.
+     2. `prefers-reduced-transparency` does not remap a value, it removes a
+        PROPERTY: the fill goes solid and `backdrop-filter` goes away
+        entirely. No token can carry that, and neither can a variant.
+     3. The day branch and the reduced-transparency branch are nested inside
+        the utility, on the `grove-ground` precedent above, so all three
+        halves are emitted together or not at all.
+
+   Borders and lit edges ride --color-edge / --color-edge-lit rather than
+   literals, so `.hc` promotes every surface's structure for free.
+
+   The reduced-transparency solids are each the recipe's own fill composited
+   over what sits behind it, so the layout, the radii, the edges and the
+   shadows are unchanged and only the see-through goes. */
+
+/* The window's top bar. No radius and no drop shadow: it is flush to the
+   window edge, and its border-bottom is the separation. */
+@utility glass-top {
+  background: rgb(10 14 8 / 0.35);
+  backdrop-filter: blur(24px) saturate(160%);
+  border-bottom: 1px solid var(--color-edge);
+  box-shadow: inset 0 1px 0 var(--color-edge-lit);
+
+  &:where(.day, .day *) {
+    background: rgb(255 255 255 / 0.4);
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    background: #0c100a;
+    backdrop-filter: none;
+
+    &:where(.day, .day *) {
+      background: #f2f4ea;
+    }
+  }
+}
+
+/* The navigation dock. Darker than the panel beside it — a rail is a held
+   thing, and the ground shows through it less. */
+@utility glass-dock {
+  background: rgb(10 14 8 / 0.45);
+  backdrop-filter: blur(26px) saturate(160%);
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-panel);
+  box-shadow:
+    inset 0 1px 0 var(--color-edge-lit),
+    0 16px 44px rgb(3 6 2 / 0.45);
+
+  &:where(.day, .day *) {
+    background: rgb(255 255 255 / 0.45);
+    /* Day's shadow is a green-grey at a fraction of night's depth: a black
+       shadow on a pale ground reads as dirt, so the lit edge above does most
+       of the separating and this only grounds the pane. */
+    box-shadow:
+      inset 0 1px 0 var(--color-edge-lit),
+      0 16px 44px rgb(46 60 36 / 0.16);
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    background: #0d120b;
+    backdrop-filter: none;
+
+    &:where(.day, .day *) {
+      background: #f5f7ee;
+    }
+  }
+}
+
+/* The main pane. The thinnest fill in the set (white over the ground rather
+   than dark over it), because this is the surface the ground's glow is meant
+   to bend through. */
+@utility glass-panel {
+  background: rgb(255 255 255 / 0.045);
+  backdrop-filter: blur(28px) saturate(150%);
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-panel);
+  box-shadow:
+    inset 0 1px 0 var(--color-edge-lit),
+    0 20px 60px rgb(3 6 2 / 0.4);
+
+  &:where(.day, .day *) {
+    background: rgb(255 255 255 / 0.5);
+    box-shadow:
+      inset 0 1px 0 var(--color-edge-lit),
+      0 20px 60px rgb(46 60 36 / 0.14);
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    background: #161d12;
+    backdrop-filter: none;
+
+    &:where(.day, .day *) {
+      background: #f8faf2;
+    }
+  }
+}
+
+/* A card, and every near-solid thing that sits INSIDE a panel: the note
+   editor's side panels, a settings card.
+
+   No backdrop-filter, deliberately. A card floats on a surface that is
+   already blurring the ground, and blurring an blurred image again produces
+   mud rather than depth — so a card's depth comes from the lit edge and the
+   shadow alone, and its fill is near-opaque instead. */
+@utility glass-card {
+  background: rgb(28 36 23 / 0.82);
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-card);
+  box-shadow:
+    inset 0 1px 0 var(--color-edge-lit),
+    0 8px 24px rgb(3 6 2 / 0.35);
+
+  &:where(.day, .day *) {
+    background: rgb(255 255 255 / 0.78);
+    /* Day's card is the one surface whose lit edge outruns the token: at
+       0.9 it is nearly white, because a card on a pale panel has almost no
+       shadow to separate it and the highlight has to do the whole job. */
+    box-shadow:
+      inset 0 1px 0 rgb(255 255 255 / 0.9),
+      0 8px 24px rgb(46 60 36 / 0.1);
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    background: #1c2418;
+
+    &:where(.day, .day *) {
+      background: #fcfdf7;
+    }
+  }
+}
+
+/* Menus and toasts: the strongest fill and the deepest blur in the set,
+   because an overlay has to separate from a surface that is itself glass.
+   Card radius, since an overlay is card-sized. */
+@utility glass-overlay {
+  background: rgb(24 32 20 / 0.88);
+  backdrop-filter: blur(32px) saturate(160%);
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-card);
+  box-shadow:
+    inset 0 1px 0 var(--color-edge-lit),
+    0 24px 60px rgb(2 4 1 / 0.6);
+
+  &:where(.day, .day *) {
+    background: rgb(250 252 246 / 0.85);
+    /* An overlay's edge is the one border day strengthens past --color-edge:
+       it is the only surface that can land over anything, including another
+       pale pane. */
+    border-color: rgb(24 32 16 / 0.16);
+    box-shadow:
+      inset 0 1px 0 var(--color-edge-lit),
+      0 24px 60px rgb(46 60 36 / 0.28);
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    background: #1a2315;
+    backdrop-filter: none;
+
+    &:where(.day, .day *) {
+      background: #fbfcf6;
+    }
+  }
+}
+
+/* Dialogs and the command palette: the overlay material at the dialog rung
+   of the radius ladder, with the longest shadow the app casts. They are
+   card-sized but window-like, and they are what the scrim is under. */
+@utility glass-dialog {
+  background: rgb(24 32 20 / 0.88);
+  backdrop-filter: blur(32px) saturate(160%);
+  border: 1px solid var(--color-edge);
+  border-radius: var(--radius-dialog);
+  box-shadow:
+    inset 0 1px 0 var(--color-edge-lit),
+    0 32px 90px rgb(2 4 1 / 0.7);
+
+  &:where(.day, .day *) {
+    background: rgb(250 252 246 / 0.85);
+    border-color: rgb(24 32 16 / 0.16);
+    box-shadow:
+      inset 0 1px 0 var(--color-edge-lit),
+      0 32px 90px rgb(46 60 36 / 0.28);
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    background: #1a2315;
+    backdrop-filter: none;
+
+    &:where(.day, .day *) {
+      background: #fbfcf6;
+    }
+  }
+}
+
+/* The veil under a modal. Light on purpose: the dialog's glass only reads as
+   glass if the app stays visible enough beneath it to blur, and a heavy scrim
+   turns an expensive frosted surface into a grey box.
+
+   No reduced-transparency branch, and that is not an omission — the scrim has
+   no backdrop-filter to drop, and a scrim made opaque would blank the app
+   rather than reveal it. */
+@utility glass-scrim {
+  background: rgb(5 8 4 / 0.28);
+
+  &:where(.day, .day *) {
+    background: rgb(46 60 36 / 0.16);
+  }
+}
+
+/* ---------- focus ----------
+   One recipe, everywhere: 2px of ink, offset outward (DESIGN_SYSTEM §2). It
+   is a utility rather than four classes at each call site because it recurs
+   on every interactive element in the app, and because the offset is the
+   half that gets forgotten.
+
+   `focus-ring-inset` is the same ring turned inward, for a control that
+   fills its container — a menu row, a list row — where an outward ring is
+   clipped by the scroller it lives in. */
+@utility focus-ring {
+  &:focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+  }
+}
+
+@utility focus-ring-inset {
+  &:focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: -2px;
+  }
+}
+
+/* ---------- global chrome ----------
+   Scrollbars and selection: two pieces of the window that belong to no
+   component, and that ship as a platform default nobody chose — a light
+   scrollbar over the night theme.
+
+   The thumb is a pill inset 3px from its track by a transparent border with
+   `background-clip: padding-box`, so it reads as a floating bar rather than
+   a filled gutter. Firefox takes the two standard properties; Chromium — and
+   so WebView2, which is what actually ships — takes the pseudo-elements.
+   Both are stated because both are cheap.
+
+   `background-color`, never the `background` shorthand: the shorthand resets
+   `background-clip` to border-box, which would fill the inset on hover. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 0.14) transparent;
+}
+.day,
+.day * {
+  scrollbar-color: rgb(24 32 16 / 0.22) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background-color: rgb(255 255 255 / 0.14);
+  border-radius: var(--radius-pill);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(255 255 255 / 0.24);
+}
+.day ::-webkit-scrollbar-thumb {
+  background-color: rgb(24 32 16 / 0.22);
+}
+.day ::-webkit-scrollbar-thumb:hover {
+  background-color: rgb(24 32 16 / 0.34);
+}
+
+/* Selected text is a kodama wash. Green is the system's voice — a search
+   match already wears it — and marking words with the pointer is the same
+   act from the other side, so the two read alike. It is spelled as a mix of
+   the token rather than two literals precisely so `.day` re-themes it: the
+   night and day mixes are exactly the two values the Grove prototype drew. */
+::selection {
+  background: color-mix(in srgb, var(--color-kodama) 25%, transparent);
 }
 
 /* ============================================================
@@ -496,41 +875,12 @@
      is consumed from CSS, where the shapes that need it already live. */
 }
 
-/* ---------- global chrome ----------
-   Scrollbars were shipping as the platform default, which renders a light bar
-   over the night theme — the one piece of the window that never got a value.
-   Styled here rather than per-component because any scroll container should
-   look the same. Firefox takes the standard properties; Chromium (and so
-   WebView2, which is what actually ships) takes the pseudo-elements. */
-* {
-  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
-  scrollbar-width: thin;
-}
+/* The global chrome — scrollbars and selection — used to live here, reading
+   the legacy `--scrollbar-*` and `--selection` tokens. It is now Grove's, in
+   section 3; design/tokens.css keeps declaring those three, and nothing
+   consumes them any more.
 
-/* Selected text is the same ink wash a search match wears, so dragging across
-   a note and finding a term read as the same act of marking. It is never the
-   reserved green: that means audio is being recorded. */
-::selection {
-  background: var(--selection);
-}
-
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-track {
-  background: var(--scrollbar-track);
-}
-::-webkit-scrollbar-thumb {
-  background: var(--scrollbar-thumb);
-  border-radius: var(--radius-md);
-  /* Inset the thumb from the track with a transparent border so it reads as a
-     floating bar rather than a filled gutter. */
-  border: 3px solid transparent;
-  background-clip: padding-box;
-}
-
-/* Reduced motion is NOT handled here. There used to be an app-wide floor on
+   Reduced motion is NOT handled here. There used to be an app-wide floor on
    `*` that collapsed every duration to 1ms, and it was the wrong shape twice
    over: it threw away the colour and opacity half, which aids comprehension and
    causes no vestibular trouble, and a duration floor cannot restore a resting

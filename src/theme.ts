@@ -7,8 +7,10 @@ import { getSettings, type Settings, type Theme } from "./useSettings";
 export type { Theme };
 
 /** The Grove day class. Night is the default and carries no class, so this
- * is only ever added or removed — there is no `.night`. */
-const DAY_CLASS = "day";
+ * is only ever added or removed — there is no `.night`. Exported so the
+ * primitive gallery's ground toggle writes the same class this module does,
+ * rather than a string that could drift from it. */
+export const DAY_CLASS = "day";
 
 /** The query the "system" choice resolves through. Held at module scope so the
  * listener below is attached exactly once per window, however many times

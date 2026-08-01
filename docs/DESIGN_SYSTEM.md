@@ -86,6 +86,9 @@ list of things allowed to be green is closed:
 - the **caret** in any input
 - a **search match** the system found
 - a **routing suggestion** the system is offering
+- **selected text**, which is the same act of marking a match wears, from the user's side rather
+  than the system's — a 25% kodama wash, spelled as a `color-mix` of the token so `.day` re-themes
+  it (`::selection`, `src/index.css` §3)
 
 It is **never** progress, a count, a chart, a success tick, a hover state, or decoration. Progress in
 particular is information rather than voice, so a lit meter segment is ink at half strength.
@@ -245,6 +248,24 @@ hole rather than a pane:
 In day, weight shifts between (3) and (4): the highlight does the separating, because a shadow on a
 pale ground reads as dirt.
 
+### The material comes in six thicknesses
+
+Each is a named recipe in `src/index.css` §3, carrying all four parts plus its rung of the ladder
+below. Reach for the one that matches the job; do not assemble a seventh by hand.
+
+| Recipe | Is | Blur |
+| --- | --- | --- |
+| `glass-top` | The window's top bar, flush to the edge | 24 / 160% |
+| `glass-dock` | The navigation rail. Darker than the panel: a rail is a held thing | 26 / 160% |
+| `glass-panel` | The main pane. The thinnest fill, so the ground's glow bends through it | 28 / 150% |
+| `glass-card` | A card, and anything near-solid **inside** a panel | **none** |
+| `glass-overlay` | Menus and toasts | 32 / 160% |
+| `glass-dialog` | Dialogs and the palette: the same material, the longest shadow | 32 / 160% |
+
+**A card carries no backdrop blur, deliberately.** It floats on a surface that is already blurring
+the ground, and blurring a blurred image again is mud, not depth — so a card's fill goes near-opaque
+and its depth comes from the lit edge and the shadow alone.
+
 ### The ladder
 
 | Layer | Radius | Is |
@@ -260,8 +281,9 @@ looks like furniture that came loose.
 
 ### Scrims are a veil, not a blackout
 
-A modal's scrim is light (~28% ink). The palette's glass only reads as glass if the app stays visible
-enough beneath it to blur — a heavy scrim turns an expensive frosted surface into a grey box.
+A modal's scrim is light (~28% ink; `glass-scrim`). The palette's glass only reads as glass if the app
+stays visible enough beneath it to blur — a heavy scrim turns an expensive frosted surface into a
+grey box.
 
 ### Reduced transparency means frosted solids
 
@@ -269,6 +291,13 @@ Under `prefers-reduced-transparency`, every glass surface takes a **solid** colo
 it looked like composited, and drops its `backdrop-filter`. The layout, the radii, the edges, and the
 shadows are unchanged — the app should look like the same design rendered on a machine that does not
 do glass, not like a different app.
+
+The scrim is the one exception, and not an omission: it has no `backdrop-filter` to drop, and a scrim
+made opaque would blank the app rather than reveal it.
+
+Because the swap removes a *property* rather than remapping a value, it cannot live in a token or a
+variant — which is why the `glass-*` recipes are `@utility` blocks with the day branch and the
+reduced-transparency branch nested inside each one, emitted together or not at all.
 
 ---
 
@@ -381,6 +410,13 @@ And in `pnpm test`:
   alone would pass on a build where the class never moved.
 - **[`src/contrast.test.ts`](../src/contrast.test.ts)** pins that `.hc` is the OR of the two requests,
   which is what makes the switch additive.
+- **[`src/groveTokenNames.test.ts`](../src/groveTokenNames.test.ts)** pins that no Grove token shares
+  a name with the unlayered legacy layer, which would hand the Grove utility the legacy value
+  silently.
+- **[`PrimitiveGallery.test.tsx`](../src/components/dev/PrimitiveGallery.test.tsx)** renders every
+  primitive under all four grounds (night, day, `.hc`, `.hc.day`). It proves they *render*, not that
+  they look right — the looking is what `/gallery.html` is for, served by `pnpm dev` and absent from
+  the build.
 
 **Everything else in this document is review's job, and this document is the checklist.** Nothing
 checks that green stayed on the kodama, that a verb got a rectangle, that an exit came in under its
