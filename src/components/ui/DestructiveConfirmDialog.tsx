@@ -1,13 +1,6 @@
-import {
-  useId,
-  useRef,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode,
-} from "react";
-import { useDialogFocus } from "../../useDialogFocus";
-import { wrapDialogTab } from "../../dialogTabTrap";
+import { useRef, type ReactNode } from "react";
 import { Button } from "./Button";
-import { Overlay } from "./Overlay";
+import { Dialog } from "./Dialog";
 import { StatusMessage } from "./StatusMessage";
 
 type Props = {
@@ -23,23 +16,26 @@ type Props = {
   error: string | null;
   /** Runs the destructive action. */
   onConfirm: () => void;
-  /** Dismiss without acting: Cancel, Escape, or a backdrop press. */
+  /** Dismiss without acting: Cancel, Escape, or a scrim press. */
   onClose: () => void;
   /** The body: what confirming will cost. */
   children: ReactNode;
 };
 
 /**
- * The shared shape of a destructive confirmation, exactly as
- * docs/DESIGN_SYSTEM.md §2 prescribes: the action is marked by CONFIRMATION,
- * not colour. Cancel is the primary control and holds initial focus; the
- * confirming button is the non-default `destructive` variant beside it, so the
- * keyboard's first Enter dismisses rather than destroys.
+ * The shared shape of a destructive confirmation: the action is marked by
+ * CONFIRMATION first (docs/DESIGN_SYSTEM.md §2), and Cancel holds initial focus
+ * so the keyboard's first Enter dismisses rather than destroys.
  *
- * This is the boilerplate every such dialog shared byte for byte — the Overlay,
- * the focus hand-off, the Escape/Tab wiring, the Cancel-primary/destructive
- * footer, the error slot — factored out so `DeleteProjectDialog` and the
- * Needs Attention capture delete are one thing, not two hand-rolled copies.
+ * Grove adds the coral `danger` box on the confirming control. That is not a
+ * softening of the confirmation-not-colour rule — it is where the rule says the
+ * one red in the app is allowed to live: on the confirm INSIDE a confirmation,
+ * never on the button that opens one.
+ *
+ * The shell is the Grove `Dialog`, so the focus trap, Escape, the scrim press,
+ * the scroll lock and the focus restore are base-ui's rather than three
+ * hand-rolled copies of a Tab wrapper. Being mounted IS being open: every
+ * caller renders this conditionally, and unmounting is how it closes.
  *
  * It is deliberately presentational: each caller keeps its own async handler,
  * `busy`/`error` state, success behaviour, and error copy, and passes the
@@ -56,41 +52,24 @@ export function DestructiveConfirmDialog({
   onClose,
   children,
 }: Props) {
-  const titleId = useId();
-  const cancelId = useId();
-
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  // Cancel is the default action of a confirmation, so it takes focus on open;
-  // focus is restored on close.
-  useDialogFocus(() => document.getElementById(cancelId));
-
-  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    wrapDialogTab(event, panelRef.current);
-  };
+  // Cancel is the default action of a confirmation, so it takes focus on open
+  // rather than base-ui's default of the first tabbable element — which here is
+  // the destructive one.
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
   return (
-    <Overlay
+    <Dialog
+      open
       onDismiss={onClose}
-      labelledBy={titleId}
-      panelRef={panelRef}
-      onKeyDown={onKeyDown}
-      className="flex flex-col gap-md p-md"
+      label={title}
+      initialFocus={cancelRef}
+      className="flex flex-col gap-4"
     >
-      <h2
-        id={titleId}
-        className="font-serif text-title-panel leading-title-panel tracking-title-panel text-text"
-      >
-        {title}
-      </h2>
+      <h2 className="text-[15px] font-semibold text-ink">{title}</h2>
 
-      <div className="flex flex-col gap-sm text-body text-text-soft">{children}</div>
+      <div className="flex flex-col gap-2.5 text-[13px] leading-relaxed text-ink-read">
+        {children}
+      </div>
 
       {error && (
         <StatusMessage variant="error" compact>
@@ -98,16 +77,14 @@ export function DestructiveConfirmDialog({
         </StatusMessage>
       )}
 
-      <div className="flex items-center justify-end gap-sm">
-        {/* The confirming control is the non-default one: destructive wears
-            the quiet ghost's chrome, and the primary beside it is Cancel. */}
-        <Button variant="destructive" onClick={onConfirm} loading={busy} loadingLabel={busyLabel}>
+      <div className="flex items-center justify-end gap-2.5">
+        <Button variant="danger" onClick={onConfirm} loading={busy} loadingLabel={busyLabel}>
           {confirmLabel}
         </Button>
-        <Button id={cancelId} onClick={onClose} loading={busy}>
+        <Button ref={cancelRef} onClick={onClose} loading={busy}>
           Cancel
         </Button>
       </div>
-    </Overlay>
+    </Dialog>
   );
 }

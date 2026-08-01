@@ -66,15 +66,12 @@ describe("DestructiveConfirmDialog", () => {
     expect(opener).toHaveFocus();
   });
 
-  it("dismisses on a backdrop press", async () => {
+  it("dismisses on a scrim press", async () => {
     const user = userEvent.setup();
     render(<Harness />);
 
     await user.click(screen.getByRole("button", { name: "Open" }));
-    const backdrop = screen.getByRole("dialog").parentElement;
-    expect(backdrop).not.toBeNull();
-
-    await user.click(backdrop as HTMLElement);
+    await user.click(screen.getByTestId("dialog-scrim"));
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });

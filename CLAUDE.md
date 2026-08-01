@@ -137,7 +137,12 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   that is not merely untidy but wrong), and no `.css` import outside `src/index.css` without a
   justifying `eslint-disable` comment — so each surviving pre-Grove stylesheet stays countable and
   dated. `pnpm test` adds `src/theme.test.ts` and `src/contrast.test.ts`, which pin the two variant
-  classes to the DOM.
+  classes to the DOM, `src/groveTokenNames.test.ts`, which fails any Grove token whose name a legacy
+  stylesheet also declares (unlayered CSS beats `@layer theme`, so the collision is silent), and
+  `src/components/dev/PrimitiveGallery.test.tsx`, which renders every primitive under all four
+  grounds. The primitives themselves are on `/gallery.html` — a dev-only Vite entry, deliberately
+  absent from `build.rollupOptions.input`, so `pnpm dev` serves it and the packaged app never
+  carries it. Look there before and after touching a primitive.
   `docs/DESIGN_SYSTEM.md` is the doctrine and decides every visual question the tokens don't (what
   green may mean, rectangles vs pills, the one press spec, motion and its reduced-motion swaps,
   glass, the measured contrast floor); `docs/UI_CONVENTIONS.md` is the mechanics (which utility to

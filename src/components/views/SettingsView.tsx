@@ -251,7 +251,6 @@ function RebuildIndexControl() {
           onClick={rebuild}
           loading={state.status === "rebuilding"}
           loadingLabel="Rebuilding…"
-          className="text-label"
         >
           Rebuild
         </Button>
@@ -737,7 +736,6 @@ export function SettingsView() {
                   onClick={runMicTestClick}
                   loading={runningMicTest}
                   loadingLabel="Testing…"
-                  className="text-label"
                 >
                   Run test
                 </Button>

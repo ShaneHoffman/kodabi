@@ -219,28 +219,21 @@ export function QuickCapture() {
           </button>
         ) : (
           // Two affordances, ranked by weight: Record is a quiet ghost because
-          // it starts something, File it is the filled commit because it ends
-          // something. Both visible, because this window is opened by hotkey
-          // but must not be operable by hotkey alone
+          // it starts something, File it is the action rectangle because it
+          // ends something. Both visible, because this window is opened by
+          // hotkey but must not be operable by hotkey alone
           // (docs/DESIGN_SYSTEM.md §6).
           <div className="flex flex-none items-center gap-sm">
-            <Button
-              variant="quiet"
-              data-testid="quick-capture-record"
-              onClick={record}
-              className="flex items-center gap-2xs py-3xs text-action text-text-soft"
-            >
+            <Button variant="quiet" data-testid="quick-capture-record" onClick={record}>
               <span className="capture__ring" aria-hidden="true" />
               Record
             </Button>
             <Button
-              variant="filled"
               data-testid="quick-capture-submit"
               onClick={submit}
               disabled={!text.trim()}
               loading={status.kind === "submitting"}
               loadingLabel="Filing…"
-              className="text-action"
             >
               File it
             </Button>

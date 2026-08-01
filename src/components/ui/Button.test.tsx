@@ -94,4 +94,26 @@ describe("Button", () => {
 
     expect(onClick).toHaveBeenCalledTimes(1);
   });
+
+  /*
+   * jsdom applies no stylesheet, so whether the press actually stops is not
+   * assertable here — but the reason it once did NOT stop is, and it is a
+   * property of the class strings alone. `:not()` takes its argument's
+   * specificity, so the guarded press weighs (0,4,0) and a bare
+   * `motion-reduce:active:scale-100` weighs (0,2,0) and loses on specificity
+   * whatever order Tailwind emits it in. The swap has to repeat both guards.
+   * The failure is silent in every tier above this one.
+   */
+  it("guards the reduced-motion swap exactly as it guards the press", () => {
+    render(<Button>Save</Button>);
+    const classes = screen.getByRole("button").className.split(/\s+/);
+
+    const press = classes.find((name) => name.endsWith("active:scale-97"));
+    const stillness = classes.find((name) => name.endsWith("active:scale-100"));
+    expect(press).toBeDefined();
+    expect(stillness).toBeDefined();
+
+    // Same selector, one prefixed by the variant that turns motion off.
+    expect(stillness).toBe(`motion-reduce:${press?.replace("scale-97", "scale-100")}`);
+  });
 });

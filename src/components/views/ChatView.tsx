@@ -142,9 +142,7 @@ export function ChatView() {
               <p className="text-body text-text-soft">
                 Claude Code exited. Start a new chat to continue.
               </p>
-              <Button variant="primary" onClick={chat.restart}>
-                Start a new chat
-              </Button>
+              <Button onClick={chat.restart}>Start a new chat</Button>
             </div>
           )}
           <div id={LOG_END_ID} />
@@ -161,11 +159,11 @@ export function ChatView() {
               onKeyDown={composerKeyDown}
             />
             {chat.turnActive ? (
-              <Button type="button" variant="quiet" className="px-xs py-2xs" onClick={chat.stop}>
+              <Button type="button" variant="quiet" onClick={chat.stop}>
                 Stop
               </Button>
             ) : (
-              <Button type="submit" variant="primary">
+              <Button type="submit">
                 Send
               </Button>
             )}
@@ -241,17 +239,8 @@ function PermissionCard({
       <p className="text-body text-text">{pending.question}</p>
       <p className="mt-3xs font-mono text-meta text-text-faint">{pending.tool}</p>
       <div className="mt-xs flex gap-2xs">
-        <Button
-          variant="primary"
-          onClick={() => respond(pending.request_id, true)}
-        >
-          Allow
-        </Button>
-        <Button
-          variant="quiet"
-          className="px-xs py-2xs"
-          onClick={() => respond(pending.request_id, false)}
-        >
+        <Button onClick={() => respond(pending.request_id, true)}>Allow</Button>
+        <Button variant="quiet" onClick={() => respond(pending.request_id, false)}>
           Deny
         </Button>
       </div>

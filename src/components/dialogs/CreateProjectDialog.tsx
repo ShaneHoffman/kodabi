@@ -99,12 +99,11 @@ export function CreateProjectDialog({ onClose }: Props) {
           <Button variant="quiet" onClick={onClose} loading={submitting}>
             Cancel
           </Button>
-          {/* filled: the single action that ends this surface. `disabled` is a
-              genuine disable (nothing to submit), distinct from the busy state
+          {/* The action that ends this surface. `disabled` is a genuine
+              disable (nothing to submit), distinct from the busy state
               `loading` conveys. */}
           <Button
             type="submit"
-            variant="filled"
             disabled={!trimmed}
             loading={submitting}
             loadingLabel="Creating…"

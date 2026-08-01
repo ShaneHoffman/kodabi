@@ -303,12 +303,11 @@ export function NeedsAttentionView() {
                 <li key={session.path} className="attention__card">
                   <WarningGlyph />
                   <CaptureSummary session={session} rowError={rowErrors[session.path]} />
-                  {/* Two actions, ranked by weight rather than by colour: Retry
-                      is the one you want, so it carries full ink and semibold;
-                      Dismiss recedes to muted regular. */}
+                  {/* Two actions, ranked by shape rather than by colour: Retry
+                      is the one you want, so it is the action rectangle;
+                      Dismiss recedes to the quiet ghost beside it. */}
                   <div className="flex flex-none items-center gap-sm">
                     <Button
-                      variant="quiet"
                       data-testid="retry-distill"
                       // One retry at a time: each run spends a real headless
                       // Claude call, and the backend serializes them anyway. The
@@ -323,7 +322,6 @@ export function NeedsAttentionView() {
                       loading={pendingPath === session.path}
                       loadingLabel="Retrying…"
                       onClick={() => retry(session.path)}
-                      className="py-3xs text-label font-semibold text-text"
                     >
                       Retry
                     </Button>
@@ -350,7 +348,6 @@ export function NeedsAttentionView() {
                       // still-focusable treatment while it's in flight.
                       loading={isRunning("dismiss", session.path)}
                       onClick={() => runAction("dismiss", session.path, dismissSession)}
-                      className="py-3xs text-label text-text-soft"
                     >
                       {/* "Dismiss", not "Discard". The backend writes a marker
                           file next to the session — the row stops counting but
@@ -376,7 +373,6 @@ export function NeedsAttentionView() {
                 variant="quiet"
                 aria-expanded={showDismissed}
                 data-testid="show-dismissed"
-                className="font-mono text-meta text-text-soft"
                 onClick={() => setShowDismissed((open) => !open)}
               >
                 Dismissed
@@ -393,7 +389,6 @@ export function NeedsAttentionView() {
                       />
                       <div className="flex flex-none items-center gap-sm">
                         <Button
-                          variant="quiet"
                           data-testid="restore-session"
                           // `pendingPath` for the same reason as Dismiss:
                           // a restore's refetch would drop the retrying
@@ -407,7 +402,6 @@ export function NeedsAttentionView() {
                           // be read.
                           loading={isRunning("restore", session.path)}
                           onClick={() => runAction("restore", session.path, restoreSession)}
-                          className="py-3xs text-label font-semibold text-text"
                         >
                           Restore
                         </Button>
@@ -429,7 +423,6 @@ export function NeedsAttentionView() {
                             setDeleteError(null);
                             setConfirmingDeletePath(session.path);
                           }}
-                          className="py-3xs text-label text-text-soft"
                         >
                           Delete
                         </Button>

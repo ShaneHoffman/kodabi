@@ -84,11 +84,24 @@ Always the token utility, never the literal:
 | The kodama, a match, the caret | `text-kodama`, `bg-kodama`, `caret-kodama`, `text-kodama-ink` |
 | Failure | `text-warn`, `text-danger` |
 | A project | `text-coral`, `bg-cobalt`, `border-teal`, `text-plum` |
+| A control's fill | `bg-action-bg` / `bg-action-bg-hover` / `border-action-edge`, and the coral trio `bg-danger-bg` / `bg-danger-bg-hover` / `border-danger-edge` |
+| The faintest fill | `bg-wash` (a quiet control's hover, a pill at rest, a menu row's highlight), `bg-wash-hover` |
 | A face | `font-ui`, `font-data`, `font-note` |
 | Reading size | `text-note` (carries its own leading) |
 | A radius | `rounded-panel`, `rounded-card`, `rounded-dialog`, `rounded-button`, `rounded-pill` |
 | A curve | `ease-out-strong`, `ease-in-out-strong` |
 | A duration | `duration-140`, `duration-220`, … (bare ms; the canonical four are in DESIGN_SYSTEM §4) |
+| A glass surface | `glass-top`, `glass-dock`, `glass-panel`, `glass-card`, `glass-overlay`, `glass-dialog`, `glass-scrim` |
+| The focus ring | `focus-ring`, or `focus-ring-inset` where the control fills its container |
+
+Each recipe carries a whole surface — its fill, blur, lit edge, border, shadow and rung of the radius
+ladder — plus its own `.day` branch, so a surface cannot be spelled at the wrong roundness or lose
+half its material. The six thicknesses each carry a `prefers-reduced-transparency` branch too;
+`glass-scrim` is the deliberate exception on both counts (a fill and nothing else, and no blur to
+drop), and DESIGN_SYSTEM §5 says which parts each one omits and why. They are `@utility` rather than
+a stack of classes because reduced transparency removes a *property* (`backdrop-filter`) rather than
+remapping a value, which no token and no variant can express. Add layout at the call site, not
+material: `glass-card p-4`, never `glass-card bg-*`.
 
 Folder hues are chosen by data, not by markup, so they arrive as a lookup from the project rather
 than as a literal class — `PROJECT_HUE[project]` returning `"text-coral"`, never a computed
@@ -114,31 +127,60 @@ Animations are `animate-*` utilities, and the reduced-motion swap is written bes
 ```tsx
 className="animate-materialize motion-reduce:animate-fade-in"
 className="animate-rise-in motion-reduce:animate-fade-in [animation-delay:45ms]"
-className="transition-transform duration-140 ease-out-strong active:scale-97 motion-reduce:active:scale-100"
+className="transition-[scale] duration-140 ease-out-strong active:scale-97 motion-reduce:active:scale-100"
 ```
 
 That the swap is visible in the markup is the point (DESIGN_SYSTEM §4).
+
+**`transition-[scale]`, not `transition-transform`.** Tailwind v4's `scale-*` sets the standalone
+`scale` property rather than a transform function, so a transition naming `transform` animates
+nothing and the press lands as a snap. The failure is silent — check the built CSS, not the screen.
+
+**The swap must carry every guard the thing it swaps carries.** The snippet above works because both
+halves weigh the same: `.x:active` against `.x:active`, decided by order, and the redefined
+`motion-reduce` sorts last. Add a guard to one side only and the swap goes dead —
+`not-disabled:not-aria-disabled:active:scale-97` weighs (0,4,0), because `:not()` takes its
+argument's specificity, and a bare `motion-reduce:active:scale-100` at (0,2,0) loses on specificity
+whatever the order. Repeat the guards: `motion-reduce:not-disabled:not-aria-disabled:active:scale-100`
+(`Button` is the live example). Same failure mode as the one above, same check — read the built CSS.
+
+`hover:` and `motion-reduce:` are **redefined** in `src/index.css`, so both mean more than Tailwind's
+defaults everywhere they appear. `hover:` also requires `(pointer: fine)`, because a touch device can
+satisfy `(hover: hover)` and then strand a tapped control in its hover state. `motion-reduce:` also
+matches `[data-reduce-motion="on"]`, the root attribute the Settings switch writes — without it the
+in-app toggle would work on legacy screens and silently do nothing on Grove ones.
 
 ---
 
 ## 4. Primitives
 
-`src/components/ui/` holds the shared controls. **Their styling is pre-Grove**, and six of the eight
-still carry their own stylesheet (`StatusMessage` and `DestructiveConfirmDialog` never had one — they
-compose other primitives and utilities); the primitives' Grove ticket restyles them. **Their
-behaviour is not pre-Grove** — the contracts below are live, they are what the components actually
-promise, and a restyle must preserve every one of them.
+`src/components/ui/` holds the shared controls. **`Button`, `Menu`, `Dialog` and
+`DestructiveConfirmDialog` are Grove; the rest are pre-Grove** and five still carry their own
+stylesheet (`TextField`, `Checkbox`, `Select`, `Overlay`, `ViewFrame` — `StatusMessage` never had
+one), which their screen tickets delete. **Behaviour is not pre-Grove either way** — the
+contracts below are live, they are what the components actually promise, and a restyle must preserve
+every one of them.
 
 | Primitive | Is | Variants |
 | --- | --- | --- |
-| `Button` | The action rectangle | `primary`, `quiet`, `filled`, `destructive` |
+| `Button` | Every pressable thing | `action`, `danger`, `quiet`, `pill` |
+| `Menu` | An anchored menu (base-ui) | — |
+| `Dialog` | A modal: scrim, glass panel, focus trap (base-ui) | — |
 | `TextField` | A labelled input | — |
 | `Checkbox` | A box and its label | — |
 | `Select` | A hand-rolled combobox (full listbox, no headless library) | `boxed`, `token` |
-| `Overlay` | The scrim, stacking layer, and raised panel behind modal surfaces | — |
+| `Overlay` | The pre-Grove modal shell, for the callers `Dialog` has not taken yet | — |
 | `ViewFrame` | A view's scaffold: gutter, column, header | `queue`, `library`, `panel`, `health`, `doc`, `search`, `terminal`, `chat` |
 | `StatusMessage` | The one way a view says nothing/failed/working | `empty`, `error`, `status` |
 | `DestructiveConfirmDialog` | The shared shape of a destructive confirmation | — |
+
+`Button`'s four variants are two shapes: `action`, `danger` and `quiet` are the same rectangle
+(`rounded-button`, 8x16) so a rail of them lines up, and `pill` is the token shape for a thing you
+open rather than a verb you perform (DESIGN_SYSTEM §2). **The component owns its whole box** — the
+pre-Grove `quiet` deferred padding to each consumer's stylesheet, and that is how the rails stopped
+agreeing. A caller passes layout (`w-full`, `self-start`), not geometry, and never a `text-*` size or
+colour: there is no `tailwind-merge`, so a call site that restates a property the primitive owns is
+decided by build order rather than by the className.
 
 ### The contracts worth not breaking
 
@@ -162,11 +204,25 @@ promise, and a restyle must preserve every one of them.
   outside `queue` / `library` / `health`, and `action` is a **type error** on `doc` / `search` (the two
   that draw no header of their own) — neither is a silent no-op. `action` is one node and one action;
   a caller with two is in the wrong slot (§5).
+- **`Dialog` traps focus; `Overlay` does not.** That is the whole reason `Dialog` exists: base-ui
+  owns the trap, Escape, the outside press, the scroll lock and the focus restore, where every
+  `Overlay` caller hand-rolled a Tab strategy of its own. Pass `initialFocus` where the first
+  tabbable control is the destructive one, so the dialog opens on the safe action. Its centering is
+  `inset-0 m-auto h-fit` and must stay margin-based: the `materialize` keyframe animates
+  `transform`, so a translate-centred popup opens in the corner.
 - **`Overlay` dismisses on click, not pointerdown**, and only when the gesture both started and ended
   on the backdrop. It deliberately does **not** trap focus — each caller passes its own `onKeyDown`,
-  because the palette swallows Tab on one input while the consent nudge wraps it across several.
+  because the palette swallows Tab on one input while the consent nudge wraps it across several. It
+  is pre-Grove and shrinking: the palette, the consent nudge and the create-project dialog are its
+  remaining callers, and each moves to `Dialog` in its own ticket.
+- **`Menu.Trigger` composes, it does not wrap.** Pass the control through `render`
+  (`<Menu.Trigger render={<Button variant="quiet">File</Button>} />`) so there is one `<button>`
+  carrying both the Grove chrome and base-ui's wiring, not a button inside a button.
 - **`DestructiveConfirmDialog` is presentational and never closes itself.** The caller owns the async
-  handler, `busy` / `error` state, and what success means.
+  handler, `busy` / `error` state, and what success means. Being mounted is being open: every caller
+  renders it conditionally. Cancel holds initial focus; the confirm is the `danger` box, which is
+  the one place in the app that red is allowed — on the confirm inside a confirmation, never on the
+  button that opens one.
 
 ### There is no `Textarea`, `ListRow`, or `PlaceholderView`
 
@@ -194,10 +250,15 @@ The curated stack is installed and is the direction of travel:
 | `sonner` | Toasts |
 | `motion` | Motion that CSS cannot express — gestures, layout animation, interruptible transitions |
 
-**`cva` and `clsx` are the two to reach for immediately.** The other four replace hand-rolled
-behaviour, and each replacement is its own decision in its own ticket — installing a package is not
-the same as adopting it. In particular, `Select` is a working, tested, accessible combobox: it gets
-replaced when someone has read what `@base-ui/react` gives in exchange, not on sight.
+**Three are adopted.** `cva` + `clsx` style `Button`, and `@base-ui/react` is behind `Menu` and
+`Dialog` — the two pieces of behaviour that are hard, invisible when they work, and not Grove's
+opinion: anchoring a popup to its trigger with a flip at the window edge, and trapping focus in a
+modal. Everything visible about both is still ours.
+
+**`cmdk`, `sonner` and `motion` are installed, not adopted**, and each is its own decision in its own
+ticket — installing a package is not the same as adopting it. The same holds for what base-ui has
+NOT taken: `Select` is a working, tested, accessible combobox, and it gets replaced when someone has
+read what `@base-ui/react` gives in exchange, not on sight.
 
 This supersedes the zero-UI-dependency posture and
 [`docs/decisions/popover-primitive.md`](decisions/popover-primitive.md), which held against base-ui
@@ -277,6 +338,19 @@ not add a new token to `design/tokens.css`.
 **Nothing new may consume the legacy layer.** A new component is Grove even if the screen around it
 is not — the two vocabularies coexist in one tree without conflict, because the Grove tokens are
 namespaced apart from the bridged ones (`--color-ground` vs `--color-bg`, `font-ui` vs `font-sans`).
+
+**The one place they do collide is a shared CSS property.** An unmigrated screen that passes
+`text-body text-text-soft` to a Grove `Button` has two `font-size` rules and two `color` rules on one
+element, and with no `tailwind-merge` the winner is Tailwind's emission order, not the className.
+Today the legacy utility wins both (it sorts after), so an unmigrated screen keeps its own size and
+colour and its own component CSS keeps its geometry — which is why the primitives ticket left the
+sidebar looking as it did. Do not rely on it: when you migrate a screen, strip those from its call
+sites rather than reasoning about who wins.
+
+**Check the built CSS when a utility is load-bearing.** `pnpm build`, then read
+`dist/assets/index-*.css`. That is how the press was caught animating nothing (`transition-transform`
+against Tailwind v4's standalone `scale` property) and how you confirm a `@utility` recipe emitted
+its `.day` and `prefers-reduced-transparency` branches.
 
 The final cleanup ticket deletes `design/tokens.css`, the `@theme inline` block, `src/fonts.ts`, and
 the three `@fontsource` dependencies once the last screen has moved. Grove's three faces ship with

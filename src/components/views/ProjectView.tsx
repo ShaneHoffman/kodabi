@@ -62,7 +62,6 @@ export function ProjectView({ slug }: Props) {
         <div className="flex items-center gap-sm">
           <Button
             variant="quiet"
-            className="py-3xs text-label text-text-soft"
             onClick={() => navigate({ kind: "noteEditor", noteId: null, project: slug })}
           >
             New note
@@ -70,7 +69,6 @@ export function ProjectView({ slug }: Props) {
           <Button
             variant="quiet"
             aria-haspopup="dialog"
-            className="py-3xs text-label text-text-soft"
             onClick={() => setConfirmingDelete(true)}
           >
             Delete project

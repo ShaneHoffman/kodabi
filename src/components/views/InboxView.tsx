@@ -665,7 +665,6 @@ function InboxRow({
               aria-label={`Delete "${note.title}"`}
               disabled={pending || leaving}
               onClick={() => setConfirmingDelete(true)}
-              className="py-3xs text-label text-text-soft"
             >
               Delete
             </Button>
