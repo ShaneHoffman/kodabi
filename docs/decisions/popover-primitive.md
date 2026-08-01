@@ -1,6 +1,20 @@
 # Popover primitive: base-ui vs. the hand-rolled `Select`
 
-**Decision: no headless UI dependency. The hand-rolled `Select` stays. Closed 2026-07-28.**
+> **SUPERSEDED 2026-08-01 by the Grove redesign.** The decision below was taken on the strength of
+> *one* primitive; Grove needs a menu, a dialog, a popover, a tooltip, a palette and a toaster, and
+> the arithmetic is different at six. `@base-ui/react` is now installed, alongside `cmdk`, `sonner`,
+> `motion`, `cva` and `clsx` — see [`docs/UI_CONVENTIONS.md`](../UI_CONVENTIONS.md) §4 and
+> [`.claude/rules/typescript-style.md`](../../.claude/rules/typescript-style.md).
+>
+> **This document is still worth reading**, for two reasons that outlived its conclusion: §5–§6 hold
+> real measurements of the CSS anchor-positioning stance and its two caveats, and §8.2 records a
+> *live, unfixed* bug — a `Select` whose wrapper is wider than its trigger hangs its menu off the
+> trigger, wherever that lands. Whoever replaces `Select` with base-ui should read §8.2 first so the
+> replacement is verified against it rather than inheriting it.
+>
+> What is dead is the conclusion and the zero-UI-dependency posture it defended. The evidence is not.
+
+**Decision (superseded): no headless UI dependency. The hand-rolled `Select` stays. Closed 2026-07-28.**
 
 **Ticket #109 (`feat/select-menu-origin`) is _not_ subsumed — do it by hand, and widen it to
 cover positioning as well as the entrance.**

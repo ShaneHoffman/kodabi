@@ -465,7 +465,18 @@
 
   /* ---------- Layer 3 — radii ----------
      Rounder as it lifts: a checkbox is barely eased, a window is a
-     soft-cornered object sitting on top of everything. */
+     soft-cornered object sitting on top of everything.
+
+     TWO STEPS CARRY A `-legacy` SUFFIX, and it is load-bearing rather than
+     tidy. This file is unlayered, and Grove's `@theme` block emits into
+     `@layer theme` — so where the two systems spell a token the same way,
+     THIS one wins (unlayered beats every layer), whatever the values are.
+     That is deliberate for --radius-sm / --radius-md, which is why
+     src/index.css must not re-declare them. It was an accident for the two
+     below: Grove names a 14px card and a 999px pill, and an unsuffixed
+     declaration here silently rendered `rounded-card` at 12px and
+     `rounded-pill` at 11px — a pill that is not a pill. The suffix is what
+     keeps the two vocabularies from colliding until this file is deleted. */
   --radius-focus: 2px;
   --radius-track: 2px; /* the progress instrument; a waveform bar */
   --radius-match: 3px; /* a highlighted search term */
@@ -476,8 +487,8 @@
   --radius-md: 8px; /* a control chip; a library row */
   --radius-control: 9px; /* a filled button; a search row; a focused palette row */
   --radius-row: 10px; /* a queue row */
-  --radius-pill: 11px; /* the active nav pill; an overlay menu */
-  --radius-card: 12px; /* a pre-lifted card; a toggle track; the search query field */
+  --radius-pill-legacy: 11px; /* the active nav pill; an overlay menu */
+  --radius-card-legacy: 12px; /* a pre-lifted card; a toggle track; the search query field */
   --radius-window: 16px; /* the palette and capture windows */
 
   /* ---------- Layer 3 — focus ----------
@@ -552,8 +563,10 @@
      out at each site, because a gate repeated at five call sites is a gate that
      gets forgotten at one of them.
 
-     A new movement leg adds its --dur-move-* here beside the base duration it
-     wraps; src/designTokens.test.ts fails a movement leg that took a bare one. */
+     A movement leg belongs on a --dur-move-*, never on a bare --dur-*.
+     src/designTokens.test.ts used to fail that mechanically; it was deleted with
+     the Grove redesign, so this is now a convention nothing checks. Don't add a
+     new leg here at all — this whole file is frozen legacy (see src/index.css). */
   --move: 1;
   --dur-move-exit: calc(var(--dur-exit) * var(--move));
   --dur-move-quick: calc(var(--dur-quick) * var(--move));
@@ -588,10 +601,12 @@
           value. None of the three affects layout — an outline and a
           box-shadow ring are both outside the box — so nothing reflows.
 
-     A new gated token adds its recipe beside the others above, in BOTH themes;
-     src/designTokens.test.ts fails a semantic token gated down one theme path
-     and not its twin, and fails a gate written at a `--k-*` pigment, where it
-     would be invisible to that check. */
+     A gated token needs its recipe in BOTH themes, and the gate belongs at the
+     recipe rather than at a `--k-*` pigment (a pigment gate applies to both
+     themes at once). src/designTokens.test.ts used to fail either mistake; it
+     was deleted with the Grove redesign, so nothing checks this now — and
+     nothing should need to, because this file is frozen legacy and takes no new
+     gated tokens. */
   --contrast: 0;
   --ring-width: calc(1px + var(--contrast) * 1px);
 
@@ -976,8 +991,9 @@
    animating under reduced motion, and why.
 
    These are NOT theme blocks, despite the shape — they map no semantic token,
-   which is what keeps "four theme blocks" true both above and in
-   src/designTokens.test.ts. They sit here, between the scales and the theme
+   which is what kept "four theme blocks" true both above and in the token guard
+   that used to assert it (src/designTokens.test.ts, deleted with the Grove
+   redesign). They sit here, between the scales and the theme
    mappings, because `--move` is a Layer 3 value: it belongs beside the motion
    scale it gates, not among the palettes, and this keeps the three dark and
    forced mappings contiguous below.
@@ -1017,8 +1033,8 @@
    for both states.
 
    Everything above about the motion switch applies here unchanged: these are
-   NOT theme blocks (they map no semantic token, which is what keeps "four theme
-   blocks" true both above and in src/designTokens.test.ts); ORDER MATTERS,
+   NOT theme blocks (they map no semantic token, which is what kept "four theme
+   blocks" true both above and in the deleted token guard); ORDER MATTERS,
    because the media block is a plain `:root` tying with the default that sets
    `--contrast: 0` and winning only by coming after it; and the attribute block
    is the in-app switch (Settings → Appearance, src/contrast.ts) rather than the

@@ -14,6 +14,7 @@ import { useTimeout } from "../../useTimeout";
 import { QUICK_CAPTURE_SHOWN_EVENT } from "../../events";
 import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; the capture windows' Grove ticket deletes it
 import "./QuickCapture.css";
 
 /** How long the destination flashes before the window dismisses itself. Short

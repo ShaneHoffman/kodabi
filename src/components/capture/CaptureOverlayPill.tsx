@@ -4,6 +4,7 @@ import { isCaptureActive, useCaptureState } from "../../useCaptureState";
 import { useDebouncedValue } from "../../useDebouncedValue";
 import { CaptureStatusLine } from "./CaptureStatusLine";
 import { SpiritMark } from "./SpiritMark";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; the capture windows' Grove ticket deletes it
 import "./CaptureOverlayPill.css";
 
 /**

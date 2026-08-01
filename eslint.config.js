@@ -4,53 +4,56 @@ import reactHooks from "eslint-plugin-react-hooks";
 import reactRefresh from "eslint-plugin-react-refresh";
 import tseslint from "typescript-eslint";
 
-// The token guard's TSX half. `src/designTokens.test.ts` covers CSS files;
-// these cover the utility strings, which eslint can see and a CSS parser
-// cannot. Together they make "never hard-code a colour, font or spacing value"
-// (CLAUDE.md) a gate rather than a review convention.
+// The Grove guards.
 //
-// The numeric pattern deliberately ends with (?![\w-]) so the NAMED steps that
-// begin with a digit — gap-3xs, py-2xs, p-2xl — are not flagged; only a bare
-// `gap-4` or `px-2.5` is. Layout dimensions (w-48, max-h-80, z-10) are absent
-// from the prefix list on purpose: they are not spacing roles, and
-// docs/UI_CONVENTIONS.md allows the plain utility for them.
+// They replace the pre-Grove token guard (a `src/designTokens.test.ts` that
+// scanned stylesheets, plus eslint rules banning numeric spacing utilities and
+// arbitrary values). Grove is styled with Tailwind utilities, so the numeric
+// grid and arbitrary values are now the sanctioned spelling and both of those
+// bans are gone. What is left worth enforcing is narrower and sharper:
 //
-// Hoisted to a const because the bridge-hook override below turns
-// `no-restricted-syntax` off to allow useEffect, and a blanket "off" would take
-// these with it — silently un-guarding thirteen files.
-const SPACING_STEPS =
-  "(p|px|py|pt|pb|pl|pr|m|mx|my|mt|mb|ms|me|gap|gap-x|gap-y|space-x|space-y)";
-const NUMERIC_SPACING = `(^|\\s)-?${SPACING_STEPS}-[0-9]+(\\.[0-9]+)?(?![\\w-])`;
-const ARBITRARY_VALUE = "-\\[[^\\]]+\\]";
-const SPACING_MESSAGE =
-  "Use the named spacing steps (px-xs, py-2xs, gap-sm…), never the numeric utilities — docs/UI_CONVENTIONS.md.";
-const ARBITRARY_MESSAGE =
-  "No arbitrary values in className (text-[13px], bg-[#fff]) — every value comes from design/tokens.css.";
+//   1. Colour comes from the theme. A hex in a className is a value that no
+//      theme block can re-map, which means it survives .day and .hc unchanged
+//      and quietly breaks both variants. This is the one rule where a literal
+//      is not merely untidy but wrong.
+//   2. Styles live in src/index.css. Every other stylesheet is pre-Grove and on
+//      its way out, so a NEW one has to be an argued exception rather than a
+//      quiet reflex.
+//
+// Both are `no-restricted-syntax`, hoisted to a const because the bridge-hook
+// override below re-declares that rule to allow useEffect — and a blanket
+// "off" there would take these with it, silently un-guarding sixteen files.
 
-const tokenGuardSelectors = [
+const COLOUR_LITERAL = "(#[0-9a-fA-F]{3,8}\\b|\\b(rgba?|hsla?|oklch|oklab|color-mix)\\()";
+const COLOUR_MESSAGE =
+  "No colour literals in className — Grove colours come from the theme (bg-ground, text-ink, " +
+  "border-edge, text-kodama…) so .day and .hc can re-map them. See docs/DESIGN_SYSTEM.md §6.";
+
+const groveGuardSelectors = [
   {
-    selector: `JSXAttribute[name.name="className"] Literal[value=/${NUMERIC_SPACING}/]`,
-    message: SPACING_MESSAGE,
+    selector: `JSXAttribute[name.name="className"] Literal[value=/${COLOUR_LITERAL}/]`,
+    message: COLOUR_MESSAGE,
   },
   {
-    selector: `JSXAttribute[name.name="className"] TemplateElement[value.raw=/${NUMERIC_SPACING}/]`,
-    message: SPACING_MESSAGE,
+    selector: `JSXAttribute[name.name="className"] TemplateElement[value.raw=/${COLOUR_LITERAL}/]`,
+    message: COLOUR_MESSAGE,
   },
   {
-    selector: `JSXAttribute[name.name="className"] Literal[value=/${ARBITRARY_VALUE}/]`,
-    message: ARBITRARY_MESSAGE,
+    // A class string hoisted to a const, out of reach of the className
+    // selectors above. That pattern is how NoteEditorView grew a parallel
+    // field system under the old guard; it stays covered under this one.
+    selector: `VariableDeclarator[id.name=/(CLASS|CLASSES)$/] > Literal[value=/${COLOUR_LITERAL}/]`,
+    message: COLOUR_MESSAGE,
   },
   {
-    selector: `JSXAttribute[name.name="className"] TemplateElement[value.raw=/${ARBITRARY_VALUE}/]`,
-    message: ARBITRARY_MESSAGE,
-  },
-  {
-    // The NoteEditorView pattern: a class string hoisted to a const, out of
-    // reach of the className selectors above. It is how that screen grew a
-    // parallel field system in the first place.
-    selector: `VariableDeclarator[id.name=/(CLASS|CLASSES)$/] > Literal[value=/${NUMERIC_SPACING}/]`,
+    // Grove has one stylesheet. The exceptions that remain are all pre-Grove
+    // and each carries a disable comment naming the ticket that deletes it —
+    // which is the point: the exceptions stay countable and dated.
+    selector:
+      'ImportDeclaration[source.value=/\\.css$/]:not([source.value="./index.css"])',
     message:
-      "Use the named spacing steps in hoisted class strings too — docs/UI_CONVENTIONS.md.",
+      "Styles are Tailwind utilities in the component, and the one stylesheet is src/index.css. " +
+      "A .css import needs an eslint-disable comment justifying it — see docs/UI_CONVENTIONS.md.",
   },
 ];
 
@@ -96,9 +99,9 @@ export default tseslint.config(
           ],
         },
       ],
-      // The effect ban plus the token guard (both defined at the top of this
-      // file, so the override below can re-state the token half verbatim).
-      "no-restricted-syntax": ["error", noEffectSelector, ...tokenGuardSelectors],
+      // The effect ban plus the Grove guards (both defined at the top of this
+      // file, so the override below can re-state the Grove half verbatim).
+      "no-restricted-syntax": ["error", noEffectSelector, ...groveGuardSelectors],
     },
   },
   // The blessed bridge hooks — the only files that may call useEffect directly.
@@ -109,8 +112,8 @@ export default tseslint.config(
   //
   // These files are exempt from the EFFECT selector only. `no-restricted-syntax`
   // is a single rule, so the exemption has to re-declare everything that stays
-  // on — a blanket "off" here would take the token guard down with it in
-  // thirteen files, silently and without a diff to notice.
+  // on — a blanket "off" here would take the Grove guards down with it in
+  // sixteen files, silently and without a diff to notice.
   {
     files: [
       "src/useCaptureState.ts",
@@ -132,7 +135,7 @@ export default tseslint.config(
     ],
     rules: {
       "no-restricted-imports": "off",
-      "no-restricted-syntax": ["error", ...tokenGuardSelectors],
+      "no-restricted-syntax": ["error", ...groveGuardSelectors],
     },
   },
 );

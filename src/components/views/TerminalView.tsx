@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { useXterm } from "../../useXterm";
 import { Button } from "../ui/Button";
 import { ViewFrame } from "../ui/ViewFrame";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this view's Grove ticket deletes it
 import "./TerminalView.css";
 
 /**

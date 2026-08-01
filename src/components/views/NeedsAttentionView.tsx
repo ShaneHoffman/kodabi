@@ -15,6 +15,7 @@ import { Button } from "../ui/Button";
 import { DestructiveConfirmDialog } from "../ui/DestructiveConfirmDialog";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this view's Grove ticket deletes it
 import "./NeedsAttentionView.css";
 
 /** A readable name for a session: its slug de-hyphenated, else an honest

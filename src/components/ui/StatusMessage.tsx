@@ -18,8 +18,10 @@ type Props = {
  * on only some of the errors, so several async failures were announced to
  * nobody. Binding the role to the variant makes that unforgettable.
  *
- * Errors are text-text-soft, never red: there is no red token, and DESIGN.md
- * does not rank with hue. Weight and the announcement carry the urgency.
+ * Errors are text-text-soft, never red: DESIGN.md does not rank with hue, and
+ * weight plus the announcement carry the urgency. Grove's `--color-danger` is
+ * not an opening here — it belongs to a destructive confirmation's confirm
+ * control, not to reporting that something failed.
  */
 export function StatusMessage({ variant, compact = false, children, className = "" }: Props) {
   // An error is assertive because the user did not ask for it and may not be

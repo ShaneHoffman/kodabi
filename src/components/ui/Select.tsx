@@ -7,6 +7,7 @@ import {
 } from "react";
 import { useOutsidePointerDown } from "../../useOutsidePointerDown";
 import { useScrollIntoView } from "../../useScrollIntoView";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; the primitives' Grove ticket deletes it
 import "./Select.css";
 
 export type SelectOption = { value: string; label: string };

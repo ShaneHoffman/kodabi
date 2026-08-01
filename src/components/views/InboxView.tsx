@@ -25,6 +25,7 @@ import { Button } from "../ui/Button";
 import { Select, type SelectOption } from "../ui/Select";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this view's Grove ticket deletes it
 import "./InboxView.css";
 
 /** Mirrors `--dur-settle`: how long the placeholder's travel-left-and-vanish

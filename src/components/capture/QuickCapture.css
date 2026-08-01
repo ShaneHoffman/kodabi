@@ -142,7 +142,8 @@
 .capture__wave {
   display: flex;
   align-items: center;
-  /* token-guard-allow: the seam inside a drawn glyph, not a spacing role. It
+  /* Was a token-guard-allow escape hatch; the guard is gone (Grove), the reason
+     is not: the seam inside a drawn glyph, not a spacing role. It
      is half of the bars' own 3px width, so it belongs to the mark rather than
      to the app's rhythm, and a named half-pixel step would imply otherwise. */
   gap: 2.5px;

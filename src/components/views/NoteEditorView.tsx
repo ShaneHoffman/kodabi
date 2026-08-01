@@ -20,7 +20,9 @@ import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
 import { SessionArtifactsSection } from "./SessionArtifactsSection";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this view's Grove ticket deletes it
 import "./markdownReading.css";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this view's Grove ticket deletes it
 import "./NoteEditorView.css";
 
 type Props = {

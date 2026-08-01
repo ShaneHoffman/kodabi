@@ -1,4 +1,5 @@
 import { useId, type InputHTMLAttributes, type ReactNode } from "react";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; the primitives' Grove ticket deletes it
 import "./Checkbox.css";
 
 type Props = Omit<

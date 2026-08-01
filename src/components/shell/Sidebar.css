@@ -53,7 +53,7 @@
    it, and the depth arrives as a custom property because only the component
    knows it. */
 .sidebar__row {
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-pill-legacy);
   padding-block: var(--sidebar-row-y);
   padding-inline: calc(
       var(--sidebar-row-x) + var(--row-depth, 0) * var(--sidebar-indent)

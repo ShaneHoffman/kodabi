@@ -7,6 +7,7 @@ import { DeleteProjectDialog } from "../dialogs/DeleteProjectDialog";
 import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this view's Grove ticket deletes it
 import "./ProjectView.css";
 
 type Props = {

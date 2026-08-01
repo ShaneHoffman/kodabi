@@ -24,6 +24,7 @@ import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this view's Grove ticket deletes it
 import "./SettingsView.css";
 
 /** The capture toggle's global shortcut, mirroring `DEFAULT_TOGGLE_SHORTCUT`

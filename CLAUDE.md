@@ -123,40 +123,31 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   (`--features tauri/custom-protocol`), which is *not* what the cargo gates produce, and `dist/`
   must be current before cargo runs — `pnpm e2e:build` does both in order. CI runs it as a
   non-required check. See `docs/UI_E2E_HARNESS.md`.
-- **Design tokens:** never hard-code a color, font, spacing, or motion value. `design/tokens.css` is
-  the single source of truth, bridged into Tailwind by `src/index.css` — consume tokens, never
-  duplicate them. **Enforced by two guards, not by review:** `src/designTokens.test.ts` (in
-  `pnpm test`) fails a literal colour/font/duration/spacing (padding, margin, gap) in any
-  `src/**/*.css`, and the
-  `no-restricted-syntax` block in `eslint.config.js` fails numeric spacing utilities (`p-3`) and
-  arbitrary values (`text-[13px]`) in `className`. The escape hatch is a `token-guard-allow`
-  comment, which must sit on the offending declaration or in the comment block directly above it.
-  **`designTokens.test.ts` also gates reduced motion**, which is a token remap on `--move` rather
-  than an app-wide floor: it fails a `transition` leg on a movement property (`transform`, `width`,
-  `grid-template-rows`, `all`, …) that took a bare `--dur-*` instead of `--dur-move-*`, an
-  `@keyframes` or `@starting-style` block that moves something without referencing `var(--move)`, an
-  `:active` rule that declares a `transform` (or a bare `scale`/`translate`/`rotate`) without
-  `--press-scale` (the press is the one state
-  allowed to move its own box without moving the layout, and the only one the two checks before it
-  cannot see), a
-  `--dur-move-*` on an `animation` (gate animations by amplitude, never by duration), and any
-  `scroll-behavior: smooth`. See `docs/DESIGN_SYSTEM.md` §4 for which of the two gates a given site
-  needs.
-  **It gates more contrast the same way**, as a token remap on `--contrast` (`docs/DESIGN_SYSTEM.md`
-  §6): it fails a `prefers-contrast` query in any component stylesheet, a `--contrast` thrown down
-  only one of its two branches or set to anything but `0`/`1`, a gate written at a `--k-*` pigment
-  instead of a per-theme recipe, a semantic token §6 says the switch moves that no longer gates
-  (followed through the theme-block → recipe hop, so re-pointing one back at a pigment is caught),
-  and a `backdrop-filter` outside `src/components/ui/Overlay.css` (the
-  app's only translucency, and the only place `prefers-reduced-transparency` is answered). Two
-  further structural assertions cover the palette itself: every semantic token is mapped in all four
-  theme blocks, and the two copies of each theme mapping are identical.
-  Off-scale per-view geometry is not an exception: it is named in Layer 4 of `design/tokens.css`
-  (`--row-*`, `--lead-*`, `--palette-*`) and consumed from a co-located `Component.css`.
-  `docs/DESIGN_SYSTEM.md` decides every visual question the tokens don't
-  (interaction states, view states, motion, elevation, the accessibility floor);
-  `docs/UI_CONVENTIONS.md` holds the spacing steps, the primitive catalogue, and the composition
-  rule (which of the six slots an action goes in, and how much one surface may hold).
+- **Design (the Grove system):** the theme is the `@theme` block in `src/index.css` — the app's one
+  stylesheet, holding the tokens, the keyframes, the `.day` / `.hc` variant blocks, and the few
+  things utilities genuinely cannot express (each with a comment saying why). **Components are
+  styled with Tailwind utility classes**, with `cva` for variants and `clsx` for conditionals;
+  Tailwind's numeric 4px scale and arbitrary values (`text-[13px]`, `max-w-[66ch]`) are both the
+  sanctioned spelling. CSS is the deliberate exception, never the habit.
+  Night is the default; `.day` and `.hc` are root classes set by `src/theme.ts` and
+  `src/contrast.ts`, and they combine. Both are **token remaps** — a `day:` or `hc:` variant in a
+  className is a claim that no token could have carried it.
+  **Enforced by two eslint rules, not by review** (`no-restricted-syntax` in `eslint.config.js`): no
+  colour literal in a `className` (a hex survives both variants unchanged, which is the one literal
+  that is not merely untidy but wrong), and no `.css` import outside `src/index.css` without a
+  justifying `eslint-disable` comment — so each surviving pre-Grove stylesheet stays countable and
+  dated. `pnpm test` adds `src/theme.test.ts` and `src/contrast.test.ts`, which pin the two variant
+  classes to the DOM.
+  `docs/DESIGN_SYSTEM.md` is the doctrine and decides every visual question the tokens don't (what
+  green may mean, rectangles vs pills, the one press spec, motion and its reduced-motion swaps,
+  glass, the measured contrast floor); `docs/UI_CONVENTIONS.md` is the mechanics (which utility to
+  write, the primitive catalogue, the six-slot composition rule, and how to migrate a screen).
+  **The migration is in flight.** `design/tokens.css`, the `@theme inline` bridge at the bottom of
+  `src/index.css`, and the per-component `*.css` files are frozen legacy, kept alive for screens
+  that have not moved yet: fix bugs in them, never extend them, and **never let new code consume
+  them**. Each screen ticket deletes its own stylesheet; a final cleanup ticket removes the rest
+  along with `src/fonts.ts` and the `@fontsource` dependencies (Grove's three faces ship with
+  Windows, so the finished app fetches no font).
 - **Spec agreement:** `docs/FRONTMATTER_SCHEMA.md` and `docs/MCP_TOOL_SURFACE.md` mirror each
   other (frontmatter fields ≡ the MCP `NoteSummary` shape). Editing one requires checking the
   other in the same change.

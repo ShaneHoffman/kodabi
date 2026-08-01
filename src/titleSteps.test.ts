@@ -15,11 +15,16 @@ import { describe, expect, it } from "vitest";
  * but that leaves the other emitters — `health`, `terminal`, `chat`, and every
  * title spelled by hand (the three dialog headings, the note editor's three) —
  * covered by nothing. This is the guard for all of them at once, in the same
- * static-scan idiom as designTokens.test.ts and invokeParity.test.ts: one file
- * that cannot be forgotten, rather than an assertion per call site that can.
+ * static-scan idiom as invokeParity.test.ts: one file that cannot be forgotten,
+ * rather than an assertion per call site that can.
  *
  * It also covers the case those per-site assertions never could — a NEW
  * ViewFrame variant, or a new hand-spelled title, added with a bare size.
+ *
+ * PRE-GROVE SCOPE. The four `--fs-title-*` steps belong to the legacy token
+ * layer, so this guards the screens that have not migrated yet. Grove sets a
+ * view title with utilities and has no title-step triple to drop half of; when
+ * the last screen moves, this file goes with design/tokens.css.
  */
 
 const ROOT = process.cwd();

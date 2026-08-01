@@ -277,7 +277,7 @@
   gap: var(--space-sm);
   min-width: var(--measure-menu);
   background: var(--overlay);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-pill-legacy);
   padding: var(--space-xs) var(--space-sm);
   box-shadow: var(--lift-menu);
   text-align: left;

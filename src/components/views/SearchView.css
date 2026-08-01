@@ -20,7 +20,7 @@
   align-items: center;
   gap: var(--space-xs);
   background: var(--surface);
-  border-radius: var(--radius-card);
+  border-radius: var(--radius-card-legacy);
   padding: var(--field-search-y) var(--space-sm);
   box-shadow: var(--lift);
 }

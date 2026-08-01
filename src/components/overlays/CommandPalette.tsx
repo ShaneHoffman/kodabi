@@ -10,6 +10,7 @@ import { useFilteredCommands } from "../../useFilteredCommands";
 import { useNavigation } from "../../useNavigation";
 import { useScrollIntoView } from "../../useScrollIntoView";
 import { Overlay } from "../ui/Overlay";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this overlay's Grove ticket deletes it
 import "./CommandPalette.css";
 
 type Props = {

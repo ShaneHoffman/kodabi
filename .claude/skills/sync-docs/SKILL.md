@@ -21,6 +21,7 @@ Scope from the caller (may be empty): $ARGUMENTS
   `MCP_TOOL_SURFACE.md`
 - `.github/workflows/ci.yml` or gate changes → `CLAUDE.md` + `README.md`
 - `src/components/ui/**` → `UI_CONVENTIONS.md`
+- `src/index.css` (the `@theme` block or the `.day`/`.hc` variants) → `DESIGN_SYSTEM.md`
 - new top-level crate/dir → `README.md` layout block
 - `Cargo.toml` `[features]` → `CLAUDE.md` feature-leg instructions
 

@@ -32,9 +32,10 @@ and wire types → the UI. Present it and get the user's go-ahead with
    or run `/add-tauri-command` per command.
 3. **Register** in `src-tauri/src/lib.rs`.
 4. **TS** — typed `invoke` wrappers and wire types in the owning `src/` module.
-5. **UI** — compose the primitives in `src/components/ui/` and use **named token
-   steps only**, never numeric utilities or hard-coded color/spacing (`design/tokens.css`
-   is the source; `docs/UI_CONVENTIONS.md` is the discipline).
+5. **UI** — compose the primitives in `src/components/ui/` and style with **Grove
+   utilities**, never a colour literal and never a new stylesheet (the `@theme` block in
+   `src/index.css` is the source; `docs/DESIGN_SYSTEM.md` is the doctrine and
+   `docs/UI_CONVENTIONS.md` is the discipline).
 
 ## 4. Verify
 

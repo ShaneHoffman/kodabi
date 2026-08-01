@@ -1,4 +1,5 @@
 import type { ComponentPropsWithRef, ReactNode } from "react";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; the primitives' Grove ticket deletes it
 import "./Button.css";
 
 type Props = ComponentPropsWithRef<"button"> & {
@@ -30,8 +31,11 @@ type Props = ComponentPropsWithRef<"button"> & {
  *             so a selected row can add its own `bg-surface`.
  *
  * `destructive` is not a fourth weight: it wears the quiet ghost's exact
- * chrome (there is no red token — docs/DESIGN_SYSTEM.md marks a destructive
- * action by confirmation, not colour) and exists so call sites state intent.
+ * chrome (docs/DESIGN_SYSTEM.md §2 marks a destructive action by
+ * confirmation, not colour) and exists so call sites state intent.
+ * Grove added a `--color-danger`, which does NOT change that: it is spent on
+ * the confirm control inside a confirmation dialog, never on the button that
+ * opens one.
  * It may only ever appear inside a confirmation dialog, as the non-default
  * control beside a `primary` Cancel that holds initial focus.
  *
