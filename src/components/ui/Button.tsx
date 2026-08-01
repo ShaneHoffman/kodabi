@@ -53,7 +53,14 @@ const buttonVariants = cva(
     // a busy button carries aria-disabled rather than the native attribute
     // and must be as inert as a genuinely disabled one.
     "not-disabled:not-aria-disabled:active:scale-97",
-    "motion-reduce:active:scale-100",
+    // The reduced-motion swap REPEATS both guards, and it has to. `:not()`
+    // takes its argument's specificity, so the guarded press above weighs
+    // (0,4,0); a bare `motion-reduce:active:scale-100` weighs (0,2,0) and
+    // loses on specificity no matter what order Tailwind emits it in — the
+    // swap would be in the markup and dead in the cascade. Matched guards make
+    // the two equal, and the redefined `motion-reduce` variant sorts after, so
+    // stillness wins. The other silent-CSS failure this file warns about.
+    "motion-reduce:not-disabled:not-aria-disabled:active:scale-100",
     "focus-ring",
     "disabled:cursor-not-allowed aria-disabled:cursor-not-allowed",
     // The disabled LOOK is one step down the ink ladder for every variant.

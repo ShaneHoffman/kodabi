@@ -603,6 +603,16 @@
       0 24px 60px rgb(46 60 36 / 0.28);
   }
 
+  /* …but that literal must not outrank the contrast promotion. `.hc.day`
+     takes --color-edge to 0.32, well past day's strengthened 0.16, so the
+     surface that floats over anything hands its border back to the token —
+     otherwise More contrast would promote every edge in the app EXCEPT the
+     two that most need it. `:where()` adds no specificity, so this wins by
+     coming second. */
+  &:where(.hc.day, .hc.day *) {
+    border-color: var(--color-edge);
+  }
+
   @media (prefers-reduced-transparency: reduce) {
     background: #1a2315;
     backdrop-filter: none;
@@ -631,6 +641,11 @@
     box-shadow:
       inset 0 1px 0 var(--color-edge-lit),
       0 32px 90px rgb(46 60 36 / 0.28);
+  }
+
+  /* The overlay's contrast carve-out, for the same reason. */
+  &:where(.hc.day, .hc.day *) {
+    border-color: var(--color-edge);
   }
 
   @media (prefers-reduced-transparency: reduce) {

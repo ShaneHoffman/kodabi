@@ -94,11 +94,14 @@ Always the token utility, never the literal:
 | A glass surface | `glass-top`, `glass-dock`, `glass-panel`, `glass-card`, `glass-overlay`, `glass-dialog`, `glass-scrim` |
 | The focus ring | `focus-ring`, or `focus-ring-inset` where the control fills its container |
 
-The seven `glass-*` recipes each carry the whole material — fill, blur, lit edge, border, shadow, and
-their rung of the radius ladder — plus their own `.day` and `prefers-reduced-transparency` branches
-(DESIGN_SYSTEM §5). They are `@utility` rather than a stack of classes because reduced transparency
-removes a *property* (`backdrop-filter`) rather than remapping a value, which no token and no variant
-can express. Add layout at the call site, not material: `glass-card p-4`, never `glass-card bg-*`.
+Each recipe carries a whole surface — its fill, blur, lit edge, border, shadow and rung of the radius
+ladder — plus its own `.day` branch, so a surface cannot be spelled at the wrong roundness or lose
+half its material. The six thicknesses each carry a `prefers-reduced-transparency` branch too;
+`glass-scrim` is the deliberate exception on both counts (a fill and nothing else, and no blur to
+drop), and DESIGN_SYSTEM §5 says which parts each one omits and why. They are `@utility` rather than
+a stack of classes because reduced transparency removes a *property* (`backdrop-filter`) rather than
+remapping a value, which no token and no variant can express. Add layout at the call site, not
+material: `glass-card p-4`, never `glass-card bg-*`.
 
 Folder hues are chosen by data, not by markup, so they arrive as a lookup from the project rather
 than as a literal class — `PROJECT_HUE[project]` returning `"text-coral"`, never a computed
@@ -133,6 +136,14 @@ That the swap is visible in the markup is the point (DESIGN_SYSTEM §4).
 `scale` property rather than a transform function, so a transition naming `transform` animates
 nothing and the press lands as a snap. The failure is silent — check the built CSS, not the screen.
 
+**The swap must carry every guard the thing it swaps carries.** The snippet above works because both
+halves weigh the same: `.x:active` against `.x:active`, decided by order, and the redefined
+`motion-reduce` sorts last. Add a guard to one side only and the swap goes dead —
+`not-disabled:not-aria-disabled:active:scale-97` weighs (0,4,0), because `:not()` takes its
+argument's specificity, and a bare `motion-reduce:active:scale-100` at (0,2,0) loses on specificity
+whatever the order. Repeat the guards: `motion-reduce:not-disabled:not-aria-disabled:active:scale-100`
+(`Button` is the live example). Same failure mode as the one above, same check — read the built CSS.
+
 `hover:` and `motion-reduce:` are **redefined** in `src/index.css`, so both mean more than Tailwind's
 defaults everywhere they appear. `hover:` also requires `(pointer: fine)`, because a touch device can
 satisfy `(hover: hover)` and then strand a tapped control in its hover state. `motion-reduce:` also
@@ -144,8 +155,9 @@ in-app toggle would work on legacy screens and silently do nothing on Grove ones
 ## 4. Primitives
 
 `src/components/ui/` holds the shared controls. **`Button`, `Menu`, `Dialog` and
-`DestructiveConfirmDialog` are Grove; the rest are pre-Grove** and four still carry their own
-stylesheet, which their screen tickets delete. **Behaviour is not pre-Grove either way** — the
+`DestructiveConfirmDialog` are Grove; the rest are pre-Grove** and five still carry their own
+stylesheet (`TextField`, `Checkbox`, `Select`, `Overlay`, `ViewFrame` — `StatusMessage` never had
+one), which their screen tickets delete. **Behaviour is not pre-Grove either way** — the
 contracts below are live, they are what the components actually promise, and a restyle must preserve
 every one of them.
 
