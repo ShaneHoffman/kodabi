@@ -483,7 +483,11 @@ describe("InboxView", () => {
           "Couldn't delete the note: the vault is read-only",
         ),
       ).toBeInTheDocument();
-      expect(screen.getByText("Quarterly planning")).toBeInTheDocument();
+      // Scoped to the list: the open dialog names the note too, in its subject
+      // strip, so an unscoped query would match either one.
+      expect(
+        within(screen.getByTestId("inbox-list")).getByText("Quarterly planning"),
+      ).toBeInTheDocument();
     });
   });
 

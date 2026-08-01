@@ -317,6 +317,20 @@ Three things the prototype does **not** do, and one prediction it falsified.
   an **accessibility preference** can add or remove a containing block, so the grep's answer is not a
   property of the stylesheet alone and re-running it means re-running it in both states.
 
+  **Update, the Grove dialogs ticket:** `ConsentNudge` moved off `.ui-overlay` onto the Grove
+  `Dialog`, and *that* containing block is not viewport-sized. `glass-dialog` carries
+  `backdrop-filter: blur(32px)`, so the popup captures `position: fixed` — measured in a real
+  Chromium, a fixed `top:0 left:0` child inside the open dialog lands at the popup's own corner, not
+  at `0,0`. The escape hatch this whole section is about is therefore **gone** for a menu inside a
+  dialog: it can no longer reach past the popup.
+
+  Measured anyway, on the real control rather than by reasoning: the retention list still lands
+  glued to its trigger, right edges flush, at full size, and `position-try-fallbacks: flip-block`
+  fires and places it **above** the trigger, because the space below it inside the popup is shorter
+  than the list. That is the fallback doing its job, so the outcome is correct — but it means the
+  flipped placement, and with it the known `transform-origin` discrepancy above, is now the *usual*
+  case for that one control rather than the rare one.
+
   ```
   transform | filter | backdrop-filter | perspective | contain | will-change | container-type
   ```

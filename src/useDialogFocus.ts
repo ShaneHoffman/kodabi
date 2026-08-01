@@ -9,7 +9,8 @@ import { useEffect, useRef } from "react";
  *
  * `findInitialFocus` runs once on mount and is read through a ref, so passing a
  * fresh inline closure each render is fine. Extracted from the identical
- * effects `CommandPalette` and `ConsentNudge` both hand-rolled.
+ * effects `CommandPalette` and `ConsentNudge` both hand-rolled; the palette is
+ * the last caller, since a Grove `Dialog` gets this from base-ui instead.
  */
 export function useDialogFocus(findInitialFocus: () => HTMLElement | null): void {
   const findInitialFocusRef = useRef(findInitialFocus);

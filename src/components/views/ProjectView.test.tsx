@@ -83,7 +83,10 @@ describe("ProjectView delete flow", () => {
 
     await user.click(deleteButton);
 
-    const dialog = screen.getByRole("dialog", { name: "Delete Growth?" });
+    const dialog = screen.getByRole("dialog", { name: "Delete this project?" });
+    // The title asks the question; the slug is named in its own strip, so the
+    // user confirms a thing rather than a pronoun.
+    expect(within(dialog).getByText("Growth")).toBeInTheDocument();
     // 2 direct notes + 3 in Growth/Q4: deletion takes the whole subtree.
     expect(
       within(dialog).getByText("Its 5 notes will move back to the Inbox."),
@@ -112,7 +115,7 @@ describe("ProjectView delete flow", () => {
     const deleteButton = await openGrowth(user);
 
     await user.click(deleteButton);
-    const dialog = screen.getByRole("dialog", { name: "Delete Growth?" });
+    const dialog = screen.getByRole("dialog", { name: "Delete this project?" });
     await user.click(within(dialog).getByRole("button", { name: "Delete project" }));
 
     await waitFor(() => {
@@ -146,7 +149,7 @@ describe("ProjectView delete flow", () => {
     const deleteButton = await openGrowth(user);
 
     await user.click(deleteButton);
-    const dialog = screen.getByRole("dialog", { name: "Delete Growth?" });
+    const dialog = screen.getByRole("dialog", { name: "Delete this project?" });
     await user.click(within(dialog).getByRole("button", { name: "Delete project" }));
 
     expect(
@@ -154,7 +157,7 @@ describe("ProjectView delete flow", () => {
         "Couldn't delete the project: folder is locked",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "Delete Growth?" })).toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "Delete this project?" })).toBeInTheDocument();
   });
 });
 

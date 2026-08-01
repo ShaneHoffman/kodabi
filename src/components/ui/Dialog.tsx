@@ -32,9 +32,8 @@ type Props = {
  * dismiss, the page behind stops scrolling, and the popup carries `role`,
  * `aria-modal` and its labelling. The pre-Grove `Overlay` deliberately did NOT
  * trap focus, and each of its callers hand-rolled a Tab strategy — that is the
- * duplication this replaces. `Overlay` stays for the callers that have not
- * migrated (the palette, the consent nudge, the create-project dialog); each
- * moves in its own screen ticket.
+ * duplication this replaces. `Overlay` stays for the one caller that has not
+ * migrated (the palette), which moves in its own screen ticket.
  *
  * Two details are load-bearing and easy to undo by accident:
  *

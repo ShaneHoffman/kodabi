@@ -3,6 +3,7 @@ import { DAY_CLASS } from "../../theme";
 import { HC_CLASS } from "../../contrast";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
+import { Field } from "../ui/Field";
 import { Menu } from "../ui/Menu";
 
 /*
@@ -99,7 +100,7 @@ export function PrimitiveGallery() {
 
       <div className="flex gap-5 p-5">
         <nav className="glass-dock flex w-56 flex-none flex-col gap-1 p-3" aria-label="Sections">
-          {["Buttons", "Glass", "Overlays", "Scrollbars", "Focus"].map((name) => (
+          {["Buttons", "Fields", "Glass", "Overlays", "Scrollbars", "Focus"].map((name) => (
             <a
               key={name}
               href={`#${name.toLowerCase()}`}
@@ -134,6 +135,32 @@ export function PrimitiveGallery() {
               <Button variant="pill" disabled>
                 transcript.md
               </Button>
+            </div>
+          </Section>
+
+          <Section
+            title="Fields"
+            note="The same glass a button is, at input size. Focus moves the border; the caret is the kodama's."
+          >
+            {/* Uncontrolled on purpose: a catalogue page has no business
+                holding the value of every control it displays. */}
+            <div className="flex max-w-sm flex-col gap-5" id="fields">
+              <Field
+                label="Project name"
+                placeholder="project-name"
+                hint={
+                  <>
+                    Nested paths like <span className="font-data">household/garage</span>{" "}
+                    work too.
+                  </>
+                }
+              />
+              <Field
+                label="Project name"
+                defaultValue="inbox"
+                error="A project cannot be called inbox."
+              />
+              <Field label="Days to keep" type="number" min={1} defaultValue={30} />
             </div>
           </Section>
 
@@ -192,7 +219,11 @@ export function PrimitiveGallery() {
 
             {/* Driven by `open` rather than by mounting, so the EXIT animation
                 plays — the one thing a conditionally-mounted dialog cannot
-                show you. */}
+                show you. That is also why this is the raw `Dialog` and not
+                `DestructiveConfirmDialog`, which is mounted-is-open: the body
+                below is a hand-copy of that component's structure, and the two
+                have to be kept in step by hand. The subject is deliberately
+                long enough to truncate. */}
             <Dialog
               open={confirming}
               onDismiss={() => setConfirming(false)}
@@ -201,15 +232,23 @@ export function PrimitiveGallery() {
               className="flex flex-col gap-4"
             >
               <h2 className="text-[15px] font-semibold text-ink">Delete this note?</h2>
-              <p className="text-[13px] leading-relaxed text-ink-read">
-                This note, along with its recording and transcript, will be permanently deleted.
+              <p
+                title="Sprinkler quotes, the 9th green rebuild, and what Miguel wants doing before the fall tournament"
+                className="overflow-hidden text-ellipsis whitespace-nowrap rounded-button border border-edge bg-wash px-3.5 py-2.5 text-[13.5px] font-semibold text-ink shadow-[inset_0_1px_0_var(--color-edge-lit)]"
+              >
+                Sprinkler quotes, the 9th green rebuild, and what Miguel wants doing before
+                the fall tournament
               </p>
+              <p className="text-[13px] leading-relaxed text-ink-dim">
+                Its recording and transcript are deleted with it.
+              </p>
+              <p className="text-[13px] leading-relaxed text-danger">This cannot be undone.</p>
               <div className="flex items-center justify-end gap-2.5">
+                <Button ref={cancelRef} variant="quiet" onClick={() => setConfirming(false)}>
+                  Cancel
+                </Button>
                 <Button variant="danger" onClick={() => setConfirming(false)}>
                   Delete note
-                </Button>
-                <Button ref={cancelRef} onClick={() => setConfirming(false)}>
-                  Cancel
                 </Button>
               </div>
             </Dialog>
