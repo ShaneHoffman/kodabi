@@ -12,7 +12,9 @@ import { useScrollIntoView } from "../../useScrollIntoView";
 import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this view's Grove ticket deletes it
 import "./markdownReading.css";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this view's Grove ticket deletes it
 import "./ChatView.css";
 
 /** The bottom sentinel the log keeps in view as the conversation grows. */

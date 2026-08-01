@@ -17,6 +17,7 @@ import { CreateProjectDialog } from "../dialogs/CreateProjectDialog";
 import { ListeningIndicator } from "../capture/ListeningIndicator";
 import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; the shell's Grove ticket deletes it
 import "./Sidebar.css";
 
 type Props = {

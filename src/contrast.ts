@@ -28,6 +28,18 @@
 
 const STORAGE_KEY = "kodabi:contrast";
 const ATTRIBUTE = "data-contrast";
+/** The Grove high-contrast class, which combines with `day`: `.hc.day` is the
+ * high-contrast day grove. */
+const HC_CLASS = "hc";
+
+/** The OS request, which is the other way into high contrast. The pre-Grove
+ * tokens.css answers this media query itself; Grove's `.hc` block is plain CSS
+ * with no query of its own, so the OS branch has to be read here and folded
+ * into the class. Module scope so the listener attaches once per window. */
+const prefersMoreContrast =
+  typeof window !== "undefined" && typeof window.matchMedia === "function"
+    ? window.matchMedia("(prefers-contrast: more)")
+    : null;
 /** The one value the attribute and storage ever hold. `more` rather than `on`
  * because it mirrors the media feature's own vocabulary — a second word for one
  * state is how a selector and the code that sets it drift apart. */
@@ -46,11 +58,17 @@ export function readContrast(): boolean {
 }
 
 /** Set the preference and reflect it on <html>, where the token remap keys off
- * it. Must target documentElement, not body — tokens.css keys off :root. */
+ * it. Must target documentElement, not body — both systems key off :root.
+ *
+ * Two of them, while the Grove migration runs: `data-contrast` for the
+ * pre-Grove tokens.css, and the `hc` class for Grove. Only the in-app toggle is
+ * persisted; the OS request is read live and OR-ed in, which is what keeps the
+ * switch additive — it can add contrast, never take it away. */
 export function applyContrast(more: boolean): void {
   const root = document.documentElement;
   if (more) root.setAttribute(ATTRIBUTE, VALUE);
   else root.removeAttribute(ATTRIBUTE);
+  root.classList.toggle(HC_CLASS, more || (prefersMoreContrast?.matches ?? false));
   try {
     if (more) window.localStorage.setItem(STORAGE_KEY, VALUE);
     else window.localStorage.removeItem(STORAGE_KEY);
@@ -59,8 +77,13 @@ export function applyContrast(more: boolean): void {
   }
 }
 
-/** Reflect the stored preference at window start. Called from each entry
- * module, since the quick-capture and overlay windows mount no shell. */
+/** Reflect the stored preference at window start, and keep the OS half of the
+ * switch live. Called from each entry module, since the quick-capture and
+ * overlay windows mount no shell. */
 export function startContrast(): void {
   applyContrast(readContrast());
+  // The OS can turn a Contrast theme on mid-session. Re-derives from storage
+  // rather than from the class, so turning the OS request back off cannot
+  // clear a preference the user set in the app.
+  prefersMoreContrast?.addEventListener("change", () => applyContrast(readContrast()));
 }

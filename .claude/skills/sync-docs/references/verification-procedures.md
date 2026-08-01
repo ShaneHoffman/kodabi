@@ -55,23 +55,27 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 ## Anchor 4 — UI primitives ↔ docs/UI_CONVENTIONS.md
 
 - **Source of truth:** `src/components/ui/` (the exported primitives and their props).
-- **Mirror:** the "Primitives" section of `docs/UI_CONVENTIONS.md` — `Button` (variants,
-  `loading`), `TextField` (`error`, `hint`), `Select` (`disabled` vs **`busy`**,
-  `emptyLabel`, keyboard behavior), `Checkbox` (and its `--check-*` coupling to the
-  shared markdown surface's task list), `ViewFrame` (eight variants; `summary` is a
-  **type error** outside `queue`/`library`/`health`, and `action` is a **type error** on
-  `doc`/`search` — the two that draw no header — neither being a silent no-op),
-  `StatusMessage` (variant → ARIA
-  role), `Overlay` — plus the "What consumes these today" table.
+- **Mirror:** §4 of `docs/UI_CONVENTIONS.md` — the primitive table (name → variants) and
+  the "contracts worth not breaking" list beneath it: `Button` (`loading` vs `disabled`,
+  and the focus reason), `Select` (`busy` vs `disabled`, the combobox keyboard set,
+  `hideLabel`, `emptyLabel`), `TextField` (`error`, `hint` → `aria-describedby`),
+  `StatusMessage` (variant → ARIA role), `ViewFrame` (eight variants; `summary` a **type
+  error** outside `queue`/`library`/`health`, `action` a **type error** on `doc`/`search`,
+  neither a silent no-op), `Overlay` (click-not-pointerdown, both ends on the backdrop, no
+  focus trap), `DestructiveConfirmDialog` (presentational, never self-closing).
 - **Do not look for `Textarea`, `ListRow` or `PlaceholderView`.** All three were
-  deleted (they had no call sites); `UI_CONVENTIONS.md` keeps a "there is no X
-  primitive" note for the first two saying what to copy instead. A live reference to
-  any of them anywhere is itself a failure.
-- **Verify:** read each primitive's exported prop types and compare against the
-  documented variants/props/behavior claims. Also confirm the consumers table names
-  the primitives each surface actually imports.
-- **Failure:** a documented variant or prop the component no longer has, a new
-  primitive the doc omits, or a surface whose imports contradict the table.
+  deleted (they had no call sites); §4 keeps a "there is no X primitive" note saying what
+  to do instead. A live reference to any of them anywhere is itself a failure.
+- **Verify:** read each primitive's exported prop types and compare against the documented
+  variants and the contract list. The contracts are behavioural, so check the
+  implementation and the component's tests, not just the type — `loading` and `busy` in
+  particular are only correct if the control stays focusable and declines activation.
+- **Failure:** a documented variant or prop the component no longer has, a new primitive
+  §4 omits, or a contract in the list that the component no longer honours.
+- **§4 documents behaviour, not styling.** These primitives are pre-Grove and still carry
+  their own stylesheets; §4 says so. Do not report their styling as drift against
+  `DESIGN_SYSTEM.md` — the primitives' Grove ticket restyles them, and until then the two
+  documents are describing different layers on purpose.
 
 > This list is the thing an auditor works from, so **it goes stale the moment a
 > primitive is added or removed** and nothing else will catch that. Updating it is
@@ -94,33 +98,44 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 - **Failure:** a feature CI checks that `CLAUDE.md`'s commit instructions don't
   mention.
 
-## Anchor 6 — Design tokens ↔ docs/DESIGN_SYSTEM.md
+## Anchor 6 — The Grove theme ↔ docs/DESIGN_SYSTEM.md
 
-- **Source of truth:** `design/tokens.css` (the token families) and the two guards,
-  `src/designTokens.test.ts` plus the `no-restricted-syntax` block in `eslint.config.js`.
-- **Mirror:** `docs/DESIGN_SYSTEM.md` — the motion table (`--dur-*` / `--ease-*`), the
-  layer names, the contrast matrices in §6, the switch tokens (`--move`, `--contrast`)
-  and what each one is documented to move, and the enforcement claims in §7.
-- **Verify:** every `--dur-*` and `--ease-*` token in `tokens.css` appears in the §4 table
-  and vice versa; the contrast figures match a recomputation from the Layer-1 pigments,
-  **in both states** — §6 carries a resting matrix and a `--contrast: 1` one, and an
-  auditor who recomputes only the first will report PASS on a stale second;
-  §7's description of what each guard catches matches what the guard actually asserts.
-  The switch tokens need naming explicitly because neither is a `--dur-*` or an
-  `--ease-*`, so the first check does not reach them.
-- **Failure:** a motion token the table omits, a contrast figure that no longer matches
-  the pigments in either state, or an enforcement claim the guards do not make.
-  (`pnpm test` covers the token/theme structure itself — this anchor covers the prose.)
-- **Recompute a gated pair against the GATED ground, both sides.** The switch moves
-  grounds as well as inks (`--menu-hover`, `--track`, `--highlight`), so measuring a
-  `--contrast: 1` ink against the resting fill reads high by most of a point and
-  invents a floor the app never clears. That mistake shipped once, in the two `-hc`
-  pigment notes, and §6's table was the thing that caught it.
-- **Coverage is already a gate; the figures are not.** "A token §6 says the switch
-  moves that `tokens.css` no longer gates" is asserted by `src/designTokens.test.ts`
-  ("spends the contrast switch on every token that promises it"), which follows the
-  theme-block → recipe hop. Don't hand-audit it — audit the numbers, which nothing
-  can check mechanically.
+- **Source of truth:** the `@theme` block and the `.day` / `.hc` blocks in
+  `src/index.css` (the tokens, the keyframes, the two variants), plus the two Grove
+  guards in `eslint.config.js`'s `no-restricted-syntax` block.
+- **Mirror:** `docs/DESIGN_SYSTEM.md` — the type table in §1, the radius ladder in §5,
+  the motion vocabulary and the reduced-motion swap table in §4, the measured contrast
+  tables in §6, and the enforcement claims in §7. Also `docs/UI_CONVENTIONS.md` §3,
+  whose "want → write" table names the utilities the tokens generate.
+- **Verify:**
+  1. Every `--animate-*` in `@theme` appears in §4's swap table with a partner, and
+     every `@keyframes` has an `--animate-*` that references it (a keyframe inside
+     `@theme` with no companion variable is never emitted).
+  2. Every `--radius-*` appears in §5's ladder, and every `--font-*` in §1's table.
+  3. **The contrast figures are recomputed, not eyeballed.** §6 quotes ratios against
+     both the ground AND the composited glass panel; recompute both columns from the
+     token values with a WCAG 2.1 relative-luminance check, compositing alpha first.
+     The panel is the tighter number and the one the floor is set on — an auditor who
+     checks only the ground column will report PASS on a `ink-faint` that fails where
+     it actually renders. That is the exact defect §6 records having caught once.
+  4. Every token the `.day` block sets also exists in `@theme` (a day value for a
+     token that no longer exists is dead, and reads as coverage).
+  5. §7's description of what each guard catches matches what the guards assert.
+- **Failure:** an animation or radius the doc omits, a contrast figure that no longer
+  matches the tokens in either column, a `.day` override with no base token, or an
+  enforcement claim the guards do not make.
+- **The `.hc` block is a closed set, and §6 says so.** It moves exactly `ink-faint`
+  and `edge`. If it has grown a third token, §6's "nothing else moves, because the
+  table shows nothing else needs to" is now false and the table should show why.
+- **Nothing here is machine-checked, unlike the pre-Grove anchor.** The old token
+  guard asserted theme-block coverage in `pnpm test`; Grove retired it along with the
+  stylesheets it scanned. Every check above is this auditor's job in full.
+
+> **Migration note (Phase 4).** `design/tokens.css`, the `@theme inline` bridge at the
+> bottom of `src/index.css`, and the per-component `*.css` files are frozen legacy for
+> unmigrated screens. They are **not** an anchor: do not audit them against
+> `DESIGN_SYSTEM.md`, which no longer describes them. Delete this note when the final
+> cleanup ticket removes them.
 
 ## Anchor 7 — MCP tool surface ↔ the server's committed schemas
 

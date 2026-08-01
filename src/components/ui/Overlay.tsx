@@ -4,6 +4,7 @@ import {
   type ReactNode,
   type Ref,
 } from "react";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; the primitives' Grove ticket deletes it
 import "./Overlay.css";
 
 type Props = {

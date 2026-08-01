@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useCapturePipeline } from "../../useCapturePipeline";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this overlay's Grove ticket deletes it
 import "./CaptureToast.css";
 
 type Notice = {

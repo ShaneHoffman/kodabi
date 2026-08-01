@@ -42,12 +42,15 @@ encryption is a later consideration.
 
 ```
 docs/                   # Strategy & spec docs — roadmap, aesthetic direction, founding doc.
-design/                 # Locked design tokens — design/tokens.css is the single source of
-                        # truth for color, type, and spacing; imported by the app, never
-                        # duplicated.
-src/                    # React + TypeScript frontend. src/index.css bridges the tokens
-                        # into Tailwind v4 utilities; src/fonts.ts self-hosts the Source
-                        # typeface trio.
+design/                 # LEGACY design tokens — design/tokens.css served the pre-Grove
+                        # system and is frozen, kept only for screens not yet migrated
+                        # to Grove. A final cleanup ticket deletes it.
+src/                    # React + TypeScript frontend. src/index.css is the app's one
+                        # stylesheet: the Grove theme (Tailwind v4 @theme tokens,
+                        # keyframes, the .day/.hc variants) plus the frozen legacy
+                        # bridge below it. src/fonts.ts self-hosts the pre-Grove Source
+                        # typeface trio and goes with the legacy layer — Grove's three
+                        # faces ship with Windows.
 src-tauri/              # Tauri v2 binary crate — the desktop shell and its three
                         # windows (main, quick capture, capture overlay pill).
 crates/kodabi-core/     # Pure, UI-agnostic, unit-testable data layer: settings, the

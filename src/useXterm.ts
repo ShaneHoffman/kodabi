@@ -1,6 +1,9 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal, type ITheme } from "@xterm/xterm";
+// xterm.js ships its own required stylesheet — the terminal does not render
+// without it, and it is a vendor file we neither write nor migrate.
+// eslint-disable-next-line no-restricted-syntax -- third-party stylesheet, not ours to replace
 import "@xterm/xterm/css/xterm.css";
 import {
   SETTINGS_CHANGED_EVENT,

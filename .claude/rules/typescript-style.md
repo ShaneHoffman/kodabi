@@ -21,10 +21,17 @@ The frontend is TypeScript strict, and the strictness is a gate, not a suggestio
   or payload restates the serde shape of its `#[tauri::command]` wrapper, with a doc
   comment naming the Rust source (the `useNotes.ts` pattern). See
   [`tauri-command-parity`](tauri-command-parity.md).
-- **No new UI runtime dependencies without discussion.** The app holds a
-  zero-UI-dependency posture — the hand-rolled `Select` primitive (a full
-  combobox with no headless library) is the precedent. Add a dependency only after
-  agreeing it's worth the weight. The posture was re-tested against base-ui in
-  2026-07 and held; [`docs/decisions/popover-primitive.md`](../../docs/decisions/popover-primitive.md)
-  is the evidence, including what would overturn it. Read it before re-opening
-  the question.
+- **The UI stack is curated, and it is closed.** Grove builds on six packages and
+  no others: `cva` + `clsx` (variants and conditional classes, for every new
+  component), `@base-ui/react` (headless menu / dialog / popover / tooltip),
+  `cmdk` (the command palette), `sonner` (toasts), and `motion` (motion CSS
+  cannot express: gestures, layout animation, interruptible transitions). A
+  seventh needs the same conversation the first six got.
+  This **supersedes the zero-UI-dependency posture** and
+  [`docs/decisions/popover-primitive.md`](../../docs/decisions/popover-primitive.md),
+  which held against base-ui in 2026-07 on the strength of one primitive; Grove
+  needs six, and the arithmetic is different at six.
+  **Installed is not adopted.** The hand-rolled `Select` is a working, tested,
+  accessible combobox: it gets replaced when someone has read what
+  `@base-ui/react` gives in exchange, in its own ticket, not on sight. Same for
+  the palette and the toast. See [`docs/UI_CONVENTIONS.md`](../../docs/UI_CONVENTIONS.md) §4.

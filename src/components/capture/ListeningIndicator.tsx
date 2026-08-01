@@ -3,6 +3,7 @@ import type { CaptureStateEvent } from "../../useCaptureState";
 import { useCaptureState } from "../../useCaptureState";
 import { useDebouncedValue } from "../../useDebouncedValue";
 import { CaptureStatusLine } from "./CaptureStatusLine";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; the capture windows' Grove ticket deletes it
 import "./ListeningIndicator.css";
 
 /**

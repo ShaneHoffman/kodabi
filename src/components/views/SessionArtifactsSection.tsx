@@ -8,6 +8,7 @@ import {
   type SessionArtifacts,
   type TranscriptSegment,
 } from "../../useSessions";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this view's Grove ticket deletes it
 import "./SessionArtifactsSection.css";
 
 /** The visible speaker label per wire channel, and the value tone that

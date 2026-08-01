@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; the capture windows' Grove ticket deletes it
 import "./SpiritMark.css";
 
 /**

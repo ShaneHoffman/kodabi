@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach } from "vitest";
 import { cleanup } from "@testing-library/react";
+import { installMatchMedia, resetMatchMedia } from "./media";
 
 /*
  * Global test setup, loaded by `vite.config.ts`'s `test.setupFiles`.
@@ -30,10 +31,18 @@ if (!("ResizeObserver" in globalThis)) {
   globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
 }
 
+// jsdom has no `matchMedia`. Installed here rather than per-file because
+// `theme.ts` and `contrast.ts` capture their queries at import time, so the stub
+// has to predate the first import of either. See src/test/media.ts.
+installMatchMedia();
+
 // Testing Library only self-registers its cleanup when a global `afterEach`
 // exists, and this suite runs with `globals: false` (explicit imports, per the
 // repo's TypeScript style). Without this, rendered trees pile up across tests
 // in a file and role queries start matching the previous test's DOM.
 afterEach(() => {
   cleanup();
+  // OS preferences are global state on `window`, so they leak between files
+  // exactly the way a rendered tree does.
+  resetMatchMedia();
 });

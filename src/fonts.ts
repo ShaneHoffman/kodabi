@@ -24,6 +24,15 @@
 // The mono face carries neither 300 nor an italic: monospace text in this app
 // is metadata and paths, which are never emphasised.
 
+// PRE-GROVE, AND THE WHOLE FILE IS ON THE WAY OUT. Grove's three faces
+// (Bahnschrift, Cascadia Mono, Georgia) all ship with Windows, so the Grove app
+// fetches no font and needs no @fontsource. These stay only because the
+// unmigrated screens are still set in the Source trio; the final cleanup ticket
+// deletes this module along with the three dependencies.
+//
+// One block disable rather than fifteen line comments: it is one exception with
+// one reason, and fifteen copies of that reason would read as fifteen decisions.
+/* eslint-disable no-restricted-syntax -- pre-Grove webfonts; the Grove cleanup ticket deletes this module */
 import "@fontsource/source-sans-3/400.css";
 import "@fontsource/source-sans-3/400-italic.css";
 import "@fontsource/source-sans-3/500.css";
@@ -38,3 +47,4 @@ import "@fontsource/source-serif-4/700.css";
 import "@fontsource/source-code-pro/400.css";
 import "@fontsource/source-code-pro/500.css";
 import "@fontsource/source-code-pro/600.css";
+/* eslint-enable no-restricted-syntax */

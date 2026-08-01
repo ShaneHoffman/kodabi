@@ -1,31 +1,372 @@
 /* ============================================================
-   Kodabi — Tailwind v4 bridge
+   Kodabi — the Grove theme
 
-   Imports the canonical tokens and re-exposes them as Tailwind theme
-   variables so utilities (bg-bg, text-text, font-serif, gap-sm …) map onto
-   our tokens.
+   This is the app's ONE stylesheet. Screens are styled with Tailwind
+   utilities (plus cva for variants); everything a utility can express
+   lives in a className, not here. Plain CSS in this file is a deliberate
+   exception, never a habit — each one carries a comment saying why a
+   utility could not do the job.
 
-   Nothing here redefines a value — design/tokens.css stays the single
-   source of truth. This file documents the mapping, pulls in the shared
-   primitive recipes, and applies the two bits of global chrome (scrollbars
-   and text selection) that belong to no single component. Reduced motion
-   used to be a third; it is now a token remap in design/tokens.css.
+   Layout of the file:
 
-   What is deliberately NOT bridged: the Layer-4 geometry family
-   (--gutter-*, --measure-*, --sidebar-*) and every elevation, edge and
-   motion token. Those are consumed from a co-located Component.css, which
-   is where a box-shadow or an exact per-view gutter belongs
-   (docs/UI_CONVENTIONS.md).
+     1. the Grove theme      — @theme tokens + keyframes (night values)
+     2. the variants         — .day and .hc, as token remaps
+     3. sanctioned CSS       — the ground glow, global chrome
+     4. LEGACY               — the pre-Grove bridge, kept alive for the
+                               screens that have not migrated yet
+
+   Section 4 is scaffolding with a demolition date. Every screen ticket
+   deletes its own component stylesheet as it migrates, and a final
+   cleanup ticket removes what is left of design/tokens.css, the
+   `@theme inline` bridge, and the webfonts. Nothing new may consume it.
+
+   The doctrine these tokens serve is docs/DESIGN_SYSTEM.md; the
+   mechanics of spelling them are docs/UI_CONVENTIONS.md.
    ============================================================ */
 
 @import "tailwindcss";
+/* LEGACY — unmigrated screens only. See section 4. */
 @import "../design/tokens.css";
 @import "./components/ui/ui.css";
 
-/* `@theme inline` is the critical keyword: it makes Tailwind emit utilities
+/* ============================================================
+   1. THE GROVE THEME
+   ============================================================ */
+
+/* Night is the default and carries no class. `.day` and `.hc` are root
+   classes set by src/theme.ts and src/contrast.ts, and they combine:
+   `.hc.day` is the high-contrast day grove.
+
+   These two variants exist for the handful of cases a token remap cannot
+   express — a surface whose *alpha* differs between grounds, where night
+   lightens with white and day darkens with ink. Reach for a token first;
+   a `day:` in a className is a claim that no token could have carried it. */
+@custom-variant day (&:where(.day, .day *));
+@custom-variant hc (&:where(.hc, .hc *));
+
+/* Plain `@theme`, not `@theme inline`: v4 emits these on `:root` inside
+   `@layer theme` and every utility references the var, so the unlayered
+   `.day` / `.hc` blocks below re-theme the whole app live. (`inline`
+   would bake the night value into each utility and break both variants —
+   it is used in the legacy bridge for the opposite reason: that layer
+   re-themes through a `data-theme` attribute those utilities never see.) */
+@theme {
+  /* ---------- the ground ----------
+     One plane. Grove has no second "surface" colour: a panel is the
+     ground seen through glass, which is an alpha over this, not a token
+     of its own (docs/DESIGN_SYSTEM.md §5). */
+  --color-ground: #111710;
+
+  /* ---------- the ink ladder ----------
+     Four steps, each with a job. `ink` is anything you act on, `read` is
+     prose at rest, `dim` is supporting text, `faint` is metadata. All
+     four clear 4.5:1 on the ground AND on the glass panel above it —
+     the panel is the tighter of the two, and the step that nearly missed
+     it is `faint`. Measured ratios are recorded in DESIGN_SYSTEM §6. */
+  --color-ink: #eef2e7;
+  --color-ink-read: #d7ddcd;
+  --color-ink-dim: #a6b09b;
+  --color-ink-faint: #838d78;
+
+  /* ---------- edges ----------
+     `edge` is the boundary; `edge-lit` is the inset highlight along a
+     surface's top, which is what makes glass read as a raised pane
+     rather than a hole. Both are decorative by design and sit below
+     3:1 — no boundary in Grove is the only thing carrying a meaning. */
+  --color-edge: rgb(255 255 255 / 0.11);
+  --color-edge-lit: rgb(255 255 255 / 0.09);
+
+  /* ---------- green, and what it is not ----------
+     Green is the kodama's colour and it means "the system is doing
+     something with your words": audio flowing, the caret, a match the
+     search found, an action it suggests. It is never progress, never a
+     count, never decoration (DESIGN_SYSTEM §2). `kodama-ink` is the step
+     green takes when it has to carry text rather than be a mark. */
+  --color-kodama: #96ce7c;
+  --color-kodama-ink: #c9e8b6;
+
+  /* Marigold is failure, and only failure. It is deliberately not in the
+     folder palette below, so "a project" and "something went wrong" can
+     never be confused. `danger` is the destructive-confirmation red. */
+  --color-warn: #e7b34a;
+  --color-danger: #ff8d7a;
+
+  /* ---------- folder hues ----------
+     Identity, not status: a hue tells you which project a thing belongs
+     to and nothing else. Markers first (a dot, a card's left border); as
+     text they are the one-word routing guess, which is why each has a
+     day value dark enough to be read. */
+  --color-coral: #f0755f;
+  --color-cobalt: #7a93f2;
+  --color-teal: #52b8a8;
+  --color-plum: #b48ee0;
+
+  /* ---------- type ----------
+     Three faces, three jobs, no overlap. UI is the interface's own
+     voice; data is anything that lines up in a column (clocks, counts,
+     ids, eyebrows); note is the reading face, and the only one that
+     carries a paragraph. All three are system faces on Windows, so
+     Grove ships no webfont. */
+  --font-ui: Bahnschrift, "Segoe UI", sans-serif;
+  --font-data: "Cascadia Mono", Consolas, monospace;
+  --font-note: Georgia, Cambria, serif;
+
+  /* Note prose is set once, here, because a reading size that drifts
+     between screens is the bug this token exists to prevent. The 66ch
+     measure is the other half and is applied at the call site — it is a
+     width, not a font. */
+  --text-note: 15px;
+  --text-note--line-height: 1.75;
+
+  /* ---------- radii ----------
+     The ladder reads as depth: the bigger the thing, the rounder it is.
+     A panel holds a card holds a button. Dialog and palette sit between
+     panel and card because they are card-sized but window-like. */
+  --radius-panel: 18px;
+  --radius-card: 14px;
+  --radius-dialog: 16px;
+  --radius-button: 10px;
+  --radius-pill: 999px;
+
+  /* ---------- motion ----------
+     Two curves. `out-strong` is nearly everything: it leaves fast and
+     arrives slowly, which is what makes a surface feel like it settled
+     rather than stopped. `in-out-strong` is for a thing that leaves the
+     way it came (a card sliding out as it is filed).
+
+     Durations are call-site utilities (`duration-140`), not tokens: the
+     canonical values are press 140 · exit 110–130 · materialize 220 ·
+     rise-in 280, and they are written down in DESIGN_SYSTEM §4. */
+  --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
+
+  /* Surfaces materialize: they scale up from 0.96 and resolve out of a
+     4px blur, so a menu reads as coming into focus rather than being
+     pasted on. Exits are the same idea at ~half the length — the user
+     has already decided, and waiting on the way out is what makes an
+     interface feel slow. */
+  --animate-materialize: materialize 220ms var(--ease-out-strong);
+  --animate-dissolve: dissolve 130ms ease forwards;
+  --animate-rise-in: rise-in 280ms var(--ease-out-strong) both;
+
+  /* The reduced-motion partners. Movement stops; life does not. Paired
+     at the call site with `motion-reduce:` so the swap is visible in the
+     className rather than hidden in a media query (DESIGN_SYSTEM §4). */
+  --animate-fade-in: fade-in 280ms ease both;
+  --animate-fade-out: fade-out 120ms ease forwards;
+
+  /* The kodama. It breathes while audio is flowing and is the only
+     thing in the app that animates forever. The two counter-rotating
+     blobs are what keep the aura from reading as a pulsing circle. */
+  --animate-breathe: breathe 3200ms ease-in-out infinite;
+  --animate-halo: halo 3200ms ease-in-out infinite;
+  --animate-halo-still: halo-still 3200ms ease-in-out infinite;
+  --animate-drift: drift 7000ms linear infinite;
+  --animate-drift-back: drift-back 9500ms linear infinite;
+
+  /* The caret, and the placeholder dot on a note still in the pipeline.
+     Both are opacity-only, so both survive reduced motion untouched. */
+  --animate-caret: caret 1100ms step-end infinite;
+  --animate-pending: pending 1600ms ease-in-out infinite;
+
+  @keyframes materialize {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+      filter: blur(4px);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+      filter: blur(0);
+    }
+  }
+  @keyframes dissolve {
+    to {
+      opacity: 0;
+      transform: scale(0.97);
+      filter: blur(2px);
+    }
+  }
+  @keyframes rise-in {
+    from {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes fade-out {
+    to {
+      opacity: 0;
+    }
+  }
+  @keyframes breathe {
+    50% {
+      transform: scale(1.12);
+    }
+  }
+  @keyframes halo {
+    0%,
+    100% {
+      opacity: 0.16;
+      transform: scale(0.9);
+    }
+    50% {
+      opacity: 0.3;
+      transform: scale(1.12);
+    }
+  }
+  /* The reduced-motion aura: the same breath, held at one size. A
+     duration floor could not have produced this — it would have frozen
+     the drift mid-rotation at whatever shape it happened to hold. */
+  @keyframes halo-still {
+    0%,
+    100% {
+      opacity: 0.16;
+    }
+    50% {
+      opacity: 0.3;
+    }
+  }
+  @keyframes drift {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @keyframes drift-back {
+    to {
+      transform: rotate(-360deg);
+    }
+  }
+  @keyframes caret {
+    50% {
+      opacity: 0;
+    }
+  }
+  @keyframes pending {
+    50% {
+      opacity: 0.3;
+    }
+  }
+}
+
+/* ============================================================
+   2. THE VARIANTS
+
+   Both are token remaps and nothing else. That is the whole discipline:
+   if a variant needs a new rule rather than a new value, the token it
+   should have moved is missing.
+   ============================================================ */
+
+/* Day is not "light mode with the same numbers". The ground gains
+   weight, ink inverts, and every hue darkens far enough to be read on a
+   pale ground — the folder hues especially, which have to survive as
+   one-word text and not just as dots. */
+.day {
+  --color-ground: #edefe3;
+
+  --color-ink: #1e2418;
+  --color-ink-read: #333d29;
+  --color-ink-dim: #55604a;
+  --color-ink-faint: #5f6a54;
+
+  /* Day's lit edge is white at real strength, not a whisper: on a pale
+     ground the highlight is what separates a raised pane from the page,
+     where at night the shadow does that work. */
+  --color-edge: rgb(24 32 16 / 0.13);
+  --color-edge-lit: rgb(255 255 255 / 0.6);
+
+  --color-kodama: #4f7b3f;
+  --color-kodama-ink: #3a6030;
+  --color-warn: #9c7408;
+  --color-danger: #a83a20;
+
+  --color-coral: #c44f31;
+  --color-cobalt: #3a57cf;
+  --color-teal: #22766a;
+  --color-plum: #7647b8;
+}
+
+/* More contrast is a promotion, not a palette. Faint ink is promoted to
+   the dim step (metadata stops whispering) and edges take a stronger
+   value (structure stops being implied). Nothing else moves, because
+   everything else already clears the floor — see DESIGN_SYSTEM §6. */
+.hc {
+  --color-ink-faint: #a6b09b;
+  --color-edge: rgb(255 255 255 / 0.26);
+}
+
+.hc.day {
+  --color-ink-faint: #4a543f;
+  --color-edge: rgb(24 32 16 / 0.32);
+}
+
+/* ============================================================
+   3. SANCTIONED CSS
+
+   Two things utilities genuinely cannot express, and the global chrome
+   that belongs to no component.
+   ============================================================ */
+
+/* The ground glow: two radial gradients over the ground colour, one
+   green from the top left and one warm from the bottom right, so the
+   window has a light source instead of being a flat fill. A utility
+   cannot express a multi-stop gradient stack composited over a
+   background-color, so it is an `@utility` — which keeps it a real
+   Tailwind utility (`grove-ground`) rather than a component class, and
+   keeps it out of the build when nothing uses it.
+
+   Day's glows are stronger, not weaker: a wash that reads clearly over
+   a dark ground disappears over a pale one.
+
+   The day branch is NESTED inside the utility rather than written as a
+   separate `.day .grove-ground` rule, so both halves are emitted together or
+   not at all. Split across two rules, the base would tree-shake when unused
+   while the day override — plain CSS — shipped regardless, and a page that
+   reached the class by a route the scanner cannot see would get day's glow
+   over no base. */
+@utility grove-ground {
+  background:
+    radial-gradient(1100px 700px at 8% -10%, rgb(150 206 124 / 0.12), transparent 60%),
+    radial-gradient(900px 600px at 100% 110%, rgb(231 179 74 / 0.07), transparent 60%),
+    var(--color-ground);
+
+  &:where(.day, .day *) {
+    background:
+      radial-gradient(1100px 700px at 8% -10%, rgb(111 168 86 / 0.18), transparent 60%),
+      radial-gradient(900px 600px at 100% 110%, rgb(214 166 60 / 0.12), transparent 60%),
+      var(--color-ground);
+  }
+}
+
+/* ============================================================
+   4. LEGACY — pre-Grove, deleted screen by screen
+   ============================================================ */
+
+/* Everything below this line is the pre-Grove system: design/tokens.css
+   re-exposed as Tailwind theme variables so the screens that have not
+   migrated yet keep rendering exactly as they did. It is frozen — no new
+   token, no new consumer. Each screen's Grove ticket deletes its own
+   component stylesheet, and the final cleanup ticket deletes this whole
+   section along with design/tokens.css and the webfonts.
+
+   `@theme inline` is the critical keyword: it makes Tailwind emit utilities
    that REFERENCE var(--bg) at runtime rather than baking the light value in at
    build time — so :root[data-theme="dark"] keeps re-theming every utility live.
-   Plain `@theme` would freeze the light values and break theme switching. */
+   Plain `@theme` would freeze the light values and break theme switching.
+   (The Grove block above is deliberately the other kind: its variants are
+   root CLASSES, which utilities see through the cascade without `inline`.) */
 @theme inline {
   /* ---------- colour — the three planes ---------- */
   --color-bg: var(--bg);

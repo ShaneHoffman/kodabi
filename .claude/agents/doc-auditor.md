@@ -33,7 +33,7 @@ Check each against its full entry in the reference file above:
 3. **Repository layout ↔ tree**
 4. **UI primitives ↔ docs/UI_CONVENTIONS.md**
 5. **Feature legs ↔ Cargo features**
-6. **Design tokens ↔ docs/DESIGN_SYSTEM.md**
+6. **The Grove theme ↔ docs/DESIGN_SYSTEM.md**
 7. **MCP tool surface ↔ the server's committed schemas**
 
 If the reference lists an anchor not named here (or vice versa), that drift is

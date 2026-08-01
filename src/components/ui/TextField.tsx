@@ -1,5 +1,6 @@
 import { useId, type ComponentPropsWithRef, type ReactNode } from "react";
 import { StatusMessage } from "./StatusMessage";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; the primitives' Grove ticket deletes it
 import "./TextField.css";
 
 type Props = Omit<ComponentPropsWithRef<"input">, "id"> & {

@@ -4,6 +4,7 @@ import { INBOX_PROJECT, type NoteSummary } from "../../useNotes";
 import { useSearchCorpus } from "../../useSearch";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
+// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this view's Grove ticket deletes it
 import "./SearchView.css";
 
 type Props = {
