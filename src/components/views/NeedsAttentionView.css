@@ -43,7 +43,7 @@
   align-items: center;
   gap: var(--space-sm);
   background: var(--surface);
-  border-radius: var(--radius-card);
+  border-radius: var(--radius-card-legacy);
   padding: var(--card-pad-y) var(--card-pad-x);
   box-shadow: var(--lift-card);
 }

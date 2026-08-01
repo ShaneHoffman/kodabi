@@ -145,7 +145,7 @@
   margin-top: var(--space-2xs);
   background: var(--overlay);
   box-shadow: var(--lift-menu);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-pill-legacy);
   padding: var(--menu-pad);
   min-width: var(--measure-menu);
   z-index: var(--layer-dropdown);

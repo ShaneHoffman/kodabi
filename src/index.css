@@ -121,7 +121,16 @@
   /* ---------- radii ----------
      The ladder reads as depth: the bigger the thing, the rounder it is.
      A panel holds a card holds a button. Dialog and palette sit between
-     panel and card because they are card-sized but window-like. */
+     panel and card because they are card-sized but window-like.
+
+     A NAME HERE MUST NOT ALSO EXIST IN design/tokens.css, and radii are
+     where the two vocabularies overlap most. `@theme` emits into
+     `@layer theme`; the legacy file is unlayered and therefore WINS every
+     tie, so a shared name does not conflict loudly — it silently hands the
+     Grove utility the legacy value. `rounded-card` shipped at 12px and
+     `rounded-pill` at 11px that way, until the legacy pair was renamed
+     `--radius-*-legacy`. The same trap is open to any new Grove token, so
+     check the name before adding one. */
   --radius-panel: 18px;
   --radius-card: 14px;
   --radius-dialog: 16px;

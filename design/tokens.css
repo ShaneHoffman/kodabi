@@ -465,7 +465,18 @@
 
   /* ---------- Layer 3 — radii ----------
      Rounder as it lifts: a checkbox is barely eased, a window is a
-     soft-cornered object sitting on top of everything. */
+     soft-cornered object sitting on top of everything.
+
+     TWO STEPS CARRY A `-legacy` SUFFIX, and it is load-bearing rather than
+     tidy. This file is unlayered, and Grove's `@theme` block emits into
+     `@layer theme` — so where the two systems spell a token the same way,
+     THIS one wins (unlayered beats every layer), whatever the values are.
+     That is deliberate for --radius-sm / --radius-md, which is why
+     src/index.css must not re-declare them. It was an accident for the two
+     below: Grove names a 14px card and a 999px pill, and an unsuffixed
+     declaration here silently rendered `rounded-card` at 12px and
+     `rounded-pill` at 11px — a pill that is not a pill. The suffix is what
+     keeps the two vocabularies from colliding until this file is deleted. */
   --radius-focus: 2px;
   --radius-track: 2px; /* the progress instrument; a waveform bar */
   --radius-match: 3px; /* a highlighted search term */
@@ -476,8 +487,8 @@
   --radius-md: 8px; /* a control chip; a library row */
   --radius-control: 9px; /* a filled button; a search row; a focused palette row */
   --radius-row: 10px; /* a queue row */
-  --radius-pill: 11px; /* the active nav pill; an overlay menu */
-  --radius-card: 12px; /* a pre-lifted card; a toggle track; the search query field */
+  --radius-pill-legacy: 11px; /* the active nav pill; an overlay menu */
+  --radius-card-legacy: 12px; /* a pre-lifted card; a toggle track; the search query field */
   --radius-window: 16px; /* the palette and capture windows */
 
   /* ---------- Layer 3 — focus ----------
