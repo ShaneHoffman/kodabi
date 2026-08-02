@@ -197,6 +197,7 @@ function ReadNote({
         {confirmingDelete && (
           <DeleteNoteDialog
             id={note.id}
+            noteTitle={note.title}
             sessionBacked={isSessionSource(note.source)}
             onClose={() => setConfirmingDelete(false)}
             // Navigate away before the delete's `vault:changed` refetch can run:

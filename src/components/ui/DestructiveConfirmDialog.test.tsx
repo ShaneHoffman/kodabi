@@ -11,10 +11,12 @@ function Harness({
   onConfirm = () => {},
   busy = false,
   error = null,
+  subject = "Sprinkler quotes and the 9th green rebuild",
 }: {
   onConfirm?: () => void;
   busy?: boolean;
   error?: string | null;
+  subject?: string;
 }) {
   const [open, setOpen] = useState(false);
   return (
@@ -25,6 +27,7 @@ function Harness({
       {open && (
         <DestructiveConfirmDialog
           title="Delete this thing?"
+          subject={subject}
           confirmLabel="Delete thing"
           busyLabel="Deleting…"
           busy={busy}
@@ -32,7 +35,7 @@ function Harness({
           onConfirm={onConfirm}
           onClose={() => setOpen(false)}
         >
-          <p>This cannot be undone.</p>
+          <p>The thing is deleted from your vault.</p>
         </DestructiveConfirmDialog>
       )}
     </>
@@ -50,6 +53,55 @@ describe("DestructiveConfirmDialog", () => {
     // Cancel is the default action of a confirmation, so the keyboard's first
     // Enter dismisses rather than destroys.
     expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+  });
+
+  it("names the acted-on thing in its own strip and owns the permanence warning", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+
+    const dialog = screen.getByRole("dialog");
+    const subject = within(dialog).getByText("Sprinkler quotes and the 9th green rebuild");
+    // The strip truncates, so the full name has to stay reachable.
+    expect(subject).toHaveAttribute("title", "Sprinkler quotes and the 9th green rebuild");
+    // The warning is the dialog's own line, not something each caller remembers
+    // to write.
+    expect(within(dialog).getByText("This cannot be undone.")).toBeInTheDocument();
+  });
+
+  it("keeps the warning when there is no subject to name", () => {
+    render(
+      <DestructiveConfirmDialog
+        title="Delete this thing?"
+        confirmLabel="Delete thing"
+        busyLabel="Deleting…"
+        busy={false}
+        error={null}
+        onConfirm={() => {}}
+        onClose={() => {}}
+      >
+        <p>The thing is deleted from your vault.</p>
+      </DestructiveConfirmDialog>,
+    );
+
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("This cannot be undone.")).toBeInTheDocument();
+    expect(
+      within(dialog).queryByText("Sprinkler quotes and the 9th green rebuild"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("puts Cancel before the destructive action, so nothing is passed over to reach it", async () => {
+    const user = userEvent.setup();
+    render(<Harness />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+
+    const dialog = screen.getByRole("dialog");
+    const cancel = within(dialog).getByRole("button", { name: "Cancel" });
+    const confirm = within(dialog).getByRole("button", { name: "Delete thing" });
+    expect(cancel.compareDocumentPosition(confirm)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
   it("closes on Escape and restores focus to the opener", async () => {

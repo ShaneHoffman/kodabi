@@ -1,6 +1,5 @@
-import { useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { useDialogFocus } from "../../useDialogFocus";
 import {
   acknowledgeConsent,
   buildRetentionPolicy,
@@ -8,25 +7,33 @@ import {
   RETENTION_OPTIONS,
   type RetentionKind,
 } from "../../useSettings";
-import { wrapDialogTab } from "../../dialogTabTrap";
 import { Button } from "../ui/Button";
-import { Overlay } from "../ui/Overlay";
+import { Dialog } from "../ui/Dialog";
+import { Field } from "../ui/Field";
 import { Select } from "../ui/Select";
 import { StatusMessage } from "../ui/StatusMessage";
-import { TextField } from "../ui/TextField";
 
 type Props = {
   onClose: () => void;
 };
 
-const PRIMARY_ID = "consent-nudge-primary";
-
 /**
  * The one-time recording-consent nudge, shown before the very first capture
  * (FOUNDING_DOC §3.7). It pairs the consent ask with the retention choice —
  * nothing is recorded until the user acknowledges, and their retention policy
- * is set in the same step. Same overlay shape as the command palette
- * (role=dialog, aria-modal, Escape/backdrop dismiss, focus save/restore).
+ * is set in the same step.
+ *
+ * The shell is the Grove `Dialog`: base-ui owns the focus trap, Escape, the
+ * scrim press and the focus restore, which is what retires the hand-rolled Tab
+ * wrapper this used to carry. Focus opens on the PRIMARY action rather than the
+ * first control, because the retention default is already the safe one and the
+ * thing the user came here to do is acknowledge.
+ *
+ * The retention `Select` is still the pre-Grove combobox (its base-ui
+ * replacement is its own ticket). It stops Escape from bubbling while its list
+ * is open, which is exactly what keeps that Escape from closing the whole
+ * dialog — a behaviour worth knowing about, since it is load-bearing rather
+ * than incidental, and pinned by a test.
  */
 export function ConsentNudge({ onClose }: Props) {
   const [kind, setKind] = useState<RetentionKind>("keep_all");
@@ -36,10 +43,7 @@ export function ConsentNudge({ onClose }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  // Focus the primary action on open; restore focus on close.
-  useDialogFocus(() => document.getElementById(PRIMARY_ID));
+  const primaryRef = useRef<HTMLButtonElement>(null);
 
   const acknowledge = async () => {
     setSubmitting(true);
@@ -65,36 +69,19 @@ export function ConsentNudge({ onClose }: Props) {
     }
   };
 
-  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      // A child (the Select's open list) stops Escape from bubbling, so this
-      // only fires when nothing inside is intercepting it.
-      event.preventDefault();
-      onClose();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    // The Select renders its options as non-tabbable list items, so only the
-    // trigger, day field, and buttons participate in the wrap today.
-    wrapDialogTab(event, panelRef.current);
-  };
-
   return (
-    <Overlay
+    <Dialog
+      open
       onDismiss={onClose}
       labelledBy="consent-nudge-title"
-      panelRef={panelRef}
-      onKeyDown={onKeyDown}
-      className="flex flex-col gap-md p-md"
+      initialFocus={primaryRef}
+      className="flex flex-col gap-4"
     >
-      <h2
-        id="consent-nudge-title"
-        className="font-serif text-title-panel leading-title-panel tracking-title-panel text-text"
-      >
+      <h2 id="consent-nudge-title" className="text-[15px] font-semibold text-ink">
         Before your first capture
       </h2>
 
-      <div className="flex flex-col gap-sm text-body text-text-soft">
+      <div className="flex flex-col gap-2.5 text-[13px] leading-relaxed text-ink-read">
         <p>
           Kodabi records your microphone and system audio while the listening
           indicator is green. It only ever records while that indicator shows.
@@ -114,11 +101,10 @@ export function ConsentNudge({ onClose }: Props) {
           flight, and NONE of them uses the native `disabled` attribute to do
           it. This is the case docs/DESIGN_SYSTEM.md §6 singles out as the
           worst one: disabling the focused element blurs it and focus resets
-          to <body>, which is outside the dialog — so the Tab wrap and the
-          Escape handler, both of which live on the panel, stop receiving
-          anything at all. The user is left inside a modal they can no longer
-          leave with the keyboard. `busy` / `readOnly` / `loading` all keep
-          their control focusable. */}
+          to <body>, which is outside the dialog. The keyboard then has nowhere
+          in the modal to Tab from, and the user is left inside a surface they
+          can no longer leave with the keyboard. `busy` / `readOnly` /
+          `loading` all keep their control focusable. */}
       <Select
         label="Retention"
         value={kind}
@@ -131,7 +117,7 @@ export function ConsentNudge({ onClose }: Props) {
           group supplies the rest of the meaning. This dialog is a flat column of
           fields with nothing to lean on, so the label carries all of it. */}
       {kind === "keep_days" && (
-        <TextField
+        <Field
           label="Days to keep"
           type="number"
           min={1}
@@ -146,7 +132,7 @@ export function ConsentNudge({ onClose }: Props) {
 
       {error && <StatusMessage variant="error" compact>{error}</StatusMessage>}
 
-      <div className="flex items-center justify-end gap-sm">
+      <div className="flex items-center justify-end gap-2.5">
         {/* `loading` with no loadingLabel: the label is unchanged (Button
             falls back to its children), and all this buys is the inert
             treatment that keeps the button focusable. There is nothing to
@@ -156,7 +142,7 @@ export function ConsentNudge({ onClose }: Props) {
           Not now
         </Button>
         <Button
-          id={PRIMARY_ID}
+          ref={primaryRef}
           onClick={acknowledge}
           loading={submitting}
           loadingLabel="Starting…"
@@ -164,6 +150,6 @@ export function ConsentNudge({ onClose }: Props) {
           I understand, start capture
         </Button>
       </div>
-    </Overlay>
+    </Dialog>
   );
 }

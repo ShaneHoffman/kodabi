@@ -76,7 +76,11 @@ describe("CreateProjectDialog", () => {
     await user.click(await screen.findByRole("button", { name: "New project" }));
 
     const dialog = screen.getByRole("dialog", { name: "New project" });
-    expect(within(dialog).getByLabelText("Project name")).toHaveFocus();
+    // base-ui hands focus off after the popup is in the document, so this is
+    // awaited rather than read on the same tick as the click.
+    await waitFor(() => {
+      expect(within(dialog).getByLabelText("Project name")).toHaveFocus();
+    });
   });
 
   it("creates the trimmed name, navigates to it, and the sidebar refreshes on the broadcast", async () => {
@@ -138,6 +142,20 @@ describe("CreateProjectDialog", () => {
     await user.keyboard("{Escape}");
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(invokedCommands()).not.toContain("create_project");
+  });
+
+  it("closes on a scrim press without creating anything", async () => {
+    const user = userEvent.setup();
+    serveVault();
+    renderShell();
+
+    await user.click(await screen.findByRole("button", { name: "New project" }));
+    await user.click(screen.getByTestId("dialog-scrim"));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
     expect(invokedCommands()).not.toContain("create_project");
   });
 });

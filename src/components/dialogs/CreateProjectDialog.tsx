@@ -1,27 +1,23 @@
-import {
-  useRef,
-  useState,
-  type FormEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from "react";
-import { useDialogFocus } from "../../useDialogFocus";
+import { useRef, useState, type FormEvent } from "react";
 import { useNavigation } from "../../useNavigation";
 import { createProject } from "../../useProjects";
-import { wrapDialogTab } from "../../dialogTabTrap";
 import { Button } from "../ui/Button";
-import { Overlay } from "../ui/Overlay";
-import { TextField } from "../ui/TextField";
+import { Dialog } from "../ui/Dialog";
+import { Field } from "../ui/Field";
 
 type Props = {
   onClose: () => void;
 };
 
-const FIELD_ID = "create-project-name";
-
 /**
- * The "New project" dialog: one name field, one committing action. Same
- * overlay shape as ConsentNudge (role=dialog, Escape/backdrop dismiss, Tab
- * wrap, focus save/restore via useDialogFocus).
+ * The "New project" dialog: one name field, one committing action. The shell is
+ * the Grove `Dialog`, so the focus trap, Escape, the scrim press, the scroll
+ * lock and the focus restore are base-ui's rather than a hand-rolled Tab
+ * wrapper — being mounted IS being open, and the caller unmounts to close.
+ *
+ * A field dialog opens ON its field (`initialFocus`), where a destructive one
+ * opens on its safe action: there is nothing here to do by accident, and the
+ * first thing the user wants is to type.
  *
  * Validation is the backend's alone (`vault::create_project` rejects reserved
  * or illegal names and duplicates); the frontend only trims and requires a
@@ -35,10 +31,7 @@ export function CreateProjectDialog({ onClose }: Props) {
   const [error, setError] = useState<string | null>(null);
   const { navigate } = useNavigation();
 
-  const panelRef = useRef<HTMLDivElement>(null);
-
-  // Focus the name field on open; restore focus on close.
-  useDialogFocus(() => document.getElementById(FIELD_ID));
+  const fieldRef = useRef<HTMLInputElement>(null);
 
   const trimmed = name.trim();
 
@@ -57,45 +50,44 @@ export function CreateProjectDialog({ onClose }: Props) {
     }
   };
 
-  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      onClose();
-      return;
-    }
-    if (event.key !== "Tab") return;
-    wrapDialogTab(event, panelRef.current);
-  };
-
   return (
-    <Overlay
+    <Dialog
+      open
       onDismiss={onClose}
       labelledBy="create-project-title"
-      panelRef={panelRef}
-      onKeyDown={onKeyDown}
-      className="flex flex-col gap-md p-md"
+      initialFocus={fieldRef}
+      className="flex flex-col gap-4"
     >
-      <h2
-        id="create-project-title"
-        className="font-serif text-title-panel leading-title-panel tracking-title-panel text-text"
-      >
+      <h2 id="create-project-title" className="text-[15px] font-semibold text-ink">
         New project
       </h2>
 
-      <form onSubmit={submit} className="flex flex-col gap-md">
-        <TextField
-          id={FIELD_ID}
+      <p className="text-[13px] leading-relaxed text-ink-dim">
+        A project is a folder notes can be routed to.
+      </p>
+
+      <form onSubmit={submit} className="flex flex-col gap-4">
+        <Field
+          ref={fieldRef}
           label="Project name"
+          placeholder="project-name"
           value={name}
           // readOnly, not disabled: a read-only input stays focusable and in
           // the tab order while the create is in flight (docs/DESIGN_SYSTEM.md §6).
           readOnly={submitting}
           onChange={(event) => setName(event.target.value)}
           error={error}
-          hint="Use / to nest projects, for example Growth/Q3"
+          // The nesting rule is a hint under the field, not a sentence in the
+          // body: a tip about what you may type belongs where you are typing.
+          hint={
+            <>
+              Nested paths like <span className="font-data">household/garage</span> work
+              too.
+            </>
+          }
         />
 
-        <div className="flex items-center justify-end gap-sm">
+        <div className="flex items-center justify-end gap-2.5">
           <Button variant="quiet" onClick={onClose} loading={submitting}>
             Cancel
           </Button>
@@ -112,6 +104,6 @@ export function CreateProjectDialog({ onClose }: Props) {
           </Button>
         </div>
       </form>
-    </Overlay>
+    </Dialog>
   );
 }

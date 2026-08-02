@@ -58,11 +58,14 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 - **Mirror:** §4 of `docs/UI_CONVENTIONS.md` — the primitive table (name → variants) and
   the "contracts worth not breaking" list beneath it: `Button` (`loading` vs `disabled`,
   and the focus reason), `Select` (`busy` vs `disabled`, the combobox keyboard set,
-  `hideLabel`, `emptyLabel`), `TextField` (`error`, `hint` → `aria-describedby`),
+  `hideLabel`, `emptyLabel`), `Field` (`error` + `aria-invalid` travel together, `hint` and
+  `error` both → `aria-describedby`, error described first),
   `StatusMessage` (variant → ARIA role), `ViewFrame` (eight variants; `summary` a **type
   error** outside `queue`/`library`/`health`, `action` a **type error** on `doc`/`search`,
   neither a silent no-op), `Overlay` (click-not-pointerdown, both ends on the backdrop, no
-  focus trap), `DestructiveConfirmDialog` (presentational, never self-closing).
+  focus trap), `DestructiveConfirmDialog` (presentational, never self-closing; the copy
+  structure — title, `subject` strip, consequence, the dialog's own permanence line, quiet
+  Cancel before the danger confirm).
 - **Do not look for `Textarea`, `ListRow` or `PlaceholderView`.** All three were
   deleted (they had no call sites); §4 keeps a "there is no X primitive" note saying what
   to do instead. A live reference to any of them anywhere is itself a failure.

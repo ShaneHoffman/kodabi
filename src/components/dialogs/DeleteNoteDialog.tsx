@@ -5,6 +5,9 @@ import { DestructiveConfirmDialog } from "../ui/DestructiveConfirmDialog";
 type Props = {
   /** The note to delete, by its stable id. */
   id: string;
+  /** The note's title, named in the dialog's subject strip so the user is
+   * confirming a thing rather than a pronoun. */
+  noteTitle: string;
   /** Whether the note was distilled from a captured session. When true,
    * deleting the note also removes the paired recording and transcript, which
    * the confirmation copy states. */
@@ -28,7 +31,7 @@ type Props = {
  * calls `deleteNote`, then hands control back through `onDeleted`. Like the
  * primitive it composes, it never closes itself — the caller owns success.
  */
-export function DeleteNoteDialog({ id, sessionBacked, onClose, onDeleted }: Props) {
+export function DeleteNoteDialog({ id, noteTitle, sessionBacked, onClose, onDeleted }: Props) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -47,6 +50,7 @@ export function DeleteNoteDialog({ id, sessionBacked, onClose, onDeleted }: Prop
   return (
     <DestructiveConfirmDialog
       title="Delete this note?"
+      subject={noteTitle}
       confirmLabel="Delete note"
       busyLabel="Deleting…"
       busy={deleting}
@@ -56,10 +60,9 @@ export function DeleteNoteDialog({ id, sessionBacked, onClose, onDeleted }: Prop
     >
       <p>
         {sessionBacked
-          ? "This note, along with its recording and transcript, will be permanently deleted."
-          : "This note will be permanently deleted."}
+          ? "Its recording and transcript are deleted with it."
+          : "The note file is deleted from your vault."}
       </p>
-      <p>This cannot be undone.</p>
     </DestructiveConfirmDialog>
   );
 }

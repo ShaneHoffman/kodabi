@@ -451,6 +451,7 @@ export function NeedsAttentionView() {
           {confirmingSession && (
             <DestructiveConfirmDialog
               title="Delete this capture?"
+              subject={sessionTitle(confirmingSession)}
               confirmLabel="Delete capture"
               busyLabel="Deleting…"
               busy={isRunning("delete", confirmingSession.path)}
@@ -462,8 +463,8 @@ export function NeedsAttentionView() {
               }}
             >
               <p>
-                This removes the recording and transcript for good. Dismiss only
-                hides a capture; deleting cannot be undone.
+                Its recording and transcript are deleted. Dismiss only hides a
+                capture, and deletes nothing.
               </p>
             </DestructiveConfirmDialog>
           )}

@@ -690,6 +690,7 @@ function InboxRow({
         {confirmingDelete && (
           <DeleteNoteDialog
             id={note.id}
+            noteTitle={note.title}
             sessionBacked={isSessionSource(note.source)}
             onClose={() => setConfirmingDelete(false)}
             // Mirror the file flow: close, then play the row's exit. The delete

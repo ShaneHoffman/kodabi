@@ -37,6 +37,11 @@ describe("PrimitiveGallery", () => {
     }
     expect(screen.getByRole("button", { name: "File to…" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open a dialog" })).toBeInTheDocument();
+    // The field, in all three of the states it has to be looked at in: at
+    // rest, carrying an error, and holding a number.
+    expect(screen.getAllByLabelText("Project name")).toHaveLength(2);
+    expect(screen.getByRole("spinbutton", { name: "Days to keep" })).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("A project cannot be called inbox.");
     // The marks are aria-hidden, so the kodama row is checked through the
     // pills' words — which is also the pairing the mark requires.
     for (const state of ["Listening", "Mic only", "Starting", "Reconnecting", "Not listening"]) {

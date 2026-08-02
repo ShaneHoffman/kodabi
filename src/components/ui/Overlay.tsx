@@ -29,10 +29,13 @@ type Props = {
  * including both of the non-obvious guards below, which is exactly the kind of
  * subtlety that survives one copy and rots in the other.
  *
- * Focus trapping is deliberately NOT here. The palette holds focus on its lone
- * input by swallowing Tab; the consent nudge wraps Tab across several controls.
- * Those are genuinely different strategies, so each dialog keeps its own via
- * `onKeyDown`, and both restore focus through `useDialogFocus`.
+ * Focus trapping is deliberately NOT here — each caller held focus its own
+ * way and restored it through `useDialogFocus`. This shell is now callerless:
+ * the dialogs that wrapped Tab across several controls moved to the Grove
+ * `Dialog`, where base-ui owns the trap, and the palette (which held focus on
+ * its lone input by swallowing Tab) never used this shell at all — it
+ * composes base-ui's dialog parts directly. Left on disk pending its own
+ * removal ticket.
  */
 export function Overlay({
   onDismiss,

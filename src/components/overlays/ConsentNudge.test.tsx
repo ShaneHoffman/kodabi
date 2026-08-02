@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ConsentNudge } from "./ConsentNudge";
@@ -159,5 +159,43 @@ describe("ConsentNudge", () => {
 
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("opens focused on the primary action", async () => {
+    render(<ConsentNudge onClose={vi.fn()} />);
+
+    // Not the first control: the retention default is already the safe one,
+    // and acknowledging is what the user came here to do.
+    await waitFor(() => {
+      expect(primaryButton()).toHaveFocus();
+    });
+  });
+
+  it("dismisses on Escape without touching the backend", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<ConsentNudge onClose={onClose} />);
+
+    await user.keyboard("{Escape}");
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("lets Escape close the open retention list without closing the nudge", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(<ConsentNudge onClose={onClose} />);
+
+    await user.click(screen.getByRole("combobox", { name: /retention/i }));
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+
+    await user.keyboard("{Escape}");
+
+    // The Select stops that Escape from bubbling, which is what keeps it from
+    // reaching the dialog's own dismissal. One Escape, one thing closed.
+    expect(screen.queryByRole("listbox")).not.toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
   });
 });

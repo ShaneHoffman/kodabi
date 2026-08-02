@@ -92,11 +92,13 @@ describe("a view-title step is a triple, not a size", () => {
     // The floor RATCHETS DOWN as Grove lands: a migrated screen sets its title
     // with Grove utilities and stops spelling the legacy triple at all
     // (`DestructiveConfirmDialog` was the fifth, until the primitives ticket
-    // moved it onto the Grove Dialog). Lower it to match reality when a
-    // migration takes one out; the whole file goes with the legacy layer.
+    // moved it onto the Grove Dialog; `ConsentNudge` and `CreateProjectDialog`
+    // were the fourth and third, until the dialogs ticket did the same). Lower
+    // it to match reality when a migration takes one out; the whole file goes
+    // with the legacy layer.
     const scanned = sourceFiles(join(ROOT, "src")).filter((file) =>
       STEPS.some((step) => readFileSync(file, "utf8").includes(`text-title-${step}`)),
     );
-    expect(scanned.length).toBeGreaterThanOrEqual(4);
+    expect(scanned.length).toBeGreaterThanOrEqual(2);
   });
 });

@@ -32,11 +32,12 @@ type Props = {
  * dismiss, the page behind stops scrolling, and the popup carries `role`,
  * `aria-modal` and its labelling. The pre-Grove `Overlay` deliberately did NOT
  * trap focus, and each of its callers hand-rolled a Tab strategy — that is the
- * duplication this replaces. `Overlay` stays for the callers that have not
- * migrated (the consent nudge, the create-project dialog); each moves in its
- * own screen ticket. The palette composes base-ui's dialog parts directly
- * rather than using this, because it is top-anchored and holds cmdk's list
- * instead of this one's centred panel.
+ * duplication this replaces. `Overlay` itself is now callerless — the consent
+ * nudge and the create-project dialog have each moved to `Dialog` in their own
+ * screen ticket, and the palette does not use it at all: it composes base-ui's
+ * dialog parts directly, because it is top-anchored and holds cmdk's list
+ * instead of this one's centred panel. `Overlay.tsx` stays on disk pending its
+ * own removal ticket rather than being deleted as a side effect of this one.
  *
  * Two details are load-bearing and easy to undo by accident:
  *
