@@ -191,8 +191,8 @@
    no audio is arriving — and share one slow opacity pulse, deliberately in
    unison rather than staggered: this is not a voice, it is a session that is
    alive and trying. Same reasoning as `.is-starting` / `.is-reconnecting` in
-   SpiritMark.css. Placed after the `nth-child` delays so this shorthand clears
-   them. */
+   the spirit-mark block of src/index.css §3. Placed after the `nth-child`
+   delays so this shorthand clears them. */
 .capture__wave--quiet .capture__bar {
   background: var(--text);
   transform: scaleY(0.3);
