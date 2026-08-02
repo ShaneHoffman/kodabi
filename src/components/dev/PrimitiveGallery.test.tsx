@@ -42,6 +42,13 @@ describe("PrimitiveGallery", () => {
     expect(screen.getAllByLabelText("Project name")).toHaveLength(2);
     expect(screen.getByRole("spinbutton", { name: "Days to keep" })).toBeInTheDocument();
     expect(screen.getByRole("alert")).toHaveTextContent("A project cannot be called inbox.");
+    // The marks are aria-hidden, so the kodama row is checked through the
+    // pills' words — which is also the pairing the mark requires.
+    for (const state of ["Listening", "Mic only", "Starting", "Reconnecting", "Not listening"]) {
+      expect(screen.getByText(state)).toBeInTheDocument();
+    }
+    // Two clocks, not four: only a pill that is actually recording shows one.
+    expect(screen.getAllByText("2:34")).toHaveLength(2);
     // Nothing is open at rest — both overlays are summoned, not resident.
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();

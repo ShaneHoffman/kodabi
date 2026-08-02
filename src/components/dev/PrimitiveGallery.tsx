@@ -1,6 +1,8 @@
 import { useRef, useState } from "react";
 import { DAY_CLASS } from "../../theme";
 import { HC_CLASS } from "../../contrast";
+import { SpiritMark } from "../capture/SpiritMark";
+import { ListenPill } from "../shell/ListenPill";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Field } from "../ui/Field";
@@ -100,7 +102,7 @@ export function PrimitiveGallery() {
 
       <div className="flex gap-5 p-5">
         <nav className="glass-dock flex w-56 flex-none flex-col gap-1 p-3" aria-label="Sections">
-          {["Buttons", "Fields", "Glass", "Overlays", "Scrollbars", "Focus"].map((name) => (
+          {["Buttons", "Fields", "Glass", "Overlays", "Kodama", "Scrollbars", "Focus"].map((name) => (
             <a
               key={name}
               href={`#${name.toLowerCase()}`}
@@ -252,6 +254,41 @@ export function PrimitiveGallery() {
                 </Button>
               </div>
             </Dialog>
+          </Section>
+
+          <Section
+            title="Kodama"
+            note="The one green: audio is reaching disk. Toggle Reduce motion — the lobes settle round and the aura keeps breathing."
+          >
+            {/* The marks at gallery size. On the page they sit at 14px, where
+                the lobes are a suggestion rather than a shape; large is the
+                only way to see whether the aura is undulating or throbbing. */}
+            <div className="flex flex-wrap items-center gap-9" id="kodama">
+              {(["idle", "starting", "listening", "degraded", "reconnecting"] as const).map(
+                (mode) => (
+                  <div key={mode} className="flex flex-col items-center gap-3">
+                    <SpiritMark mode={mode} size="1.5rem" halo="1.4rem" />
+                    <span className="font-data text-[10px] tracking-[0.14em] text-ink-faint uppercase">
+                      {mode}
+                    </span>
+                  </div>
+                ),
+              )}
+              <div className="flex flex-col items-center gap-3">
+                <SpiritMark mode="listening" variant="ring" size="1.5rem" />
+                <span className="font-data text-[10px] tracking-[0.14em] text-ink-faint uppercase">
+                  ring
+                </span>
+              </div>
+            </div>
+
+            <div className="mt-2 flex flex-wrap items-center gap-2.5">
+              <ListenPill mode="listening" label="Listening" elapsedSeconds={154} />
+              <ListenPill mode="degraded" label="Mic only" elapsedSeconds={154} />
+              <ListenPill mode="starting" label="Starting" elapsedSeconds={154} />
+              <ListenPill mode="reconnecting" label="Reconnecting" elapsedSeconds={154} />
+              <ListenPill mode="idle" label="Not listening" />
+            </div>
           </Section>
 
           <Section title="Scrollbars" note="Transparent track, pill thumb inset 3px from it.">
