@@ -154,10 +154,10 @@ in-app toggle would work on legacy screens and silently do nothing on Grove ones
 
 ## 4. Primitives
 
-`src/components/ui/` holds the shared controls. **`Button`, `Menu`, `Dialog` and
-`DestructiveConfirmDialog` are Grove; the rest are pre-Grove** and five still carry their own
-stylesheet (`TextField`, `Checkbox`, `Select`, `Overlay`, `ViewFrame` — `StatusMessage` never had
-one), which their screen tickets delete. **Behaviour is not pre-Grove either way** — the
+`src/components/ui/` holds the shared controls. **`Button`, `Menu`, `Dialog`, `Field` and
+`DestructiveConfirmDialog` are Grove; the rest are pre-Grove** and four still carry their own
+stylesheet (`Checkbox`, `Select`, `Overlay`, `ViewFrame` — `StatusMessage` never had one), which
+their screen tickets delete. **Behaviour is not pre-Grove either way** — the
 contracts below are live, they are what the components actually promise, and a restyle must preserve
 every one of them.
 
@@ -166,7 +166,7 @@ every one of them.
 | `Button` | Every pressable thing | `action`, `danger`, `quiet`, `pill` |
 | `Menu` | An anchored menu (base-ui) | — |
 | `Dialog` | A modal: scrim, glass panel, focus trap (base-ui) | — |
-| `TextField` | A labelled input | — |
+| `Field` | A labelled input in a glass row | — |
 | `Checkbox` | A box and its label | — |
 | `Select` | A hand-rolled combobox (full listbox, no headless library) | `boxed`, `token` |
 | `Overlay` | The pre-Grove modal shell, for the callers `Dialog` has not taken yet | — |
@@ -195,9 +195,12 @@ decided by build order rather than by the className.
   `aria-activedescendant`; Enter/Space selects; Escape closes and returns focus to the trigger;
   outside click closes; typing jumps. `hideLabel` keeps the accessible name and drops the visual row.
   `emptyLabel` is what the open list says when there is nothing in it.
-- **`TextField` takes `error`, not a hand-rolled message.** The copy and `aria-invalid` have to travel
+- **`Field` takes `error`, not a hand-rolled message.** The copy and `aria-invalid` have to travel
   together, and every hand-rolled version in the app set one without the other. `hint` is wired
-  through `aria-describedby`.
+  through `aria-describedby` too, and the error is described first, so it is heard before the hint
+  the value just contradicted. The bordered box is the ROW, not the input: the input inside is
+  transparent and outline-free so `focus-within` can move the whole surface's border, which is why
+  this is the one interactive primitive with no `focus-ring`.
 - **`StatusMessage`'s variant fixes the ARIA role**: `error` → `role="alert"`, `status` →
   `role="status"`, `empty` → none. That binding is the whole point of the primitive.
 - **`ViewFrame`'s `variant` is required and discriminates the props.** `summary` is a **type error**
@@ -211,10 +214,10 @@ decided by build order rather than by the className.
   `inset-0 m-auto h-fit` and must stay margin-based: the `materialize` keyframe animates
   `transform`, so a translate-centred popup opens in the corner.
 - **`Overlay` dismisses on click, not pointerdown**, and only when the gesture both started and ended
-  on the backdrop. It deliberately does **not** trap focus — each caller passes its own `onKeyDown`,
-  because the palette swallows Tab on one input while the consent nudge wraps it across several. It
-  is pre-Grove and shrinking: the palette, the consent nudge and the create-project dialog are its
-  remaining callers, and each moves to `Dialog` in its own ticket.
+  on the backdrop. It deliberately does **not** trap focus — its caller passes its own `onKeyDown`,
+  because the palette swallows Tab on one input. It is pre-Grove and down to that one caller: the
+  palette moves to `Dialog` in its own ticket, and `Overlay`, `Overlay.css` and `useDialogFocus` go
+  with it.
 - **`Menu.Trigger` composes, it does not wrap.** Pass the control through `render`
   (`<Menu.Trigger render={<Button variant="quiet">File</Button>} />`) so there is one `<button>`
   carrying both the Grove chrome and base-ui's wiring, not a button inside a button.
@@ -223,6 +226,12 @@ decided by build order rather than by the className.
   renders it conditionally. Cancel holds initial focus; the confirm is the `danger` box, which is
   the one place in the app that red is allowed — on the confirm inside a confirmation, never on the
   button that opens one.
+- **Its copy is a structure, not prose.** Title asks the question ("Delete this note?"); `subject`
+  names the thing in its own truncating strip; `children` is one short consequence line; the
+  permanence warning is the dialog's OWN line in the danger tint, so no caller can forget it; the
+  rail runs quiet Cancel then the destructive confirm, left to right, so nothing sits under the
+  pointer on the way to the confirm. A field dialog follows the same shape and puts its tips in the
+  `Field`'s `hint`, never in the body prose.
 
 ### There is no `Textarea`, `ListRow`, or `PlaceholderView`
 
@@ -250,10 +259,12 @@ The curated stack is installed and is the direction of travel:
 | `sonner` | Toasts |
 | `motion` | Motion that CSS cannot express — gestures, layout animation, interruptible transitions |
 
-**Three are adopted.** `cva` + `clsx` style `Button`, and `@base-ui/react` is behind `Menu` and
-`Dialog` — the two pieces of behaviour that are hard, invisible when they work, and not Grove's
-opinion: anchoring a popup to its trigger with a flip at the window edge, and trapping focus in a
-modal. Everything visible about both is still ours.
+**Three are adopted.** `cva` gives `Button` its variants and `clsx` composes classes wherever a
+primitive has conditions (`Field`, `Dialog`); a component with no variants needs no `cva` table.
+`@base-ui/react` is behind
+`Menu` and `Dialog` — the two pieces of behaviour that are hard, invisible when they work, and not
+Grove's opinion: anchoring a popup to its trigger with a flip at the window edge, and trapping focus
+in a modal. Everything visible about both is still ours.
 
 **`cmdk`, `sonner` and `motion` are installed, not adopted**, and each is its own decision in its own
 ticket — installing a package is not the same as adopting it. The same holds for what base-ui has

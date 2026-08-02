@@ -18,9 +18,11 @@ type Props = {
  * `DestructiveConfirmDialog` (docs/DESIGN_SYSTEM.md §2): the action is marked by
  * CONFIRMATION, not colour, with Cancel holding initial focus.
  *
- * Nothing is lost on confirm: the backend (`vault::delete_project`) moves
- * every contained note back to the Inbox before removing the folder tree, so
- * on success this navigates to the Inbox, where the user's notes now are.
+ * No NOTE is lost on confirm: the backend (`vault::delete_project`) moves every
+ * contained note back to the Inbox before removing the folder tree, so on
+ * success this navigates to the Inbox, where the user's notes now are. The
+ * dialog's permanence warning is about the project itself — the folder, its
+ * children, and everything filed into it — which is what does not come back.
  */
 export function DeleteProjectDialog({
   slug,
@@ -47,7 +49,8 @@ export function DeleteProjectDialog({
 
   return (
     <DestructiveConfirmDialog
-      title={`Delete ${slug}?`}
+      title="Delete this project?"
+      subject={slug}
       confirmLabel="Delete project"
       busyLabel="Deleting…"
       busy={deleting}
