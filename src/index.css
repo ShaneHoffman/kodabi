@@ -11,7 +11,7 @@
 
      1. the Grove theme      — @theme tokens + keyframes (night values)
      2. the variants         — .day and .hc, as token remaps
-     3. sanctioned CSS       — the ground glow, global chrome
+     3. sanctioned CSS       — the ground glow, global chrome, the mark
      4. LEGACY               — the pre-Grove bridge, kept alive for the
                                screens that have not migrated yet
 
@@ -207,7 +207,7 @@
 
      Durations are call-site utilities (`duration-140`), not tokens: the
      canonical values are press 140 · exit 110–130 · materialize 220 ·
-     rise-in 280, and they are written down in DESIGN_SYSTEM §4. */
+     rise-in 280 · morph 300, and they are written down in DESIGN_SYSTEM §4. */
   --ease-out-strong: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out-strong: cubic-bezier(0.77, 0, 0.175, 1);
 
@@ -234,6 +234,12 @@
   --animate-halo-still: halo-still 3200ms ease-in-out infinite;
   --animate-drift: drift 7000ms linear infinite;
   --animate-drift-back: drift-back 9500ms linear infinite;
+
+  /* The kodama read as an instrument rather than a presence: a crisp
+     ring leaving the core instead of a soft field around it, for chrome
+     that meters the capture. It moves, so its reduced partner is the
+     aura's — halo-still, opacity alone. */
+  --animate-ring: ring 2200ms ease-out infinite;
 
   /* The caret, and the placeholder dot on a note still in the pipeline.
      Both are opacity-only, so both survive reduced motion untouched. */
@@ -318,6 +324,19 @@
   @keyframes drift-back {
     to {
       transform: rotate(-360deg);
+    }
+  }
+  /* Out and gone, never back: a ring that shrank home again would read
+     as a throb rather than a signal leaving. It starts already faint so
+     the expansion is the event, not the arrival. */
+  @keyframes ring {
+    from {
+      opacity: 0.65;
+      transform: scale(1);
+    }
+    to {
+      opacity: 0;
+      transform: scale(2.4);
     }
   }
   @keyframes caret {
@@ -791,6 +810,177 @@
    night and day mixes are exactly the two values the Grove prototype drew. */
 ::selection {
   background: color-mix(in srgb, var(--color-kodama) 25%, transparent);
+}
+
+/* ---------- the kodama spirit-mark ----------
+   The app's beating heart, and the one component whose material lives here
+   rather than in its className. Two things a utility cannot reach: the aura's
+   two counter-rotating lobes are PSEUDO-ELEMENTS (a lopsided blurred shape
+   drifting inside a soft field — four layers on two nodes, and a
+   pseudo-element takes no class), and the core's caught-light sheen is a
+   gradient laid over a themed background-color.
+
+   The `is-*` mode classes below are emitted by
+   src/components/capture/SpiritMark.tsx — the two files are one contract, and
+   src/components/capture/SpiritMark.test.tsx pins it.
+
+   Ported from the deleted SpiritMark.css. Colours are Grove tokens, so `.day`
+   and `.hc` carry the mark with no rule of their own; durations are the shared
+   @theme animations, so the mark breathes on the same clock as everything else
+   that loops. */
+.spirit-mark {
+  --mark-size: 1.15rem;
+  --halo-spread: 1rem;
+  position: relative;
+  flex: none;
+  display: inline-block;
+  width: var(--mark-size);
+  height: var(--mark-size);
+}
+
+/* The aura is present only while listening. `__aura` is the wake gate — it
+   owns the 0→1 opacity fade and nothing else — while its child `__bloom`
+   carries the breath, so the wake and the breath never fight over one
+   property. 300ms is the app's morph clock: the same length the core's colour
+   and the listen pill's fill take, so arriving on air reads as one move. */
+.spirit-mark__aura {
+  position: absolute;
+  inset: calc(-1 * var(--halo-spread));
+  border-radius: 50%;
+  opacity: 0;
+  transition: opacity 300ms var(--ease-out-strong);
+}
+
+/* Rather than one static, lopsided glow, two soft asymmetric lobes slowly
+   counter-rotate so the aura's edge undulates — a living presence rather than
+   a pulsing circle. Only `transform` is animated on the blurred layers (the
+   border-radius stays fixed), so the blur rasterizes once and the rotation
+   rides the compositor with no per-frame repaint. */
+.spirit-mark__bloom {
+  position: absolute;
+  inset: 0;
+  opacity: 0.26;
+}
+.spirit-mark__bloom::before,
+.spirit-mark__bloom::after {
+  content: "";
+  position: absolute;
+  inset: 4%;
+  background: radial-gradient(circle, var(--color-kodama) 0%, transparent 72%);
+  filter: blur(4px);
+  border-radius: 48% 52% 53% 47% / 52% 47% 53% 48%;
+  will-change: transform;
+}
+.spirit-mark__bloom::after {
+  inset: 11%;
+  opacity: 0.8;
+  border-radius: 52% 48% 47% 53% / 48% 53% 47% 52%;
+}
+
+/* The core is a clean disc, so the mark survives at 14px and in one ink value.
+   The sheen is a caught highlight, not a specular dot: it keeps the core from
+   reading as a mechanical LED. `transform` is transitioned alongside the
+   colour so a breath in flight eases back to rest instead of snapping.
+
+   White at 0.16 is the specified value, not a taste: it is what
+   design/spirit-mark.html carries and what the legacy `--sheen` held, and at
+   14px anything stronger stops being caught light and becomes the specular
+   dot the line above says it must not be. The literal is spelled out rather
+   than tokenised because it has exactly one consumer and does not move
+   between grounds. */
+.spirit-mark__core {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background-color: var(--color-ink);
+  background-image: radial-gradient(
+    circle at 42% 38%,
+    rgb(255 255 255 / 0.16),
+    transparent 52%
+  );
+  transition:
+    background-color 300ms var(--ease-out-strong),
+    transform 300ms var(--ease-out-strong);
+}
+
+/* Listening and degraded both wear the green: audio IS reaching disk in both,
+   and hiding that would falsely imply privacy (DESIGN_SYSTEM §2). What
+   degraded loses is the field of ma — no aura — so it is visibly not full
+   listening. */
+.spirit-mark.is-listening .spirit-mark__core,
+.spirit-mark.is-degraded .spirit-mark__core {
+  background-color: var(--color-kodama);
+  animation: var(--animate-breathe);
+}
+.spirit-mark.is-listening .spirit-mark__aura {
+  opacity: 1;
+}
+.spirit-mark.is-listening .spirit-mark__bloom {
+  animation: var(--animate-halo);
+}
+.spirit-mark.is-listening .spirit-mark__bloom::before {
+  animation: var(--animate-drift);
+}
+.spirit-mark.is-listening .spirit-mark__bloom::after {
+  animation: var(--animate-drift-back);
+}
+
+/* Starting and reconnecting: capture is engaged but nothing is recorded yet,
+   so the mark stays ink — the green is reserved for audio actually being
+   captured. The shared `pending` pulse reads as anticipation, which is what
+   separates both from the dormant idle mark (a press that never registered,
+   or a session that isn't running at all). It is opacity-only, so it survives
+   reduced motion untouched. */
+.spirit-mark.is-starting .spirit-mark__core,
+.spirit-mark.is-reconnecting .spirit-mark__core {
+  animation: var(--animate-pending);
+}
+
+/* ---------- the mark under reduced motion ----------
+   Movement stops; life does not. The core stops scaling, the lobes stop
+   turning and settle ROUND, and what survives is the aura's opacity breath
+   plus the starting / reconnecting pulse.
+
+   Rounding the lobes is the point, not a tidy-up: their lopsided radius is
+   information only while it rotates. Stop the rotation and it is a skewed
+   blob sitting still — which is exactly what the old app-wide duration floor
+   produced, and why a floor was the wrong instrument.
+
+   THREE THINGS HERE ARE LOAD-BEARING. (1) `!important` on the lobes: the
+   drift rules above are two classes stronger than a bare lobe selector.
+   (2) The order — the core and bloom swaps only tie the rules above on
+   specificity, so they win by coming later in this file; moving this block up
+   silently disables them. (3) Both rule sets: `motion-reduce:` handles
+   utilities, but hand-written CSS needs the media query and the app toggle
+   spelled out, and a media query cannot share a selector list with a plain
+   rule. */
+@media (prefers-reduced-motion: reduce) {
+  .spirit-mark__bloom::before,
+  .spirit-mark__bloom::after {
+    animation: none !important;
+    border-radius: 50%;
+    will-change: auto;
+  }
+  .spirit-mark.is-listening .spirit-mark__core,
+  .spirit-mark.is-degraded .spirit-mark__core {
+    animation: none;
+  }
+  .spirit-mark.is-listening .spirit-mark__bloom {
+    animation: var(--animate-halo-still);
+  }
+}
+:root[data-reduce-motion="on"] .spirit-mark__bloom::before,
+:root[data-reduce-motion="on"] .spirit-mark__bloom::after {
+  animation: none !important;
+  border-radius: 50%;
+  will-change: auto;
+}
+:root[data-reduce-motion="on"] .spirit-mark.is-listening .spirit-mark__core,
+:root[data-reduce-motion="on"] .spirit-mark.is-degraded .spirit-mark__core {
+  animation: none;
+}
+:root[data-reduce-motion="on"] .spirit-mark.is-listening .spirit-mark__bloom {
+  animation: var(--animate-halo-still);
 }
 
 /* ============================================================

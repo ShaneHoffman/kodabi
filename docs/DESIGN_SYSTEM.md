@@ -183,9 +183,16 @@ Every view answers four questions, and a view that answers only the first is unf
 | **Exit** | 110–130ms | `ease` | Anything leaving: menus, dialogs, toasts, a filed card |
 | **Materialize** | 220ms | `ease-out-strong` | A surface arriving: menu, dialog, toast |
 | **Rise-in** | 280ms, 45ms stagger | `ease-out-strong` | A list of rows appearing |
+| **Morph** | 300ms | `ease-out-strong` | A surface that stays put and changes what it means: the listen pill going on air, the kodama's core taking the green |
 
 **Exits are faster than entrances, always.** The user has already decided; waiting on the way out is
 what makes an interface feel slow.
+
+**Morph is the one that is slower than an entrance, and deliberately.** Nothing arrives and nothing
+leaves — a thing already on screen changes state — so the length is what makes the change legible as
+a change rather than a repaint. Everything morphing together must share it: the listen pill's fill,
+edge and label and the mark's core all take 300ms, which is what makes going on air read as one move
+rather than a pill and a dot agreeing by luck (docs/SPIRIT_MARK.md).
 
 **The command palette materializes in 200ms and leaves in 110ms**, the short end of both bands, spelled
 at the call site rather than taken from `animate-materialize`. Ctrl K is a hundred-times-a-day action:
@@ -224,6 +231,7 @@ animation for its opacity-only partner, at the call site, with the `motion-reduc
 | `animate-rise-in` | `animate-fade-in` |
 | `animate-dissolve` | `animate-fade-out` |
 | `animate-halo` | `animate-halo-still` |
+| `animate-ring` | `animate-halo-still` |
 | `animate-breathe`, `animate-drift`, `animate-drift-back` | none |
 | `active:scale-97` | no press transform |
 
