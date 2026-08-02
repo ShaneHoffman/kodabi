@@ -34,4 +34,6 @@ The frontend is TypeScript strict, and the strictness is a gate, not a suggestio
   **Installed is not adopted.** The hand-rolled `Select` is a working, tested,
   accessible combobox: it gets replaced when someone has read what
   `@base-ui/react` gives in exchange, in its own ticket, not on sight. Same for
-  the palette and the toast. See [`docs/UI_CONVENTIONS.md`](../../docs/UI_CONVENTIONS.md) §4.
+  the toast. The palette has had that ticket: `cmdk` **is** adopted, driving the
+  list inside `@base-ui/react`'s dialog parts, and everything visible about it is
+  still ours. See [`docs/UI_CONVENTIONS.md`](../../docs/UI_CONVENTIONS.md) §4.

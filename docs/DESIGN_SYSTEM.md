@@ -181,7 +181,7 @@ Every view answers four questions, and a view that answers only the first is unf
 | --- | --- | --- | --- |
 | **Press** | 140ms | `ease-out-strong` | Every pressable thing (§2) |
 | **Exit** | 110–130ms | `ease` | Anything leaving: menus, dialogs, toasts, a filed card |
-| **Materialize** | 220ms | `ease-out-strong` | A surface arriving: menu, palette, dialog, toast |
+| **Materialize** | 220ms | `ease-out-strong` | A surface arriving: menu, dialog, toast |
 | **Rise-in** | 280ms, 45ms stagger | `ease-out-strong` | A list of rows appearing |
 | **Morph** | 300ms | `ease-out-strong` | A surface that stays put and changes what it means: the listen pill going on air, the kodama's core taking the green |
 
@@ -193,6 +193,11 @@ leaves — a thing already on screen changes state — so the length is what mak
 a change rather than a repaint. Everything morphing together must share it: the listen pill's fill,
 edge and label and the mark's core all take 300ms, which is what makes going on air read as one move
 rather than a pill and a dot agreeing by luck (docs/SPIRIT_MARK.md).
+
+**The command palette materializes in 200ms and leaves in 110ms**, the short end of both bands, spelled
+at the call site rather than taken from `animate-materialize`. Ctrl K is a hundred-times-a-day action:
+a surface summoned that often has to be *there*, and 20ms of extra arrival is 20ms the user spends
+waiting to type. It is the same keyframe at a different length, not a different move.
 
 ### Surfaces materialize
 
@@ -256,10 +261,10 @@ hole rather than a pane:
 In day, weight shifts between (3) and (4): the highlight does the separating, because a shadow on a
 pale ground reads as dirt.
 
-### The material comes in six thicknesses
+### The material comes in seven thicknesses
 
 Each is a named recipe in `src/index.css` §3, carrying all four parts plus its rung of the ladder
-below. Reach for the one that matches the job; do not assemble a seventh by hand.
+below. Reach for the one that matches the job; do not assemble an eighth by hand.
 
 | Recipe | Is | Blur |
 | --- | --- | --- |
@@ -268,7 +273,13 @@ below. Reach for the one that matches the job; do not assemble a seventh by hand
 | `glass-panel` | The main pane. The thinnest fill, so the ground's glow bends through it | 28 / 150% |
 | `glass-card` | A card, and anything near-solid **inside** a panel | **none** |
 | `glass-overlay` | Menus and toasts | 32 / 160% |
-| `glass-dialog` | Dialogs and the palette: the same material, the longest shadow | 32 / 160% |
+| `glass-dialog` | Dialogs: the same material, the longest shadow | 32 / 160% |
+| `glass-palette` | The command palette. The dialog's shadow at the card's radius | 36 / 160% |
+
+**The palette is the thickest rung, and that is the rule rather than an exception to it.** A bigger
+pane has more of the app behind it to push back, so it has to read as a thicker material or it reads
+as a hole. It keeps the card's 14px because what it holds is a list of rows, and a dialog's 16px
+would bow out past the topmost of them.
 
 **A card carries no backdrop blur, deliberately.** It floats on a surface that is already blurring
 the ground, and blurring a blurred image again is mud, not depth — so a card's fill goes near-opaque
@@ -279,8 +290,8 @@ and its depth comes from the lit edge and the shadow alone.
 | Layer | Radius | Is |
 | --- | --- | --- |
 | Panel, dock | `rounded-panel` (18px) | The furniture. Sits on the ground, never moves |
-| Card, menu, toast | `rounded-card` (14px) | Content and transient surfaces |
-| Dialog, palette | `rounded-dialog` (16px) | Card-sized but window-like, so between the two |
+| Card, menu, toast, palette | `rounded-card` (14px) | Content and transient surfaces |
+| Dialog | `rounded-dialog` (16px) | Card-sized but window-like, so between the two |
 | Button | `rounded-button` (10px) | An action (§2) |
 | Pill | `rounded-pill` (999px) | A token (§2) |
 

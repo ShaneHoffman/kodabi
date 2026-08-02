@@ -867,24 +867,21 @@
      inside it. That is 40px, which is the bridged section-gap step (--space-lg)
      arriving by addition — this is the increment that gets there from a row's
      own padding, which is why it is 14 and not 40. The same trick as
-     --palette-section-gap and --sidebar-section-gap, spent on this panel. */
+     --sidebar-section-gap, spent on this panel. */
   --gap-setting-group: 14px;
 
   /* where a summoned overlay sits, and how the summoned surfaces are packed.
 
      These windows are read, not worked in, so they are indented off their own
-     edge rather than padded like a control. */
+     edge rather than padded like a control.
+
+     The palette's own geometry used to live here too; it moved to utilities at
+     the call site when the palette went to Grove, and only --palette-top is
+     left because Overlay still positions the two dialogs that have not. */
   --palette-top: 96px;
-  --palette-query-top: 20px; /* the palette's query row */
-  --palette-query-x: 22px;
-  --palette-query-bottom: 18px;
-  --palette-row-y: 11px; /* one result row */
-  --palette-row-x: 13px;
-  --palette-section-gap: 14px; /* a later section's lead-in, and the list foot */
-  --palette-eyebrow-gap: 6px; /* a section eyebrow to its first row */
   --menu-pad: 7px; /* an overlay menu's inset around its rows */
-  --menu-option-y: 10px; /* deliberately not the palette row's pair: a menu
-                            option is chosen, a palette row is read */
+  --menu-option-y: 10px; /* a menu option is chosen, not read, so it sits
+                            tighter than a list row */
   --menu-option-x: 13px;
   --capture-pad-top: 24px; /* the quick-capture window body */
   --capture-pad-x: 28px;

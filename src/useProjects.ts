@@ -54,6 +54,33 @@ export function formatSlug(slug: string): string {
   return slug.split("/").join(" / ");
 }
 
+/** The four folder hues (docs/DESIGN_SYSTEM.md §2). Marigold is deliberately
+ * absent: it means failure, and a project must never be mistaken for one. */
+export type FolderHue = "coral" | "cobalt" | "teal" | "plum";
+
+const FOLDER_HUES: readonly FolderHue[] = ["coral", "cobalt", "teal", "plum"];
+
+/**
+ * A project's hue, derived from its slug.
+ *
+ * Hues are identity, never status, so this has to be a pure function of the
+ * name and nothing else: cycling by list position would repaint every folder
+ * below a newly created one, and a colour that moves is a colour that means
+ * nothing. Derived rather than stored because a hue is a rendering of the
+ * project, not a fact about it — nothing on disk or in the index carries one.
+ *
+ * The hash is the textbook 31x rotation, `| 0` to stay in int32 rather than
+ * drifting into float territory on a long slug. Its exact output is pinned by
+ * a test: changing it would silently recolour every vault in existence.
+ */
+export function folderHue(slug: string): FolderHue {
+  let hash = 0;
+  for (let index = 0; index < slug.length; index += 1) {
+    hash = (hash * 31 + slug.charCodeAt(index)) | 0;
+  }
+  return FOLDER_HUES[Math.abs(hash) % FOLDER_HUES.length];
+}
+
 export function slugDepth(slug: string): number {
   return slug.split("/").length - 1;
 }

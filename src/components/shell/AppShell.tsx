@@ -46,7 +46,11 @@ export function AppShell() {
         {/* Outside the error boundary and outside the routed view: a failure
             reaches you whatever screen you are on. */}
         <CaptureToast />
-        {open && <CommandPalette onClose={closePalette} />}
+        {/* Mounted whether or not it is open, unlike the nudge below: the
+            palette owns its own exit animation, and base-ui only keeps a popup
+            alive through that animation if the element is still rendered.
+            Behind `open &&` the dissolve would be cut off by the unmount. */}
+        <CommandPalette open={open} onClose={closePalette} />
         {consentOpen && <ConsentNudge onClose={closeNudge} />}
       </div>
     </CapturePipelineProvider>

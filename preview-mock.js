@@ -146,7 +146,7 @@
   // Drive the app to a screen by clicking the same controls a person would, so
   // what gets captured is a state the user could actually have navigated to.
   const clickByText = (text) => {
-    // Buttons and listbox options: the palette's rows are <li role="option">,
+    // Buttons and listbox options: the palette's rows are role="option" divs,
     // not buttons, because focus stays on the combobox input.
     for (const node of document.querySelectorAll('button, [role="option"]')) {
       if (node.textContent.trim().startsWith(text)) {

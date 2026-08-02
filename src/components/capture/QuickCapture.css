@@ -33,8 +33,7 @@
    1px top border in currentColor — which would draw a second, ink-coloured
    line on top of the translucent one this rule is actually made of. The rule
    is the background box, at an --edge-* value, like every other hairline in
-   the app. Same note on .command-palette__rule, .settings__rule and
-   .sidebar__divider. */
+   the app. Same note on .settings__rule and .sidebar__divider. */
 .capture__rule {
   border: none;
   height: 1px;

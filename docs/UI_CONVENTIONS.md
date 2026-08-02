@@ -91,12 +91,12 @@ Always the token utility, never the literal:
 | A radius | `rounded-panel`, `rounded-card`, `rounded-dialog`, `rounded-button`, `rounded-pill` |
 | A curve | `ease-out-strong`, `ease-in-out-strong` |
 | A duration | `duration-140`, `duration-220`, … (bare ms; the canonical four are in DESIGN_SYSTEM §4) |
-| A glass surface | `glass-top`, `glass-dock`, `glass-panel`, `glass-card`, `glass-overlay`, `glass-dialog`, `glass-scrim` |
+| A glass surface | `glass-top`, `glass-dock`, `glass-panel`, `glass-card`, `glass-overlay`, `glass-dialog`, `glass-palette`, `glass-scrim` |
 | The focus ring | `focus-ring`, or `focus-ring-inset` where the control fills its container |
 
 Each recipe carries a whole surface — its fill, blur, lit edge, border, shadow and rung of the radius
 ladder — plus its own `.day` branch, so a surface cannot be spelled at the wrong roundness or lose
-half its material. The six thicknesses each carry a `prefers-reduced-transparency` branch too;
+half its material. The seven thicknesses each carry a `prefers-reduced-transparency` branch too;
 `glass-scrim` is the deliberate exception on both counts (a fill and nothing else, and no blur to
 drop), and DESIGN_SYSTEM §5 says which parts each one omits and why. They are `@utility` rather than
 a stack of classes because reduced transparency removes a *property* (`backdrop-filter`) rather than
@@ -214,10 +214,10 @@ decided by build order rather than by the className.
   `inset-0 m-auto h-fit` and must stay margin-based: the `materialize` keyframe animates
   `transform`, so a translate-centred popup opens in the corner.
 - **`Overlay` dismisses on click, not pointerdown**, and only when the gesture both started and ended
-  on the backdrop. It deliberately does **not** trap focus — its caller passes its own `onKeyDown`,
-  because the palette swallows Tab on one input. It is pre-Grove and down to that one caller: the
-  palette moves to `Dialog` in its own ticket, and `Overlay`, `Overlay.css` and `useDialogFocus` go
-  with it.
+  on the backdrop. It deliberately does **not** trap focus — each of its former callers passed its own
+  `onKeyDown`. It is now callerless: the consent nudge and the create-project dialog have each moved to
+  `Dialog`, and the palette never used it at all — it composes base-ui's dialog parts directly. `Overlay`,
+  `Overlay.css` and `useDialogFocus` are dead code pending their own removal ticket.
 - **`Menu.Trigger` composes, it does not wrap.** Pass the control through `render`
   (`<Menu.Trigger render={<Button variant="quiet">File</Button>} />`) so there is one `<button>`
   carrying both the Grove chrome and base-ui's wiring, not a button inside a button.
@@ -259,14 +259,18 @@ The curated stack is installed and is the direction of travel:
 | `sonner` | Toasts |
 | `motion` | Motion that CSS cannot express — gestures, layout animation, interruptible transitions |
 
-**Three are adopted.** `cva` gives `Button` its variants and `clsx` composes classes wherever a
-primitive has conditions (`Field`, `Dialog`); a component with no variants needs no `cva` table.
-`@base-ui/react` is behind
-`Menu` and `Dialog` — the two pieces of behaviour that are hard, invisible when they work, and not
-Grove's opinion: anchoring a popup to its trigger with a flip at the window edge, and trapping focus
-in a modal. Everything visible about both is still ours.
+**Four are adopted.** `cva` gives `Button` its variants and `clsx` composes classes wherever a
+primitive has conditions (`Field`, `Dialog`, `CommandPalette`); a component with no variants needs no
+`cva` table. `@base-ui/react` is behind `Menu` and `Dialog` — the two pieces of behaviour that are
+hard, invisible when they work, and not Grove's opinion: anchoring a popup to its trigger with a flip
+at the window edge, and trapping focus in a modal. And `cmdk` is behind `CommandPalette`, which uses
+**both**: cmdk owns the list (fuzzy scoring, the arrow keys, the listbox ARIA, one highlight shared by
+pointer and keyboard) inside base-ui's dialog parts, which own the modal. Note what that rules out —
+cmdk's own `Command.Dialog` wraps `@radix-ui/react-dialog`, and taking it would have put a second
+dialog implementation in the app beside base-ui's. **A library is worth adopting for the part of it
+you need, not the whole surface it offers.** Everything visible about all four is still ours.
 
-**`cmdk`, `sonner` and `motion` are installed, not adopted**, and each is its own decision in its own
+**`sonner` and `motion` are installed, not adopted**, and each is its own decision in its own
 ticket — installing a package is not the same as adopting it. The same holds for what base-ui has
 NOT taken: `Select` is a working, tested, accessible combobox, and it gets replaced when someone has
 read what `@base-ui/react` gives in exchange, not on sight.

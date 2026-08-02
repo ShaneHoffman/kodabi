@@ -1,5 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CommandPalette } from "./CommandPalette";
 import { NavigationProvider } from "../providers/NavigationProvider";
@@ -28,10 +29,10 @@ function serveVault(): void {
 async function renderPalette() {
   const result = render(
     <NavigationProvider>
-      <CommandPalette onClose={() => {}} />
+      <CommandPalette open onClose={() => {}} />
     </NavigationProvider>,
   );
-  await screen.findByRole("option", { name: "briarwood-golf" });
+  await screen.findByRole("option", { name: /briarwood-golf/ });
   return result;
 }
 
@@ -39,56 +40,72 @@ function input(): HTMLElement {
   return screen.getByRole("combobox");
 }
 
-describe("CommandPalette sections", () => {
+/** The row cmdk would run on Enter. */
+function selectedOption(): HTMLElement {
+  const selected = screen
+    .getAllByRole("option")
+    .find((option) => option.getAttribute("aria-selected") === "true");
+  if (!selected) throw new Error("no option is selected");
+  return selected;
+}
+
+describe("CommandPalette", () => {
   beforeEach(() => {
     resetTauriMocks();
     serveVault();
   });
 
-  it("heads the two halves of an unfiltered list", async () => {
-    // Somewhere to go and something to do are different questions; flat, the
-    // only thing marking the boundary was a hint repeated on every row.
+  it("groups an unfiltered list into places, folders and verbs", async () => {
+    // Somewhere to go, a folder to open and something to do are three different
+    // questions. The headings are screen-reader only — sighted users get the
+    // hairlines — so a group with no accessible name would be a group a screen
+    // reader could not describe.
     await renderPalette();
 
     expect(screen.getByRole("group", { name: "Jump to" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Folders" })).toBeInTheDocument();
     expect(screen.getByRole("group", { name: "Actions" })).toBeInTheDocument();
   });
 
-  it("says nothing per row that its own heading already says", async () => {
+  it("names the list itself, rather than taking the library's default", async () => {
+    // cmdk spreads the caller's props before its own aria-label, so the name
+    // has to arrive through `label` — passed any other way it is silently
+    // replaced by the word "Suggestions", which is not what this list is.
     await renderPalette();
 
-    expect(
-      screen.getByRole("option", { name: "briarwood-golf" }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole("listbox", { name: "Commands" })).toBeInTheDocument();
   });
 
-  it("drops the headings when filtering and marks the row Enter would run", async () => {
-    // A filtered list is a set of matches, not a table of contents. What
-    // replaces the heading is not a restatement of it — it is the one thing
-    // worth saying about the top row, which is that Enter runs it.
-    const user = userEvent.setup();
+  it("tags each row with the kind of thing it is", async () => {
     await renderPalette();
 
-    await user.type(input(), "briarwood");
+    expect(screen.getByRole("option", { name: /^Inbox/ })).toHaveTextContent("navigate");
+    expect(screen.getByRole("option", { name: /briarwood-golf/ })).toHaveTextContent("folder");
+    expect(screen.getByRole("option", { name: /New note/ })).toHaveTextContent("action");
+  });
 
-    expect(screen.queryByRole("group", { name: "Jump to" })).not.toBeInTheDocument();
-    const [match] = screen.getAllByRole("option");
-    expect(match).toHaveTextContent("briarwood-golf");
-    expect(match).toHaveTextContent("↵");
+  it("gives a folder row its project's identity hue", async () => {
+    // The dot is decoration for the name beside it, so it is hidden from the
+    // accessible name rather than read out as a colour.
+    await renderPalette();
+
+    const dot = screen
+      .getByRole("option", { name: /briarwood-golf/ })
+      .querySelector("[aria-hidden='true']");
+
+    expect(dot).toHaveClass("bg-coral");
   });
 
   it("teaches the global shortcut of a command that has one, and invents none", async () => {
     // The palette is where people learn the bindings, so a hint here has to be
-    // a real accelerator the backend registered. Every other row shows nothing
+    // a real accelerator the backend registered. Every other row shows its kind
     // rather than a label dressed up as a key.
     await renderPalette();
 
     expect(screen.getByRole("option", { name: /Quick capture/ })).toHaveTextContent(
       "Ctrl+Alt+Space",
     );
-    expect(screen.getByRole("option", { name: /New note/ })).not.toHaveTextContent(
-      "Ctrl",
-    );
+    expect(screen.getByRole("option", { name: /New note/ })).not.toHaveTextContent("Ctrl");
   });
 
   it("offers the needs-attention jump while only dismissed captures remain", async () => {
@@ -108,28 +125,103 @@ describe("CommandPalette sections", () => {
 
     await renderPalette();
 
-    expect(
-      await screen.findByRole("option", { name: "Needs attention" }),
-    ).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: /Needs attention/ })).toBeInTheDocument();
   });
 
-  it("walks the arrow keys straight across the section boundary", async () => {
-    // The sections are visual only: the option ids stay one sequence over the
-    // whole list, so the highlight must not stall or skip where they meet.
+  it("walks the arrow keys straight across a group boundary", async () => {
+    // The groups are visual only: the highlight must not stall or skip where
+    // one ends and the hairline begins.
     const user = userEvent.setup();
     await renderPalette();
     const options = screen.getAllByRole("option");
-    // Inbox, briarwood-golf | New note, Quick capture, Search notes,
-    // Open chat, Open terminal, Settings
+    // Inbox, Search notes, Open chat, Open terminal, Settings |
+    // briarwood-golf | New note, Quick capture
     expect(options).toHaveLength(8);
-    expect(input()).toHaveAttribute("aria-activedescendant", options[0].id);
+    expect(selectedOption()).toHaveTextContent("Inbox");
 
-    await user.keyboard("{ArrowDown}{ArrowDown}");
+    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}");
 
-    // The third row is the first of the next section, reached with no extra
-    // keypress for the heading in between.
-    expect(input()).toHaveAttribute("aria-activedescendant", options[2].id);
-    expect(options[2]).toHaveTextContent("New note");
-    expect(options[2]).toHaveAttribute("aria-selected", "true");
+    // The sixth row is the first folder, reached with no extra keypress for the
+    // separator in between.
+    expect(selectedOption()).toHaveTextContent("briarwood-golf");
+  });
+
+  it("matches on more than a substring", async () => {
+    // The hand-rolled filter this replaced was `includes` over the title, so a
+    // gapped abbreviation found nothing at all.
+    const user = userEvent.setup();
+    await renderPalette();
+
+    await user.type(input(), "trm");
+
+    expect(screen.getByRole("option", { name: /Open terminal/ })).toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: /^Inbox/ })).not.toBeInTheDocument();
+  });
+
+  it("drops the group scaffolding while filtering", async () => {
+    // A filtered list is a set of matches, not a table of contents.
+    const user = userEvent.setup();
+    await renderPalette();
+
+    await user.type(input(), "briarwood");
+
+    expect(screen.queryByRole("group", { name: "Jump to" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+  });
+
+  it("turns a query that matches nothing into a search", async () => {
+    // Typed text always leads somewhere, so there is no empty state to reach.
+    // The fallback has to be *selected*, not merely present: it is the row
+    // Enter runs, and it is force-mounted past the filter that hid the rest.
+    const user = userEvent.setup();
+    await renderPalette();
+
+    await user.type(input(), "zzzz");
+
+    const [fallback] = screen.getAllByRole("option");
+    expect(screen.getAllByRole("option")).toHaveLength(1);
+    expect(fallback).toHaveTextContent("Search for “zzzz”");
+    expect(fallback).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("runs the selected command and closes", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(
+      <NavigationProvider>
+        <CommandPalette open onClose={onClose} />
+      </NavigationProvider>,
+    );
+    await screen.findByRole("option", { name: /briarwood-golf/ });
+
+    await user.type(input(), "terminal");
+    await user.keyboard("{Enter}");
+
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("hands focus back to whatever opened it", async () => {
+    // base-ui owns the trap and the restore; what this pins is that the palette
+    // is wired to it at all, since the hand-rolled version it replaces had to
+    // save and restore the opener itself.
+    const user = userEvent.setup();
+    function Harness() {
+      const [open, setOpen] = useState(false);
+      return (
+        <NavigationProvider>
+          <button onClick={() => setOpen(true)}>Commands</button>
+          <CommandPalette open={open} onClose={() => setOpen(false)} />
+        </NavigationProvider>
+      );
+    }
+    render(<Harness />);
+    const opener = screen.getByRole("button", { name: "Commands" });
+
+    await user.click(opener);
+    expect(await screen.findByRole("combobox")).toHaveFocus();
+
+    await user.keyboard("{Escape}");
+
+    expect(opener).toHaveFocus();
   });
 });
