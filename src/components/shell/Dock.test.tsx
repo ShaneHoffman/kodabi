@@ -2,7 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CapturePipelineProvider } from "../providers/CapturePipelineProvider";
-import { Sidebar } from "./Sidebar";
+import { Dock } from "./Dock";
 import { MainContent } from "./MainContent";
 import { NavigationProvider } from "../providers/NavigationProvider";
 import { DISTILL_STATE_EVENT } from "../../events";
@@ -22,12 +22,12 @@ function makeSession(slug: string, dismissed = false): FailedSession {
   };
 }
 
-/** The reads the sidebar and the views behind it make. */
+/** The reads the dock and the views behind it make. */
 function serveVault(sessions: FailedSession[] = []): void {
   onCommand("list_projects", () => ({ inbox_note_count: 0, projects: [] }));
   onCommand("list_notes", () => []);
   onCommand("list_failed_sessions", () => sessions);
-  // The listening indicator in the footer reads this on mount; left unrouted it
+  // The capture pipeline around the dock reads this on mount; left unrouted it
   // would reject and put an error beside the row under test.
   onCommand("capture_phase", () => ({
     phase: "idle",
@@ -39,14 +39,14 @@ function renderShell() {
   return render(
     <NavigationProvider>
       <CapturePipelineProvider>
-        <Sidebar onOpenPalette={() => {}} />
+        <Dock />
         <MainContent />
       </CapturePipelineProvider>
     </NavigationProvider>,
   );
 }
 
-describe("Sidebar needs-attention row", () => {
+describe("Dock needs-attention row", () => {
   beforeEach(() => {
     resetTauriMocks();
   });

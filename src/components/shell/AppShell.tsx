@@ -8,13 +8,18 @@ import { CapturePipelineProvider } from "../providers/CapturePipelineProvider";
 import { CaptureToast } from "../overlays/CaptureToast";
 import { CommandPalette } from "../overlays/CommandPalette";
 import { ConsentNudge } from "../overlays/ConsentNudge";
+import { Dock } from "./Dock";
 import { MainContent } from "./MainContent";
-import { Sidebar } from "./Sidebar";
+import { TopBar } from "./TopBar";
 
 /**
- * The persistent layout every destination docks into: sidebar + main region,
- * with the command palette overlaid on demand. The shell owns the viewport
- * (h-screen); sidebar and main scroll independently.
+ * The persistent layout every destination docks into: a transport bar over a
+ * dock and a main panel, with the command palette overlaid on demand.
+ *
+ * Three glass surfaces on the grove ground, and the gutter between them is the
+ * point — the dock and the panel are panes floating on a lit background, not
+ * regions of one sheet, so each carries its own edges and its own scroll. The
+ * shell owns the viewport (h-screen) and nothing else scrolls.
  */
 export function AppShell() {
   const { open, openPalette, closePalette } = useCommandPalette();
@@ -31,18 +36,22 @@ export function AppShell() {
     // the Inbox (which shows the pipeline's progress) and the toast (which
     // now only ever shows its failures).
     <CapturePipelineProvider>
-      <div className="flex h-screen overflow-hidden bg-bg font-sans text-text">
-        <Sidebar onOpenPalette={openPalette} />
-        <main className="flex-1 overflow-y-auto">
-          {/* Only the routed view is guarded: a crash here leaves the sidebar
-              alive, so the user navigates out rather than restarting. The key is
-              the whole destination, not just its kind — the fallback tells the
-              user to pick another screen, and picking a second project (or a
-              second note, or a second search) has to actually clear it. */}
-          <AppErrorBoundary resetKey={viewKey(view)}>
-            <MainContent />
-          </AppErrorBoundary>
-        </main>
+      <div className="grove-ground flex h-screen flex-col overflow-hidden font-ui text-ink">
+        <TopBar onOpenPalette={openPalette} />
+        <div className="flex min-h-0 flex-1 gap-5 p-5">
+          <Dock />
+          <main className="glass-panel min-w-0 flex-1 overflow-y-auto">
+            {/* Only the routed view is guarded: a crash here leaves the dock and
+                the transport bar alive, so the user navigates out rather than
+                restarting. The key is the whole destination, not just its kind —
+                the fallback tells the user to pick another screen, and picking a
+                second project (or a second note, or a second search) has to
+                actually clear it. */}
+            <AppErrorBoundary resetKey={viewKey(view)}>
+              <MainContent />
+            </AppErrorBoundary>
+          </main>
+        </div>
         {/* Outside the error boundary and outside the routed view: a failure
             reaches you whatever screen you are on. */}
         <CaptureToast />

@@ -669,37 +669,22 @@
      Consumed from co-located Component.css (docs/UI_CONVENTIONS.md), never
      as an arbitrary Tailwind value. */
 
-  /* the shell */
-  --sidebar-w: 232px;
-  --sidebar-pad-top: 30px;
-  --sidebar-pad-x: 22px;
-  --sidebar-pad-bottom: 24px;
-  /* A nav row's box, and it is ONE box per group whatever the row's state.
-     The reference draws the active pill larger than the row beside it (12/16
-     against 7/8), which is invisible in a static mock and awful in a live
-     one: selecting a project slid its label 8px right and grew the row 10px,
-     shoving every row below it down. Selection changes the FILL, the
-     ELEVATION and the WEIGHT. It never changes the box. */
-  --sidebar-row-x: 12px; /* the project list and the footer */
-  --sidebar-row-y: 9px;
-  --sidebar-rail-x: 16px; /* the system rail, which carries more weight */
-  --sidebar-rail-y: 11px;
-  --sidebar-indent: 16px; /* one level of project nesting */
-  --sidebar-eyebrow-top: 30px; /* the lead-in above the PROJECTS eyebrow */
-  --sidebar-row-gap: 1px; /* between project rows: a seam, not a step */
-  /* The rail's section break: under the wordmark, under its divider, and
-     under the listening foot. One value, because they are one gesture. */
-  --sidebar-section-gap: 20px;
+  /* The shell's own geometry is gone: the Grove shell states it in utilities
+     (src/components/shell/), so there is nothing left here for it to read. */
 
   /* The view gutter — vertical, then horizontal. ONE pair, for every view.
      Each view type used to state its own (44/60, 52/60, 46/56, 52/60, 40/64,
      40/56) on the theory that where the content sat was part of what told a
      queue from a library. In the running app it did not read as intent: it read
-     as the content moving every time you clicked something in the sidebar. View
+     as the content moving every time you clicked something in the dock. View
      identity is carried by the header, the density and the weight, which stay
-     per-variant; the frame around them holds still. */
-  --gutter-view-y: 44px;
-  --gutter-view-x: 60px;
+     per-variant; the frame around them holds still.
+
+     The pair shrank with the Grove shell: the panel is now an inset pane with
+     20px of ground around it, so the old 44/60 stacked two gutters and pushed
+     every view's first line a third of the way down the glass. */
+  --gutter-view-y: 34px;
+  --gutter-view-x: 40px;
 
   /* content measures */
   --measure-setting: 520px; /* a settings row: label left, control right */

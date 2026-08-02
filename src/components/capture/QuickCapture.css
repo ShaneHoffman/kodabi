@@ -105,7 +105,7 @@
 /* The same 11px box in every state, so the header never reflows — only the
    fill changes. Ink while a capture is engaged but nothing is reaching disk
    (starting up, or every source dropped); the one reserved green the moment it
-   is. Mirrors `.listening__core` in ListeningIndicator.css. */
+   is. The Grove equivalent is the SpiritMark's core (src/index.css §3). */
 .capture__core {
   position: relative;
   width: 11px;
@@ -119,7 +119,7 @@
 }
 
 /* Scale gated by `--move`, so reduced motion keeps the opacity breath and drops
-   the growth. Mirrors `listening-breathe` in ListeningIndicator.css. */
+   the growth. Mirrors Grove's `breathe` keyframes (src/index.css §1). */
 @keyframes capture-breathe {
   0%,
   100% {

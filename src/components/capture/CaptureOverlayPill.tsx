@@ -8,8 +8,8 @@ import { SpiritMark } from "./SpiritMark";
 import "./CaptureOverlayPill.css";
 
 /**
- * The always-on-top capture pill: the same mark-plus-status pairing as
- * {@link ListeningIndicator}, but in its own frameless window that floats over
+ * The always-on-top capture pill: the same mark-plus-status pairing as the
+ * transport bar's ListenPill, but in its own frameless window that floats over
  * full-screen apps.
  *
  * It exists for the one case the in-window indicator and the tray both miss:
