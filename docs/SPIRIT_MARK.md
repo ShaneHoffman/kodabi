@@ -48,9 +48,14 @@ you are changing the mark rather than reasoning about it.
   would pulse underneath an opaque disc, and the reduced ring variant would show nothing moving at
   all. That is the failure the swap exists to prevent, so check the resting frame, not just that a
   `motion-reduce:` partner is present.
-- **The pairing is a component.** `src/components/shell/ListenPill.tsx` is the mark plus the text
-  label the concept requires, plus the elapsed clock. Look at both on `/gallery.html` under
-  `pnpm dev` — the Kodama section renders every mode across all four grounds.
+- **The pairing is a component, inside the app.** `src/components/shell/ListenPill.tsx` is the mark
+  plus the text label the concept requires, plus the elapsed clock. Look at both on `/gallery.html`
+  under `pnpm dev` — the Kodama section renders every mode across all four grounds.
+  The two floating capture windows draw the same anatomy themselves (`CaptureOverlayPill`, and
+  `RecordingStatus` inside `QuickCapture`) rather than mounting `ListenPill`: a pill is a chip
+  sitting *in* a surface, and those two *are* the surface, on glass tuned for the desktop behind
+  them. What must not diverge is the meaning — mark's fill, label's value, clock only for the
+  session — so change all three together, or change none.
 
 ---
 
