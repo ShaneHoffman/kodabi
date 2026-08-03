@@ -72,6 +72,12 @@ function depthStyle(depth: number): CSSProperties | undefined {
  * never pushes the tools at the foot out of reach, and the panel beside it
  * keeps its own edges.
  *
+ * The scroll belongs to the DESTINATIONS, not to the pane. Put it on the
+ * <aside> instead and the foot stops being a foot: `mt-auto` only distributes
+ * FREE space, and an overflowing column has none, so a vault past a dozen
+ * folders pushed Chat and Terminal below the fold and made reaching them a
+ * scroll. Bounding the list is what keeps them pinned.
+ *
  * The Inbox, Needs attention and Search lead as PEERS in a system group: they
  * are the three things that act on the whole vault. Folders are places to
  * browse and carry their hue and their count. Chat and Terminal sit under a
@@ -140,8 +146,14 @@ export function Dock() {
   };
 
   return (
-    <aside className="glass-dock flex w-56 flex-none flex-col overflow-y-auto px-3 py-3.5">
-      <nav aria-label="Knowledge base" className="flex flex-col">
+    <aside className="glass-dock flex w-56 flex-none flex-col px-3 py-3.5">
+      {/* min-h-0 is what makes the overflow real: a flex child's default
+          min-height is its content, so without it the nav grows past the pane
+          and takes the foot with it instead of scrolling. */}
+      <nav
+        aria-label="Knowledge base"
+        className="flex min-h-0 flex-1 flex-col overflow-y-auto"
+      >
         {/* A failed listing must not masquerade as an empty vault. */}
         {error && (
           <StatusMessage variant="error" compact>
@@ -201,9 +213,10 @@ export function Dock() {
         </ul>
       </nav>
 
-      {/* mt-auto pins the foot, so the folders above can grow without the tools
-          moving under the pointer. Its own landmark: `aria-current="page"` only
-          means something inside a <nav>. */}
+      {/* mt-auto pins the foot on a SHORT list, and the nav's own scroll above
+          pins it on a long one, so the folders can grow without the tools
+          moving under the pointer either way. Its own landmark:
+          `aria-current="page"` only means something inside a <nav>. */}
       <nav aria-label="Tools" className="mt-auto border-t border-edge pt-2">
         <ul className="flex flex-col gap-0.5">
           <li>

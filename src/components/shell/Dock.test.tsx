@@ -154,3 +154,29 @@ describe("Dock needs-attention row", () => {
     expect(row).toHaveAttribute("aria-current", "page");
   });
 });
+
+describe("Dock layout", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  // jsdom has no layout, so this pins the STRUCTURE that produces the
+  // behaviour: the destinations list is the scroll container, and the tools at
+  // the foot sit outside it. Put the scroll on the <aside> instead and the
+  // foot stops being a foot — `mt-auto` distributes free space, an overflowing
+  // column has none, and a vault past a dozen folders scrolls Chat and
+  // Terminal below the fold.
+  it("scrolls the destinations, not the pane, so the tools stay pinned", async () => {
+    serveVault();
+    renderShell();
+
+    const destinations = await screen.findByRole("navigation", {
+      name: "Knowledge base",
+    });
+    const tools = screen.getByRole("navigation", { name: "Tools" });
+
+    expect(destinations).toHaveClass("min-h-0", "flex-1", "overflow-y-auto");
+    expect(destinations).not.toContainElement(tools);
+    expect(tools.parentElement).not.toHaveClass("overflow-y-auto");
+  });
+});

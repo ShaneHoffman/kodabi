@@ -110,4 +110,31 @@ describe("TopBar", () => {
       { timeout: 2000 },
     );
   });
+
+  it("says a start failed rather than reading as a rest", async () => {
+    // A start whose every source failed derives phase `idle`. This bar is the
+    // only surface that reports it: the tray says "Kodabi: idle", the OS
+    // start notification is suppressed for a start that captured nothing, the
+    // overlay pill renders nothing while capture is inactive, and CaptureToast
+    // carries distill and transcription failures only.
+    serveVault();
+    renderShell();
+    expect(await screen.findByRole("status")).toHaveTextContent("Idle");
+
+    act(() => {
+      emitFromBackend(CAPTURE_STATE_EVENT, {
+        phase: "idle",
+        sources: { loopback: "failed", microphone: "failed" },
+      });
+    });
+
+    await waitFor(
+      () => {
+        expect(screen.getByRole("status")).toHaveTextContent(
+          "Capture failed to start",
+        );
+      },
+      { timeout: 2000 },
+    );
+  });
 });

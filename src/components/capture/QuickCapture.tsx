@@ -252,12 +252,11 @@ export function QuickCapture() {
  * something is being recorded, and it has been for this long.
  *
  * It follows the same contract every on-air surface does, for the same reason:
- * the state
- * reads through the dot's FILL and the label's VALUE, never through a change
- * of shape. A capture that is starting up, or whose sources have all dropped,
- * keeps every part of this header in place — same dot, same bars, same timer —
- * but wears them in ink, because the green means precisely one thing and
- * nothing is reaching disk yet. The label says which it is.
+ * the state reads through the dot's FILL and the label's VALUE, never through
+ * a change of shape. A capture that is starting up, or whose sources have all
+ * dropped, keeps every part of this header in place — same dot, same bars,
+ * same timer — but wears them in ink, because the green means precisely one
+ * thing and nothing is reaching disk yet. The label says which it is.
  */
 function Listening({
   elapsed,

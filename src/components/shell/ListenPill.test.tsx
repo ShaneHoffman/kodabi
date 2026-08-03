@@ -61,6 +61,33 @@ describe("ListenPill", () => {
     expect(mark(container)).toHaveClass(`is-${mode}`);
   });
 
+  it("says why, when idle is a failure rather than a rest", () => {
+    render(
+      <ListenPill mode="idle" label="Idle" detail="Capture failed to start" />,
+    );
+
+    // In the same live region as the state it explains: a bare "Idle" is
+    // indistinguishable from never having pressed anything, and no other
+    // surface reports a start that captured nothing.
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Idle Capture failed to start",
+    );
+  });
+
+  it("drops the detail while live — the headline already carries it", () => {
+    render(
+      <ListenPill
+        mode="degraded"
+        label="Mic only"
+        detail="System audio unavailable"
+        elapsedSeconds={154}
+      />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("Mic only");
+    expect(screen.queryByText("System audio unavailable")).not.toBeInTheDocument();
+  });
+
   it("morphs rather than snaps between the two tones", () => {
     const { container } = render(<ListenPill mode="idle" label="Not listening" />);
 

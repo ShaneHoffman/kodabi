@@ -74,7 +74,18 @@ export function TopBar({ onOpenPalette }: Props) {
         </button>
       </h1>
 
-      <ListenPill mode={mode} label={label.text} elapsedSeconds={elapsedSeconds} />
+      {/* The detail travels with the label, not just the label: a start whose
+          every source failed derives phase `idle`, and no other surface says
+          so — the tray reads "Kodabi: idle", the start notification is
+          suppressed for a start that captured nothing, the overlay pill
+          renders nothing while capture is inactive, and CaptureToast only
+          carries distill and transcription failures. */}
+      <ListenPill
+        mode={mode}
+        label={label.text}
+        detail={label.detail}
+        elapsedSeconds={elapsedSeconds}
+      />
 
       <nav aria-label="App" className="ml-auto flex items-center gap-1.5">
         <button

@@ -23,8 +23,9 @@ import "./CaptureOverlayPill.css";
  */
 export function CaptureOverlayPill() {
   const captureState = useCaptureState();
-  // Same split as the sidebar indicator: the mark reacts instantly, the text
-  // follows a debounced state so a flapping source doesn't strobe the label.
+  // Same split as the transport bar's ListenPill: the mark reacts instantly,
+  // the text follows a debounced state so a flapping source doesn't strobe the
+  // label.
   const label = captureLabel(useDebouncedValue(captureState, 400));
 
   // Belt and braces. The window should already be hidden by the time capture
