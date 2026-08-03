@@ -12,8 +12,8 @@
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use kodabi_core::capture::quick_capture;
-use kodabi_core::note::{self, Note};
+use kodabi_core::capture::{quick_capture, route_preview};
+use kodabi_core::note::{self, Note, Routing};
 use tauri::{AppHandle, Emitter, Manager, Runtime, Window};
 use tauri_plugin_global_shortcut::Shortcut;
 
@@ -43,6 +43,15 @@ const SHOWN_EVENT: &str = "quick-capture:shown";
 pub struct QuickCaptureOutcome {
     id: String,
     path: String,
+    project: Option<String>,
+    confidence: f64,
+}
+
+/// The router's guess for a draft, echoed to the capture UI so it can show where
+/// Enter would file. `project: null` is the Inbox sentinel, matching
+/// [`QuickCaptureOutcome`].
+#[derive(serde::Serialize)]
+pub struct QuickCaptureRoutePreview {
     project: Option<String>,
     confidence: f64,
 }
@@ -175,6 +184,34 @@ fn submit_impl(app: &AppHandle, text: &str) -> Result<QuickCaptureOutcome, Strin
     Ok(outcome(&captured.note, rel))
 }
 
+/// Where `text` would file right now, without filing it — the capture window's
+/// live routing guess, refreshed as the user types. Read-only by construction:
+/// unlike [`quick_capture_submit`] it writes nothing, emits no
+/// [`VAULT_CHANGED_EVENT`], and deliberately skips `report_signal_failures` (a
+/// broken glossary would otherwise be logged once per keystroke; filing still
+/// reports it). `async` so the vault scan stays off the webview's main thread.
+#[tauri::command]
+pub async fn quick_capture_route_preview(
+    app: AppHandle,
+    text: String,
+) -> Result<QuickCaptureRoutePreview, String> {
+    let kb = knowledge_base_dir(&app)?;
+    let preview =
+        route_preview(&kb, &text, &routing_config_from_env()).map_err(|err| err.to_string())?;
+    Ok(preview_dto(&preview.routing))
+}
+
+/// Projects a routing decision to the guess DTO, mirroring [`outcome`]'s Inbox
+/// handling: the sentinel becomes `project: null`. A preview is always
+/// `Routing::Routed`, so `unwrap_or(0.0)` is a defensive floor, never hit.
+fn preview_dto(routing: &Routing) -> QuickCaptureRoutePreview {
+    let project = routing.project();
+    QuickCaptureRoutePreview {
+        project: (project != note::INBOX).then(|| project.to_string()),
+        confidence: routing.confidence().unwrap_or(0.0),
+    }
+}
+
 /// Projects a written [`Note`] to the capture outcome: Inbox sentinel →
 /// `project: null`, KB-relative path normalized to forward slashes. A
 /// quick-captured note is always `Routing::Routed`, so `confidence` is present;
@@ -215,6 +252,26 @@ mod tests {
     fn default_quick_capture_shortcut_parses() {
         // A typo in the constant should fail this test, not a runtime `.expect`.
         let _ = default_quick_capture_shortcut();
+    }
+
+    #[test]
+    fn preview_dto_maps_inbox_to_null() {
+        let dto = preview_dto(&Routing::Routed {
+            project: note::INBOX.to_string(),
+            confidence: 0.21,
+        });
+        assert_eq!(dto.project, None);
+        assert_eq!(dto.confidence, 0.21);
+    }
+
+    #[test]
+    fn preview_dto_keeps_a_real_project_and_its_confidence() {
+        let dto = preview_dto(&Routing::Routed {
+            project: "Briarwood Golf".to_string(),
+            confidence: 0.5,
+        });
+        assert_eq!(dto.project.as_deref(), Some("Briarwood Golf"));
+        assert_eq!(dto.confidence, 0.5);
     }
 
     #[test]

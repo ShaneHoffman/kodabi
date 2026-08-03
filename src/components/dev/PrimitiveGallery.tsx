@@ -195,6 +195,19 @@ export function PrimitiveGallery() {
                   A veil, not a blackout: the app has to stay visible enough to blur.
                 </p>
               </div>
+              {/* The two that float over the desktop rather than over the app.
+                  They read wrong here on purpose: behind them is a panel, not
+                  someone's wallpaper, which is the whole reason their fill and
+                  border are literals instead of ground-tuned tokens. */}
+              <div className="glass-pill flex items-center px-5 py-3">
+                <p className="text-[15.5px] font-semibold">The capture pill</p>
+              </div>
+              <div className="glass-sheet p-4">
+                <p className="text-[15.5px] font-semibold">The capture sheet</p>
+                <p className="mt-1.5 text-[13px] text-ink-dim">
+                  Quick capture: panel-round, dialog-deep, over the desktop.
+                </p>
+              </div>
             </div>
           </Section>
 

@@ -125,6 +125,7 @@ export default tseslint.config(
       "src/useDistillState.ts",
       "src/useElapsed.ts",
       "src/useOutsidePointerDown.ts",
+      "src/useRoutePreview.ts",
       "src/useScrollIntoView.ts",
       "src/useSettings.ts",
       "src/useTauriEvent.ts",

@@ -717,6 +717,87 @@
   }
 }
 
+/* ---------- the two glasses that float over the desktop ----------
+   Every rung above floats over the app, so its fill is tinted against the
+   ground and its border is --color-edge, which was measured against that
+   ground. These two are whole windows: transparent webviews over whatever the
+   user happens to be doing, where there is no ground behind the pane at all.
+   So the fill is its own dark tint rather than white-over-ground, and the night
+   border is a literal 0.16 rather than the token's 0.11 — an edge tuned against
+   a known backdrop cannot hold against an unknown one.
+
+   Both still hand the border back to --color-edge under .hc, and on BOTH
+   grounds rather than just .hc.day: unlike glass-overlay (whose night border
+   already IS the token), a literal here would swallow the night half of the
+   contrast promotion too. */
+
+/* The capture overlay pill: the always-on-top status window. Pill rung of the
+   radius ladder, because it is one. */
+@utility glass-pill {
+  background: rgb(16 22 13 / 0.72);
+  backdrop-filter: blur(28px) saturate(160%);
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: var(--radius-pill);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.12),
+    0 16px 48px rgb(0 0 0 / 0.55);
+
+  &:where(.day, .day *) {
+    background: rgb(250 252 246 / 0.8);
+    border-color: rgb(24 32 16 / 0.16);
+    box-shadow:
+      inset 0 1px 0 var(--color-edge-lit),
+      0 16px 48px rgb(46 60 36 / 0.28);
+  }
+
+  &:where(.hc, .hc *) {
+    border-color: var(--color-edge);
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    background: #12180e;
+    backdrop-filter: none;
+
+    &:where(.day, .day *) {
+      background: #f7f9f0;
+    }
+  }
+}
+
+/* The quick-capture sheet. Panel-round rather than dialog-round: it is a whole
+   floating window, so it takes the furniture rung of the ladder, with the
+   dialog's depth of blur and shadow under it. */
+@utility glass-sheet {
+  background: rgb(18 24 15 / 0.78);
+  backdrop-filter: blur(32px) saturate(160%);
+  border: 1px solid rgb(255 255 255 / 0.16);
+  border-radius: var(--radius-panel);
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.12),
+    0 32px 90px rgb(0 0 0 / 0.6);
+
+  &:where(.day, .day *) {
+    background: rgb(250 252 246 / 0.85);
+    border-color: rgb(24 32 16 / 0.16);
+    box-shadow:
+      inset 0 1px 0 var(--color-edge-lit),
+      0 32px 90px rgb(46 60 36 / 0.28);
+  }
+
+  &:where(.hc, .hc *) {
+    border-color: var(--color-edge);
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    background: #171e12;
+    backdrop-filter: none;
+
+    &:where(.day, .day *) {
+      background: #f9fbf3;
+    }
+  }
+}
+
 /* The veil under a modal. Light on purpose: the dialog's glass only reads as
    glass if the app stays visible enough beneath it to blur, and a heavy scrim
    turns an expensive frosted surface into a grey box.

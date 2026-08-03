@@ -1,10 +1,10 @@
-import { captureLabel } from "../../captureLabel";
+import { clsx } from "clsx";
+import { captureLabel, markMode } from "../../captureLabel";
 import type { CaptureStateEvent } from "../../useCaptureState";
 import { useCaptureState } from "../../useCaptureState";
 import { useDebouncedValue } from "../../useDebouncedValue";
 import { CaptureStatusLine } from "./CaptureStatusLine";
-// eslint-disable-next-line no-restricted-syntax -- pre-Grove; the capture windows' Grove ticket deletes it
-import "./ListeningIndicator.css";
+import { SpiritMark } from "./SpiritMark";
 
 /**
  * What is actually reaching disk, as a phrase. The design's live indicator
@@ -55,14 +55,27 @@ export function ListeningIndicator() {
   const sources = sourceLine(captureState);
 
   return (
-    <div className={`listening${live ? " listening--live" : ""} flex flex-col gap-2xs`}>
-      <div className={`flex items-center ${live ? "gap-sm" : "gap-xs"}`}>
-        <span className="listening__dot">
-          {live && <span className="listening__glow" aria-hidden="true" />}
-          <span
-            className={`listening__core${live ? " listening__core--live" : ""}`}
-          />
-        </span>
+    // The sidebar insets are still the legacy geometry family: this row sits on
+    // the same left edge as the nav rows above it, and it keeps doing so until
+    // the sidebar's own Grove ticket. Live gains room above for the mark's aura,
+    // which reaches past its own box.
+    <div
+      className={clsx(
+        "flex flex-col gap-2xs px-[var(--sidebar-row-x)] pb-[var(--sidebar-section-gap)]",
+        live && "pt-2xs",
+      )}
+    >
+      <div className={clsx("flex items-center", live ? "gap-sm" : "gap-xs")}>
+        {/* Optically centred against the quiet label, which is uppercase and so
+            has no descenders: matching the boxes leaves the mark sitting
+            visibly low against the caps. Live, the label is the mixed-case
+            headline step and needs no correction. */}
+        <SpiritMark
+          mode={markMode(captureState)}
+          size="11px"
+          halo="11px"
+          className={live ? undefined : "-translate-y-px"}
+        />
         {live ? (
           <div className="flex min-w-0 flex-1 flex-col gap-3xs">
             <CaptureStatusLine live variant="headline">

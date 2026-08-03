@@ -29,7 +29,7 @@
 }
 
 /* An <hr>; `border: none` clears preflight's 1px currentColor top border so
-   the line is only the translucent background box (see QuickCapture.css). */
+   the line is only the translucent background box. */
 .sidebar__divider {
   border: none;
   height: 1px;

@@ -1,27 +1,47 @@
+import { clsx } from "clsx";
 import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import { captureLabel } from "../../captureLabel";
+import { captureLabel, markMode } from "../../captureLabel";
 import { startCapture, stopCapture } from "../../captureControl";
 import { hideQuickCaptureWindow, submitQuickCapture } from "../../quickCapture";
 import { isCaptureActive, useCaptureState } from "../../useCaptureState";
 import { useDebouncedValue } from "../../useDebouncedValue";
-import { formatElapsed, useElapsed } from "../../useElapsed";
+import { formatElapsed, useEngagedElapsed } from "../../useElapsed";
+import { folderHue, type FolderHue } from "../../useProjects";
+import { useRoutePreview } from "../../useRoutePreview";
 import { useTauriEvent } from "../../useTauriEvent";
 import { useTimeout } from "../../useTimeout";
 import { QUICK_CAPTURE_SHOWN_EVENT } from "../../events";
 import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
-// eslint-disable-next-line no-restricted-syntax -- pre-Grove; the capture windows' Grove ticket deletes it
-import "./QuickCapture.css";
+import { SpiritMark } from "./SpiritMark";
 
 /** How long the destination flashes before the window dismisses itself. Short
  * enough to still feel instant, long enough to read where the note landed.
  * Exported so the test asserts against this value rather than a copy of it —
  * a copy only catches the constant growing, never it shrinking to nothing. */
 export const FLASH_MS = 600;
+
+/* The routing guess wears its project's own colour, dot and words together:
+   the guess IS the identity of a folder, and a coloured dot beside grey text
+   would say two things where the user reads one (docs/DESIGN_SYSTEM.md §6).
+   Written out rather than interpolated — Tailwind cannot see a constructed
+   class name and would emit neither. */
+const HUE_TEXT: Record<FolderHue, string> = {
+  coral: "text-coral",
+  cobalt: "text-cobalt",
+  teal: "text-teal",
+  plum: "text-plum",
+};
+const HUE_DOT: Record<FolderHue, string> = {
+  coral: "bg-coral",
+  cobalt: "bg-cobalt",
+  teal: "bg-teal",
+  plum: "bg-plum",
+};
 
 type Status =
   | { kind: "idle" }
@@ -32,14 +52,15 @@ type Status =
 /**
  * The quick-capture window: a thought, typed or spoken, in one summoned box.
  *
- * It reads in three registers. TYPING is silent — serif text, a green caret,
- * and nothing else moving. ENGAGED BUT NOT ON AIR (starting up, or every
- * source dropped and reconnecting) wears the full recording chrome — header,
- * timer, Stop — in ink: the session is running and Enter must stop it, but
- * nothing is reaching disk so nothing may claim the green. SPEAKING turns the
- * green fully live: a breathing dot, four animated bars, and a timer. That is
- * the whole reason the hue is reserved; this window is where it pays off,
- * because "is this thing recording me" has to be answerable from the doorway.
+ * It reads in three registers. TYPING is silent — the kodama sits idle in ink,
+ * because a typed thought records nothing; only the caret is green. ENGAGED BUT
+ * NOT ON AIR (starting up, or every source dropped and reconnecting) wears the
+ * full recording chrome — label, timer, Stop — still in ink: the session is
+ * running and Enter must stop it, but nothing is reaching disk so nothing may
+ * claim the green. SPEAKING turns the mark fully live, breathing green beside a
+ * running clock. That is the whole reason the hue is reserved; this window is
+ * where it pays off, because "is this thing recording me" has to be answerable
+ * from the doorway.
  *
  * The two questions are kept apart deliberately. `isCaptureActive` decides
  * which chrome is mounted, what Enter and Escape do, and when the clock runs;
@@ -63,21 +84,13 @@ export function QuickCapture() {
 
   const captureState = useCaptureState();
   const engaged = isCaptureActive(captureState.phase);
+  // Timed from the press, not from audio arriving, so a dropout never rewinds
+  // the clock. The mark reports whether sound is reaching disk; this reports
+  // how long the session has been open, and they are different questions.
+  const elapsed = useEngagedElapsed(engaged);
 
-  // Timed from the moment the session engaged — the press — not from the
-  // moment audio started arriving, so a source dropping out and recovering
-  // mid-capture never rewinds the clock to 0:00 and under-reports how long
-  // this recording has been going. The backend reports a phase, not a
-  // duration, so this is the honest source — accurate to within a tick, which
-  // is the resolution a `0:07` shows anyway. Held during render rather than in
-  // an effect: it is derived from a prop-like value changing.
-  const [engagedSince, setEngagedSince] = useState<number | null>(null);
-  const [wasEngaged, setWasEngaged] = useState(engaged);
-  if (wasEngaged !== engaged) {
-    setWasEngaged(engaged);
-    setEngagedSince(engaged ? Date.now() : null);
-  }
-  const elapsed = useElapsed(engagedSince);
+  // Where Enter would file this draft, refreshed as it is typed.
+  const routeGuess = useRoutePreview(text);
 
   // Re-show refocuses the box. A prior *error* keeps its message and draft so a
   // blur-dismiss can't silently bury a failed capture — the user sees it on the
@@ -152,148 +165,193 @@ export function QuickCapture() {
   };
 
   return (
-    <main className="capture flex h-screen flex-col">
-      <div className="capture__body flex-1">
-        {engaged ? <Listening elapsed={elapsed} state={captureState} /> : null}
-        {/* The box stays mounted while recording rather than being replaced:
-            a spoken capture and a typed one land in the same note, so what you
-            have already typed must not vanish the moment you press Record. */}
-        <div className={engaged ? "mt-sm" : ""}>
-          <textarea
-            ref={inputRef}
-            data-testid="quick-capture-input"
-            aria-label="Capture a thought"
-            autoFocus
-            spellCheck={false}
-            rows={engaged ? 2 : 3}
-            placeholder={engaged ? "Add a note alongside the recording…" : "Capture a thought…"}
-            value={text}
-            onChange={(event) => setText(event.target.value)}
-            onKeyDown={onKeyDown}
-            className="capture__input ui-focus-ring ui-writing placeholder:text-text-faint"
+    // The window is larger than the sheet: it is transparent and casts its own
+    // shadow in CSS, which needs room to fade into or it clips flat against the
+    // window bounds and reads as a rectangle around a rounded sheet.
+    <main className="flex h-screen w-screen items-center justify-center p-10">
+      <div className="glass-sheet flex h-full w-full flex-col overflow-hidden p-2.5">
+        <div className="flex min-h-0 flex-1 items-start gap-2.5 px-3 pt-2.5 pb-2">
+          {/* One mark, always mounted: idle ink while this is only a typed
+              thought, the capture's own mode once a session is running. It
+              turns green when audio flows and at no other time. */}
+          <SpiritMark
+            mode={engaged ? markMode(captureState) : "idle"}
+            size="13px"
+            halo="10px"
+            className="mt-1"
           />
+          <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+            {engaged && <RecordingStatus elapsed={elapsed} state={captureState} />}
+            {/* The box stays mounted while recording rather than being
+                replaced: a spoken capture and a typed one land in the same
+                note, so what you have already typed must not vanish the moment
+                you press Record. */}
+            <textarea
+              ref={inputRef}
+              data-testid="quick-capture-input"
+              aria-label="Capture a thought"
+              autoFocus
+              spellCheck={false}
+              rows={engaged ? 2 : 3}
+              placeholder={engaged ? "Add a note alongside the recording…" : "Capture a thought…"}
+              value={text}
+              onChange={(event) => setText(event.target.value)}
+              onKeyDown={onKeyDown}
+              className="focus-ring w-full resize-none bg-transparent p-0 font-ui text-[15px] leading-relaxed text-ink caret-kodama outline-hidden placeholder:text-ink-faint"
+            />
+          </div>
         </div>
-      </div>
 
-      {/* A real <hr>: a thematic break between the thought and the transport
-          under it, which is what the element means. */}
-      <hr className="capture__rule" />
+        {/* A real <hr>: a thematic break between the thought and the transport
+            under it, which is what the element means. Preflight strips the
+            default border, so the rule is the background. */}
+        <hr className="h-px flex-none border-none bg-edge" />
 
-      <footer className="capture__footer">
-        {status.kind === "error" ? (
-          // role="alert": a failed capture arrives asynchronously and the user
-          // may not be looking at the box.
-          <StatusMessage variant="error" compact>
-            Couldn&apos;t file this: {status.message}
-          </StatusMessage>
-        ) : captureError ? (
-          <StatusMessage variant="error" compact>
-            Couldn&apos;t reach the recorder: {captureError}
-          </StatusMessage>
-        ) : (
-          <span className="font-mono text-micro text-text-faint">
-            {engaged
-              ? // Not "Esc cancels". There is no cancel: Escape runs the same
+        <footer className="flex flex-none items-center gap-3 px-3 pt-2.5 pb-1">
+          {status.kind === "error" ? (
+            // role="alert": a failed capture arrives asynchronously and the user
+            // may not be looking at the box.
+            <StatusMessage variant="error" compact>
+              Couldn&apos;t file this: {status.message}
+            </StatusMessage>
+          ) : captureError ? (
+            <StatusMessage variant="error" compact>
+              Couldn&apos;t reach the recorder: {captureError}
+            </StatusMessage>
+          ) : (
+            <span className="min-w-0 flex-1 truncate font-data text-[10.5px] text-ink-faint">
+              {engaged ? (
+                // Not "Esc cancels". There is no cancel: Escape runs the same
                 // stop-and-file path Enter does, and a hint that promised
                 // otherwise would be a lie about a recording.
-                "↵ or Esc stops and files"
-              : "↵ files it · ⇧↵ new line · Esc dismisses"}
-          </span>
-        )}
+                <>
+                  <span className="text-ink-dim">Enter</span> or{" "}
+                  <span className="text-ink-dim">Esc</span> stops and files
+                </>
+              ) : (
+                <>
+                  <span className="text-ink-dim">Enter</span> saves and routes it
+                  · <span className="text-ink-dim">Esc</span> dismisses
+                </>
+              )}
+            </span>
+          )}
 
-        {status.kind === "filed" ? (
-          <span
-            data-testid="quick-capture-destination"
-            className="flex-none font-mono text-micro text-text"
-          >
-            → {status.destination}
-          </span>
-        ) : engaged ? (
-          <button
-            type="button"
-            onClick={stopAndFile}
-            className="capture__stop ui-focus-ring flex-none text-action font-semibold text-text"
-          >
-            <span className="capture__square" aria-hidden="true" />
-            Stop
-          </button>
-        ) : (
-          // Two affordances, ranked by weight: Record is a quiet ghost because
-          // it starts something, File it is the action rectangle because it
-          // ends something. Both visible, because this window is opened by
-          // hotkey but must not be operable by hotkey alone
-          // (docs/DESIGN_SYSTEM.md §6).
-          <div className="flex flex-none items-center gap-sm">
-            <Button variant="quiet" data-testid="quick-capture-record" onClick={record}>
-              <span className="capture__ring" aria-hidden="true" />
-              Record
-            </Button>
-            <Button
-              data-testid="quick-capture-submit"
-              onClick={submit}
-              disabled={!text.trim()}
-              loading={status.kind === "submitting"}
-              loadingLabel="Filing…"
+          {/* The router's live guess, in the slot the filed destination will
+              use. Hidden the moment anything definitive needs that slot, so a
+              guess never competes with what actually happened. */}
+          {status.kind === "idle" && !engaged && routeGuess && (
+            <span
+              data-testid="quick-capture-route-preview"
+              className={clsx(
+                "flex flex-none items-center gap-1.5 font-data text-[10.5px]",
+                routeGuess.project
+                  ? HUE_TEXT[folderHue(routeGuess.project)]
+                  : "text-ink-faint",
+              )}
             >
-              File it
+              {routeGuess.project && (
+                <span
+                  aria-hidden="true"
+                  className={clsx(
+                    "size-[7px] flex-none rounded-[2px]",
+                    HUE_DOT[folderHue(routeGuess.project)],
+                  )}
+                />
+              )}
+              → {routeGuess.project ?? "Inbox"}
+            </span>
+          )}
+
+          {status.kind === "filed" ? (
+            <span
+              data-testid="quick-capture-destination"
+              className="flex-none font-data text-[11px] text-ink"
+            >
+              → {status.destination}
+            </span>
+          ) : engaged ? (
+            <Button variant="action" onClick={stopAndFile} className="flex-none">
+              <span
+                aria-hidden="true"
+                className="size-[9px] flex-none rounded-[2px] bg-ink"
+              />
+              Stop
             </Button>
-          </div>
-        )}
-      </footer>
+          ) : (
+            // Two affordances, ranked by weight: Record is a quiet ghost because
+            // it starts something, File it is the action rectangle because it
+            // ends something. Both visible, because this window is opened by
+            // hotkey but must not be operable by hotkey alone
+            // (docs/DESIGN_SYSTEM.md §6).
+            <div className="flex flex-none items-center gap-3">
+              <Button variant="quiet" data-testid="quick-capture-record" onClick={record}>
+                <span
+                  aria-hidden="true"
+                  className="size-[11px] flex-none rounded-full border border-ink-faint"
+                />
+                Record
+              </Button>
+              <Button
+                data-testid="quick-capture-submit"
+                onClick={submit}
+                disabled={!text.trim()}
+                loading={status.kind === "submitting"}
+                loadingLabel="Filing…"
+              >
+                File it
+              </Button>
+            </div>
+          )}
+        </footer>
+      </div>
     </main>
   );
 }
 
 /**
- * The recording header: mounted for the whole session, green only when live.
+ * The recording status line: what the session is doing, and for how long.
  *
- * A dot inside a breathing glow, four bars, the state as a word, and a timer.
- * Together they answer the only question that matters here without being read:
- * something is being recorded, and it has been for this long.
+ * Mounted only while a capture is engaged, which is also what seeds its
+ * debounce: mounting mid-capture reads the state it mounted with, rather than
+ * spending 400ms insisting the recording is idle.
  *
- * It follows `ListeningIndicator`'s contract, for the same reason: the state
- * reads through the dot's FILL and the label's VALUE, never through a change
- * of shape. A capture that is starting up, or whose sources have all dropped,
- * keeps every part of this header in place — same dot, same bars, same timer —
- * but wears them in ink, because the green means precisely one thing and
- * nothing is reaching disk yet. The label says which it is.
+ * The state reads through the mark's FILL and this label's VALUE, never through
+ * a change of shape — a capture that is starting up, or whose sources have all
+ * dropped, keeps the same line in place and wears it in ink, because the green
+ * means precisely one thing and nothing is reaching disk yet.
  */
-function Listening({
+function RecordingStatus({
   elapsed,
   state,
 }: {
   elapsed: number;
   state: ReturnType<typeof useCaptureState>;
 }) {
-  // The mark reacts instantly for immediate visual feedback, but the label —
-  // a live region — follows a debounced state so a flapping source doesn't
-  // spam screen readers (or flicker the word) on every toggle.
+  // The mark reacts instantly for immediate feedback, but the label — a live
+  // region — follows a debounced state so a flapping source doesn't spam screen
+  // readers (or flicker the word) on every toggle.
   const label = captureLabel(useDebouncedValue(state, 400));
   const live = captureLabel(state).live;
+
   return (
-    <div className="flex items-center gap-xs">
-      <span className="capture__dot">
-        {live && <span className="capture__glow" aria-hidden="true" />}
-        <span className={`capture__core${live ? " capture__core--live" : ""}`} />
-      </span>
+    <div className="flex items-center gap-2.5">
+      {/* The live region is the label alone: wrapping the clock in it would
+          announce a new time every second, forever. */}
       <p
         role="status"
-        className={`text-label font-semibold ${live ? "text-text" : "text-text-faint"}`}
+        className={clsx(
+          "font-ui text-[11px] font-semibold tracking-[0.12em] uppercase",
+          "transition-colors duration-300 ease-out-strong",
+          live ? "text-kodama-ink" : "text-ink-dim",
+        )}
       >
         {label.text}
       </p>
-      <span
-        className={`capture__wave${live ? "" : " capture__wave--quiet"}`}
-        aria-hidden="true"
-      >
-        <span className="capture__bar" />
-        <span className="capture__bar" />
-        <span className="capture__bar" />
-        <span className="capture__bar" />
-      </span>
-      <span className="ml-auto font-mono text-cap text-text-faint">
+      <span className="ml-auto flex-none font-data text-[13px] text-ink tabular-nums">
         {formatElapsed(elapsed)}
       </span>
     </div>
   );
 }
+

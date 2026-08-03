@@ -4,6 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Quick capture</title>
+    <style>
+      /* This window is `transparent: true` (src-tauri/tauri.conf.json): the page
+         itself must never paint, so the sheet's rounded corners and its shadow
+         land on the desktop instead of on a white rectangle. Inline here rather
+         than in src/index.css for two reasons: it has to hold from the very
+         first frame, before the bundle loads, or the window flashes opaque on
+         every hotkey press; and index.css is shared with the main window, which
+         must keep its ground. */
+      html,
+      body,
+      #root {
+        background: transparent;
+      }
+    </style>
   </head>
 
   <body>

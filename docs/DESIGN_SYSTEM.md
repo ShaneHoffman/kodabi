@@ -261,10 +261,10 @@ hole rather than a pane:
 In day, weight shifts between (3) and (4): the highlight does the separating, because a shadow on a
 pale ground reads as dirt.
 
-### The material comes in seven thicknesses
+### The material comes in nine thicknesses
 
 Each is a named recipe in `src/index.css` §3, carrying all four parts plus its rung of the ladder
-below. Reach for the one that matches the job; do not assemble an eighth by hand.
+below. Reach for the one that matches the job; do not assemble a tenth by hand.
 
 | Recipe | Is | Blur |
 | --- | --- | --- |
@@ -275,6 +275,16 @@ below. Reach for the one that matches the job; do not assemble an eighth by hand
 | `glass-overlay` | Menus and toasts | 32 / 160% |
 | `glass-dialog` | Dialogs: the same material, the longest shadow | 32 / 160% |
 | `glass-palette` | The command palette. The dialog's shadow at the card's radius | 36 / 160% |
+| `glass-pill` | The capture overlay pill: a whole window, over the desktop | 28 / 160% |
+| `glass-sheet` | The quick-capture window: panel-round, dialog-deep, over the desktop | 32 / 160% |
+
+**The last two float over the desktop, not over the app, and that changes two of the four parts.**
+Every other rung is tinted against the ground and edged with `--color-edge`, both measured against
+that ground. A transparent capture window has no ground behind it — it has whatever the user happens
+to be doing — so its fill is its own dark tint and its night border is a literal 0.16 rather than the
+token's 0.11. They still hand the border back to `--color-edge` under `.hc`, on **both** grounds
+rather than only `.hc.day`, since a literal night border would otherwise swallow the night half of
+the contrast promotion.
 
 **The palette is the thickest rung, and that is the rule rather than an exception to it.** A bigger
 pane has more of the app behind it to push back, so it has to read as a thicker material or it reads
@@ -366,7 +376,14 @@ Three day values sit between 3:1 and 4.5:1 — `kodama` (4.26), `coral` (4.00), 
 **That is the boundary of what a hue is allowed to do in day.** Each clears the 3:1 non-text floor,
 so each is fine as a dot, a border, an icon, or large text; none of them may be the colour of a
 sentence. When a hue must carry running text in day, the accompanying ink token carries it and the
-hue moves to the marker beside it — the pattern the routing guess already uses.
+hue moves to the marker beside it.
+
+**One label sits deliberately at that boundary: the quick-capture routing guess.** `→ briarwood-golf`
+wears its project's hue in both variants, dot and slug together, because the guess *is* the identity
+of a folder and splitting it into a coloured dot beside grey text says two things where the user
+reads one. It is a three-word `font-data` label standing next to its own hue dot with the filing
+verb ("saves and routes it") a few characters to its left, not a sentence anyone reads for meaning —
+so day coral at 4.00 is the accepted case, not a precedent. A hue still never colours running text.
 
 ### Edges are decorative
 

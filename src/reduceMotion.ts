@@ -41,9 +41,7 @@ export function readReduceMotion(): boolean {
 /** Set the preference and reflect it on <html>, where the CSS floor keys off
  * it. Must target documentElement, not body — index.css keys off :root. */
 export function applyReduceMotion(reduce: boolean): void {
-  const root = document.documentElement;
-  if (reduce) root.setAttribute(ATTRIBUTE, "on");
-  else root.removeAttribute(ATTRIBUTE);
+  reflectReduceMotion(reduce);
   try {
     if (reduce) window.localStorage.setItem(STORAGE_KEY, "on");
     else window.localStorage.removeItem(STORAGE_KEY);
@@ -52,8 +50,25 @@ export function applyReduceMotion(reduce: boolean): void {
   }
 }
 
-/** Reflect the stored preference at window start. Called from each entry
- * module, since the quick-capture and overlay windows mount no shell. */
+/** The document half of [`applyReduceMotion`], without the write. Used wherever
+ * the preference is already stored and only this window is behind — writing it
+ * back would echo a `storage` event to every other window, which would write it
+ * back in turn. */
+function reflectReduceMotion(reduce: boolean): void {
+  const root = document.documentElement;
+  if (reduce) root.setAttribute(ATTRIBUTE, "on");
+  else root.removeAttribute(ATTRIBUTE);
+}
+
+/** Reflect the stored preference at window start, and follow it when another
+ * window changes it. Called from each entry module, since the quick-capture and
+ * overlay windows mount no shell — and they are exactly the windows that would
+ * otherwise keep animating after the Settings toggle says stop. */
 export function startReduceMotion(): void {
   applyReduceMotion(readReduceMotion());
+  window.addEventListener("storage", (event) => {
+    if (event.key === null || event.key === STORAGE_KEY) {
+      reflectReduceMotion(readReduceMotion());
+    }
+  });
 }

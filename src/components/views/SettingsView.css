@@ -47,7 +47,7 @@
    settings column: it is the seat for the rail above it, not a divider for
    the rows below. */
 /* An <hr>; `border: none` clears preflight's 1px currentColor top border so
-   the line is only the translucent background box (see QuickCapture.css). */
+   the line is only the translucent background box. */
 .settings__rule {
   border: none;
   height: 1px;
