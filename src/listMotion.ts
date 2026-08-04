@@ -17,6 +17,17 @@
  * Every transition here is a NAMED property list. `transition-all` would sweep
  * up whatever a caller adds later — a colour, a shadow, the hover lift — and
  * put it on the exit's clock (docs/DESIGN_SYSTEM.md §4).
+ *
+ * ONE of these recipes goes on an element at a time, never two, and never
+ * alongside a transition the caller wrote itself. `transition-[…]` and
+ * `duration-*` are each a single CSS property, so a second utility for either
+ * is decided by Tailwind's emission order rather than by the className: the
+ * longest property list wins, and the longest duration wins. Stacking the
+ * entrance and the exit "so both are ready" therefore gives BOTH legs the
+ * entrance's clock and silently retires the exit band. Pick the recipe from
+ * the state (a ternary, not an override) — a transition is read from the
+ * after-change style, so applying it in the same commit as the leaving values
+ * still animates.
  */
 
 /**

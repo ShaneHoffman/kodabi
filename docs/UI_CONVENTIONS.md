@@ -112,7 +112,7 @@ Always the token utility, never the literal:
 | A duration | `duration-140`, `duration-220`, … (bare ms; the canonical four are in DESIGN_SYSTEM §4) |
 | A glass surface | `glass-top`, `glass-dock`, `glass-panel`, `glass-card`, `glass-overlay`, `glass-dialog`, `glass-palette`, `glass-pill`, `glass-sheet`, `glass-scrim` |
 | A card that lifts under the pointer | `hover:-translate-y-[2px] hover:glass-card-lift` (DESIGN_SYSTEM §5) |
-| A row that enters or leaves a working list | the class strings in [`src/listMotion.ts`](../src/listMotion.ts) |
+| A row that enters or leaves a working list | the class strings in [`src/listMotion.ts`](../src/listMotion.ts) — **one at a time**, chosen by state, never stacked |
 | The focus ring | `focus-ring`, or `focus-ring-inset` where the control fills its container |
 
 Each recipe carries a whole surface — its fill, blur, lit edge, border, shadow and rung of the radius
@@ -211,6 +211,15 @@ is emitted after `text-ink`, so the suggestion rendered exactly as dim as the ro
 stand out from. **This is what the failure looks like — not a build error, not a visibly broken
 screen, just an instruction that quietly did not happen.** As variants there is one size utility and
 one colour utility on the element and nothing to resolve; `Menu.test.tsx` pins that count.
+
+**It is not a `text-*` problem — it is every property, and motion is where it bites hardest.**
+`transition-[…]` and `duration-*` are each one CSS property too, so stacking an element's hover
+transition, its entrance and its exit "so all three are ready" gives every leg the longest property
+list and the longest duration. Nothing errors; two of the three intentions are simply gone, along
+with the exit band (DESIGN_SYSTEM §4) they were spelling out. Pick the recipe from the state with a
+ternary rather than layering overrides — a transition is read from the after-change style, so
+applying it in the same commit as the leaving values still animates. `InboxView.test.tsx` counts
+those two utilities on a row exactly as `Menu.test.tsx` counts these.
 
 ### The contracts worth not breaking
 

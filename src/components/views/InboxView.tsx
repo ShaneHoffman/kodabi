@@ -64,12 +64,25 @@ const GRACE_MS = 10_000;
    (docs/UI_CONVENTIONS.md). The card edge, the guess words and the menu dot all
    read from the same three tables, so a project is one colour wherever it
    appears. */
+/* The edge states the hue twice, once for rest and once for hover, and the
+   second one is not redundant. `glass-card-lift` brightens the card's whole
+   `border-color`, and it is a `:hover` rule — (0,2,0) against a bare
+   `border-l-*`'s (0,1,0) — so it outranks the resting hue on specificity
+   whatever order Tailwind emits them in. Without the hover restatement the
+   guess colour drops off the edge exactly while the pointer is on the card:
+   the fast read disappearing at the moment it is being read. Checked in the
+   built CSS, which is the only place this kind of failure is visible
+   (docs/UI_CONVENTIONS.md §6). */
 const GUESS_EDGE: Record<FolderHue, string> = {
-  coral: "border-l-coral",
-  cobalt: "border-l-cobalt",
-  teal: "border-l-teal",
-  plum: "border-l-plum",
+  coral: "border-l-coral hover:border-l-coral",
+  cobalt: "border-l-cobalt hover:border-l-cobalt",
+  teal: "border-l-teal hover:border-l-teal",
+  plum: "border-l-plum hover:border-l-plum",
 };
+/** The same restatement for a card with nothing to suggest: its neutral edge is
+ * a content choice too, and `glass-card-lift` would repaint it the material's
+ * edge colour on hover. */
+const NEUTRAL_EDGE = "border-l-ink-faint hover:border-l-ink-faint";
 const GUESS_TEXT: Record<FolderHue, string> = {
   coral: "text-coral",
   cobalt: "text-cobalt",
@@ -478,9 +491,10 @@ function PipelinePlaceholder({ presence }: { presence: PlaceholderPresence }) {
         <div
           className={clsx(
             "glass-card flex items-center gap-6 border-l-[3px] border-l-ink-faint py-4 pr-5 pl-5",
-            LIST_ROW_ENTER,
-            LIST_ROW_EXIT,
-            presence.vanishing && LIST_ROW_LEAVING,
+            // One recipe at a time, as on a real row: entrance and exit each
+            // carry their own `duration-*`, and both on the element at once
+            // means the longer one silently wins for both legs.
+            presence.vanishing ? clsx(LIST_ROW_EXIT, LIST_ROW_LEAVING) : LIST_ROW_ENTER,
           )}
         >
           <div role="status" className="min-w-0 flex-1">
@@ -618,11 +632,14 @@ function FiledToast({
       type="button"
       className={clsx(
         "glass-pill focus-ring fixed right-6 bottom-6 z-10 flex cursor-pointer items-center gap-3.5 py-2.5 pr-4 pl-4.5",
-        "transition-[translate,opacity,scale] duration-220 ease-out-strong",
+        "transition-[translate,opacity,scale] ease-out-strong",
         "starting:translate-y-2 starting:opacity-0",
         "not-aria-disabled:active:scale-97 motion-reduce:transition-none",
-        // Faster out than in, like every exit in the app (DESIGN_SYSTEM §4).
-        toast.fading && "opacity-0 duration-130",
+        // Faster out than in, like every exit in the app (DESIGN_SYSTEM §4) —
+        // and the two durations are a ternary rather than an override, because
+        // Tailwind resolves a second `duration-*` by emission order (the
+        // larger value wins) rather than by where it sits in the className.
+        toast.fading ? "opacity-0 duration-130" : "duration-220",
       )}
       onClick={open}
       onMouseEnter={onPause}
@@ -765,20 +782,36 @@ function InboxRow({
           data-testid="inbox-row"
           className={clsx(
             "glass-card flex items-center gap-6 border-l-[3px] py-4 pr-5 pl-5",
-            // Named properties only: `translate` and the two the lift recipe
-            // sets. A `transition-all` here would put the guess edge's colour
-            // on the hover clock too, so a card whose guess changed would
-            // fade its edge as if the pointer had done it.
-            "transition-[translate,box-shadow,border-color] duration-180 ease-out-strong",
             // `hover:` is redefined in index.css as (hover: hover) and
             // (pointer: fine) — a lift that a touch device cannot undo is a
             // card stuck in a state, so the gating is the variant's, not ours.
             "hover:-translate-y-[2px] hover:glass-card-lift",
-            "motion-reduce:transition-none motion-reduce:hover:translate-y-0",
-            guess ? GUESS_EDGE[guess.hue] : "border-l-ink-faint",
-            LIST_ROW_EXIT,
-            leaving && LIST_ROW_LEAVING,
-            fresh && LIST_ROW_ENTER,
+            "motion-reduce:hover:translate-y-0",
+            guess ? GUESS_EDGE[guess.hue] : NEUTRAL_EDGE,
+            // EXACTLY ONE transition recipe on the card at a time, because two
+            // are not additive: `transition-[…]` and `duration-*` are single
+            // properties, and a second utility for either is resolved by
+            // Tailwind's emission order rather than by the className — the
+            // longest property list and the longest duration simply win
+            // (docs/UI_CONVENTIONS.md §4). Written as a chain, the three
+            // states cannot stack, so each says exactly what it means.
+            //
+            // The states are mutually exclusive in fact as well as in code: a
+            // row that is leaving is not being hovered for a lift, and a row
+            // still playing its arrival is not yet leaving.
+            leaving
+              ? clsx(LIST_ROW_EXIT, LIST_ROW_LEAVING)
+              : fresh
+                ? LIST_ROW_ENTER
+                : // Named properties only: `translate` and the two the lift
+                  // recipe sets. A `transition-all` here would put the guess
+                  // edge's colour on the hover clock too, so a card whose
+                  // guess changed would fade its edge as if the pointer had
+                  // done it.
+                  clsx(
+                    "transition-[translate,box-shadow,border-color] duration-180 ease-out-strong",
+                    "motion-reduce:transition-none",
+                  ),
           )}
         >
           <button

@@ -314,6 +314,14 @@ specific literals, and a literal colour may not be written in a `className` (§7
 state of a card is a recipe for the same reason the card itself is. Written `hover:glass-card-lift`,
 and only where a lift is the right signal: an Inbox row, where every card is a thing to be handled.
 
+**It repaints `border-color`, all four sides, from a `:hover` rule — so a card that colours one edge
+for CONTENT must restate that colour at the hover layer.** `.hover\:glass-card-lift:hover` weighs
+(0,2,0) against a bare `border-l-coral`'s (0,1,0), so it wins on specificity whatever order Tailwind
+emits them in, and the content colour drops off the edge exactly while the pointer is on the card.
+The Inbox row's guess hue is written `border-l-coral hover:border-l-coral` for that reason. Colouring
+an edge is the only conflict here: nothing else the recipe sets is a property a card is likely to
+have opinions about.
+
 ### The ladder
 
 | Layer | Radius | Is |

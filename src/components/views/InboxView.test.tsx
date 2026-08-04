@@ -208,6 +208,24 @@ describe("InboxView", () => {
       expect(guess).toHaveTextContent("→ briarwood-golf");
       // Same hue in the words as on the edge: one project, one colour.
       expect(guess).toHaveClass("text-coral");
+      // And it keeps the hue under the pointer. `hover:glass-card-lift`
+      // brightens the card's whole `border-color` from a `:hover` rule, which
+      // outranks a bare `border-l-coral` on specificity — so without the
+      // restatement the guess colour would drop off the edge exactly while
+      // the card is being pointed at.
+      expect(screen.getByTestId("inbox-row")).toHaveClass("hover:border-l-coral");
+    });
+
+    it("keeps its neutral edge under the pointer too", async () => {
+      serveVault([makeNote({ id: "n_a1b2c3", title: "Ideas from the drive home" })]);
+
+      renderInbox();
+      await screen.findByText("Ideas from the drive home");
+
+      expect(screen.getByTestId("inbox-row")).toHaveClass(
+        "border-l-ink-faint",
+        "hover:border-l-ink-faint",
+      );
     });
 
     it("says so plainly when there is no confident guess", async () => {
@@ -304,6 +322,30 @@ describe("InboxView", () => {
         });
       });
     });
+  });
+
+  it("carries one transition recipe at a time, so no leg loses its own clock", async () => {
+    // `transition-[…]` and `duration-*` are each ONE CSS property: a second
+    // utility for either is resolved by Tailwind's emission order, not by the
+    // className, so the longest property list and the longest duration win
+    // for every leg at once. Stacking the hover lift, the entrance and the
+    // exit "so all three are ready" is therefore not additive — it silently
+    // retires two of them. The same counting `Menu.test.tsx` does, for the
+    // same failure: an instruction that quietly did not happen.
+    serveVault([PLANNING]);
+
+    renderInbox();
+    await screen.findByText("Quarterly planning");
+
+    const classes = Array.from(screen.getByTestId("inbox-row").classList);
+    expect(classes.filter((name) => name.startsWith("transition-["))).toHaveLength(1);
+    expect(classes.filter((name) => /^duration-\d/.test(name))).toHaveLength(1);
+    // At rest that one recipe is the hover lift's, naming the two properties
+    // `glass-card-lift` actually sets — a lift whose shadow snapped on while
+    // the card eased upward would read as a drop shadow, not an object
+    // rising.
+    expect(classes).toContain("transition-[translate,box-shadow,border-color]");
+    expect(classes).toContain("duration-180");
   });
 
   it("opens the note when the card body is clicked", async () => {
