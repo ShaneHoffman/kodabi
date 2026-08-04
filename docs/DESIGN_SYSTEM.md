@@ -60,6 +60,18 @@ The small uppercase label above a group (`FOLDERS`, `SESSION`, `KODABI`) is set 
 10px with wide tracking. It is a signpost, not a title: it never takes ink strength, and there is
 never more than one level of it on a surface.
 
+### Every view opens at one step
+
+A view's title is 26px semibold in `font-ui`, with its summary in `font-data` on the same baseline.
+One step for the Inbox, a folder, Settings and the terminal alike.
+
+The pre-Grove rule was the opposite: each kind of view had its own serif title step, on the theory
+that a config panel and a note must not open at the same size. What told them apart in the running
+app was never the heading — it was the density and the shape below it, which is what the stance
+still fixes. Sizing the head per view only made the window's volume change when you clicked
+something. The note editor keeps a larger step, because a document is the one place the title *is*
+the content's first line.
+
 ### Structure stretches, prose keeps its measure
 
 The single most important typographic rule in Grove, and the one a full-width layout breaks first.

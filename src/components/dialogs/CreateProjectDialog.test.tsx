@@ -14,7 +14,7 @@ import { useVaultChangedBridge } from "../../useVaultChangedBridge";
 import { CapturePipelineProvider } from "../providers/CapturePipelineProvider";
 import { MainContent } from "../shell/MainContent";
 import { NavigationProvider } from "../providers/NavigationProvider";
-import { Sidebar } from "../shell/Sidebar";
+import { Dock } from "../shell/Dock";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
@@ -33,7 +33,7 @@ function project(slug: string, noteCount = 0): Project {
   };
 }
 
-/** The reads the sidebar and the views behind it make. */
+/** The reads the dock and the views behind it make. */
 function serveVault(projects: Project[] = []): void {
   onCommand("list_projects", () => ({ inbox_note_count: 0, projects }));
   onCommand("list_notes", () => []);
@@ -56,7 +56,7 @@ function renderShell() {
     <NavigationProvider>
       <CapturePipelineProvider>
         <VaultBridge />
-        <Sidebar onOpenPalette={() => {}} />
+        <Dock />
         <MainContent />
       </CapturePipelineProvider>
     </NavigationProvider>,

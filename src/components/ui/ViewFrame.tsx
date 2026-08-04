@@ -5,25 +5,24 @@ import "./ViewFrame.css";
 /**
  * What kind of place this view is. Not decoration: the variant is the one
  * thing that answers "what am I looking at" before the heading is read. It
- * fixes the title's size and the shape of the header, so two views of the
- * same kind cannot drift apart (docs/DESIGN_SYSTEM.md §1).
+ * fixes the stance — the column cap and the body's density — so two views of
+ * the same kind cannot drift apart (docs/DESIGN_SYSTEM.md §1).
  *
- * It does NOT fix the gutter or the alignment. Those are the same on every
- * view, on all four sides, and nothing centres — see the banner in
+ * It no longer fixes the title's size. The Grove shell opens every view at one
+ * step inside the panel; what distinguishes a queue from a library is what sits
+ * under the head, not how loudly the head is set.
+ *
+ * It does NOT fix the gutter or the alignment either. Those are the same on
+ * every view, on all four sides, and nothing centres — see the banner in
  * ViewFrame.css for why moving them per view failed in the running app.
  *
- *   queue   — work to get through. A compact one-line masthead instead of a
- *             big title: a queue is not a document, and giving it a 34px
- *             serif heading made it read as one. Caps no column.
- *   library — a place to browse. The largest title ViewFrame itself draws, and
- *             the opposite stance from `queue` in weight and density. (Not the
- *             largest in the app: `doc` renders no header, and the note editor
- *             spells the 36px step by hand.) Caps no column: its rows are rows,
- *             not prose.
- *   panel   — configuration. A small title and no column cap, so a tab rail
- *             can run the full pane (its rows cap themselves).
- *   health  — system state to recover from. A short list of pre-lifted
- *             cards under a serif title. Caps no column.
+ *   queue   — work to get through. Its summary is a workload sentence rather
+ *             than a count. Caps no column.
+ *   library — a place to browse. Caps no column: its rows are rows, not prose.
+ *   panel   — configuration. No column cap, so a tab rail can run the full pane
+ *             (its rows cap themselves).
+ *   health  — system state to recover from. A short list of pre-lifted cards.
+ *             Caps no column.
  *   doc     — a note, on the measure it was written to (--measure-doc).
  *   search  — results under a pinned query (--measure-search).
  *   terminal— the embedded Claude Code terminal. A small masthead over a
@@ -52,7 +51,7 @@ type Variant =
 type BaseProps = {
   /** The small uppercase label above the title. Names the section, not the field. */
   eyebrow?: ReactNode;
-  /** The view's name. On `queue` it leads the one-line masthead instead. */
+  /** The view's name, at the one step every view opens on. */
   title?: ReactNode;
   children: ReactNode;
 };
@@ -78,17 +77,18 @@ type HeaderlessVariant = "doc" | "search";
  *
  * `summary` is only accepted by the variants that draw one.
  *
- * The line under the title — a workload sentence for a queue, a count for a
+ * The line beside the title — a workload sentence for a queue, a count for a
  * library, a state for a health view. Deliberately not a free styling slot:
- * the variant fixes its typographic role, so a count can never render at a
+ * the frame fixes its typographic role, so a count can never render at a
  * heading's weight in one view and a caption's in another. Pass the content,
  * never a class. Omit it at zero — the empty state speaks then, and two
  * "nothing here" voices in one header is one too many.
  *
  * On `panel`, `doc` and `search` it is a TYPE ERROR rather than a silent
- * no-op. The render guarded on `SUMMARY_CLASS[variant]` being non-empty, so
+ * no-op. The render used to guard on a per-variant class being non-empty, so
  * those three accepted the prop, dropped it, and raised nothing — a prop that
- * works on half the variants and quietly does not on the rest.
+ * works on half the variants and quietly does not on the rest. The type is
+ * what still says so now that the head is uniform.
  */
 type Props = BaseProps &
   (
@@ -101,53 +101,6 @@ type Props = BaseProps &
     | { variant: HeaderlessVariant; summary?: never; action?: never }
   );
 
-/** Each variant's title step. A config panel and a note must not open at the
- * same size, which is exactly what one shared `text-h2` used to make them do.
- *
- * A step is a TRIPLE, never a bare size: `text-title-x` always travels with
- * `leading-title-x` and `tracking-title-x`. Both tighten as the step grows,
- * because letters read further apart and lines drift apart at display sizes,
- * and Source Serif 4 ships here as static weights with no `opsz` axis to do it
- * for us (docs/DESIGN_SYSTEM.md §1). Dropping either half re-opens the gap.
- *
- * `ui-balance` on all three: these run to 26–34px in a serif inside a capped
- * measure, which is the exact shape that drops a single word onto a line of
- * its own. */
-const TITLE_CLASS: Record<Variant, string> = {
-  queue: "",
-  library:
-    "ui-balance font-serif text-title-library leading-title-library tracking-title-library text-text",
-  panel:
-    "ui-balance font-serif text-title-panel leading-title-panel tracking-title-panel text-text",
-  health:
-    "ui-balance font-serif text-title-health leading-title-health tracking-title-health text-text",
-  doc: "",
-  search: "",
-  // A tool, sized like the config panel: a small serif title, so the pane below
-  // it gets the room.
-  terminal:
-    "ui-balance font-serif text-title-panel leading-title-panel tracking-title-panel text-text",
-  // Same stance as the terminal: the conversation is the content, not the
-  // masthead.
-  chat: "ui-balance font-serif text-title-panel leading-title-panel tracking-title-panel text-text",
-};
-
-/** A queue states the work; a library and a health view state the size.
- *
- * `ui-tnum` because every one of these is a count that changes under the
- * user ("12 notes" → "13 notes"), rendered in the proportional interface
- * sans. The empty entries are not oversights — see `summary` on Props. */
-const SUMMARY_CLASS: Record<Variant, string> = {
-  queue: "",
-  library: "ui-tnum text-label text-text-faint",
-  panel: "",
-  health: "ui-tnum text-label text-text-faint",
-  doc: "",
-  search: "",
-  terminal: "",
-  chat: "",
-};
-
 /** The variants that render `summary` at all. `panel`, `doc` and `search`
  * have no typographic role for one, so passing it there is a mistake rather
  * than a no-op — the type below is what says so, at the call site, instead of
@@ -159,11 +112,10 @@ type SummaryVariant = "queue" | "library" | "health";
  * header. The gutter and column come from ViewFrame.css, keyed off the
  * variant; the header is built here.
  *
- * The eyebrow in particular is why this is worth a component: it is exactly
- * `font-mono text-eyebrow uppercase tracking-eyebrow text-text-faint`, and
- * when each view spelled that out by hand most of them reached for Tailwind's
- * `tracking-wide` (0.025em) while the Sidebar used the token (0.16em) — the
- * same role rendering 6.4x apart.
+ * The eyebrow in particular is why this is worth a component: it is one exact
+ * recipe, and when each view spelled it out by hand most of them reached for
+ * Tailwind's `tracking-wide` (0.025em) while the rail used the token (0.16em)
+ * — the same role rendering 6.4x apart.
  */
 export function ViewFrame({
   variant,
@@ -173,10 +125,7 @@ export function ViewFrame({
   summary,
   children,
 }: Props) {
-  const header = renderHeader({ variant, eyebrow, title, action, summary } as Omit<
-    Props,
-    "children"
-  >);
+  const header = renderHeader({ eyebrow, title, action, summary });
 
   return (
     // Named, so it is a real region landmark. A bare <section> has no
@@ -208,53 +157,57 @@ function landmarkName(node: ReactNode): string | undefined {
   return typeof node === "string" && node.trim() ? node : undefined;
 }
 
+/**
+ * One head for every view that draws one.
+ *
+ * The title and the summary share a BASELINE, not a stack: a view's name and
+ * the size of what is in it are one statement, and stacking them made every
+ * screen open like a chapter. The summary reads in the data face because that
+ * is what it is — a count or a state, not a sentence — and it stays
+ * `tabular-nums` so a number changing under the user doesn't shuffle the line
+ * sideways.
+ *
+ * The per-variant title steps are gone. They existed to keep a config panel
+ * from opening at a note's size, and the Grove shell answers that differently:
+ * every view opens at one step inside the panel, and what tells them apart is
+ * the density and shape below the head (docs/DESIGN_SYSTEM.md §1). The note
+ * editor still spells its own larger step by hand, because a document genuinely
+ * is the exception.
+ */
 function renderHeader({
-  variant,
   eyebrow,
   title,
   action,
   summary,
-}: Omit<Props, "children">) {
+}: {
+  eyebrow?: ReactNode;
+  title?: ReactNode;
+  action?: ReactNode;
+  summary?: ReactNode;
+}) {
   // No header content, no header. This used to swallow an `action` too, which
   // is why `action` is now a type error on the two variants that never pass
   // either of these.
   if (!eyebrow && !title) return null;
 
-  const eyebrowNode = eyebrow && (
-    <p className="font-mono text-eyebrow uppercase tracking-eyebrow text-text-faint">
-      {eyebrow}
-    </p>
-  );
-
-  // A queue's masthead is one line, not a stack: the view's name and the
-  // amount of work in it belong to the same sentence ("Inbox · 4 to file"),
-  // and splitting them across a title and a subtitle made a short list of
-  // chores look like a chapter opening.
-  if (variant === "queue") {
-    return (
-      <header className="flex items-baseline justify-between gap-md">
-        <div>
-          {eyebrowNode}
-          <p className="mt-2xs text-lead text-text">
-            <span className="font-semibold">{title}</span>
-            {summary && <span className="ui-tnum text-text-faint"> · {summary}</span>}
-          </p>
-        </div>
-        {action && <div className="flex-none">{action}</div>}
-      </header>
-    );
-  }
-
   return (
-    <header className="flex items-start justify-between gap-md">
-      <div>
-        {eyebrowNode}
-        {title && <h2 className={`mt-2xs ${TITLE_CLASS[variant]}`}>{title}</h2>}
-        {summary && SUMMARY_CLASS[variant] && (
-          <p className={`mt-2xs ${SUMMARY_CLASS[variant]}`}>{summary}</p>
+    <header className="flex flex-col gap-1.5">
+      {eyebrow && (
+        <p className="font-data text-[10px] uppercase tracking-[0.22em] text-ink-faint">
+          {eyebrow}
+        </p>
+      )}
+      <div className="flex items-baseline gap-4">
+        {title && (
+          <h2 className="ui-balance text-[26px] font-semibold leading-[1.15] tracking-[-0.01em] text-ink">
+            {title}
+          </h2>
         )}
+        {summary && (
+          <p className="font-data text-[11px] text-ink-dim tabular-nums">{summary}</p>
+        )}
+        {action && <div className="ml-auto flex-none self-center">{action}</div>}
       </div>
-      {action && <div className="flex-none">{action}</div>}
     </header>
   );
 }

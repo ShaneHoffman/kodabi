@@ -42,6 +42,14 @@ type Props = {
    * that phrasing, and it is the trust-bearing half of this control.
    */
   label: string;
+  /**
+   * What is wrong, when something is (`captureLabel().detail`). Shown only
+   * while NOT live, because that is the case the headline cannot carry on its
+   * own: a start whose every source failed reads as a bare "Idle", which is
+   * indistinguishable from never having pressed anything. Live, the headline
+   * already names what is recording ("Mic only") and the clock has the slot.
+   */
+  detail?: string | null;
   /** Whole seconds recorded, from useElapsed. Shown only while live. */
   elapsedSeconds?: number | null;
   className?: string;
@@ -63,7 +71,13 @@ type Props = {
  * nothing — so they stay neutral, and the clock stays hidden with them: a
  * timer running over a capture that is writing nothing is a confident lie.
  */
-export function ListenPill({ mode, label, elapsedSeconds, className }: Props) {
+export function ListenPill({
+  mode,
+  label,
+  detail,
+  elapsedSeconds,
+  className,
+}: Props) {
   const live = mode === "listening" || mode === "degraded";
 
   return (
@@ -74,9 +88,11 @@ export function ListenPill({ mode, label, elapsedSeconds, className }: Props) {
       )}
     >
       <SpiritMark mode={mode} size="14px" halo="11px" />
-      {/* The live region is the label alone. Wrapping the clock in it too
-          would announce a new time every second, which is the whole content
-          of the region changing once a second, forever. */}
+      {/* The live region is the label and its detail. The clock stays OUT of
+          it: a time announced every second is the whole content of the region
+          changing once a second, forever. The detail is the opposite case —
+          it changes only when the capture's health does, and it is the half a
+          screen-reader user cannot infer from a mark. */}
       <span
         role="status"
         className={clsx(
@@ -89,6 +105,19 @@ export function ListenPill({ mode, label, elapsedSeconds, className }: Props) {
         )}
       >
         {label}
+        {/* Nested rather than a sibling, so it lands in the same region and is
+            announced with the state it explains. The resets are what keep it
+            reading as a note beside the label instead of a second headline. */}
+        {!live && detail && (
+          <>
+            {/* A real space, not just the margin: the two spans concatenate
+                into one accessible name, and without it a screen reader says
+                "IdleCapture failed to start". */}{" "}
+            <span className="ml-1 font-normal tracking-normal normal-case text-ink-faint">
+              {detail}
+            </span>
+          </>
+        )}
       </span>
       {live && elapsedSeconds != null && (
         <span className="font-data text-[11.5px] text-ink tabular-nums">

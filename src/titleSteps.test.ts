@@ -93,12 +93,15 @@ describe("a view-title step is a triple, not a size", () => {
     // with Grove utilities and stops spelling the legacy triple at all
     // (`DestructiveConfirmDialog` was the fifth, until the primitives ticket
     // moved it onto the Grove Dialog; `ConsentNudge` and `CreateProjectDialog`
-    // were the fourth and third, until the dialogs ticket did the same). Lower
-    // it to match reality when a migration takes one out; the whole file goes
-    // with the legacy layer.
+    // were the fourth and third, until the dialogs ticket did the same;
+    // `ViewFrame` was the second, until the shell ticket standardized every
+    // view head on one Grove step). Lower it to match reality when a migration
+    // takes one out; the whole file goes with the legacy layer.
+    //
+    // One left: NoteEditorView, which spells the `doc` step by hand.
     const scanned = sourceFiles(join(ROOT, "src")).filter((file) =>
       STEPS.some((step) => readFileSync(file, "utf8").includes(`text-title-${step}`)),
     );
-    expect(scanned.length).toBeGreaterThanOrEqual(2);
+    expect(scanned.length).toBeGreaterThanOrEqual(1);
   });
 });
