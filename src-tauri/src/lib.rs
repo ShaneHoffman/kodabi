@@ -212,6 +212,7 @@ pub fn run() {
             note_cmds::create_project,
             note_cmds::delete_project,
             index_cmds::rebuild_index,
+            index_cmds::search_notes,
             quick_capture::show_quick_capture,
             quick_capture::hide_quick_capture,
             quick_capture::quick_capture_submit,
