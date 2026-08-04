@@ -66,10 +66,7 @@ export function readContrast(): boolean {
  * persisted; the OS request is read live and OR-ed in, which is what keeps the
  * switch additive — it can add contrast, never take it away. */
 export function applyContrast(more: boolean): void {
-  const root = document.documentElement;
-  if (more) root.setAttribute(ATTRIBUTE, VALUE);
-  else root.removeAttribute(ATTRIBUTE);
-  root.classList.toggle(HC_CLASS, more || (prefersMoreContrast?.matches ?? false));
+  reflectContrast(more);
   try {
     if (more) window.localStorage.setItem(STORAGE_KEY, VALUE);
     else window.localStorage.removeItem(STORAGE_KEY);
@@ -78,13 +75,34 @@ export function applyContrast(more: boolean): void {
   }
 }
 
-/** Reflect the stored preference at window start, and keep the OS half of the
- * switch live. Called from each entry module, since the quick-capture and
- * overlay windows mount no shell. */
+/** The document half of [`applyContrast`], without the write. Used wherever the
+ * preference is already stored and only this window is behind — writing it back
+ * would echo a `storage` event to every other window, which would write it back
+ * in turn. */
+function reflectContrast(more: boolean): void {
+  const root = document.documentElement;
+  if (more) root.setAttribute(ATTRIBUTE, VALUE);
+  else root.removeAttribute(ATTRIBUTE);
+  root.classList.toggle(HC_CLASS, more || (prefersMoreContrast?.matches ?? false));
+}
+
+/** Reflect the stored preference at window start, and keep both live halves of
+ * the switch listening. Called from each entry module, since the quick-capture
+ * and overlay windows mount no shell. */
 export function startContrast(): void {
   applyContrast(readContrast());
   // The OS can turn a Contrast theme on mid-session. Re-derives from storage
   // rather than from the class, so turning the OS request back off cannot
   // clear a preference the user set in the app.
-  prefersMoreContrast?.addEventListener("change", () => applyContrast(readContrast()));
+  prefersMoreContrast?.addEventListener("change", () => reflectContrast(readContrast()));
+  // Settings lives in the main window, but the two capture windows are separate
+  // webviews that read this once at boot. `storage` fires in every *other*
+  // same-origin document when one of them writes, which is how the toggle
+  // reaches them without a backend round trip. (Theme has the
+  // `settings:changed` event for this; contrast has no backend field yet.)
+  window.addEventListener("storage", (event) => {
+    if (event.key === null || event.key === STORAGE_KEY) {
+      reflectContrast(readContrast());
+    }
+  });
 }

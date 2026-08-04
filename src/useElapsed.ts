@@ -33,6 +33,28 @@ export function useElapsed(startedAt: number | null): number {
   return seconds;
 }
 
+/**
+ * Seconds since `engaged` last became true, 0 while it is false — the clock
+ * both capture surfaces show.
+ *
+ * Timed from the press rather than from audio arriving, so a mid-session
+ * dropout never rewinds the number: the session really has been running that
+ * long, and the mark beside it is what reports whether sound is currently
+ * reaching disk.
+ *
+ * Not an effect: this is the adjust-state-during-render pattern, comparing the
+ * previous prop to the current one in the render body.
+ */
+export function useEngagedElapsed(engaged: boolean): number {
+  const [engagedSince, setEngagedSince] = useState<number | null>(null);
+  const [wasEngaged, setWasEngaged] = useState(engaged);
+  if (wasEngaged !== engaged) {
+    setWasEngaged(engaged);
+    setEngagedSince(engaged ? Date.now() : null);
+  }
+  return useElapsed(engagedSince);
+}
+
 /** `m:ss`, the form a recording timer takes everywhere. Hours are deliberately
  * not handled: a capture that runs past 59 minutes reads `73:20`, which is
  * still correct and still sorts by eye. */

@@ -25,7 +25,8 @@ in `eslint.config.js` fail any non-blessed file at the
   `useVaultQuery` (vault fetch + refetch bus), `useCaptureState`,
   `useDistillState`, `useTranscriptionState`, `useSettings`, `useConsentNudge`,
   `useChatSession` (the chat view's backend session: `chat_open` on mount +
-  the `chat:event` stream).
+  the `chat:event` stream), `useRoutePreview` (the quick-capture footer's
+  debounced routing-guess call).
   DOM: `useCommandPalette` (global ⌘K/Ctrl-K keydown), `useDialogFocus` (dialog
   focus hand-off), `useScrollIntoView` (active-descendant row visibility),
   `useOutsidePointerDown` (dismiss on outside press), `useXterm` (the embedded

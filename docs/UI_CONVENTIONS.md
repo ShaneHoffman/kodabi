@@ -110,12 +110,12 @@ Always the token utility, never the literal:
 | A radius | `rounded-panel`, `rounded-card`, `rounded-dialog`, `rounded-button`, `rounded-pill` |
 | A curve | `ease-out-strong`, `ease-in-out-strong` |
 | A duration | `duration-140`, `duration-220`, … (bare ms; the canonical four are in DESIGN_SYSTEM §4) |
-| A glass surface | `glass-top`, `glass-dock`, `glass-panel`, `glass-card`, `glass-overlay`, `glass-dialog`, `glass-palette`, `glass-scrim` |
+| A glass surface | `glass-top`, `glass-dock`, `glass-panel`, `glass-card`, `glass-overlay`, `glass-dialog`, `glass-palette`, `glass-pill`, `glass-sheet`, `glass-scrim` |
 | The focus ring | `focus-ring`, or `focus-ring-inset` where the control fills its container |
 
 Each recipe carries a whole surface — its fill, blur, lit edge, border, shadow and rung of the radius
 ladder — plus its own `.day` branch, so a surface cannot be spelled at the wrong roundness or lose
-half its material. The seven thicknesses each carry a `prefers-reduced-transparency` branch too;
+half its material. The nine thicknesses each carry a `prefers-reduced-transparency` branch too;
 `glass-scrim` is the deliberate exception on both counts (a fill and nothing else, and no blur to
 drop), and DESIGN_SYSTEM §5 says which parts each one omits and why. They are `@utility` rather than
 a stack of classes because reduced transparency removes a *property* (`backdrop-filter`) rather than

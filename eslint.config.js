@@ -22,7 +22,7 @@ import tseslint from "typescript-eslint";
 //
 // Both are `no-restricted-syntax`, hoisted to a const because the bridge-hook
 // override below re-declares that rule to allow useEffect — and a blanket
-// "off" there would take these with it, silently un-guarding sixteen files.
+// "off" there would take these with it, silently un-guarding seventeen files.
 
 const COLOUR_LITERAL = "(#[0-9a-fA-F]{3,8}\\b|\\b(rgba?|hsla?|oklch|oklab|color-mix)\\()";
 const COLOUR_MESSAGE =
@@ -113,7 +113,7 @@ export default tseslint.config(
   // These files are exempt from the EFFECT selector only. `no-restricted-syntax`
   // is a single rule, so the exemption has to re-declare everything that stays
   // on — a blanket "off" here would take the Grove guards down with it in
-  // sixteen files, silently and without a diff to notice.
+  // seventeen files, silently and without a diff to notice.
   {
     files: [
       "src/useCaptureState.ts",
@@ -125,6 +125,7 @@ export default tseslint.config(
       "src/useDistillState.ts",
       "src/useElapsed.ts",
       "src/useOutsidePointerDown.ts",
+      "src/useRoutePreview.ts",
       "src/useScrollIntoView.ts",
       "src/useSettings.ts",
       "src/useTauriEvent.ts",

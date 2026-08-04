@@ -5,6 +5,7 @@ import { FLASH_MS, QuickCapture } from "./QuickCapture";
 import type { QuickCaptureOutcome } from "../../quickCapture";
 import { QUICK_CAPTURE_SHOWN_EVENT } from "../../events";
 import type { CaptureStateEvent } from "../../useCaptureState";
+import { ROUTE_PREVIEW_DEBOUNCE_MS } from "../../useRoutePreview";
 import {
   emitFromBackend,
   invoke,
@@ -338,12 +339,9 @@ describe("QuickCapture", () => {
     await emitCapture(STARTING);
 
     expect(screen.getByRole("status")).toHaveTextContent("Starting…");
-    expect(container.querySelector(".capture__core")).not.toHaveClass(
-      "capture__core--live",
-    );
-    expect(container.querySelector(".capture__glow")).toBeNull();
-    expect(container.querySelector(".capture__wave")).toHaveClass(
-      "capture__wave--quiet",
+    expect(container.querySelector(".spirit-mark")).toHaveClass("is-starting");
+    expect(container.querySelector(".spirit-mark")).not.toHaveClass(
+      "is-listening",
     );
 
     // The affordances match the session, not the audio: Stop is the only thing
@@ -396,12 +394,11 @@ describe("QuickCapture", () => {
     // Both sources dropped: the session is still engaged and will resume with
     // no further press, so the chrome stays — but the green does not.
     expect(screen.getByRole("status")).toHaveTextContent("Reconnecting");
-    expect(container.querySelector(".capture__core")).not.toHaveClass(
-      "capture__core--live",
+    expect(container.querySelector(".spirit-mark")).toHaveClass(
+      "is-reconnecting",
     );
-    expect(container.querySelector(".capture__glow")).toBeNull();
-    expect(container.querySelector(".capture__wave")).toHaveClass(
-      "capture__wave--quiet",
+    expect(container.querySelector(".spirit-mark")).not.toHaveClass(
+      "is-listening",
     );
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
 
@@ -422,9 +419,9 @@ describe("QuickCapture", () => {
     expect(screen.getByText("0:03")).toBeInTheDocument();
 
     await emitCapture(RECONNECTING);
-    // The dot reacts at once; the announced label settles first.
-    expect(container.querySelector(".capture__core")).not.toHaveClass(
-      "capture__core--live",
+    // The mark reacts at once; the announced label settles first.
+    expect(container.querySelector(".spirit-mark")).not.toHaveClass(
+      "is-listening",
     );
     expect(screen.getByRole("status")).toHaveTextContent("Listening");
 
@@ -440,9 +437,94 @@ describe("QuickCapture", () => {
     act(() => {
       vi.advanceTimersByTime(1000);
     });
-    expect(container.querySelector(".capture__core")).toHaveClass(
-      "capture__core--live",
-    );
+    expect(container.querySelector(".spirit-mark")).toHaveClass("is-listening");
     expect(screen.getByText("0:05")).toBeInTheDocument();
+  });
+
+  it("shows the router's guess for the draft, in its project's hue", async () => {
+    vi.useFakeTimers();
+    onCommand("quick_capture_route_preview", () => ({
+      project: "briarwood-golf",
+      confidence: 0.8,
+    }));
+    render(<QuickCapture />);
+
+    fireEvent.change(box(), { target: { value: "bunker edge quote" } });
+    await act(async () => {
+      vi.advanceTimersByTime(ROUTE_PREVIEW_DEBOUNCE_MS);
+    });
+
+    const guess = screen.getByTestId("quick-capture-route-preview");
+    expect(guess).toHaveTextContent("→ briarwood-golf");
+    // The guess wears the folder's own colour, so where the note is headed
+    // reads before the words do. `briarwood-golf` hashes to coral
+    // (src/useProjects.test.ts pins it).
+    expect(guess).toHaveClass("text-coral");
+  });
+
+  it("guesses the Inbox when nothing clears the routing threshold", async () => {
+    vi.useFakeTimers();
+    onCommand("quick_capture_route_preview", () => ({
+      project: null,
+      confidence: 0.1,
+    }));
+    render(<QuickCapture />);
+
+    fireEvent.change(box(), { target: { value: "buy milk" } });
+    await act(async () => {
+      vi.advanceTimersByTime(ROUTE_PREVIEW_DEBOUNCE_MS);
+    });
+
+    // Still answered, because "nowhere in particular" is where it will file and
+    // the user is entitled to know that before pressing Enter. No hue: the
+    // Inbox is not a project and must not borrow a project's identity.
+    const guess = screen.getByTestId("quick-capture-route-preview");
+    expect(guess).toHaveTextContent("→ Inbox");
+    expect(guess).toHaveClass("text-ink-faint");
+  });
+
+  it("drops the guess the moment the draft is emptied", async () => {
+    vi.useFakeTimers();
+    onCommand("quick_capture_route_preview", () => ({
+      project: "briarwood-golf",
+      confidence: 0.8,
+    }));
+    render(<QuickCapture />);
+
+    fireEvent.change(box(), { target: { value: "bunker edge quote" } });
+    await act(async () => {
+      vi.advanceTimersByTime(ROUTE_PREVIEW_DEBOUNCE_MS);
+    });
+    expect(screen.getByTestId("quick-capture-route-preview")).toBeInTheDocument();
+
+    // Immediately, not a debounce later: an empty box has no destination, and a
+    // stale project name sitting under it would be a claim about nothing.
+    fireEvent.change(box(), { target: { value: "" } });
+    expect(
+      screen.queryByTestId("quick-capture-route-preview"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("hides the guess while a capture is running", async () => {
+    vi.useFakeTimers();
+    onCommand("start_capture", () => null);
+    onCommand("quick_capture_route_preview", () => ({
+      project: "briarwood-golf",
+      confidence: 0.8,
+    }));
+    render(<QuickCapture />);
+
+    fireEvent.change(box(), { target: { value: "bunker edge quote" } });
+    await act(async () => {
+      vi.advanceTimersByTime(ROUTE_PREVIEW_DEBOUNCE_MS);
+    });
+    expect(screen.getByTestId("quick-capture-route-preview")).toBeInTheDocument();
+
+    // Recording chrome owns that corner: the timer and Stop are about the
+    // session, and a routing guess competing with them would be noise.
+    await emitCapture(LISTENING);
+    expect(
+      screen.queryByTestId("quick-capture-route-preview"),
+    ).not.toBeInTheDocument();
   });
 });

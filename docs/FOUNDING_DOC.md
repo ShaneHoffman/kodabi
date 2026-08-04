@@ -164,9 +164,12 @@ At meeting end (batch, not continuous — keeps token usage sane):
      (animated/tinted while capturing, still when idle), and exists whenever capture can run — the
      app lives in the tray; the window is optional.
   2. **Toast:** every capture start fires a brief self-dismissing notification.
-  3. **Full-screen:** a small always-on-top overlay pill (draggable, dismissible) covers the case
-     where the tray is hidden. Default ON for auto-detected captures, default OFF for
-     manual/hotkey captures (user can change both).
+  3. **Full-screen:** a small always-on-top overlay pill (draggable, pure status: the kodama, the
+     state in words, and the running clock) covers the case where the tray is hidden. Default ON
+     for auto-detected captures, default OFF for manual/hotkey captures (user can change both).
+     It carries **no controls, deliberately** — stopping is the global shortcut and the main
+     window, and a recording the user can hide from themselves per session is exactly the failure
+     this invariant exists to prevent. The persistent choice is the setting above.
   4. **No OS reliance:** the Windows mic-in-use indicator only covers microphone capture — WASAPI
      loopback (system audio) does not trigger it. Kodabi's own indicators must be sufficient on
      their own.

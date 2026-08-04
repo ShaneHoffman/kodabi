@@ -10,15 +10,15 @@
 //! called from `capture_control::broadcast_event`, which almost always runs
 //! with `CaptureController::toggle_lock` held (that lock is documented as the
 //! outermost lock in its module). Everything here must therefore stay *leaf*:
-//! the settings snapshot and the atomics below are taken alone and released
-//! immediately, window calls are fire-and-forget, and nothing reaches back for
-//! `toggle_lock` or for a blocking window getter such as `is_visible`. Show and
-//! hide are idempotent, so no read-before-write is needed to stay correct.
+//! the settings snapshot and the origin mutex below are taken alone and
+//! released immediately, window calls are fire-and-forget, and nothing reaches
+//! back for `toggle_lock` or for a blocking window getter such as `is_visible`.
+//! Show and hide are idempotent, so no read-before-write is needed to stay
+//! correct.
 //!
 //! Naming note: the `capture` here is *audio* capture, the same sense as
 //! `capture_control.rs`. It is unrelated to `quick_capture.rs`'s text box.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use kodabi_core::overlay::{should_show_overlay, CaptureOrigin};
@@ -33,37 +33,18 @@ use crate::settings_cmds::SettingsState;
 /// start shows it with no webview cold start.
 pub const WINDOW_LABEL: &str = "capture-overlay";
 
-/// Per-session overlay state: whether the user dismissed the pill for the
-/// capture that is running now, and how that capture began.
+/// Per-session overlay state: how the capture that is running now began.
 ///
-/// Both are leaf state by design (see the module-level lock discipline). The
-/// dismissal is deliberately *per capture session* rather than persistent: it
-/// clears when capture returns to idle, so hiding the pill once never silently
-/// disables the visibility guarantee for every future recording. The persistent
-/// choice is the setting, not this — which is also why changing that setting
-/// clears the dismissal ([`apply_settings_change`]) rather than losing to it.
+/// Leaf state by design (see the module-level lock discipline). There is no
+/// session dismissal to track: the pill carries no controls, so the only ways to
+/// hide one are the persistent setting and stopping the capture — which is what
+/// keeps the visibility guarantee from being switchable off per recording.
 #[derive(Default)]
 pub struct OverlayController {
-    dismissed: AtomicBool,
     origin: Mutex<CaptureOrigin>,
 }
 
 impl OverlayController {
-    /// The user hid the pill for the capture that is currently running.
-    fn dismiss(&self) {
-        self.dismissed.store(true, Ordering::SeqCst);
-    }
-
-    /// Capture returned to idle, or the user changed the overlay setting: the
-    /// pill is announced again.
-    fn clear_dismissal(&self) {
-        self.dismissed.store(false, Ordering::SeqCst);
-    }
-
-    fn is_dismissed(&self) -> bool {
-        self.dismissed.load(Ordering::SeqCst)
-    }
-
     fn set_origin(&self, origin: CaptureOrigin) {
         *self
             .origin
@@ -106,9 +87,6 @@ pub(crate) fn sync(app: &AppHandle, event: &CaptureStateEvent) {
     };
 
     let capture_active = event.phase != CapturePhase::Idle;
-    if !capture_active {
-        controller.clear_dismissal();
-    }
 
     // A missing settings state (very early startup) counts as "can't prove the
     // user asked for a pill", so nothing is shown — the same fail-safe
@@ -118,7 +96,6 @@ pub(crate) fn sync(app: &AppHandle, event: &CaptureStateEvent) {
             capture_active,
             controller.origin(),
             settings.snapshot().overlay,
-            controller.is_dismissed(),
         ),
         None => false,
     };
@@ -126,20 +103,9 @@ pub(crate) fn sync(app: &AppHandle, event: &CaptureStateEvent) {
     apply(app, show);
 }
 
-/// Bring the pill in line with a just-changed overlay setting.
-///
-/// Clears the session dismissal before re-deriving: turning the setting on is
-/// an explicit, persistent request to see the pill, and it has to outrank a
-/// dismissal of the capture that happens to still be running. Without this the
-/// toggle is a dead control for the rest of that capture — the user hides the
-/// pill, later switches the setting on, and nothing appears — which is exactly
-/// the precedence [`OverlayController`] documents the other way round.
-///
-/// Turning the setting *off* is unaffected: the pill is hidden either way.
+/// Bring the pill in line with a just-changed overlay setting, so it appears or
+/// disappears mid-capture instead of waiting for the next start.
 pub(crate) fn apply_settings_change(app: &AppHandle) {
-    if let Some(controller) = app.try_state::<OverlayController>() {
-        controller.clear_dismissal();
-    }
     resync(app);
 }
 
@@ -201,38 +167,9 @@ fn apply(app: &AppHandle, show: bool) {
     }
 }
 
-/// Hide the pill for the capture that is running now.
-///
-/// Session-scoped, not a setting: the next capture shows it again. The
-/// persistent choice lives in `settings.overlay` and is changed from the
-/// Settings view.
-#[tauri::command]
-pub fn dismiss_capture_overlay(app: AppHandle) {
-    if let Some(controller) = app.try_state::<OverlayController>() {
-        controller.dismiss();
-    }
-    apply(&app, false);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn dismissal_persists_until_capture_goes_idle() {
-        let controller = OverlayController::default();
-        assert!(!controller.is_dismissed());
-
-        controller.dismiss();
-        // Still dismissed across repeated reads — unlike an armed-flag, this is
-        // not consumed by being checked, or the pill would reappear on the next
-        // state broadcast of the same capture.
-        assert!(controller.is_dismissed());
-        assert!(controller.is_dismissed());
-
-        controller.clear_dismissal();
-        assert!(!controller.is_dismissed());
-    }
 
     #[test]
     fn origin_defaults_to_manual_and_round_trips() {

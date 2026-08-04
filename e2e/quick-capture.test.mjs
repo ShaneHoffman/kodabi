@@ -71,8 +71,11 @@ const MARKER = `e2e quick capture ${process.pid}-${Date.now()}`;
  *   font-src data:                    six @fontsource faces fall under Vite's
  *                                     4096-byte assetsInlineLimit default and ship
  *                                     as data: URIs inside the built stylesheet.
- *   style-src 'unsafe-inline'         Tailwind's runtime, and xterm.js's injected
- *                                     stylesheet.
+ *   style-src 'unsafe-inline'         Tailwind's runtime, xterm.js's injected
+ *                                     stylesheet, and the transparent-background
+ *                                     block inlined in capture.html / overlay.html
+ *                                     (it has to hold before the bundle loads, or
+ *                                     both capture windows flash opaque).
  *   media-src http://asset.localhost  the <audio src={convertFileSrc(…)}> in
  *                                     SessionArtifactsSection.tsx, which is the
  *                                     only asset-protocol consumer in the app.

@@ -34,6 +34,21 @@ pub enum QuickCaptureError {
     Note(#[from] NoteError),
 }
 
+/// Where a draft *would* file: the read-only half of [`quick_capture`], with no
+/// id minted and nothing written. See [`route_preview`].
+pub struct RoutePreview {
+    /// The routing decision — always `Routing::Routed`, filing into a project or
+    /// into [`INBOX`](note::INBOX) with the score recorded.
+    pub routing: note::Routing,
+    /// Projects whose glossary could not load. Same non-fatal report as
+    /// [`QuickCaptured::glossary_failures`], and for the same reason: routing
+    /// proceeded treating each as having no vocabulary.
+    pub glossary_failures: Vec<GlossaryLoadFailure>,
+    /// Projects whose routing-examples log could not load. Same non-fatal report
+    /// as [`QuickCaptured::example_failures`].
+    pub example_failures: Vec<ExamplesLoadFailure>,
+}
+
 /// A quick-captured note: the validated [`Note`] and the path it was written to.
 pub struct QuickCaptured {
     pub note: Note,
@@ -74,12 +89,11 @@ pub fn quick_capture(
         return Err(QuickCaptureError::EmptyBody);
     }
 
-    // Route on the raw text: `route` takes plain title/body, so the distill pass
-    // is skipped entirely. Title is `None` — a quick capture has no separate
-    // title; the first body line only seeds the filename, never a routing
-    // signal (that would double-count the same words as both title and body).
-    let loaded = routing::load_project_signals(vault_root)?;
-    let routing = routing::route(NoteText { title: None, body }, &loaded.signals, config);
+    // Routing is `route_preview`'s job, not a second copy of it: the quick
+    // capture window shows the same guess live as the user types, and the two
+    // must never diverge.
+    let preview = route_preview(vault_root, body, config)?;
+    let routing = preview.routing;
 
     let id = NoteId::generate().map_err(QuickCaptureError::IdGeneration)?;
     // The first body line seeds both the filename slug and the stored title.
@@ -101,6 +115,37 @@ pub fn quick_capture(
     Ok(QuickCaptured {
         note,
         path,
+        glossary_failures: preview.glossary_failures,
+        example_failures: preview.example_failures,
+    })
+}
+
+/// Where `body` would file right now, without filing it: the same trim-and-route
+/// pipeline [`quick_capture`] runs, stopping before an id is minted or anything
+/// touches disk. Feeds the quick-capture window's live routing guess, which is
+/// why it shares the code path rather than mirroring it — a guess that disagreed
+/// with what Enter actually did would be worse than no guess.
+///
+/// `body` is trimmed and rejected when empty, exactly as filing rejects it.
+pub fn route_preview(
+    vault_root: &Path,
+    body: &str,
+    config: &RoutingConfig,
+) -> Result<RoutePreview, QuickCaptureError> {
+    let body = body.trim();
+    if body.is_empty() {
+        return Err(QuickCaptureError::EmptyBody);
+    }
+
+    // Route on the raw text: `route` takes plain title/body, so the distill pass
+    // is skipped entirely. Title is `None` — a quick capture has no separate
+    // title; the first body line only seeds the filename, never a routing
+    // signal (that would double-count the same words as both title and body).
+    let loaded = routing::load_project_signals(vault_root)?;
+    let routing = routing::route(NoteText { title: None, body }, &loaded.signals, config);
+
+    Ok(RoutePreview {
+        routing,
         glossary_failures: loaded.glossary_failures,
         example_failures: loaded.example_failures,
     })
@@ -272,6 +317,100 @@ mod tests {
         .unwrap();
 
         assert_eq!(read_back(&captured).id, captured.note.id);
+    }
+
+    #[test]
+    fn preview_rejects_empty_and_whitespace_body() {
+        let vault = tempdir().unwrap();
+        for body in ["", "   ", "\n\t \n"] {
+            assert!(matches!(
+                route_preview(vault.path(), body, &RoutingConfig::default()),
+                Err(QuickCaptureError::EmptyBody)
+            ));
+        }
+    }
+
+    #[test]
+    fn preview_matches_quick_capture_and_writes_nothing() {
+        let vault = tempdir().unwrap();
+        std::fs::create_dir(vault.path().join("Briarwood Golf")).unwrap();
+        let body = "Met the Briarwood Golf team about the irrigation bid.";
+        let config = RoutingConfig { threshold: 0.4 };
+
+        let preview = route_preview(vault.path(), body, &config).unwrap();
+        assert_eq!(
+            preview.routing,
+            Routing::Routed {
+                project: "Briarwood Golf".to_string(),
+                confidence: 0.5,
+            }
+        );
+
+        // A preview is read-only: no Inbox conjured, and the project it guessed
+        // is still the empty directory the test made.
+        assert!(!vault.path().join("Inbox").exists());
+        assert_eq!(
+            std::fs::read_dir(vault.path().join("Briarwood Golf"))
+                .unwrap()
+                .count(),
+            0,
+            "preview wrote into the project it guessed"
+        );
+
+        // And it is the same decision filing makes, because it is the same call.
+        let captured = quick_capture(vault.path(), body, "2026-07-18", &config).unwrap();
+        assert_eq!(captured.note.routing, preview.routing);
+    }
+
+    #[test]
+    fn preview_sees_recorded_corrections() {
+        use crate::routing_examples::{RoutingExample, RoutingExamples};
+
+        let vault = tempdir().unwrap();
+        let project_dir = vault.path().join("Briarwood Golf");
+        std::fs::create_dir(&project_dir).unwrap();
+
+        let mut log = RoutingExamples::default();
+        log.upsert(RoutingExample {
+            note_id: "n_seed01".to_string(),
+            title: "Clubhouse migration".to_string(),
+            excerpt: "clubhouse migration cutover plan".to_string(),
+            previous_project: None,
+            confidence: 1.0,
+            corrected_at: "2026-07-18T20:15:00Z".to_string(),
+            reason: None,
+        });
+        log.save(&project_dir).unwrap();
+
+        // The guess reads corrections just as filing does: name (2.0) + a perfect
+        // example match (2.0) = 4.0, saturate(4) = 4/6, clearing the 0.6 default.
+        let preview = route_preview(
+            vault.path(),
+            "Briarwood Golf clubhouse migration cutover plan",
+            &RoutingConfig::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            preview.routing,
+            Routing::Routed {
+                project: "Briarwood Golf".to_string(),
+                confidence: 4.0 / 6.0,
+            }
+        );
+
+        let unrelated = route_preview(
+            vault.path(),
+            "Buy groceries and call the plumber",
+            &RoutingConfig::default(),
+        )
+        .unwrap();
+        assert_eq!(
+            unrelated.routing,
+            Routing::Routed {
+                project: note::INBOX.to_string(),
+                confidence: 0.0,
+            }
+        );
     }
 
     #[test]

@@ -1,14 +1,8 @@
 import { act, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CaptureOverlayPill } from "./CaptureOverlayPill";
 import type { CaptureStateEvent } from "../../useCaptureState";
-import {
-  emitFromBackend,
-  invokedCommands,
-  onCommand,
-  resetTauriMocks,
-} from "../../test/tauri";
+import { emitFromBackend, onCommand, resetTauriMocks } from "../../test/tauri";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
@@ -70,7 +64,7 @@ describe("CaptureOverlayPill", () => {
     // fails the AA contrast floor in the light theme); the label says the same
     // thing through value, at full ink rather than faint.
     expect(container.querySelector(".spirit-mark")).toHaveClass("is-listening");
-    expect(label).toHaveClass("text-text");
+    expect(label).toHaveClass("text-kodama-ink");
   });
 
   it("renders nothing at all while capture is idle", async () => {
@@ -122,7 +116,7 @@ describe("CaptureOverlayPill", () => {
     // stays at full ink.
     expect(label).toHaveTextContent("Mic only");
     expect(container.querySelector(".spirit-mark")).toHaveClass("is-degraded");
-    expect(label).toHaveClass("text-text");
+    expect(label).toHaveClass("text-kodama-ink");
   });
 
   it("drops the green when a degraded capture has nothing live", async () => {
@@ -136,23 +130,32 @@ describe("CaptureOverlayPill", () => {
     // Nothing is reaching disk, so neither carrier may claim it is: the mark
     // falls back to the moving ink form, and the label recedes to faint.
     expect(container.querySelector(".spirit-mark")).toHaveClass("is-reconnecting");
-    expect(label).toHaveClass("text-text-faint");
-    expect(label).not.toHaveClass("text-text");
+    expect(label).toHaveClass("text-ink-dim");
+    expect(label).not.toHaveClass("text-kodama-ink");
   });
 
-  it("dismisses the pill for the current capture session", async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    onCommand("dismiss_capture_overlay", () => null);
+  it("counts the session up from the moment capture engaged", async () => {
     await renderSeeded(LISTENING);
 
-    await user.click(screen.getByTestId("capture-overlay-dismiss"));
+    // The pill claims a recording is running; a recording indicator that cannot
+    // say how long it has been running is asking to be trusted about the one
+    // thing the user would check.
+    expect(screen.getByText("0:00")).toBeInTheDocument();
 
-    // The backend owns the hide and the session-scoped flag; the pill only
-    // asks.
-    expect(invokedCommands()).toContain("dismiss_capture_overlay");
+    act(() => void vi.advanceTimersByTime(3000));
+    expect(screen.getByText("0:03")).toBeInTheDocument();
   });
 
-  it("keeps the whole pill draggable and the dismiss control clickable", async () => {
+  it("carries no controls at all", async () => {
+    await renderSeeded(LISTENING);
+
+    // Pure status. A pill the user can dismiss is a recording that can be made
+    // invisible, which is the one thing this window exists to prevent; stopping
+    // is the global shortcut and the main window.
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("keeps the whole pill draggable", async () => {
     await renderSeeded(LISTENING);
 
     // `deep`, not the bare attribute: bare drags only on a press landing
@@ -161,9 +164,6 @@ describe("CaptureOverlayPill", () => {
       "data-tauri-drag-region",
       "deep",
     );
-    // Tauri's drag script excludes <button> subtrees, which is the only reason
-    // a control inside a deep drag region stays pressable. A div would drag.
-    expect(screen.getByTestId("capture-overlay-dismiss").tagName).toBe("BUTTON");
   });
 
   it("keeps the pill inset from the window edge so its shadow can fade out", async () => {
@@ -173,6 +173,6 @@ describe("CaptureOverlayPill", () => {
     // clipped flat and reads as a rectangle around a rounded pill, which is
     // exactly what the transparent window is meant to avoid. The padded frame
     // is the fade-out room, and the window is sized for it.
-    expect(screen.getByTestId("capture-overlay-root")).toHaveClass("p-sm");
+    expect(screen.getByTestId("capture-overlay-root")).toHaveClass("p-3");
   });
 });

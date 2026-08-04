@@ -31,3 +31,20 @@ export function hideQuickCaptureWindow(): Promise<void> {
 export function submitQuickCapture(text: string): Promise<QuickCaptureOutcome> {
   return invoke<QuickCaptureOutcome>("quick_capture_submit", { text });
 }
+
+/** The router's guess for a draft, mirroring `QuickCaptureRoutePreview` in
+ * `src-tauri/src/quick_capture.rs`. `project: null` is the Inbox sentinel. */
+export type QuickCaptureRoutePreview = {
+  project: string | null;
+  confidence: number;
+};
+
+/** Where the draft *would* file right now. Read-only: writes nothing, so it is
+ * safe to call as the user types. */
+export function previewQuickCaptureRoute(
+  text: string,
+): Promise<QuickCaptureRoutePreview> {
+  return invoke<QuickCaptureRoutePreview>("quick_capture_route_preview", {
+    text,
+  });
+}

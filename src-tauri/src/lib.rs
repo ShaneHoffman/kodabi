@@ -215,7 +215,7 @@ pub fn run() {
             quick_capture::show_quick_capture,
             quick_capture::hide_quick_capture,
             quick_capture::quick_capture_submit,
-            overlay::dismiss_capture_overlay,
+            quick_capture::quick_capture_route_preview,
             settings_cmds::get_settings,
             settings_cmds::set_retention_policy,
             settings_cmds::set_capture_overlay,
