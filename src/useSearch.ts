@@ -103,30 +103,60 @@ export function parseSnippet(snippet: string): TextSegment[] {
   return segments;
 }
 
+/** A character FTS5's `unicode61` tokenizer keeps inside a word. Everything
+ * else is a token break, which is what makes a "word" the same thing on both
+ * sides of the wire. */
+const WORD_CHAR = /[\p{L}\p{N}]/u;
+
+function isWordChar(char: string | undefined): boolean {
+  return char !== undefined && WORD_CHAR.test(char);
+}
+
 /**
  * Marks `query`'s terms in text the backend did not mark for us.
  *
  * FTS5's `snippet()` marks one column — the best-matching one — so a hit found
- * by its title arrives with the title bare. This puts the same green on it, by
- * the same rule the backend used: match each term where it starts, and treat
- * the last one as a prefix, since that is what the user is still typing.
+ * by its body arrives with the title bare. This puts the same green on it, and
+ * green is only allowed to mean "a search match the system found"
+ * (docs/DESIGN_SYSTEM.md §2), so it has to mark what the index actually
+ * matched and nothing else. That means mirroring `sanitize_fts_query`
+ * (crates/kodabi-core/src/index/search.rs) exactly:
+ *
+ * - a term only starts a match at a token boundary, never mid-word — the index
+ *   matched tokens, so painting "on" inside "Sponsor" would claim a match that
+ *   was never made;
+ * - every term but the last must also END at a token boundary, because the
+ *   backend matches those as whole words;
+ * - the last term may stop mid-word, because that is the one the backend sends
+ *   with the `*` prefix operator (the word the user is still typing);
+ * - a token with no alphanumeric character is dropped, because the backend
+ *   drops it too and it never reached the index.
  */
 export function highlightTerms(text: string, query: string): TextSegment[] {
   const terms = query
     .split(/\s+/)
-    .filter((term) => term.length > 0)
+    .filter((term) => WORD_CHAR.test(term))
     .map((term) => term.toLowerCase());
   if (terms.length === 0) return [{ text, marked: false }];
+  const prefixTerm = terms[terms.length - 1];
 
   const haystack = text.toLowerCase();
-  // One pass over the text, taking the earliest term that starts here. Ranges
+  // One pass over the text, taking the earliest term that matches here. Ranges
   // can't overlap because each match advances past itself.
   const segments: TextSegment[] = [];
   let plainFrom = 0;
   let index = 0;
 
   while (index < text.length) {
-    const term = terms.find((candidate) => haystack.startsWith(candidate, index));
+    // Mid-word positions can't start a match, so they cost one comparison
+    // rather than a scan of every term.
+    const term = isWordChar(text[index - 1])
+      ? undefined
+      : terms.find(
+          (candidate) =>
+            haystack.startsWith(candidate, index) &&
+            (candidate === prefixTerm || !isWordChar(text[index + candidate.length])),
+        );
     if (!term) {
       index += 1;
       continue;

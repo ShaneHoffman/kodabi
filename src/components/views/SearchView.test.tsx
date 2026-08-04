@@ -100,7 +100,7 @@ describe("SearchView", () => {
     const field = await openSearch(user);
 
     expect(
-      screen.getByText("Searches titles and snippets across every note."),
+      screen.getByText("Searches every note in full, title and body."),
     ).toBeInTheDocument();
 
     await user.type(field, "t");

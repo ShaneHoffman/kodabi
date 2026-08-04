@@ -67,6 +67,35 @@ describe("highlightTerms", () => {
     ]);
   });
 
+  it("leaves a term that only occurs mid-word alone", () => {
+    // The index matched `"on"*` somewhere in the body; it did not match inside
+    // "Sponsor", so the title must not claim it did.
+    expect(highlightTerms("Sponsor list", "on")).toEqual([
+      { text: "Sponsor list", marked: false },
+    ]);
+  });
+
+  it("matches every term but the last as a whole word", () => {
+    // The backend sends `"test" OR "tournament"*`, so "Testing" is not a match
+    // for "test" even though it starts with it.
+    const segments = highlightTerms("Testing the tournament", "test tournament");
+    expect(segments.filter((segment) => segment.marked).map((segment) => segment.text)).toEqual([
+      "tournament",
+    ]);
+  });
+
+  it("still marks a non-final term that is a whole word", () => {
+    const segments = highlightTerms("test the tournament", "test tournament");
+    expect(segments.filter((segment) => segment.marked).map((segment) => segment.text)).toEqual([
+      "test",
+      "tournament",
+    ]);
+  });
+
+  it("drops a token with no alphanumeric character, as the backend does", () => {
+    expect(highlightTerms("a -- b", "--")).toEqual([{ text: "a -- b", marked: false }]);
+  });
+
   it("returns the text unmarked when nothing matches", () => {
     expect(highlightTerms("Deck railing", "zzzz")).toEqual([
       { text: "Deck railing", marked: false },

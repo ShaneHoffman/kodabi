@@ -150,7 +150,7 @@ export function SearchView({ query }: Props) {
       {error ? (
         <StatusMessage variant="error">Couldn&apos;t search your notes: {error}</StatusMessage>
       ) : !searchedQuery ? (
-        <p className={QUIET_LINE}>Searches titles and snippets across every note.</p>
+        <p className={QUIET_LINE}>Searches every note in full, title and body.</p>
       ) : hits.length === 0 ? (
         !loading &&
         results && <p className={QUIET_LINE}>Nothing matches &ldquo;{searchedQuery}&rdquo;.</p>
