@@ -177,6 +177,8 @@ describe("ProjectView index rows", () => {
       source: "manual",
       confidence: 0.9,
       snippet: "",
+      // A project listing never carries a guess: the note already has a home.
+      guess: null,
       ...overrides,
     };
   }

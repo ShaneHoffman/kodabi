@@ -5,6 +5,7 @@
    remounts the tree instead of hot-swapping it, which is a dev-loop nicety
    against an API where `Menu.Item` cannot be used outside a `Menu.Root`. */
 import { Menu as BaseMenu } from "@base-ui/react/menu";
+import { cva, type VariantProps } from "class-variance-authority";
 import { clsx } from "clsx";
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 
@@ -45,18 +46,48 @@ const MENU_SURFACE =
   "animate-materialize motion-reduce:animate-fade-in " +
   "data-ending-style:animate-dissolve motion-reduce:data-ending-style:animate-fade-out";
 
-/** A row inside a menu.
+/** A row inside a menu, in the three appearances a menu row comes in.
  *
  * `data-highlighted` is one attribute for two things — the pointer is over the
  * row, or the keyboard has walked to it — which is precisely the invariant
  * docs/UI_CONVENTIONS.md §4 asks for: hover and focus live on the same
- * element, so a menu never shows two rows lit at once. */
-const MENU_ROW =
-  "flex w-full cursor-default select-none items-center gap-2 rounded-[9px] px-2.5 py-2 " +
-  "font-ui text-[13px] font-medium leading-none text-ink-dim outline-hidden " +
-  "transition-[background-color,color] duration-140 ease-out-strong " +
-  "data-highlighted:bg-wash data-highlighted:text-ink " +
-  "data-disabled:text-ink-faint";
+ * element, so a menu never shows two rows lit at once.
+ *
+ * The two extra appearances are variants rather than classes a call site
+ * passes, because font size and text colour are properties this recipe already
+ * owns: two utilities for one property are resolved by Tailwind's emission
+ * order, not by the order they appear in a `className`, so an override written
+ * at the call site is a coin flip that looks like an instruction
+ * (docs/UI_CONVENTIONS.md §4). Both of these lost that flip before they were
+ * moved here.
+ *
+ *   suggested — the row the system is proposing, held lit while the menu is
+ *               open. It is a claim about content, not a hover state, so it
+ *               reads brighter than its siblings even when the highlight is
+ *               somewhere else.
+ *   foot      — the row that leaves the list to do something else ("New
+ *               project…"). Smaller and quieter: it is the way out, not one
+ *               more thing to pick.
+ */
+const menuRow = cva(
+  [
+    "flex w-full cursor-default select-none items-center gap-2 rounded-[9px] px-2.5 py-2",
+    "font-ui font-medium leading-none outline-hidden",
+    "transition-[background-color,color] duration-140 ease-out-strong",
+    "data-highlighted:bg-wash data-highlighted:text-ink",
+    "data-disabled:text-ink-faint",
+  ],
+  {
+    variants: {
+      variant: {
+        default: "text-[13px] text-ink-dim",
+        suggested: "bg-wash text-[13px] text-ink",
+        foot: "text-[11.5px] text-ink-faint",
+      },
+    },
+    defaultVariants: { variant: "default" },
+  },
+);
 
 type ContentProps = {
   /** Which side of the trigger the menu prefers, before any flip. */
@@ -89,8 +120,12 @@ function MenuContent({ side = "bottom", align = "start", className, children }: 
   );
 }
 
-function MenuItem({ className, ...rest }: ComponentPropsWithoutRef<typeof BaseMenu.Item>) {
-  return <BaseMenu.Item className={clsx(MENU_ROW, className)} {...rest} />;
+function MenuItem({
+  className,
+  variant,
+  ...rest
+}: ComponentPropsWithoutRef<typeof BaseMenu.Item> & VariantProps<typeof menuRow>) {
+  return <BaseMenu.Item className={clsx(menuRow({ variant }), className)} {...rest} />;
 }
 
 function MenuSeparator({

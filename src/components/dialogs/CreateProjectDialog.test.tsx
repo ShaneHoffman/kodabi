@@ -11,6 +11,7 @@ import {
 } from "../../test/tauri";
 import type { Project } from "../../useProjects";
 import { useVaultChangedBridge } from "../../useVaultChangedBridge";
+import { CreateProjectDialog } from "./CreateProjectDialog";
 import { CapturePipelineProvider } from "../providers/CapturePipelineProvider";
 import { MainContent } from "../shell/MainContent";
 import { NavigationProvider } from "../providers/NavigationProvider";
@@ -157,5 +158,29 @@ describe("CreateProjectDialog", () => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
     expect(invokedCommands()).not.toContain("create_project");
+  });
+
+  it("hands the created project to onCreated instead of navigating", async () => {
+    // The Inbox's File menu opens this dialog mid-errand: the user is filing
+    // a note, and navigating away would answer half the request and leave the
+    // note where it was. The caller that knows the errand takes over.
+    const user = userEvent.setup();
+    const onCreated = vi.fn();
+    serveVault();
+    onCommand("create_project", () => project("Ops"));
+    render(
+      <NavigationProvider>
+        <CreateProjectDialog onClose={() => {}} onCreated={onCreated} />
+      </NavigationProvider>,
+    );
+
+    await user.type(screen.getByLabelText("Project name"), "Ops");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => {
+      expect(onCreated).toHaveBeenCalledWith(project("Ops"));
+    });
+    // Nothing moved: the dialog closed onto the surface it was opened from.
+    expect(screen.queryByRole("heading", { name: "Ops" })).not.toBeInTheDocument();
   });
 });

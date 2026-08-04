@@ -1,12 +1,22 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useNavigation } from "../../useNavigation";
-import { createProject } from "../../useProjects";
+import { createProject, type Project } from "../../useProjects";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Field } from "../ui/Field";
 
 type Props = {
   onClose: () => void;
+  /**
+   * What to do with the created project instead of opening it.
+   *
+   * Creating a project is rarely the whole errand. Opened from the sidebar it
+   * is — you made a folder and you want to see it, which is the default below.
+   * Opened from an Inbox card's File menu the errand was "file this note
+   * somewhere new", and navigating away would answer half of it and leave the
+   * note sitting where it was. The caller that knows the errand says so here.
+   */
+  onCreated?: (project: Project) => void;
 };
 
 /**
@@ -23,9 +33,10 @@ type Props = {
  * or illegal names and duplicates); the frontend only trims and requires a
  * non-empty value, and surfaces the rejection on the field. On success it
  * navigates straight to the echoed canonical slug — the sidebar row arrives
- * via the backend's `vault:changed` broadcast.
+ * via the backend's `vault:changed` broadcast — unless the caller passed
+ * `onCreated`, which takes over from there.
  */
-export function CreateProjectDialog({ onClose }: Props) {
+export function CreateProjectDialog({ onClose, onCreated }: Props) {
   const [name, setName] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -43,7 +54,11 @@ export function CreateProjectDialog({ onClose }: Props) {
     try {
       const created = await createProject(trimmed);
       onClose();
-      navigate({ kind: "project", slug: created.slug });
+      // Close first either way: whatever happens next — a navigation or the
+      // caller's own follow-up — happens to a surface this dialog is no
+      // longer covering.
+      if (onCreated) onCreated(created);
+      else navigate({ kind: "project", slug: created.slug });
     } catch (err) {
       setError(String(err));
       setSubmitting(false);
