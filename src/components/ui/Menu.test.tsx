@@ -60,6 +60,44 @@ describe("Menu", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
+  it("carries its row appearances as variants, not as call-site overrides", async () => {
+    // Font size and text colour belong to the row recipe, so a call site
+    // passing `text-[11.5px]` alongside the recipe's own `text-[13px]` is
+    // resolved by Tailwind's emission order rather than by the className —
+    // and both of these lost that flip when they were written that way
+    // (docs/UI_CONVENTIONS.md §4). As variants there is exactly one size
+    // utility and one colour utility on the element, so nothing can conflict.
+    const user = userEvent.setup();
+    render(
+      <Menu.Root>
+        <Menu.Trigger render={<Button>File</Button>} />
+        <Menu.Content>
+          <Menu.Item variant="suggested">Briarwood Golf</Menu.Item>
+          <Menu.Item>Riverbend Deck</Menu.Item>
+          <Menu.Item variant="foot">New project…</Menu.Item>
+        </Menu.Content>
+      </Menu.Root>,
+    );
+
+    await user.click(screen.getByRole("button", { name: "File" }));
+    const [suggested, plain, foot] = await screen.findAllByRole("menuitem");
+
+    const sizes = (element: HTMLElement) =>
+      Array.from(element.classList).filter((name) => name.startsWith("text-["));
+    const colours = (element: HTMLElement) =>
+      Array.from(element.classList).filter((name) => name.startsWith("text-ink"));
+
+    for (const row of [suggested, plain, foot]) {
+      expect(sizes(row)).toHaveLength(1);
+      expect(colours(row)).toHaveLength(1);
+    }
+    // The suggestion reads brighter than its siblings even when the highlight
+    // is elsewhere: it is a claim about content, not a hover state.
+    expect(suggested).toHaveClass("bg-wash", "text-ink");
+    expect(plain).toHaveClass("text-[13px]", "text-ink-dim");
+    expect(foot).toHaveClass("text-[11.5px]", "text-ink-faint");
+  });
+
   it("closes on Escape and returns focus to the trigger", async () => {
     const user = userEvent.setup();
     render(<Harness />);

@@ -13,6 +13,13 @@
 > replacement is verified against it rather than inheriting it.
 >
 > What is dead is the conclusion and the zero-UI-dependency posture it defended. The evidence is not.
+>
+> **Addendum, 2026-08-04:** the Grove Inbox migration removed this document's most-cited call site —
+> the Inbox row's `variant="token"` `Select` is now a base-ui `Menu`, and `InboxView.css` is gone.
+> The *measurements* below are dated evidence and are left exactly as they were taken; the one thing
+> that genuinely stops working is §12's instruction to reproduce the flip case on "the bottom-most
+> Inbox row", which must now use another `Select` call site. `ConsentNudge` still renders one, so
+> §8.2's live bug and its repro are unaffected.
 
 **Decision (superseded): no headless UI dependency. The hand-rolled `Select` stays. Closed 2026-07-28.**
 

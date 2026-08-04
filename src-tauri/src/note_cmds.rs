@@ -220,9 +220,12 @@ fn written_note(note: &Note, title: Option<String>, rel_path: &Path) -> WrittenN
 /// its stored frontmatter `title` when present, else the de-slugged filename
 /// stem for a legacy or hand-made note.
 ///
-/// `snippet` is a UI-only extension beyond the doc'd `NoteSummary` (which is
-/// deliberately schema-open); it gives list rows a body preview without a
-/// second `read_note` round-trip. It is derived, never stored.
+/// `snippet` and `guess` are UI-only extensions beyond the doc'd `NoteSummary`
+/// (which is deliberately schema-open); both are derived at list time and never
+/// stored. `snippet` gives list rows a body preview without a second
+/// `read_note` round-trip. `guess` is the router's current best-guess
+/// destination, and is `None` outside Inbox listings — a note that already has
+/// a home needs no suggestion of one.
 #[derive(serde::Serialize)]
 pub struct NoteSummaryDto {
     id: String,
@@ -236,6 +239,18 @@ pub struct NoteSummaryDto {
     source: String,
     confidence: Option<f64>,
     snippet: String,
+    guess: Option<RouteGuessDto>,
+}
+
+/// Where the router would file an unfiled note today, mirroring
+/// [`routing::RouteGuess`]. `confidence` is the live margin score, distinct
+/// from the sibling `confidence` field on the summary: that one is the
+/// historical record of why the note landed in the Inbox, this one is the
+/// strength of the suggestion being offered now.
+#[derive(serde::Serialize)]
+pub struct RouteGuessDto {
+    project: String,
+    confidence: f64,
 }
 
 /// One opened note: the MCP `get_note` vocabulary (`NoteSummary` +
@@ -288,6 +303,10 @@ pub struct ProjectListDto {
 
 /// Lists a project's direct notes, newest first. Unparseable `.md` files are
 /// skipped (and logged) rather than failing the whole listing.
+///
+/// Inbox listings additionally carry each row's routing guess, so the Inbox can
+/// offer a suggested destination per note. Case-insensitive on the sentinel to
+/// match `validate_project`'s reservation of the name.
 #[tauri::command]
 pub async fn list_notes(app: AppHandle, project: String) -> Result<Vec<NoteSummaryDto>, String> {
     let kb = knowledge_base_dir(&app)?;
@@ -298,10 +317,23 @@ pub async fn list_notes(app: AppHandle, project: String) -> Result<Vec<NoteSumma
             scan.skipped.len()
         );
     }
+    let guesses = if project.eq_ignore_ascii_case(note::INBOX) {
+        vault::guess_note_destinations(&kb, &scan.notes)
+    } else {
+        vec![None; scan.notes.len()]
+    };
     Ok(scan
         .notes
         .iter()
-        .map(|listed| note_summary(listed, &kb))
+        .zip(guesses)
+        .map(|(listed, guess)| {
+            let mut summary = note_summary(listed, &kb);
+            summary.guess = guess.map(|guess| RouteGuessDto {
+                project: guess.project,
+                confidence: guess.confidence,
+            });
+            summary
+        })
         .collect())
 }
 
@@ -605,6 +637,10 @@ fn note_summary(listed: &ListedNote, kb: &Path) -> NoteSummaryDto {
         source: listed.note.source.as_yaml().to_string(),
         confidence: listed.note.routing.confidence(),
         snippet: snippet(&listed.note.body),
+        // Filled in by `list_notes` for Inbox rows only; every other projection
+        // of a note (read, save, file) answers "where is it", not "where might
+        // it go", and carries no guess.
+        guess: None,
     }
 }
 
@@ -800,6 +836,49 @@ mod tests {
         assert_eq!(dto.path, "Inbox/idea.md");
         assert_eq!(dto.title, "idea");
         assert_eq!(dto.confidence, Some(0.38));
+        // The guess is `list_notes`' to fill in, per-listing; the projection
+        // itself never invents one.
+        assert!(dto.guess.is_none());
+    }
+
+    #[test]
+    fn note_summary_serializes_guess_as_an_object_or_null() {
+        let kb = Path::new("kb-root");
+        let note = Note::new(
+            NoteId::parse("n_a1b2c3").unwrap(),
+            NoteType::Note,
+            Routing::Routed {
+                project: note::INBOX.to_string(),
+                confidence: 0.12,
+            },
+            "2026-07-10",
+            vec![],
+            Source::parse("quick-capture").unwrap(),
+            "Body.",
+        )
+        .unwrap();
+        let listed = ListedNote {
+            path: kb.join("Inbox").join("idea.md"),
+            title: "idea".to_string(),
+            note,
+        };
+
+        // Absent: an explicit `null`, not a missing key — the frontend types
+        // the field as nullable, not optional.
+        let json = serde_json::to_value(note_summary(&listed, kb)).unwrap();
+        assert_eq!(json["guess"], serde_json::Value::Null);
+
+        let mut dto = note_summary(&listed, kb);
+        dto.guess = Some(RouteGuessDto {
+            project: "Briarwood Golf".to_string(),
+            confidence: 0.41,
+        });
+        let json = serde_json::to_value(dto).unwrap();
+        assert_eq!(json["guess"]["project"], "Briarwood Golf");
+        assert_eq!(json["guess"]["confidence"], 0.41);
+        // The stored score stays its own field: the two numbers answer
+        // different questions and must not be conflated on the wire.
+        assert_eq!(json["confidence"], 0.12);
     }
 
     #[test]

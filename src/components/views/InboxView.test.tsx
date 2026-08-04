@@ -44,17 +44,20 @@ function makeNote(overrides: Partial<NoteSummary> & { id: string; title: string 
     source: "manual",
     confidence: 0.41,
     snippet: "",
+    // No suggestion by default: the router having nothing to say is the case
+    // most of these tests are not about.
+    guess: null,
     ...overrides,
   };
 }
 
-function makeProject(slug: string): Project {
+function makeProject(slug: string, note_count = 0): Project {
   return {
     id: slug,
     slug,
     display_name: slug,
     parent: null,
-    note_count: 0,
+    note_count,
     meeting_count: 0,
   };
 }
@@ -106,31 +109,28 @@ function renderInboxWithNavigateSpy(): (view: View) => void {
   return navigate;
 }
 
-/** Matches a row's picker by its accessible name, which is the sr-only label
- * followed by the trigger's own text ("… File to…"). A predicate, not a
- * `RegExp`: the note title is interpolated, and a title carrying `(` or `?`
- * would make a pattern that throws or quietly matches the wrong row. */
-function pickerFor(title: string) {
-  const label = `File "${title}" to project`;
-  return (accessibleName: string) => accessibleName.startsWith(label);
+/** A row's File trigger — the whole rail hangs off it. `aria-label` carries
+ * the note title, so one exact string identifies one card. */
+function fileTrigger(title: string): HTMLElement {
+  return screen.getByRole("button", { name: `File "${title}" to project` });
 }
 
-/** Open a row's project picker and choose `project`. */
+/** Open a row's File menu and choose `project`. */
 async function fileNote(
   user: ReturnType<typeof userEvent.setup>,
   title: string,
   project: string,
 ): Promise<void> {
-  await user.click(screen.getByRole("combobox", { name: pickerFor(title) }));
-  await user.click(screen.getByRole("option", { name: project }));
+  await user.click(fileTrigger(title));
+  await user.click(await screen.findByRole("menuitem", { name: new RegExp(`^${project}`) }));
 }
 
-/** The status span currently reading `is-visible` inside the placeholder —
- * the crossfade renders both texts of a pair always, so a plain substring
- * match can't tell which one is actually showing. */
+/** The status span currently shown inside the placeholder — the crossfade
+ * renders both texts of a pair always (one at zero opacity), so a plain
+ * substring match can't tell which one is actually showing. */
 function activeStatusText(): string | null {
   const placeholder = screen.getByTestId("pipeline-placeholder");
-  return placeholder.querySelector(".is-visible")?.textContent ?? null;
+  return placeholder.querySelector("[data-visible]")?.textContent ?? null;
 }
 
 /** What the placeholder actually announces: the sr-only line inside its
@@ -173,9 +173,11 @@ describe("InboxView", () => {
 
     renderInbox();
 
-    expect(
-      await screen.findByText("2026-07-10 · chat · 62% match"),
-    ).toBeInTheDocument();
+    expect(await screen.findByText("chat · 2026-07-10")).toBeInTheDocument();
+    // The gauge is restated in words beside it: colour and length alone are
+    // not a reading (docs/DESIGN_SYSTEM.md §6).
+    expect(screen.getByText("62% match")).toBeInTheDocument();
+    expect(screen.getByTestId("inbox-row-gauge")).toHaveStyle({ width: "62%" });
   });
 
   it("says nothing about kind on a plain note's row", async () => {
@@ -184,7 +186,166 @@ describe("InboxView", () => {
     renderInbox();
 
     // The majority case: a `note` segment on every row would be noise.
-    expect(await screen.findByText("2026-07-01 · 41% match")).toBeInTheDocument();
+    expect(await screen.findByText("2026-07-01")).toBeInTheDocument();
+  });
+
+  describe("the router's guess", () => {
+    it("wears the guessed folder's hue on the edge and names it in words", async () => {
+      serveVault([
+        makeNote({
+          id: "n_a1b2c3",
+          title: "Sprinkler quotes",
+          guess: { project: "briarwood-golf", confidence: 0.41 },
+        }),
+      ]);
+
+      renderInbox();
+      await screen.findByText("Sprinkler quotes");
+
+      // `folderHue("briarwood-golf")` is pinned by useProjects.test.ts.
+      expect(screen.getByTestId("inbox-card")).toHaveClass("border-l-coral");
+      const guess = screen.getByTestId("inbox-row-guess");
+      expect(guess).toHaveTextContent("→ briarwood-golf");
+      // Same hue in the words as on the edge: one project, one colour.
+      expect(guess).toHaveClass("text-coral");
+      // And it keeps the hue under the pointer. `hover:glass-card-lift`
+      // brightens the card's whole `border-color` from a `:hover` rule, which
+      // outranks a bare `border-l-coral` on specificity — so without the
+      // restatement the guess colour would drop off the edge exactly while
+      // the card is being pointed at.
+      expect(screen.getByTestId("inbox-card")).toHaveClass("hover:border-l-coral");
+    });
+
+    it("keeps its neutral edge under the pointer too", async () => {
+      serveVault([makeNote({ id: "n_a1b2c3", title: "Ideas from the drive home" })]);
+
+      renderInbox();
+      await screen.findByText("Ideas from the drive home");
+
+      expect(screen.getByTestId("inbox-card")).toHaveClass(
+        "border-l-ink-faint",
+        "hover:border-l-ink-faint",
+      );
+    });
+
+    it("says so plainly when there is no confident guess", async () => {
+      serveVault([makeNote({ id: "n_a1b2c3", title: "Ideas from the drive home" })]);
+
+      renderInbox();
+      await screen.findByText("Ideas from the drive home");
+
+      expect(screen.getByTestId("inbox-card")).toHaveClass("border-l-ink-faint");
+      expect(screen.getByTestId("inbox-row-guess")).toHaveTextContent("no confident guess");
+    });
+
+    it("ignores a guess too weak to be a claim", async () => {
+      // A dead tie scores 0.0: the router still names a winner, but offering
+      // it as a destination would dress a coin flip as an answer.
+      serveVault([
+        makeNote({
+          id: "n_a1b2c3",
+          title: "Ideas from the drive home",
+          guess: { project: "briarwood-golf", confidence: 0.05 },
+        }),
+      ]);
+
+      renderInbox();
+      await screen.findByText("Ideas from the drive home");
+
+      expect(screen.getByTestId("inbox-card")).toHaveClass("border-l-ink-faint");
+      expect(screen.getByTestId("inbox-row-guess")).toHaveTextContent("no confident guess");
+    });
+
+    it("offers the guess first in the File menu, with the key that fires it", async () => {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      serveVault(
+        [
+          makeNote({
+            id: "n_a1b2c3",
+            title: "Sprinkler quotes",
+            guess: { project: "briarwood-golf", confidence: 0.41 },
+          }),
+        ],
+        ["kodabi", "briarwood-golf"],
+      );
+
+      renderInbox();
+      await screen.findByText("Sprinkler quotes");
+      await user.click(fileTrigger("Sprinkler quotes"));
+
+      const items = await screen.findAllByRole("menuitem");
+      // First, ahead of the alphabetically-earlier `kodabi`, and carrying the
+      // ↵ that says Enter files here.
+      expect(items[0]).toHaveTextContent("briarwood-golf");
+      expect(items[0]).toHaveTextContent("↵");
+      // Listed once: the suggestion is not repeated among the others.
+      expect(items.filter((item) => item.textContent?.includes("briarwood-golf"))).toHaveLength(1);
+    });
+
+    it("files to the suggestion on Enter, which is what the ↵ hint promises", async () => {
+      // The hint is a claim about the keyboard, so it is worth a keyboard
+      // test: a ↵ beside a row that Enter does not reach would be a lie
+      // drawn in the one colour reserved for the system's suggestions.
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      serveVault(
+        [
+          makeNote({
+            id: "n_a1b2c3",
+            title: "Sprinkler quotes",
+            guess: { project: "briarwood-golf", confidence: 0.41 },
+          }),
+        ],
+        ["kodabi", "briarwood-golf"],
+      );
+      onCommand("file_note_to_project", () => ({
+        note: { ...PLANNING, project: "briarwood-golf" },
+        previous: { path: PLANNING.path, project: null },
+        moved: true,
+      }));
+      renderInbox();
+      await screen.findByText("Sprinkler quotes");
+
+      // Opened from the keyboard, base-ui lands the highlight on the first
+      // item — so Enter takes it. (Opened by CLICK it highlights nothing, and
+      // Enter does nothing, which is right: a pointer user is not reaching
+      // for a key they were never shown.)
+      fileTrigger("Sprinkler quotes").focus();
+      await user.keyboard("{ArrowDown}");
+      await waitFor(() => {
+        expect(screen.getByRole("menu")).toBeInTheDocument();
+      });
+      await user.keyboard("{Enter}");
+
+      await waitFor(() => {
+        expect(invoke).toHaveBeenCalledWith("file_note_to_project", {
+          input: { id: "n_a1b2c3", project: "briarwood-golf" },
+        });
+      });
+    });
+  });
+
+  it("carries one transition recipe at a time, so no leg loses its own clock", async () => {
+    // `transition-[…]` and `duration-*` are each ONE CSS property: a second
+    // utility for either is resolved by Tailwind's emission order, not by the
+    // className, so the longest property list and the longest duration win
+    // for every leg at once. Stacking the hover lift, the entrance and the
+    // exit "so all three are ready" is therefore not additive — it silently
+    // retires two of them. The same counting `Menu.test.tsx` does, for the
+    // same failure: an instruction that quietly did not happen.
+    serveVault([PLANNING]);
+
+    renderInbox();
+    await screen.findByText("Quarterly planning");
+
+    const classes = Array.from(screen.getByTestId("inbox-card").classList);
+    expect(classes.filter((name) => name.startsWith("transition-["))).toHaveLength(1);
+    expect(classes.filter((name) => /^duration-\d/.test(name))).toHaveLength(1);
+    // At rest that one recipe is the hover lift's, naming the two properties
+    // `glass-card-lift` actually sets — a lift whose shadow snapped on while
+    // the card eased upward would read as a drop shadow, not an object
+    // rising.
+    expect(classes).toContain("transition-[translate,box-shadow,border-color]");
+    expect(classes).toContain("duration-180");
   });
 
   it("opens the note when the card body is clicked", async () => {
@@ -304,24 +465,53 @@ describe("InboxView", () => {
     // (docs/DESIGN_SYSTEM.md §3).
     expect(await screen.findByText(/no such project: briarwood-golf/)).toBeInTheDocument();
     // The note is still unfiled, so it must still be actionable: row present
-    // and the picker back (not stuck on "Filing…").
+    // and the trigger back (not stuck on "Filing…").
     expect(screen.getByText("Quarterly planning")).toBeInTheDocument();
-    expect(
-      screen.getByRole("combobox", { name: pickerFor("Quarterly planning") }),
-    ).toBeInTheDocument();
+    expect(fileTrigger("Quarterly planning")).not.toHaveAttribute("aria-busy");
   });
 
-  it("offers no picker when there is no project to file into", async () => {
+  it("still offers filing in a project-less vault, because the menu can make one", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     serveVault([PLANNING], []);
 
     renderInbox();
-
-    // No per-row hint in its place either: pointing at the fix is the
-    // sidebar's job (task #84's create-project affordance), not one copy of
-    // the same sentence on every card.
     await screen.findByText("Quarterly planning");
-    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
-    expect(screen.queryByText(/Create a project/)).not.toBeInTheDocument();
+
+    // The old gate hid the picker when there was nowhere to file, because a
+    // control whose only outcome is a dead end should not be offered. The
+    // menu's foot is the better fix: there is always somewhere to file, if
+    // you are willing to make it.
+    await user.click(fileTrigger("Quarterly planning"));
+    const items = await screen.findAllByRole("menuitem");
+    expect(items).toHaveLength(1);
+    expect(items[0]).toHaveTextContent("New project…");
+  });
+
+  it("creates a project from the menu's foot and files the note into it", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    serveVault([PLANNING], []);
+    onCommand("create_project", () => makeProject("riverbend-deck"));
+    onCommand("file_note_to_project", () => ({
+      note: { ...PLANNING, project: "riverbend-deck" },
+      previous: { path: PLANNING.path, project: null },
+      moved: true,
+    }));
+    renderInbox();
+    await screen.findByText("Quarterly planning");
+
+    await user.click(fileTrigger("Quarterly planning"));
+    await user.click(await screen.findByRole("menuitem", { name: "New project…" }));
+    const dialog = await screen.findByRole("dialog", { name: "New project" });
+    await user.type(within(dialog).getByLabelText("Project name"), "riverbend-deck");
+    await user.click(within(dialog).getByRole("button", { name: "Create" }));
+
+    // The errand was "file this note somewhere new", so creating the project
+    // finishes it rather than leaving the note where it was.
+    await waitFor(() => {
+      expect(invoke).toHaveBeenCalledWith("file_note_to_project", {
+        input: { id: "n_a1b2c3", project: "riverbend-deck" },
+      });
+    });
   });
 
   it("says nothing is waiting when the inbox is empty", async () => {
@@ -340,16 +530,51 @@ describe("InboxView", () => {
 
     const { unmount } = renderInbox();
 
-    // The count sits on the title's baseline, so the noun lives in the view's
-    // name rather than being repeated in the count.
-    expect(await screen.findByText("2 to file")).toBeInTheDocument();
+    // Both halves of the state on one line: what is left, and what you have
+    // already done about it.
+    expect(await screen.findByText("2 unfiled · 0 filed this session")).toBeInTheDocument();
     unmount();
 
     resetTauriMocks();
-    serveVault([PLANNING]);
+    serveVault([]);
     renderInbox();
 
-    expect(await screen.findByText("1 to file")).toBeInTheDocument();
+    await screen.findByText(/Nothing waiting/);
+    expect(screen.queryByText(/unfiled/)).not.toBeInTheDocument();
+  });
+
+  it("counts a filed note into the session tally and lights the meter", async () => {
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    serveVault([PLANNING, VENDOR]);
+    onCommand("file_note_to_project", () => ({
+      note: { ...PLANNING, project: "briarwood-golf" },
+      previous: { path: PLANNING.path, project: null },
+      moved: true,
+    }));
+    renderInbox();
+    await screen.findByText("Quarterly planning");
+
+    // Nothing cleared yet: an unlit meter over a full queue is the honest
+    // starting state.
+    const segments = () =>
+      Array.from(screen.getByTestId("inbox-meter").children) as HTMLElement[];
+    expect(segments()).toHaveLength(5);
+    expect(segments().filter((segment) => segment.dataset.lit)).toHaveLength(0);
+
+    await fileNote(user, "Quarterly planning", "briarwood-golf");
+    serveVault([VENDOR]);
+    act(() => {
+      notifyVaultChanged();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("1 unfiled · 1 filed this session")).toBeInTheDocument();
+    });
+    // Half the queue cleared, and the lit segments are INK — green is the
+    // kodama's voice, never progress (docs/DESIGN_SYSTEM.md §2).
+    const lit = segments().filter((segment) => segment.dataset.lit);
+    expect(lit).toHaveLength(3);
+    expect(lit[0]).toHaveClass("bg-ink/50");
   });
 
   it("holds no needs-attention queue of its own", async () => {
@@ -392,9 +617,8 @@ describe("InboxView", () => {
       renderInbox();
       await screen.findByText("Quarterly planning");
 
-      // No picker (nothing to file into), but an unwanted note must still be
-      // removable wherever it sits, so delete is always offered.
-      expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+      // An unwanted note must be removable wherever it sits, whatever the
+      // rest of the vault looks like.
       expect(
         screen.getByRole("button", { name: 'Delete "Quarterly planning"' }),
       ).toBeInTheDocument();
@@ -720,7 +944,11 @@ describe("InboxView", () => {
       });
       const rows = screen.getAllByText("New capture");
       expect(rows).toHaveLength(1);
-      expect(rows[0].closest(".inbox__rowShell")).toHaveClass("inbox__rowShell--fresh");
+      // The arriving row plays the entrance the placeholder was holding its
+      // place for, so the handoff reads as a fill-in rather than a swap.
+      expect(rows[0].closest("[data-testid='inbox-card']")).toHaveClass(
+        "starting:opacity-0",
+      );
     });
 
     it("vanishes immediately and hands off to a toast when distill routes elsewhere", async () => {
@@ -735,10 +963,9 @@ describe("InboxView", () => {
           session_path: "s1.jsonl",
         });
       });
-      // No dwell on the row itself any more: it starts leaving at once.
-      expect(screen.getByTestId("pipeline-placeholder").className).toContain(
-        "inbox__slot--leaving",
-      );
+      // No dwell on the row itself any more: it starts leaving at once — the
+      // slot collapsing while the card slides out of it.
+      expect(screen.getByTestId("pipeline-placeholder")).toHaveClass("grid-rows-[0fr]");
       expect(screen.queryByRole("button", { name: /Open the note filed to/ })).not.toBeInTheDocument();
 
       await act(async () => {
@@ -755,9 +982,7 @@ describe("InboxView", () => {
       await act(async () => {
         vi.advanceTimersByTime(3500); // TOAST_DWELL_MS
       });
-      expect(screen.getByRole("button", { name: /Open the note filed to/ })).toHaveClass(
-        "inbox__toast--fading",
-      );
+      expect(screen.getByRole("button", { name: /Open the note filed to/ })).toHaveClass("opacity-0");
 
       await act(async () => {
         vi.advanceTimersByTime(130); // TOAST_FADE_MS
@@ -787,17 +1012,13 @@ describe("InboxView", () => {
       await act(async () => {
         vi.advanceTimersByTime(5000); // well past TOAST_DWELL_MS
       });
-      expect(screen.getByRole("button", { name: /Open the note filed to/ })).not.toHaveClass(
-        "inbox__toast--fading",
-      );
+      expect(screen.getByRole("button", { name: /Open the note filed to/ })).not.toHaveClass("opacity-0");
 
       await user.unhover(toast);
       await act(async () => {
         vi.advanceTimersByTime(3500); // TOAST_DWELL_MS, restarted
       });
-      expect(screen.getByRole("button", { name: /Open the note filed to/ })).toHaveClass(
-        "inbox__toast--fading",
-      );
+      expect(screen.getByRole("button", { name: /Open the note filed to/ })).toHaveClass("opacity-0");
     });
 
     it("opens the filed note when the toast is clicked", async () => {

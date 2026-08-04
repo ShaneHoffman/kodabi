@@ -534,21 +534,11 @@ fn score_candidate(
 /// the writer's Inbox-requires-confidence invariant holds by construction.
 pub fn route(text: NoteText<'_>, candidates: &[ProjectSignals], config: &RoutingConfig) -> Routing {
     let scores = score_projects(text, candidates);
-    let Some(top) = scores.first().filter(|top| top.weight > 0.0) else {
+    let Some((top, confidence)) = top_and_margin(&scores) else {
         // No candidates at all, or nothing matched anything: uncategorized
         // beats miscategorized, with the zero score on record.
         return inbox_landing(0.0);
     };
-    // The margin is against the best *other* project: candidates are
-    // caller-supplied and nothing forbids duplicates, and a duplicate of the
-    // winner as its own runner-up would zero out the confidence of an
-    // unopposed match.
-    let runner_up = scores
-        .iter()
-        .skip(1)
-        .find(|s| s.project != top.project)
-        .map_or(0.0, |s| s.weight);
-    let confidence = saturate(top.weight - runner_up);
     // A slug the writer would reject (candidates need not come from
     // discovery, which is the only validated source) must not surface as a
     // `Routed` target — `Note::new` would fail the whole write, losing the
@@ -562,6 +552,59 @@ pub fn route(text: NoteText<'_>, candidates: &[ProjectSignals], config: &Routing
     } else {
         inbox_landing(confidence)
     }
+}
+
+/// The winning candidate and its margin confidence, or `None` when nothing
+/// scored at all. Shared by [`route`] and [`best_candidate`] so the two can
+/// never disagree about who won or by how much.
+///
+/// The margin is against the best *other* project: candidates are
+/// caller-supplied and nothing forbids duplicates, and a duplicate of the
+/// winner as its own runner-up would zero out the confidence of an unopposed
+/// match.
+fn top_and_margin(scores: &[ProjectScore]) -> Option<(&ProjectScore, f64)> {
+    let top = scores.first().filter(|top| top.weight > 0.0)?;
+    let runner_up = scores
+        .iter()
+        .skip(1)
+        .find(|s| s.project != top.project)
+        .map_or(0.0, |s| s.weight);
+    Some((top, saturate(top.weight - runner_up)))
+}
+
+/// The router's best guess, as [`route`] would decide it with the threshold
+/// removed: which project this text most resembles, and how strongly.
+///
+/// [`route`] answers "does the evidence justify filing this automatically",
+/// and a `no` throws the winner away — an Inbox landing keeps only the score.
+/// This answers the different question the Inbox asks of every row it shows:
+/// *where would this go if you had to choose*. The guess is advisory, offered
+/// as a suggested destination rather than acted on, so it deliberately has no
+/// threshold of its own; a caller that wants a display floor applies its own.
+///
+/// `None` when there is nothing to suggest: no candidates, no evidence at all,
+/// or a top slug [`validate_project`] would reject — suggesting a destination
+/// that filing would refuse is worse than suggesting nothing.
+pub fn best_candidate(text: NoteText<'_>, candidates: &[ProjectSignals]) -> Option<RouteGuess> {
+    let scores = score_projects(text, candidates);
+    let (top, confidence) = top_and_margin(&scores)?;
+    validate_project(&top.project).ok()?;
+    Some(RouteGuess {
+        project: top.project.clone(),
+        confidence,
+    })
+}
+
+/// Where [`best_candidate`] says a note most likely belongs. Not a routing
+/// decision and never stored: nothing on disk carries a guess, and re-scoring
+/// against today's signals is the whole point.
+#[derive(Debug, Clone, PartialEq)]
+pub struct RouteGuess {
+    /// The winning candidate's project slug.
+    pub project: String,
+    /// The same margin confidence [`route`] would record — `saturate(w1 - w2)`,
+    /// so a dead tie is `0.0` however strong both candidates are.
+    pub confidence: f64,
 }
 
 fn inbox_landing(confidence: f64) -> Routing {
@@ -1213,6 +1256,78 @@ mod tests {
         // reaches 1.0, so everything lands in Inbox.
         let config = RoutingConfig { threshold: 1.0 };
         assert_eq!(route(body(strong), &fixture(), &config).project(), INBOX);
+    }
+
+    // -- the guess ---------------------------------------------------------
+
+    #[test]
+    fn best_candidate_returns_the_top_project_below_threshold() {
+        // The evidence a bare body name-drop gives is deliberately too weak to
+        // file (0.5 < DEFAULT_THRESHOLD) — but it is still the best answer to
+        // "where would this go", which is what the Inbox row asks.
+        let text = body("mentioned Briarwood Golf in passing");
+        assert_eq!(
+            route(text, &fixture(), &RoutingConfig::default()).project(),
+            INBOX
+        );
+        assert_eq!(
+            best_candidate(text, &fixture()),
+            Some(RouteGuess {
+                project: "Briarwood Golf".to_string(),
+                confidence: 0.5,
+            })
+        );
+    }
+
+    #[test]
+    fn best_candidate_is_none_with_no_candidates_or_zero_evidence() {
+        assert_eq!(best_candidate(body("anything at all"), &[]), None);
+        assert_eq!(best_candidate(body(""), &fixture()), None);
+        assert_eq!(best_candidate(body("nothing relevant"), &fixture()), None);
+    }
+
+    #[test]
+    fn best_candidate_is_none_for_an_invalid_top_slug() {
+        // Suggesting a destination filing would refuse is worse than
+        // suggesting nothing — "con" is a reserved Windows device name.
+        let candidates = [signals(
+            "con",
+            &[("MERIDIAN", &[]), ("TeeTrack", &[]), ("GreenFlow", &[])],
+        )];
+        assert_eq!(
+            best_candidate(
+                body("MERIDIAN update, TeeTrack demo, GreenFlow next"),
+                &candidates
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn best_candidate_breaks_a_dead_tie_deterministically_at_zero_confidence() {
+        // A tie still names a winner (the score sort's project-asc tiebreak),
+        // at the 0.0 confidence that says the evidence is split. Applying a
+        // display floor to that is the caller's business, not the router's.
+        let tied = "MERIDIAN and TeeTrack progress blocked on OKR activation review.";
+        assert_eq!(
+            best_candidate(body(tied), &fixture()),
+            Some(RouteGuess {
+                project: "Briarwood Golf".to_string(),
+                confidence: 0.0,
+            })
+        );
+    }
+
+    #[test]
+    fn best_candidate_agrees_with_route_above_threshold() {
+        // Where `route` does file, the guess must name the same destination
+        // with the same number — one margin rule, not two.
+        let strong =
+            "MERIDIAN rollout: TeeTrack sync for the tee sheet, GreenFlow irrigation checks.";
+        let routing = route(body(strong), &fixture(), &RoutingConfig::default());
+        let guess = best_candidate(body(strong), &fixture()).unwrap();
+        assert_eq!(routing.project(), guess.project);
+        assert_eq!(routing.confidence(), Some(guess.confidence));
     }
 
     // -- discovery ---------------------------------------------------------
