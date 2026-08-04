@@ -11,10 +11,18 @@ import { emitFromBackend, invoke, onCommand, resetTauriMocks } from "../../test/
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
 
+/** The device ID every fixture is captured on. Real shape (8 lowercase base36
+ * characters, `DeviceId::parse`), because the meta line parses it back out of
+ * the filename. */
+const DEVICE_ID = "k4m2xp7q";
+
 function makeSession(slug: string, dismissed = false): FailedSession {
+  // `{timestamp}-{deviceID}-{slug}.jsonl`, the scheme `kodabi_core::naming`
+  // writes and `docs/FILENAME_SCHEME.md` specifies.
+  const fileName = `20260701T100000000Z-${DEVICE_ID}-${slug}.jsonl`;
   return {
-    path: `sessions/2026-07-01T10-00-00Z-${slug}.jsonl`,
-    file_name: `2026-07-01T10-00-00Z-${slug}.jsonl`,
+    path: `sessions/${fileName}`,
+    file_name: fileName,
     slug,
     captured_at: "2026-07-01T10:00:00Z",
     dismissed,
@@ -59,6 +67,43 @@ describe("NeedsAttentionView", () => {
     expect(screen.queryByTestId("show-dismissed")).not.toBeInTheDocument();
   });
 
+  it("says what went wrong on the card, in mono meta and plain language", async () => {
+    // The badge is marigold, which day mode measures under the reading floor —
+    // so it may never be the only thing that says a capture failed. The meta
+    // line names the session (the id a person can quote back), and the
+    // sentence under it says what happened and that the recording survived.
+    serveSessions([makeSession("team-sync")]);
+
+    renderView();
+
+    expect(await screen.findByText("no note created")).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(`session ${DEVICE_ID}`))).toBeInTheDocument();
+    expect(
+      screen.getByText(/Kodabi made no note from this capture/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Dismissed captures stay reachable from the command palette/),
+    ).toBeInTheDocument();
+  });
+
+  it("drops the failure line from a capture already waved off", async () => {
+    // A dismissed card is a settled thing: it keeps its title and its meta so
+    // it stays identifiable, and stops claiming to need anything.
+    const user = userEvent.setup();
+    serveSessions([makeSession("team-sync", true)]);
+
+    renderView();
+    await user.click(await screen.findByTestId("show-dismissed"));
+
+    const shelf = screen.getByTestId("dismissed-sessions");
+    expect(within(shelf).getByText("team sync")).toBeInTheDocument();
+    expect(within(shelf).getByText(new RegExp(`session ${DEVICE_ID}`))).toBeInTheDocument();
+    expect(screen.queryByText("no note created")).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(/Kodabi made no note from this capture/),
+    ).not.toBeInTheDocument();
+  });
+
   it("counts the work in the header", async () => {
     serveSessions([makeSession("team-sync"), makeSession("retro")]);
 
@@ -75,7 +120,8 @@ describe("NeedsAttentionView", () => {
     // them, so only one may be in flight. The running row stays focusable
     // (aria-disabled via `loading`) while its neighbours go natively disabled.
     const user = userEvent.setup();
-    serveSessions([makeSession("team-sync"), makeSession("retro")]);
+    const teamSync = makeSession("team-sync");
+    serveSessions([teamSync, makeSession("retro")]);
     onCommand("distill_session", () => null);
     renderView();
     await screen.findByText("team sync");
@@ -84,7 +130,7 @@ describe("NeedsAttentionView", () => {
     await user.click(first);
 
     expect(invoke).toHaveBeenCalledWith("distill_session", {
-      sessionPath: "sessions/2026-07-01T10-00-00Z-team-sync.jsonl",
+      sessionPath: teamSync.path,
     });
     expect(first).toHaveAccessibleName("Retrying…");
     expect(first).not.toBeDisabled();
@@ -177,6 +223,16 @@ describe("NeedsAttentionView", () => {
     renderView();
 
     expect(await screen.findByText(/All clear/)).toBeInTheDocument();
+    // The kodama beside it is aria-hidden, so the hint is what carries the
+    // state to a screen reader.
+    expect(
+      screen.getByText(/Failed captures land here so they are never invisible/),
+    ).toBeInTheDocument();
+    // Nothing has been dismissed either, so there is nothing for the footnote
+    // to reassure anyone about.
+    expect(
+      screen.queryByText(/Dismissed captures stay reachable/),
+    ).not.toBeInTheDocument();
   });
 
   it("holds every marker action while a retry is in flight", async () => {
