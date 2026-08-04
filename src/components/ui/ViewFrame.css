@@ -46,9 +46,9 @@
   max-width: var(--measure-doc);
 }
 
-.view--search .view__column {
-  max-width: var(--measure-search);
-}
+/* `search` caps nothing either: its field runs the panel's full width, because
+   a query field that stops short of the panel it searches reads as belonging to
+   something narrower than the results under it. */
 
 /* `queue`, `library`, `panel` and `health` deliberately cap nothing here. Their
    rows are rows, not prose: they take the width the gutter leaves them, the

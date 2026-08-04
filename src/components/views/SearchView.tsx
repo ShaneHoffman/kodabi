@@ -1,157 +1,193 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useId, useState } from "react";
+import { clsx } from "clsx";
+import { noteKind } from "../../noteMeta";
 import { useNavigation } from "../../useNavigation";
-import { INBOX_PROJECT, type NoteSummary } from "../../useNotes";
-import { useSearchCorpus } from "../../useSearch";
+import { INBOX_PROJECT } from "../../useNotes";
+import { folderHue, type FolderHue } from "../../useProjects";
+import { useScrollIntoView } from "../../useScrollIntoView";
+import {
+  highlightTerms,
+  parseSnippet,
+  useNoteSearch,
+  type SearchHit,
+  type TextSegment,
+} from "../../useSearch";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
-// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this view's Grove ticket deletes it
-import "./SearchView.css";
 
 type Props = {
   query: string;
 };
 
-/** A note plus where the query matched it. */
-type Hit = {
-  note: NoteSummary;
-  /** The snippet split around the first match, so the term can be marked
-   * without a regex running inside JSX. */
-  before: string;
-  match: string;
-  after: string;
+/** Written out rather than interpolated, so Tailwind's scanner sees each class
+ * as a literal and emits it (the palette's `HUE_DOT` precedent). */
+const HUE_TEXT: Record<FolderHue, string> = {
+  coral: "text-coral",
+  cobalt: "text-cobalt",
+  teal: "text-teal",
+  plum: "text-plum",
 };
 
-/** The project a note reads as, in the mono path vocabulary the filing menu
- * and the project view both use. An unfiled note is `inbox`. */
-function crumb(note: NoteSummary): string {
-  return `${note.project ?? INBOX_PROJECT.toLowerCase()} · ${note.date}`;
-}
+/** The idle hint and the no-hits line are the same voice at the same weight:
+ * one quiet line where the rows would be, saying what this field does or what
+ * it just did. */
+const QUIET_LINE = "px-2.5 py-3.5 font-data text-[10.5px] text-ink-faint";
+
+/** One shared empty list, so "no results yet" is one identity rather than a
+ * fresh array on every render. */
+const NO_HITS: SearchHit[] = [];
 
 /**
- * Where the query lands in a note, if it lands at all.
+ * Search over every note.
  *
- * Matching is over the title, the snippet and the tags, but the EXCERPT is
- * always taken from the snippet: a result whose title matched still needs to
- * show you body text, or every row would just repeat its own heading back.
- * When the match is not in the snippet the snippet is shown unmarked, which is
- * honest — the row is telling you it matched elsewhere.
- */
-function findHit(note: NoteSummary, needle: string): Hit | null {
-  const haystacks = [note.title, note.snippet, note.tags.join(" ")];
-  if (!haystacks.some((text) => text.toLowerCase().includes(needle))) return null;
-
-  const index = note.snippet.toLowerCase().indexOf(needle);
-  if (index < 0) return { note, before: note.snippet, match: "", after: "" };
-  return {
-    note,
-    before: note.snippet.slice(0, index),
-    match: note.snippet.slice(index, index + needle.length),
-    after: note.snippet.slice(index + needle.length),
-  };
-}
-
-/**
- * Search across every project.
- *
- * The matching runs in the frontend over the notes already listed from disk.
- * That is deliberate for now: the FTS5 index exists but has no query command
- * yet, and a real-feeling search over real notes is worth more than a stub
- * that says "arrives later". `useSearchCorpus` is the seam — when the backend
- * command lands, it changes and nothing here does.
+ * The index does the matching (`useNoteSearch` → the `search_notes` command),
+ * so a hit can come from deep in a body this view never listed, and the marks
+ * in a snippet are the backend's own — the green says "the system found this",
+ * which is one of the sanctioned uses of green (docs/DESIGN_SYSTEM.md §2).
  */
 export function SearchView({ query }: Props) {
   const { navigate } = useNavigation();
   const [draft, setDraft] = useState(query);
-  const { notes, loading, error } = useSearchCorpus();
+  const { results, searchedQuery, loading, error } = useNoteSearch(draft);
 
-  const needle = draft.trim().toLowerCase();
-  const hits = useMemo(
-    () => (needle ? notes.map((note) => findHit(note, needle)).filter(Boolean) : []),
-    [notes, needle],
-  ) as Hit[];
+  const baseId = useId();
+  const listboxId = `${baseId}-results`;
+  const hitId = (index: number) => `${baseId}-hit-${index}`;
 
-  // The scope line counts where the matches LANDED, so it renders only on the
-  // branch that has hits. (It once claimed to count what was searched rather
-  // than what matched, which the code never did — and a count of the corpus
-  // would have to come from `useSearchCorpus`, not from `hits`.)
-  const projectsHit = new Set(
-    hits.map((hit) => hit.note.project).filter((project): project is string => !!project),
-  ).size;
-  const unfiledHit = hits.filter((hit) => hit.note.project === null).length;
+  const hits = results?.hits ?? NO_HITS;
+
+  // The walker resets whenever the result set changes underneath it: an index
+  // into a list that just became a different list points at nothing the user
+  // chose. Adjust-state-during-render rather than an effect, per
+  // .claude/rules/no-use-effect.md (the NeedsAttentionView precedent).
+  //
+  // Keyed on the results OBJECT, which `useVaultQuery` holds in state and only
+  // replaces when a response lands. Keying on `hits` instead compares an array
+  // this component just derived, which is a new identity every render — the
+  // reset then fires forever.
+  const [activeIndex, setActiveIndex] = useState(-1);
+  const [walkedResults, setWalkedResults] = useState(results);
+  if (walkedResults !== results) {
+    setWalkedResults(results);
+    setActiveIndex(-1);
+  }
+
+  const active = activeIndex < hits.length ? activeIndex : -1;
+  useScrollIntoView(active >= 0 ? hitId(active) : null);
+
+  const openHit = (hit: SearchHit) =>
+    navigate({
+      kind: "noteEditor",
+      noteId: hit.id,
+      project: hit.project ?? INBOX_PROJECT,
+    });
+
+  const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+    // Keys pressed mid-IME-composition belong to the composition (Select.tsx).
+    if (event.nativeEvent.isComposing || hits.length === 0) return;
+
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActiveIndex(Math.min(active + 1, hits.length - 1));
+    } else if (event.key === "ArrowUp") {
+      // Clamped at -1, which is "back in the field with no row lit" — the state
+      // the walk started from, so ArrowUp always has somewhere to go back to.
+      event.preventDefault();
+      setActiveIndex(Math.max(active - 1, -1));
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      // Enter with nothing walked opens the top hit: it is what the ranking
+      // says you meant, and pressing Enter on a search field means "go".
+      openHit(hits[Math.max(active, 0)]);
+    }
+  };
 
   return (
-    <ViewFrame variant="search">
-      <div className="search__field ui-focus-ring-within">
-        <MagnifierGlyph />
+    <ViewFrame variant="search" title="Search">
+      {/* The Grove glass field (Field.tsx's recipe at the search radius). No
+          focus ring: the border step and the kodama caret ARE the focus
+          signal, and a ring around a box that already changed says it twice. */}
+      <div
+        className={clsx(
+          "mt-5 flex items-center gap-2.5 rounded-[12px] border border-edge bg-wash px-4 py-3",
+          "shadow-[inset_0_1px_0_var(--color-edge-lit)]",
+          "transition-[border-color] duration-140 ease-out-strong",
+          "focus-within:border-ink-faint",
+        )}
+      >
+        {/* The palette's glyph, at the palette's size — one magnifier in the
+            app, so a query field is recognisable wherever it turns up. */}
+        <span aria-hidden="true" className="flex-none text-[13px] text-ink-faint">
+          ⌕
+        </span>
         <input
+          type="text"
+          role="combobox"
+          aria-label="Search notes"
+          aria-expanded={hits.length > 0}
+          aria-controls={listboxId}
+          aria-activedescendant={active >= 0 ? hitId(active) : undefined}
+          aria-autocomplete="list"
+          autoComplete="off"
+          autoFocus
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
-          placeholder="Search notes…"
-          aria-label="Search notes"
-          autoFocus
-          className="search__input ui-writing text-input text-text placeholder:text-text-faint"
+          onKeyDown={onKeyDown}
+          placeholder="Search every note…"
+          className={clsx(
+            "w-full min-w-0 bg-transparent",
+            "font-ui text-[13.5px] text-ink caret-kodama outline-hidden",
+            "placeholder:text-ink-faint",
+          )}
         />
-        {/* Gated on `loading` for the same reason the empty state below is:
-            the corpus is empty until the listing lands, so an ungated count
-            flashed "0 results" on every cold start while the branch beneath
-            it correctly rendered nothing (docs/DESIGN_SYSTEM.md §3). */}
-        <span className="ui-tnum flex-none font-mono text-cap text-text-faint">
-          {needle && !loading
-            ? `${hits.length} ${hits.length === 1 ? "result" : "results"}`
-            : ""}
+        {/* Gated on `loading` as well as on there being a query: an ungated
+            count reads "0 hits" for the length of every round trip. */}
+        <span className="flex-none font-data text-[10.5px] text-ink-faint tabular-nums">
+          {results && !loading ? countLabel(results.page.total_estimate, hits.length) : ""}
         </span>
       </div>
 
-      {needle && hits.length > 0 && (
-        <p className="mt-sm font-mono text-micro uppercase text-text-faint">
-          Across {projectsHit} {projectsHit === 1 ? "project" : "projects"}
-          {unfiledHit > 0 && ` · ${unfiledHit} unfiled`}
-        </p>
-      )}
-
       {error ? (
         <StatusMessage variant="error">Couldn&apos;t search your notes: {error}</StatusMessage>
-      ) : !needle ? (
-        <StatusMessage variant="empty">
-          Type to search every note in every project, plus the unfiled ones.
-        </StatusMessage>
+      ) : !searchedQuery ? (
+        <p className={QUIET_LINE}>Searches every note in full, title and body.</p>
       ) : hits.length === 0 ? (
-        !loading && (
-          <StatusMessage variant="empty">
-            Nothing matches &ldquo;{draft.trim()}&rdquo;. Search reads note titles,
-            snippets and tags, so a word from deeper in the body will not match yet.
-          </StatusMessage>
-        )
+        !loading &&
+        results && <p className={QUIET_LINE}>Nothing matches &ldquo;{searchedQuery}&rdquo;.</p>
       ) : (
-        <ul className="search__results">
-          {hits.map((hit) => (
-            <li key={hit.note.path}>
-              <button
-                type="button"
-                className="search__row ui-focus-ring"
-                onClick={() =>
-                  navigate({
-                    kind: "noteEditor",
-                    noteId: hit.note.id,
-                    project: hit.note.project ?? INBOX_PROJECT,
-                  })
-                }
-              >
-                {/* Breadcrumb first — the signal that this list spans
-                    projects, and the thing that tells it apart from the
-                    Inbox at a glance. */}
-                <span className="block font-mono text-micro text-text-faint">
-                  {crumb(hit.note)}
+        <ul id={listboxId} role="listbox" aria-label="Search results" className="mt-3.5">
+          {hits.map((hit, index) => (
+            <li
+              key={hit.path}
+              id={hitId(index)}
+              role="option"
+              aria-selected={index === active}
+              data-active={index === active}
+              // Pointer and keyboard drive the same one attribute, so two rows
+              // can never be lit at once (docs/UI_CONVENTIONS.md §4) — which is
+              // also why there is no `hover:` here.
+              onMouseMove={() => index !== active && setActiveIndex(index)}
+              onClick={() => openHit(hit)}
+              className={clsx(
+                "block w-full cursor-default rounded-[10px] px-2.5 py-3 text-left",
+                "transition-[background-color] duration-140 ease-out-strong",
+                "data-[active=true]:bg-wash",
+              )}
+            >
+              <span className="block truncate text-[14.5px] font-semibold text-ink">
+                <Marked segments={highlightTerms(hit.title, searchedQuery)} />
+              </span>
+              {/* The folder leads, in the folder's own hue: what tells this
+                  list apart from a project's is that it spans them. */}
+              <span className="mt-1 block truncate font-data text-[10.5px] text-ink-faint">
+                <span className={hit.project ? HUE_TEXT[folderHue(hit.project)] : undefined}>
+                  {hit.project ?? INBOX_PROJECT.toLowerCase()}
                 </span>
-                <span className="mt-3xs block truncate text-lead font-semibold text-text">
-                  {hit.note.title}
-                </span>
-                <span className="mt-3xs block font-serif text-snippet-sm leading-snippet text-text-soft">
-                  {hit.before}
-                  {hit.match && <mark className="search__mark">{hit.match}</mark>}
-                  {hit.after}
-                </span>
-              </button>
+                {metaTail(hit)}
+              </span>
+              <span className="mt-1 block truncate text-[12.5px] text-ink-dim">
+                <Marked segments={parseSnippet(hit.snippet)} />
+              </span>
             </li>
           ))}
         </ul>
@@ -160,25 +196,40 @@ export function SearchView({ query }: Props) {
   );
 }
 
-/** The same glyph the command palette uses, at the same size — one magnifier
- * in the app, so a query field is recognisable wherever it turns up. */
-function MagnifierGlyph(): ReactNode {
+/** Text with the matched runs in green. `mark`'s own default background is a
+ * yellow that belongs to no theme here, so the element carries the tokens. */
+function Marked({ segments }: { segments: TextSegment[] }) {
   return (
-    <svg
-      width="17"
-      height="17"
-      viewBox="0 0 18 18"
-      fill="none"
-      aria-hidden="true"
-      className="block flex-none text-text-faint"
-    >
-      <circle cx="8" cy="8" r="6.2" stroke="currentColor" strokeWidth="1.4" />
-      <path
-        d="M12.4 12.4L16 16"
-        stroke="currentColor"
-        strokeWidth="1.4"
-        strokeLinecap="round"
-      />
-    </svg>
+    <>
+      {segments.map((segment, index) =>
+        segment.marked ? (
+          <mark key={index} className="rounded-[3px] bg-kodama/16 px-0.5 text-kodama-ink">
+            {segment.text}
+          </mark>
+        ) : (
+          <span key={index}>{segment.text}</span>
+        ),
+      )}
+    </>
   );
+}
+
+/** What follows the folder on a hit's meta line: the kind when it says
+ * something, then the note's day. */
+function metaTail(hit: SearchHit): string {
+  const kind = noteKind(hit.type);
+  return [kind, hit.date.slice(0, 10)].filter(Boolean).map((part) => ` · ${part}`).join("");
+}
+
+/**
+ * The hit count, mono and right-aligned in the field.
+ *
+ * `total_estimate` is the exact fused total, and `null` once the index's
+ * candidate pool came back full — past that it does not know, so the count says
+ * "at least this many" rather than quoting the page size as if it were the
+ * total.
+ */
+function countLabel(totalEstimate: number | null, shown: number): string {
+  if (totalEstimate === null) return `${shown}+ hits`;
+  return `${totalEstimate} ${totalEstimate === 1 ? "hit" : "hits"}`;
 }

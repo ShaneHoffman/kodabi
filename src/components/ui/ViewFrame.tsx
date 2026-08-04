@@ -24,7 +24,8 @@ import "./ViewFrame.css";
  *   health  — system state to recover from. A short list of pre-lifted cards.
  *             Caps no column.
  *   doc     — a note, on the measure it was written to (--measure-doc).
- *   search  — results under a pinned query (--measure-search).
+ *   search  — results under a query field. Caps no column: the field runs the
+ *             panel's full width, and its rows are rows.
  *   terminal— the embedded Claude Code terminal. A small masthead over a
  *             full-bleed pane: its body (the xterm mount) grows to fill the
  *             height the gutter leaves, and scrolls inside itself.
@@ -36,7 +37,10 @@ import "./ViewFrame.css";
  * `doc` and `search` render no header of their own: their headers are a
  * genuinely different shape (a back link and its own actions; a query field)
  * and arrive as children. Those two therefore accept neither `action` nor
- * `summary` — both are type errors there rather than silent no-ops.
+ * `summary` — both are type errors there rather than silent no-ops. They may
+ * still pass `title`, and `search` does: its field is a header's *content*, not
+ * a header's shape, so it sits under the ordinary head like any other view's
+ * rows do.
  */
 type Variant =
   | "queue"
@@ -133,11 +137,11 @@ export function ViewFrame({
     // with a main, an aside and a nav and nothing identifying the view inside
     // them. `title` when there is one, else `eyebrow`.
     //
-    // KNOWN GAP, deliberately not fixed here: `doc` and `search` pass neither,
-    // so NoteEditorView's and SearchView's sections are still unnamed — the
-    // exact failure above, for the two views that draw their own header. The
-    // fix is a decision of its own (a `label` prop, an aria-label on the view's
-    // own <header>, or accept it), not a side effect of the action contract.
+    // KNOWN GAP, narrowed to one view: `doc` passes neither, so
+    // NoteEditorView's section is still unnamed. `search` closed its half by
+    // passing a plain `title` when it moved to Grove. The remaining fix is a
+    // decision of its own (a `label` prop, an aria-label on the view's own
+    // <header>, or accept it), not a side effect of the action contract.
     <section
       aria-label={landmarkName(title) ?? landmarkName(eyebrow)}
       className={`view view--${variant}`}
