@@ -26,6 +26,16 @@ const CHANNEL_LABELS: Record<
 export const PANEL_EYEBROW =
   "font-data text-[10px] uppercase tracking-[0.22em] text-ink-faint";
 
+/** What the Transcript chip points at.
+ *
+ * The chip is the one disclosure in the app whose content is neither its
+ * sibling nor below it: the turns need the reading measure, so they land in the
+ * body column, which is the grid's FIRST child and therefore upstream of the
+ * rail holding the chip. `aria-expanded` alone would leave a screen reader
+ * hearing "expanded" with nothing after the button and nothing to jump to. One
+ * id, spelled once, is what makes the pair programmatic rather than visual. */
+const TRANSCRIPT_TURNS_ID = "note-transcript-turns";
+
 /**
  * The source pairing, as a panel in the note's details rail: the recording
  * retention kept, and the raw transcript the note was distilled from. Rendered
@@ -107,7 +117,16 @@ export function SessionPanel({
             className="mt-2.5 w-full"
             aria-expanded={playing}
             data-testid="session-audio"
-            onClick={() => setAudioOpen((open) => !open)}
+            onClick={() => {
+              setAudioOpen((open) => !open);
+              // A reveal that failed is about the press, not about the chip's
+              // state, so it does not outlive the chip closing. Without this it
+              // does: the error lives up here now that the panel stays mounted,
+              // where it used to die with the unmounted player — and a
+              // `role="alert"` restored on reopening announces a failure the
+              // reader did not just cause.
+              setRevealError(null);
+            }}
           >
             {/* The split lives INSIDE the button: `justify-between` in
                 className cannot beat the variant's own `justify-center`.
@@ -174,6 +193,7 @@ export function SessionPanel({
           variant="chip"
           className="mt-2 w-full"
           aria-expanded={transcriptOpen}
+          aria-controls={TRANSCRIPT_TURNS_ID}
           data-testid="session-source"
           onClick={onToggleTranscript}
         >
@@ -238,7 +258,11 @@ function wordCount(segments: TranscriptSegment[]): string {
  */
 export function TranscriptTurns({ segments }: { segments: TranscriptSegment[] }) {
   return (
-    <div className="mt-8 border-t border-edge pt-6" data-testid="source-panel">
+    <div
+      id={TRANSCRIPT_TURNS_ID}
+      className="mt-8 border-t border-edge pt-6"
+      data-testid="source-panel"
+    >
       <p className={PANEL_EYEBROW}>Transcript</p>
       <ol className="mt-3">
         {segments.map((segment) => {

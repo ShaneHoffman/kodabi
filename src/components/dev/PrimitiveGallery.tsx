@@ -124,6 +124,22 @@ export function PrimitiveGallery() {
               <Button variant="quiet">Dismiss</Button>
               <Button variant="pill">transcript.md</Button>
             </div>
+            {/* `chip` is the only variant with a width to show: it exists
+                because a pill's ends leave ragged gutters in the note's 272px
+                rail, so it is shown in a box that width rather than inline
+                beside the others, with the label/value split it was made for. */}
+            <div className="flex w-[272px] flex-col gap-2">
+              <Button variant="chip">
+                <span className="flex w-full items-center justify-between gap-2">
+                  <span>
+                    <span aria-hidden="true">▶ </span>Audio
+                  </span>{" "}
+                  <span className="font-data text-[10.5px] font-normal tabular-nums text-ink-faint">
+                    1:06
+                  </span>
+                </span>
+              </Button>
+            </div>
             <div className="flex flex-wrap items-center gap-2.5">
               <Button loading loadingLabel="Filing…">
                 File it
@@ -136,6 +152,9 @@ export function PrimitiveGallery() {
               </Button>
               <Button variant="pill" disabled>
                 transcript.md
+              </Button>
+              <Button variant="chip" disabled>
+                Audio
               </Button>
             </div>
           </Section>

@@ -23,7 +23,10 @@ import "./ViewFrame.css";
  *             (its rows cap themselves).
  *   health  — system state to recover from. A short list of pre-lifted cards.
  *             Caps no column.
- *   doc     — a note, on the measure it was written to (--measure-doc).
+ *   doc     — a note, on the measure it was written to (--measure-doc). No
+ *             consumer since the note editor's Grove ticket: a note is two
+ *             columns now, and one measure cannot hold both. Kept with the
+ *             legacy layer it belongs to rather than removed on its own.
  *   search  — results under a pinned query (--measure-search).
  *   terminal— the embedded Claude Code terminal. A small masthead over a
  *             full-bleed pane: its body (the xterm mount) grows to fill the
@@ -134,10 +137,13 @@ export function ViewFrame({
     // them. `title` when there is one, else `eyebrow`.
     //
     // KNOWN GAP, deliberately not fixed here: `doc` and `search` pass neither,
-    // so NoteEditorView's and SearchView's sections are still unnamed — the
-    // exact failure above, for the two views that draw their own header. The
-    // fix is a decision of its own (a `label` prop, an aria-label on the view's
-    // own <header>, or accept it), not a side effect of the action contract.
+    // so a view on one of them is still unnamed — the exact failure above, for
+    // the two variants that draw their own header. SearchView is the one left:
+    // the note editor answered it by leaving this frame entirely for a
+    // `NoteFrame` that names its own landmark. `doc` therefore has no consumer
+    // at all now, and goes with the legacy layer. The fix for `search` is a
+    // decision of its own (a `label` prop, an aria-label on the view's own
+    // <header>, or accept it), not a side effect of the action contract.
     <section
       aria-label={landmarkName(title) ?? landmarkName(eyebrow)}
       className={`view view--${variant}`}
@@ -171,8 +177,9 @@ function landmarkName(node: ReactNode): string | undefined {
  * from opening at a note's size, and the Grove shell answers that differently:
  * every view opens at one step inside the panel, and what tells them apart is
  * the density and shape below the head (docs/DESIGN_SYSTEM.md §1). The note
- * editor still spells its own larger step by hand, because a document genuinely
- * is the exception.
+ * editor was the last holdout and came down too: it spells this same step by
+ * hand, in its own frame, because its head is the document's first line rather
+ * than a frame header.
  */
 function renderHeader({
   eyebrow,

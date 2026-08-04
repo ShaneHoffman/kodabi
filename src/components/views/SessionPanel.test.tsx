@@ -264,6 +264,46 @@ describe("SessionPanel", () => {
     );
   });
 
+  it("does not carry a failed reveal across closing the chip", async () => {
+    // The error belongs to the press, not to the chip's state. It lives on the
+    // panel now that the panel outlives the player, so without a reset it comes
+    // back on reopening — a `role="alert"` announcing a failure the reader did
+    // not just cause.
+    serveNote();
+    serveArtifacts();
+    onCommand("reveal_session_audio", () => {
+      throw "The recording file is missing.";
+    });
+    renderNote();
+
+    const audio = await screen.findByTestId("session-audio");
+    await userEvent.click(audio);
+    await userEvent.click(screen.getByTestId("reveal-recording"));
+    await screen.findByRole("alert");
+
+    await userEvent.click(audio);
+    await userEvent.click(audio);
+
+    expect(screen.getByTestId("reveal-recording")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("points the transcript chip at the turns it summons", async () => {
+    // The one disclosure whose content is upstream of its trigger: the turns
+    // land in the body column, which precedes the rail. `aria-expanded` alone
+    // would leave nothing after the button and nothing to jump to.
+    serveNote();
+    serveArtifacts({ audio_path: null });
+    renderNote();
+
+    const transcript = await screen.findByTestId("session-source");
+    await userEvent.click(transcript);
+
+    const controls = transcript.getAttribute("aria-controls");
+    expect(controls).toBeTruthy();
+    expect(screen.getByTestId("source-panel")).toHaveAttribute("id", controls);
+  });
+
   it("surfaces a failed artifact read as an error", async () => {
     serveNote();
     onCommand("read_session_artifacts", () => {

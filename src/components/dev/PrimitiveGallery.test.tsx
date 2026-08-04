@@ -32,7 +32,7 @@ describe("PrimitiveGallery", () => {
 
     // One of each variant, by its label rather than its class: the point is
     // that the catalogue is complete, not how it is spelled.
-    for (const label of ["File it", "Delete note", "Dismiss", "transcript.md"]) {
+    for (const label of ["File it", "Delete note", "Dismiss", "transcript.md", "Audio"]) {
       expect(screen.getAllByRole("button", { name: label }).length).toBeGreaterThan(0);
     }
     expect(screen.getByRole("button", { name: "File to…" })).toBeInTheDocument();
