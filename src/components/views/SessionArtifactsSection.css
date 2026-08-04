@@ -15,8 +15,9 @@
   padding-top: var(--lead-session);
 }
 
-/* The summoned panel. Matches .attention__dismissed-stack, the app's other
-   disclosure: what a toggle opens sits a field-stack step below it. */
+/* The summoned panel. Matches the needs-attention dismissed shelf, the app's
+   other disclosure: what a toggle opens sits a field-stack step below it.
+   (That shelf is Grove now and spells the same step `mt-4`.) */
 .session-artifacts__panel {
   margin-top: var(--space-sm);
 }
