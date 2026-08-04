@@ -23,14 +23,20 @@ function sourceLine(state: CaptureStateEvent): string | null {
 }
 
 /**
- * The persistent on-air surface in the sidebar foot: one dot, always in the
- * same place, always the same size, whatever capture is doing.
+ * The persistent on-air surface in the sidebar foot: one spirit mark, always in
+ * the same place, always the same 11px core, whatever capture is doing.
  *
- * The state reads through the dot's FILL and the label's VALUE, never through
- * a change of shape — the foot must not reflow when a capture starts, or the
- * Settings and Commands rows jump under the pointer. Idle is an ink dot beside
- * a mono `IDLE`; live is the one reserved green plus a breathing glow beside a
- * full-ink label. Those are the only two silhouettes.
+ * The state reads through the mark's FILL and the label's VALUE, never through
+ * a change of the core's size — the foot must not reflow when a capture starts,
+ * or the Settings and Commands rows jump under the pointer. Idle is an ink mark
+ * beside a mono `IDLE`; live is the one reserved green beside a full-ink label,
+ * with `markMode` naming the ink in-between states (starting, degraded,
+ * reconnecting) so a session that is engaged is never mistaken for one that is
+ * not running at all.
+ *
+ * The core is size-invariant; the live mark's aura is not — it reaches past its
+ * own box, which is what the live-only `pt-2xs` below is reserving room for.
+ * Removing it reintroduces exactly the reflow this paragraph forbids.
  *
  * It reports CAPTURE only. What transcription and distillation are doing
  * afterwards used to stack up here as extra lines — a bare `SAVED` sitting

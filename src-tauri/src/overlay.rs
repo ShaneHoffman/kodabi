@@ -10,10 +10,11 @@
 //! called from `capture_control::broadcast_event`, which almost always runs
 //! with `CaptureController::toggle_lock` held (that lock is documented as the
 //! outermost lock in its module). Everything here must therefore stay *leaf*:
-//! the settings snapshot and the atomics below are taken alone and released
-//! immediately, window calls are fire-and-forget, and nothing reaches back for
-//! `toggle_lock` or for a blocking window getter such as `is_visible`. Show and
-//! hide are idempotent, so no read-before-write is needed to stay correct.
+//! the settings snapshot and the origin mutex below are taken alone and
+//! released immediately, window calls are fire-and-forget, and nothing reaches
+//! back for `toggle_lock` or for a blocking window getter such as `is_visible`.
+//! Show and hide are idempotent, so no read-before-write is needed to stay
+//! correct.
 //!
 //! Naming note: the `capture` here is *audio* capture, the same sense as
 //! `capture_control.rs`. It is unrelated to `quick_capture.rs`'s text box.
