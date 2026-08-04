@@ -86,6 +86,26 @@ describe("NeedsAttentionView", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows the time alone when a filename doesn't follow the session scheme", async () => {
+    // A hand-imported file has no `{timestamp}-{deviceID}` prefix, so the
+    // second `-` segment is part of its name rather than a device ID. Half a
+    // filename presented as "session sync" is worse than no id at all, so the
+    // meta line has to drop the id rather than show what it parsed.
+    const imported: FailedSession = {
+      ...makeSession("team-sync"),
+      file_name: "team-sync-notes.jsonl",
+      path: "sessions/team-sync-notes.jsonl",
+    };
+    serveSessions([imported]);
+
+    renderView();
+
+    const list = within(await screen.findByTestId("needs-attention"));
+    expect(list.getByText("team sync")).toBeInTheDocument();
+    expect(list.queryByText(/session sync/)).not.toBeInTheDocument();
+    expect(list.queryByText(/session /)).not.toBeInTheDocument();
+  });
+
   it("drops the failure line from a capture already waved off", async () => {
     // A dismissed card is a settled thing: it keeps its title and its meta so
     // it stays identifiable, and stops claiming to need anything.

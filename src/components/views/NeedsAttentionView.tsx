@@ -339,7 +339,13 @@ export function NeedsAttentionView() {
                     mode only this screen would use. */}
                 <SpiritMark mode="idle" size="26px" className="mb-[18px] opacity-60" />
                 <p className="text-[15px] font-semibold text-ink">All clear.</p>
-                <p className="max-w-[44ch] text-[12.5px] leading-[1.55] text-ink-faint">
+                {/* Dim, not faint: `ink-faint` is the metadata register and is
+                    spent on timestamps, counts and ids (docs/DESIGN_SYSTEM.md
+                    §6). This is the only thing on the screen and a sentence
+                    the user reads for meaning, which is the one thing that
+                    register may not carry — and it is the register every other
+                    view's empty line already reads at. */}
+                <p className="max-w-[44ch] text-[12.5px] leading-[1.55] text-ink-dim">
                   Failed captures land here so they are never invisible. Nothing
                   needs a look.
                 </p>
@@ -401,11 +407,12 @@ export function NeedsAttentionView() {
                     >
                       {/* "Dismiss", not "Discard". The backend writes a marker
                           file next to the session — the row stops counting but
-                          the recording and transcript are untouched, which is
-                          exactly what the footnote promises. "Discard" named a
-                          deletion this button does not perform; that verb now
-                          exists only behind the dismissed shelf and its
-                          confirm. */}
+                          the recording and transcript are untouched, and the
+                          shelf below is where they come back from. "Discard"
+                          named a deletion this button does not perform; that
+                          verb now exists only behind that shelf and its
+                          confirm, which is the one place on this screen that
+                          spells out what is and isn't destroyed. */}
                       Dismiss
                     </Button>
                   </div>
@@ -497,8 +504,13 @@ export function NeedsAttentionView() {
                and the sidebar row is gone, precisely so a waved-off capture is
                never unreachable. It sits its own lead-in below the cards
                rather than tucked under the last one — it is about all of
-               them. */
-            <p className="mt-[22px] font-data text-[11px] text-ink-dim">
+               them.
+
+               Inherited `font-ui`, not `font-data`: this is a sentence in the
+               interface's own voice, and the data face carries the things that
+               line up in a column — clocks, counts, ids, paths, eyebrows
+               (docs/DESIGN_SYSTEM.md §1). */
+            <p className="mt-[22px] text-[11px] text-ink-dim">
               Dismissed captures stay reachable from the command palette.
             </p>
           )}
