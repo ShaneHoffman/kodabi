@@ -643,6 +643,37 @@
   }
 }
 
+/* The format toolbar's pointer tail — a rotated square below `glass-overlay`
+   that makes the toolbar point at the selection it acts on.
+
+   Fill only: the geometry (position, size, rotation, pullback) is utilities at
+   the call site, because it is layout and layout belongs in the markup. What
+   cannot go there is this background — the tail has to be the SAME fill as the
+   overlay above it or the seam shows, and that fill is a literal inside the
+   recipe rather than a token (see the three reasons above the glass set). A
+   colour literal in a className is the one thing eslint refuses outright, and
+   correctly: a hex survives `.day` unchanged. So the fill comes here, tracking
+   `glass-overlay`'s three branches exactly. Change one, change both.
+
+   No border, no shadow, no blur: the square is a continuation of the panel's
+   body, not a surface of its own, and a blur behind an opaque-enough fill
+   would only make its edges disagree with the panel it hangs off. */
+@utility glass-overlay-tail {
+  background: rgb(24 32 20 / 0.88);
+
+  &:where(.day, .day *) {
+    background: rgb(250 252 246 / 0.85);
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    background: #1a2315;
+
+    &:where(.day, .day *) {
+      background: #fbfcf6;
+    }
+  }
+}
+
 /* Dialogs: the overlay material at the dialog rung of the radius ladder, with
    the longest shadow the app casts. They are card-sized but window-like, and
    they are what the scrim is under. */

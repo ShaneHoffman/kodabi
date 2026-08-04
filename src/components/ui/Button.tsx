@@ -3,7 +3,7 @@ import { clsx } from "clsx";
 import type { ComponentPropsWithRef, ReactNode } from "react";
 
 /**
- * The four shapes a Grove button comes in.
+ * The five shapes a Grove button comes in.
  *
  * Two of them are the same box. `action`, `danger` and `quiet` are all a
  * rectangle at `rounded-button` with 8x16 padding, because they sit next to
@@ -25,6 +25,15 @@ import type { ComponentPropsWithRef, ReactNode } from "react";
  *   pill    — the token shape. A pill does not perform a verb, it STANDS for
  *            something you can open: an artifact chip, a citation. If the
  *            label is a verb it is a rectangle (DESIGN_SYSTEM §2).
+ *   chip    — the pill's material at a softer radius, for a token that has to
+ *            fill the width it is given: the note editor's SESSION panel, where
+ *            `Audio` and `Transcript` stack in a 272px rail and a pill's ends
+ *            would leave two ragged gutters. It stands for something you open,
+ *            exactly like `pill`; only the box changed to fit the rail.
+ *            A label/value split goes in a `flex w-full justify-between` span
+ *            INSIDE the button — not via className, which cannot beat the base
+ *            `justify-center` (no tailwind-merge here: the cascade decides, and
+ *            both utilities are the same property in the same layer).
  *
  * Colours are tokens rather than values because the alphas invert between
  * grounds — night lightens with white, day darkens with ink — and `.day`
@@ -91,6 +100,12 @@ const buttonVariants = cva(
         ],
         pill: [
           "rounded-pill px-3.5 py-2 font-semibold text-ink-dim",
+          "border-edge bg-wash shadow-[inset_0_1px_0_var(--color-edge-lit)]",
+          "not-disabled:not-aria-disabled:hover:bg-wash-hover",
+          "not-disabled:not-aria-disabled:hover:text-ink",
+        ],
+        chip: [
+          "rounded-[10px] px-3 py-2 font-semibold text-ink-dim",
           "border-edge bg-wash shadow-[inset_0_1px_0_var(--color-edge-lit)]",
           "not-disabled:not-aria-disabled:hover:bg-wash-hover",
           "not-disabled:not-aria-disabled:hover:text-ink",

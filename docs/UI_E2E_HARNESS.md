@@ -184,9 +184,10 @@ warning. That is how the `connect-src` omission that silently degraded every
 `invoke()` to the slow bridge was found in the first place.
 
 `media-src` was the one directive still annotated but unexercised: the app's only
-asset-protocol consumer is the `<audio>` in `SessionArtifactsSection`, and the
-quick-capture slice never opens a note with a recording. The source-pairing slice
-mounts one, so dropping the directive now turns something red. Reaching that
+asset-protocol consumer is the `<audio>` in `SessionPanel`, and the quick-capture
+slice never opens a note with a recording. The source-pairing slice mounts one —
+at rest, since the player stays mounted so the Audio chip can read a duration off
+it — so dropping the directive now turns something red. Reaching that
 state also surfaced a real bug in the vault seam — `assetProtocol.scope` in
 `tauri.conf.json` can only name a static path (`$APPDATA/sessions/*.wav`), so a
 vault relocated by `KODABI_KB_ROOT` had its recordings refused before the CSP was
@@ -280,6 +281,6 @@ these was run for this decision:
 | Rename `inbox_note_count` in `note_cmds.rs` | **only** the sidebar-count assertion goes red |
 | Drop `connect-src` from the CSP in `src-tauri/tauri.conf.json` | **only** the console-clean scenario goes red |
 | Drop `data:` from the CSP's `font-src` | **both** CSP scenarios go red (the refusal is logged, *and* the face fails to load) |
-| Cap `Turns` at 20 segments in `SessionArtifactsSection.tsx` | **only** the fifty-turns scenario goes red (the toggle still reads 50) |
+| Cap `TranscriptTurns` at 20 segments in `SessionPanel.tsx` | **only** the fifty-turns scenario goes red (the chip's word count is unchanged) |
 | Drop `media-src` from the CSP | **only** source-pairing's console scenario goes red |
 | Drop the asset-scope widening from `lib.rs` setup | **only** the asset-protocol scenario goes red, with `media error code 4` — and the console scenario stays green, because Tauri refuses an out-of-scope asset before the CSP is consulted |

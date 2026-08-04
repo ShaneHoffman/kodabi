@@ -12,7 +12,18 @@ export type View =
   | { kind: "inbox" }
   | { kind: "needsAttention" }
   | { kind: "project"; slug: string }
-  | { kind: "noteEditor"; noteId: string | null; project: string | null }
+  | {
+      kind: "noteEditor";
+      noteId: string | null;
+      project: string | null;
+      /** Where the note was opened FROM, when the opener knew. The back link
+       * prefers it and falls back to the note's filing location, so a note
+       * opened from a search returns to those results rather than to the
+       * folder it happens to live in. Deliberately absent from `viewKey`: it
+       * is how you arrived, not which note you are on, and keying on it would
+       * remount the editor for a difference the document cannot see. */
+      origin?: View;
+    }
   | { kind: "search"; query: string }
   | { kind: "settings" }
   | { kind: "terminal" }

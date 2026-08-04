@@ -80,6 +80,10 @@ export function SearchView({ query }: Props) {
       kind: "noteEditor",
       noteId: hit.id,
       project: hit.project ?? INBOX_PROJECT,
+      // The live draft, not the `query` prop: the prop is what this view was
+      // opened with, and back has to return to the results the reader was
+      // actually looking at.
+      origin: { kind: "search", query: draft.trim() },
     });
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {

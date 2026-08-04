@@ -87,7 +87,9 @@ One shape for every view that draws one, so two screens cannot open at different
 | Together | Title and summary share a baseline: `flex items-baseline gap-4` |
 
 `ViewFrame` draws it — pass `eyebrow` / `title` / `summary`, never the classes. The note editor is
-the one exception, and it spells its larger step by hand because a document genuinely is one.
+the one exception, and it spells the same step by hand: its head is not a frame header but the
+document's own first line, sitting beside Edit and Delete rather than above a list, and its body is
+two columns `ViewFrame`'s single measure cannot hold.
 
 ---
 
@@ -325,9 +327,9 @@ attention, Search), the folders, and the two tools under a hairline (Chat, Termi
 That is a decision, not an accident of what got built first. A region that some destinations have and
 others don't makes the main column's width depend on where you navigated, which reads as the layout
 being unstable rather than as two places being different kinds of place. The two candidates people
-reach for are already answered by stacking: a note's metadata is one line under the title, and the
-session artifacts sit under the body behind a single hairline — chrome below the document, not part
-of it.
+reach for — a note's metadata, and its session artifacts — are answered inside the note's own view:
+they sit in the details rail described below, which is leftover width rather than a region, and every
+other destination keeps the full main slot.
 
 The note editor's details rail is not a counterexample. It is what the *leftover* width becomes once
 prose has stopped at its measure (DESIGN_SYSTEM §1), inside the one main slot — not a second region

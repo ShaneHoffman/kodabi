@@ -492,7 +492,12 @@ function FiledToast({
         );
         navigate(
           note
-            ? { kind: "noteEditor", noteId: note.id, project: toast.slug }
+            ? {
+                kind: "noteEditor",
+                noteId: note.id,
+                project: toast.slug,
+                origin: { kind: "inbox" },
+              }
             : { kind: "project", slug: toast.slug },
         );
       })
@@ -633,6 +638,7 @@ function InboxRow({
                 kind: "noteEditor",
                 noteId: note.id,
                 project: INBOX_PROJECT,
+                origin: { kind: "inbox" },
               })
             }
           >

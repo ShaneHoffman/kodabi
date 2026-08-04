@@ -90,10 +90,10 @@ pub fn run() {
             // `$APPDATA/sessions/*.wav` — but `transcribe::knowledge_base_dir`
             // honours `KODABI_KB_ROOT`. A relocated vault's recordings
             // therefore sat outside the scope, so the `<audio>` element that
-            // `SessionArtifactsSection` feeds through `convertFileSrc` was
-            // refused before the CSP was even consulted, and playback failed
-            // for every note. That made the environment seam a half-seam: it
-            // moved the notes but not the recordings.
+            // `SessionPanel` feeds through `convertFileSrc` was refused before
+            // the CSP was even consulted, and playback failed for every note.
+            // That made the environment seam a half-seam: it moved the notes
+            // but not the recordings.
             //
             // `allow_directory` is the narrowest grant the scope API exposes —
             // there is no way to append a `*.wav` glob, since `allow_file`

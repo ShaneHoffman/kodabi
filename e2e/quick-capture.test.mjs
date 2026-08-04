@@ -77,11 +77,11 @@ const MARKER = `e2e quick capture ${process.pid}-${Date.now()}`;
  *                                     (it has to hold before the bundle loads, or
  *                                     both capture windows flash opaque).
  *   media-src http://asset.localhost  the <audio src={convertFileSrc(…)}> in
- *                                     SessionArtifactsSection.tsx, which is the
- *                                     only asset-protocol consumer in the app.
+ *                                     SessionPanel.tsx, which is the only
+ *                                     asset-protocol consumer in the app.
  *
  * Deliberately absent: `https:` on img-src. A note body's `![](https://…)` reaches
- * a real <img> through ReactMarkdown (NoteEditorView.tsx), and blocking that is
+ * a real <img> through ReactMarkdown (NoteMarkdown.tsx), and blocking that is
  * the point — it is the remote-tracking-pixel block, not a bug to fix.
  */
 

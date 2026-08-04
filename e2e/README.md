@@ -102,7 +102,7 @@ and cannot hold a comment.
 
 `source-pairing.test.mjs` extends that to `media-src`, which nothing exercised
 before it: the app's only asset-protocol consumer is the `<audio>` in
-`SessionArtifactsSection`, and quick capture never opens a note with a recording.
+`SessionPanel`, and quick capture never opens a note with a recording.
 It also asserts the recording actually *loads*, which is a different failure —
 Tauri refuses an out-of-scope asset before the CSP is consulted, so a scope that
 does not follow `KODABI_KB_ROOT` leaves the console clean and playback dead.
