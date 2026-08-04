@@ -17,6 +17,8 @@ function note(date: string, id = `n_${date}`): NoteSummary {
     source: "manual",
     confidence: null,
     snippet: "",
+    // A project listing never carries a guess: the note already has a home.
+    guess: null,
   };
 }
 
