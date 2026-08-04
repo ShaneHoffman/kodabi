@@ -164,6 +164,45 @@ pub struct SearchParams {
     pub cursor: Option<String>,
 }
 
+/// The pair of strings `snippet()` wraps around each matched term.
+///
+/// The default is Markdown bold, which is what the MCP contract promises and
+/// what a model reading a hit renders natively. A caller that means to *parse*
+/// the marks back out needs something else: the indexed text is the note's raw
+/// Markdown body, so a literal `**` in a note is indistinguishable from a
+/// delimiter. [`SearchOptions`] is how such a caller says so.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SnippetMarks {
+    pub open: &'static str,
+    pub close: &'static str,
+}
+
+impl Default for SnippetMarks {
+    fn default() -> Self {
+        Self {
+            open: "**",
+            close: "**",
+        }
+    }
+}
+
+/// How a search runs, as distinct from *what* it searches for ([`SearchParams`]
+/// is the contract's input schema and stays exactly that). These are the
+/// caller's own presentation and matching choices, so they never appear on the
+/// wire and default to the MCP behaviour.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SearchOptions {
+    /// What to wrap matched terms in. See [`SnippetMarks`].
+    pub marks: SnippetMarks,
+    /// Treat the query's final token as a *prefix* rather than a whole word.
+    ///
+    /// For a search-as-you-type field: the last token is usually a word the
+    /// user is still typing, and matching it whole means the results vanish
+    /// mid-word and reappear at the end. Off by default, because a caller
+    /// passing a complete query means the words it wrote.
+    pub prefix_last_term: bool,
+}
+
 /// A ranked search hit: a `NoteSummary` augmented with retrieval `score`,
 /// `rank`, and `snippet`. Field names and casing match the `SearchHit`/
 /// `NoteSummary` `$defs` in `docs/MCP_TOOL_SURFACE.md`.
@@ -297,6 +336,19 @@ impl NoteIndex {
         params: &SearchParams,
         embedder: Option<&dyn Embedder>,
     ) -> Result<SearchResults> {
+        self.search_notes_with(params, embedder, SearchOptions::default())
+    }
+
+    /// [`search_notes`](Self::search_notes) with the caller's own presentation
+    /// and matching choices — see [`SearchOptions`]. The contract behaviour is
+    /// `SearchOptions::default()`, so the MCP tool goes through the plain
+    /// [`search_notes`](Self::search_notes) above and cannot drift from it.
+    pub fn search_notes_with(
+        &self,
+        params: &SearchParams,
+        embedder: Option<&dyn Embedder>,
+        options: SearchOptions,
+    ) -> Result<SearchResults> {
         let limit = params.limit.clamp(MIN_LIMIT, MAX_LIMIT) as usize;
 
         // Validate every input before the empty-query shortcut, so a malformed
@@ -320,7 +372,7 @@ impl NoteIndex {
 
         // Arm 1: full-text. Skipped when sanitizing leaves no usable term, so no
         // invalid FTS5 MATCH expression ever reaches SQLite.
-        let fts_expr = sanitize_fts_query(&params.query);
+        let fts_expr = sanitize_fts_query(&params.query, options.prefix_last_term);
         let fts = match &fts_expr {
             Some(expr) => self.fts_arm(expr, &filters, depth)?,
             None => Vec::new(),
@@ -377,7 +429,8 @@ impl NoteIndex {
         // Hydrate only the page: one row fetch, one batched tag load, and
         // snippets sourced per hit below.
         let mut rows = self.load_hit_rows(&page_ids)?;
-        let mut snippets = self.page_snippets(fts_expr.as_deref(), &fts, &vector, &page_ids)?;
+        let mut snippets =
+            self.page_snippets(fts_expr.as_deref(), &fts, &vector, &page_ids, options.marks)?;
 
         let mut hits = Vec::with_capacity(page.len());
         for (offset, (id, score)) in page.iter().enumerate() {
@@ -463,6 +516,7 @@ impl NoteIndex {
         fts: &[String],
         vector: &[(String, i64)],
         page_ids: &[&str],
+        marks: SnippetMarks,
     ) -> Result<HashMap<String, String>> {
         let fts_ids: HashSet<&str> = fts.iter().map(String::as_str).collect();
         let from_fts: Vec<&str> = page_ids
@@ -472,7 +526,7 @@ impl NoteIndex {
             .collect();
 
         let mut snippets = match fts_expr {
-            Some(expr) if !from_fts.is_empty() => self.fts_snippets(expr, &from_fts)?,
+            Some(expr) if !from_fts.is_empty() => self.fts_snippets(expr, &from_fts, marks)?,
             _ => HashMap::new(),
         };
 
@@ -496,15 +550,27 @@ impl NoteIndex {
     /// Highlighted `snippet()` text for the given note ids, in one query. The
     /// ids are already filtered by the arm that produced them, so this repeats
     /// only the `MATCH` — the filter clauses would be redundant.
-    fn fts_snippets(&self, match_expr: &str, ids: &[&str]) -> Result<HashMap<String, String>> {
+    fn fts_snippets(
+        &self,
+        match_expr: &str,
+        ids: &[&str],
+        marks: SnippetMarks,
+    ) -> Result<HashMap<String, String>> {
+        // The delimiters are bound, not interpolated: they are `&'static str`
+        // today, but a quoted literal built by `format!` would be one caller
+        // away from an apostrophe breaking the SQL.
         let sql = format!(
-            "SELECT notes.id, snippet(notes_fts, -1, '**', '**', '…', 16)
+            "SELECT notes.id, snippet(notes_fts, -1, ?, ?, '…', 16)
              FROM notes_fts JOIN notes ON notes.pk = notes_fts.rowid
              WHERE notes_fts MATCH ? AND notes.id IN ({placeholders})",
             placeholders = sql_placeholders(ids.len())
         );
 
-        let mut values = Vec::with_capacity(ids.len() + 1);
+        // Bind order follows the placeholders: the two delimiters, the MATCH
+        // expr, then the ids.
+        let mut values = Vec::with_capacity(ids.len() + 3);
+        values.push(Value::Text(marks.open.to_string()));
+        values.push(Value::Text(marks.close.to_string()));
         values.push(Value::Text(match_expr.to_string()));
         values.extend(ids.iter().map(|id| Value::Text((*id).to_string())));
 
@@ -681,7 +747,12 @@ fn empty_results() -> SearchResults {
 /// stopwords: an `AND` of a chatty query would require every word and match
 /// nothing, while `OR` keeps recall and lets `bm25` rank the multi-term matches
 /// highest.
-fn sanitize_fts_query(query: &str) -> Option<String> {
+///
+/// With `prefix_last_term`, the final surviving term gets FTS5's `*` prefix
+/// operator (`"term"*`), which matches any word starting with it. The `*` sits
+/// *outside* the quotes deliberately: inside, it would be part of the literal
+/// and match nothing.
+fn sanitize_fts_query(query: &str, prefix_last_term: bool) -> Option<String> {
     let mut terms = Vec::new();
     for token in query.split_whitespace() {
         if !token.chars().any(char::is_alphanumeric) {
@@ -691,6 +762,11 @@ fn sanitize_fts_query(query: &str) -> Option<String> {
         terms.push(format!("\"{escaped}\""));
         if terms.len() == MAX_QUERY_TOKENS {
             break;
+        }
+    }
+    if prefix_last_term {
+        if let Some(last) = terms.last_mut() {
+            last.push('*');
         }
     }
     (!terms.is_empty()).then(|| terms.join(" OR "))
@@ -2205,5 +2281,161 @@ mod tests {
             "budget + ellipsis"
         );
         assert!(snippet.ends_with('…'));
+    }
+
+    // --- 23. Search options -------------------------------------------------
+
+    /// The sentinels the app's own search command uses. Private-use codepoints,
+    /// so they cannot occur in a note the user typed.
+    const OPEN: &str = "\u{E000}";
+    const CLOSE: &str = "\u{E001}";
+
+    fn marked_options() -> SearchOptions {
+        SearchOptions {
+            marks: SnippetMarks {
+                open: OPEN,
+                close: CLOSE,
+            },
+            ..SearchOptions::default()
+        }
+    }
+
+    #[test]
+    fn custom_marks_wrap_matches_and_the_default_stays_markdown_bold() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        put(
+            &mut index,
+            &note(
+                "n_mk0001",
+                None,
+                NoteType::Note,
+                "2026-07-01",
+                &[],
+                "M",
+                "the sprinkler quote arrived",
+            ),
+        );
+
+        let marked = index
+            .search_notes_with(&query("sprinkler"), None, marked_options())
+            .unwrap();
+        let snippet = &marked.hits[0].snippet;
+        assert!(
+            snippet.contains(&format!("{OPEN}sprinkler{CLOSE}")),
+            "custom marks should wrap the match: {snippet:?}"
+        );
+
+        // The contract path is untouched, which is what keeps the MCP tool's
+        // output stable while the app parses its own delimiters.
+        let default = index.search_notes(&query("sprinkler"), None).unwrap();
+        assert!(default.hits[0].snippet.contains("**sprinkler**"));
+        assert!(!default.hits[0].snippet.contains(OPEN));
+    }
+
+    #[test]
+    fn a_body_with_literal_bold_is_unambiguous_under_custom_marks() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        put(
+            &mut index,
+            &note(
+                "n_mk0002",
+                None,
+                NoteType::Note,
+                "2026-07-01",
+                &[],
+                "B",
+                "the **quote** was **firm** on sprinkler work",
+            ),
+        );
+
+        let results = index
+            .search_notes_with(&query("sprinkler"), None, marked_options())
+            .unwrap();
+        let snippet = &results.hits[0].snippet;
+        // The note's own `**` survives verbatim, and only the sentinels mean
+        // "match" — the whole reason the app does not reuse the bold default.
+        assert!(snippet.contains("**quote**"), "{snippet:?}");
+        assert_eq!(snippet.matches(OPEN).count(), 1, "{snippet:?}");
+        assert_eq!(snippet.matches(CLOSE).count(), 1, "{snippet:?}");
+    }
+
+    #[test]
+    fn prefix_last_term_matches_a_word_still_being_typed() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        put(
+            &mut index,
+            &note(
+                "n_pf0001",
+                None,
+                NoteType::Note,
+                "2026-07-01",
+                &[],
+                "P",
+                "the fall tournament bracket",
+            ),
+        );
+
+        let partial = query("tourna");
+        assert!(
+            index.search_notes(&partial, None).unwrap().hits.is_empty(),
+            "the contract default matches whole words only"
+        );
+
+        let options = SearchOptions {
+            prefix_last_term: true,
+            ..SearchOptions::default()
+        };
+        let results = index.search_notes_with(&partial, None, options).unwrap();
+        assert_eq!(hit_ids(&results), vec!["n_pf0001".to_string()]);
+    }
+
+    #[test]
+    fn prefix_applies_only_to_the_final_term() {
+        // Earlier tokens are words the user finished typing, so they stay
+        // whole: "brack tourna" must not match on "brack" alone.
+        assert_eq!(
+            sanitize_fts_query("brack tourna", true).unwrap(),
+            "\"brack\" OR \"tourna\"*"
+        );
+        assert_eq!(
+            sanitize_fts_query("brack tourna", false).unwrap(),
+            "\"brack\" OR \"tourna\""
+        );
+        // Nothing to prefix is not an error.
+        assert!(sanitize_fts_query("?!?", true).is_none());
+    }
+
+    #[test]
+    fn prefixed_special_character_queries_never_error() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        put(
+            &mut index,
+            &note(
+                "n_pf0002",
+                None,
+                NoteType::Note,
+                "2026-07-01",
+                &[],
+                "S",
+                "some body text",
+            ),
+        );
+
+        let options = SearchOptions {
+            prefix_last_term: true,
+            ..SearchOptions::default()
+        };
+        for text in [
+            "don't",
+            "title:foo",
+            "NEAR(",
+            "a OR b",
+            "\"quoted\"",
+            "*",
+            "?!?",
+        ] {
+            let result = index.search_notes_with(&query(text), None, options);
+            assert!(result.is_ok(), "query {text:?} must not error");
+        }
     }
 }
