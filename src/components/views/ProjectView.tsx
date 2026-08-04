@@ -184,16 +184,22 @@ export function ProjectView({ slug }: Props) {
                         navigate({ kind: "noteEditor", noteId: note.id, project: slug })
                       }
                     >
-                      <p className="text-[14.5px] font-semibold text-ink">{note.title}</p>
-                      <p className="mt-1 font-data text-[10.5px] text-ink-faint tabular-nums">
+                      {/* Only phrasing content inside: the title, meta and
+                          snippet are block <span>s, because a button's content
+                          model allows nothing more and the whole row is the
+                          button (the same shape InboxView's row settled on). */}
+                      <span className="block text-[14.5px] font-semibold text-ink">
+                        {note.title}
+                      </span>
+                      <span className="mt-1 block font-data text-[10.5px] text-ink-faint tabular-nums">
                         {projectRowMeta(note)}
-                      </p>
+                      </span>
                       {/* A note can have no body to preview, and an empty line
                           would still take its 4px and its height. */}
                       {note.snippet && (
-                        <p className="mt-1 truncate text-[12.5px] text-ink-dim">
+                        <span className="mt-1 block truncate text-[12.5px] text-ink-dim">
                           {note.snippet}
-                        </p>
+                        </span>
                       )}
                     </button>
                   </li>

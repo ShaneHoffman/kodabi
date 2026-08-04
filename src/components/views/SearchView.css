@@ -67,8 +67,10 @@
    raised plane, one rule below it. The comment was right and the code was
    not: at `--surface` with no lift a search row read as a plane that had
    half-arrived, and it out-weighed the identical row in Project view.
-   `--tint` is what "tint" means, and it is what `.project__row` already uses
-   (docs/DESIGN_SYSTEM.md §2: the same meaning gets the same colour). */
+   `--tint` is what "tint" means, and it is the same wash a project's index row
+   takes (that row is now Grove's `hover:bg-wash`, in ProjectView.tsx, since
+   this view's own migration has not landed yet) — docs/DESIGN_SYSTEM.md §2:
+   the same meaning gets the same colour. */
 .search__row:hover,
 .search__row:focus-visible {
   background: var(--tint);

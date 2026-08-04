@@ -91,6 +91,25 @@ describe("groupNotes", () => {
     ]);
   });
 
+  it("gives a month's second run its own key, so the two cannot collide", () => {
+    // The keys are React keys, and the ordering above is not hypothetical: the
+    // backend sorts by instant, so a note written at 21:00 on May 31 in a
+    // western offset (04:00Z on June 1) leads a June note dated at midnight
+    // UTC, and May opens again below it. Two `<Fragment key="2026-05">`
+    // siblings would reconcile into one slot and lose a group on refetch.
+    const groups = groupNotes(
+      [note("2026-05-31T21:00:00-07:00"), note("2026-06-01"), note("2026-05-30")],
+      TODAY,
+    );
+
+    expect(groups.map((group) => group.key)).toEqual(["2026-05", "2026-06", "2026-05#1"]);
+    expect(shape(groups)).toEqual([
+      ["May 2026", 1],
+      ["June 2026", 1],
+      ["May 2026", 1],
+    ]);
+  });
+
   it("falls back to the raw month on a date it cannot name", () => {
     // The vault scanner does not reject a malformed frontmatter date, so this
     // renders "2026-00" rather than "undefined 2026". (A malformed month that

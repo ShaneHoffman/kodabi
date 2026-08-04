@@ -2,7 +2,13 @@ import type { NoteSummary } from "./useNotes";
 
 /** One run of consecutive notes under a single eyebrow label. `key` is the
  * month it was cut from (`"recent"` for the leading run), which is stable
- * across refetches in a way the label is not. */
+ * across refetches in a way the label is not.
+ *
+ * It is also UNIQUE across the returned groups, because it is a React key: a
+ * month can open more than one run (see `groupNotes`), and a second run of one
+ * takes a `#n` suffix rather than repeating the first one's key. Two siblings
+ * sharing a key is not a cosmetic warning — React reconciles them into one
+ * slot, so a refetch can drop or swap a whole group's rows. */
 export type NoteGroup = {
   key: string;
   label: string;
@@ -50,22 +56,46 @@ const RECENT_LABEL = "Recent";
  * testable; `todayIsoDate()` (useNotes.ts) is the local-day source callers use.
  * The comparison is `>=`, so a future-dated note joins "Recent" rather than
  * opening a month group above it.
+ *
+ * KNOWN SEAM, not fixed here: the backend orders by INSTANT and this groups by
+ * the LOCAL month, and the two disagree at a month boundary. `date_sort_key`
+ * (vault.rs) reads `2026-05-31T21:00:00-07:00` as 2026-06-01T04:00Z, newer than
+ * a `2026-06-01` note at midnight UTC, so that May note leads and the index
+ * heads "May 2026" above "June 2026" — and a month can therefore open more than
+ * one run. Both halves are deliberate on their own (the sort wants a real
+ * instant; the grouping must not re-zone a note out of the month it says it was
+ * written in), so reconciling them is a decision, not a review fix. What is
+ * handled here is the consequence that is not a judgement call: each run gets
+ * its own `key`.
  */
 export function groupNotes(notes: NoteSummary[], todayIso: string): NoteGroup[] {
   const currentMonth = todayIso.slice(0, 7);
   const groups: NoteGroup[] = [];
+  // How many runs each label has already opened, so a month that opens a
+  // second one gets a key of its own. A run is identified by its label rather
+  // than by the key it will carry, precisely because the key is about to stop
+  // being the same string twice.
+  const runsSoFar = new Map<string, number>();
 
   for (const note of notes) {
     const month = note.date.slice(0, 7);
     const recent = month >= currentMonth;
-    const key = recent ? "recent" : month;
+    const label = recent ? RECENT_LABEL : monthLabel(month);
     const last: NoteGroup | undefined = groups[groups.length - 1];
 
-    if (last?.key === key) {
+    if (last?.label === label) {
       last.notes.push(note);
-    } else {
-      groups.push({ key, label: recent ? RECENT_LABEL : monthLabel(month), notes: [note] });
+      continue;
     }
+
+    const previousRuns = runsSoFar.get(label) ?? 0;
+    runsSoFar.set(label, previousRuns + 1);
+    const monthKey = recent ? "recent" : month;
+    groups.push({
+      key: previousRuns === 0 ? monthKey : `${monthKey}#${previousRuns}`,
+      label,
+      notes: [note],
+    });
   }
 
   return groups;
