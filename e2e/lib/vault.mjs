@@ -122,7 +122,7 @@ const FIFTY_TURNS = Array.from({ length: 50 }, (_, index) => [
  */
 export const SCENARIOS = {
   "retention/both": {
-    why: "Both artifacts survived — the maximal toggle, `Source · recording · 3 segments`.",
+    why: "Both artifacts survived — the maximal rail, an Audio chip and a Transcript chip.",
     sessions: [
       {
         key: "both",
@@ -144,13 +144,13 @@ export const SCENARIOS = {
         tags: ["budgeting"],
         source: { session: "both" },
         confidence: 0.92,
-        body: "The maximal reading surface. Expect `Source · recording · 3 segments` at rest, and both the player and the turns behind the one toggle.",
+        body: "The maximal reading surface. Expect an Audio chip and a Transcript chip in the details rail, each opening its own artifact.",
       },
     ],
   },
 
   "retention/transcript-only": {
-    why: "Retention kept the transcript and pruned the recording — `Source · 3 segments`.",
+    why: "Retention kept the transcript and pruned the recording — a Transcript chip and no Audio chip.",
     sessions: [
       {
         key: "transcript",
@@ -170,7 +170,7 @@ export const SCENARIOS = {
         dateFrom: "transcript",
         source: { session: "transcript" },
         confidence: 0.88,
-        body: "Expect `Source · 3 segments`, no pruned sentence, and no player once opened.",
+        body: "Expect a Transcript chip, no pruned sentence, and no Audio chip at all.",
       },
     ],
   },
@@ -196,7 +196,7 @@ export const SCENARIOS = {
         dateFrom: "recording",
         source: { session: "recording" },
         confidence: 0.81,
-        body: "Expect `Source · recording` plus the visible no-longer-stored sentence, and only the player behind the toggle.",
+        body: "Expect an Audio chip plus the visible no-longer-stored sentence, and no Transcript chip.",
       },
     ],
   },
@@ -220,7 +220,7 @@ export const SCENARIOS = {
   },
 
   "retention/empty-transcript": {
-    why: "A transcript that exists and holds nothing — `Source · 0 segments`, opening onto an empty panel.",
+    why: "A transcript that exists and holds nothing — a `0 words` chip, opening onto an empty column.",
     sessions: [
       { key: "empty", minutesAgo: 330, slug: "empty-transcript", artifacts: ["jsonl"], turns: [] },
     ],
@@ -234,13 +234,13 @@ export const SCENARIOS = {
         dateFrom: "empty",
         source: { session: "empty" },
         confidence: 0.69,
-        body: "A captured session where nothing was ever transcribed. Expect `Source · 0 segments` and an empty panel. The soft spot is real; this fixture pins it rather than pretending it is not there.",
+        body: "A captured session where nothing was ever transcribed. Expect a `Transcript 0 words` chip opening onto nothing. The soft spot is real; this fixture pins it rather than pretending it is not there.",
       },
     ],
   },
 
   "composition/at-ceiling": {
-    why: "A filed session note at the composition ceiling — three clusters, four controls (back link, Edit, Delete note, Source). Preview-only.",
+    why: "A filed session note at the composition ceiling — five controls (back link, Edit, Delete note, Audio, Transcript). Preview-only.",
     sessions: [
       {
         key: "budget",
@@ -279,6 +279,10 @@ export const SCENARIOS = {
           "",
           "- [ ] Jane to send the signed budget memo to finance.",
           "- [ ] Priya to request formal bids from GreenFlow and two alternates.",
+          // One done, so the preview shows both checkbox states. The filled box
+          // and the struck label are half of what a task list looks like, and
+          // every other fixture leaves that half unrendered.
+          "- [x] Circulate the 2011 install records ahead of the walk-through.",
         ].join("\n"),
       },
     ],
@@ -343,7 +347,7 @@ export const SCENARIOS = {
         // No .wav on purpose: fifty turns at 75s spacing is a 61-minute
         // meeting, and an 8-second placeholder tone beside it would be the
         // fixture lying about what it holds.
-        body: "Expect `Source · 50 segments`, every one of them rendered, and the last offsets in `h:mm:ss`.",
+        body: "Expect a Transcript chip, all fifty turns rendered, and the last offsets in `h:mm:ss`.",
       },
     ],
   },
@@ -672,7 +676,7 @@ export async function seedVault(root, scenarioNames = SCENARIO_NAMES, { force = 
       if (entry.artifacts.includes("jsonl")) {
         const body = (entry.turns ?? []).map((turn, index) => segment(index, turn)).join("\n");
         // A trailing newline after the last line, and nothing at all when there
-        // are no turns — an empty file is the `Source · 0 segments` state, which
+        // are no turns — an empty file is the `Transcript 0 words` state, which
         // `read_raw_session` parses fine.
         await writeFile(join(root, "sessions", `${stem}.jsonl`), body === "" ? "" : `${body}\n`);
         written.push(`${stem}.jsonl`);
@@ -700,6 +704,15 @@ export async function seedVault(root, scenarioNames = SCENARIO_NAMES, { force = 
         stem,
         capturedAt: capturedAt.toISOString(),
         files: written,
+        turns: (entry.turns ?? []).length,
+        // What the note screen's Transcript chip will read, counted the way
+        // `SessionPanel` counts it. Reported rather than restated in the test,
+        // for the same reason the titles are: a catalogue edit must not leave a
+        // scenario chasing a number that moved.
+        words: (entry.turns ?? []).reduce(
+          (total, [, , , text]) => total + text.split(/\s+/).filter(Boolean).length,
+          0,
+        ),
       });
     }
 

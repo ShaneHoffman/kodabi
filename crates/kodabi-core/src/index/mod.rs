@@ -33,7 +33,9 @@ pub use outstanding::{OutstandingItem, OutstandingParams, OutstandingResults, Ou
 
 pub use scope::ProjectScope;
 
-pub use search::{PageInfo, SearchHit, SearchParams, SearchResults, TagMatch};
+pub use search::{
+    PageInfo, SearchHit, SearchOptions, SearchParams, SearchResults, SnippetMarks, TagMatch,
+};
 
 use std::path::Path;
 use std::sync::Once;

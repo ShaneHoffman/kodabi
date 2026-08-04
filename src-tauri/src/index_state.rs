@@ -28,7 +28,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use kodabi_core::embed::{self, Embedder};
-use kodabi_core::index::{IndexedNote, NoteIndex};
+use kodabi_core::index::{IndexedNote, NoteIndex, SearchOptions, SearchParams, SearchResults};
 use kodabi_core::reconcile;
 use kodabi_core::watch::{self, VaultWatcher};
 use tauri::{AppHandle, Emitter, Manager};
@@ -69,10 +69,42 @@ pub struct IndexState {
     /// (logged at startup). Wrapped in a `Mutex` so the shared state stays
     /// `Sync` — the lock is held only for a non-blocking channel send.
     sender: Option<Mutex<Sender<Job>>>,
+    /// The same index the worker writes, kept here so a *read* can reach it
+    /// without a round trip through the job channel. Every write still goes
+    /// through the worker: sharing the handle adds a reader, not a second
+    /// writer.
+    index: Option<Arc<Mutex<NoteIndex>>>,
+    /// The embedder the worker indexes with, so a query is embedded by the same
+    /// model as the passages it is scored against. `None` in the default build.
+    embedder: Option<Arc<dyn Embedder>>,
     /// Keeps the OS file watcher alive for the app's lifetime; dropping it stops
     /// watching. `None` when the index or the vault path is unavailable. The
     /// `Mutex` only makes the state `Sync`; it is never locked after construction.
     _watcher: Option<Mutex<VaultWatcher>>,
+}
+
+/// A cloneable read handle onto the index, for commands that query it.
+///
+/// It exists because managed state cannot cross onto a blocking thread: a
+/// command clones this, moves it into `spawn_blocking`, and reads there. The
+/// index worker holds the lock across a whole-vault scan, so a search really can
+/// wait on it — which is exactly why that wait must not sit on the IPC thread.
+#[derive(Clone)]
+pub struct SearchHandle {
+    index: Arc<Mutex<NoteIndex>>,
+    embedder: Option<Arc<dyn Embedder>>,
+}
+
+impl SearchHandle {
+    /// Runs one search under the index lock. Blocking; call it off the IPC
+    /// thread.
+    pub fn search(
+        &self,
+        params: &SearchParams,
+        options: SearchOptions,
+    ) -> kodabi_core::index::Result<SearchResults> {
+        lock(&self.index).search_notes_with(params, self.embedder.as_deref(), options)
+    }
 }
 
 impl IndexState {
@@ -84,6 +116,8 @@ impl IndexState {
             eprintln!("note index unavailable — notes will not be searchable this session");
             return Self {
                 sender: None,
+                index: None,
+                embedder: None,
                 _watcher: None,
             };
         };
@@ -98,7 +132,11 @@ impl IndexState {
         let (sender, jobs) = mpsc::channel::<Job>();
         let app_handle = app.clone();
         let worker_root = vault_root.clone();
-        std::thread::spawn(move || run_worker(app_handle, index, embedder, worker_root, jobs));
+        let worker_index = Arc::clone(&index);
+        let worker_embedder = embedder.clone();
+        std::thread::spawn(move || {
+            run_worker(app_handle, worker_index, worker_embedder, worker_root, jobs)
+        });
 
         // A full reconciliation scan at startup converges files added or edited
         // while the app was closed, before any live watcher event arrives.
@@ -121,8 +159,19 @@ impl IndexState {
 
         Self {
             sender: Some(Mutex::new(sender)),
+            index: Some(index),
+            embedder,
             _watcher: watcher,
         }
+    }
+
+    /// A handle for querying the index, or `None` when the index is unavailable
+    /// this session (the same condition that makes every write a no-op).
+    pub fn search_handle(&self) -> Option<SearchHandle> {
+        Some(SearchHandle {
+            index: Arc::clone(self.index.as_ref()?),
+            embedder: self.embedder.clone(),
+        })
     }
 
     /// Hands `note` to the background worker to be upserted and (re-)embedded,

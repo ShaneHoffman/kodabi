@@ -23,8 +23,12 @@ import "./ViewFrame.css";
  *             (its rows cap themselves).
  *   health  — system state to recover from. A short list of pre-lifted cards.
  *             Caps no column.
- *   doc     — a note, on the measure it was written to (--measure-doc).
- *   search  — results under a pinned query (--measure-search).
+ *   doc     — a note, on the measure it was written to (--measure-doc). No
+ *             consumer since the note editor's Grove ticket: a note is two
+ *             columns now, and one measure cannot hold both. Kept with the
+ *             legacy layer it belongs to rather than removed on its own.
+ *   search  — results under a query field. Caps no column: the field runs the
+ *             panel's full width, and its rows are rows.
  *   terminal— the embedded Claude Code terminal. A small masthead over a
  *             full-bleed pane: its body (the xterm mount) grows to fill the
  *             height the gutter leaves, and scrolls inside itself.
@@ -36,7 +40,10 @@ import "./ViewFrame.css";
  * `doc` and `search` render no header of their own: their headers are a
  * genuinely different shape (a back link and its own actions; a query field)
  * and arrive as children. Those two therefore accept neither `action` nor
- * `summary` — both are type errors there rather than silent no-ops.
+ * `summary` — both are type errors there rather than silent no-ops. They may
+ * still pass `title`, and `search` does: its field is a header's *content*, not
+ * a header's shape, so it sits under the ordinary head like any other view's
+ * rows do.
  */
 type Variant =
   | "queue"
@@ -146,10 +153,13 @@ export function ViewFrame({
     // its name) would otherwise lose its name on the way to Grove — the same
     // failure above, arriving from the opposite direction.
     //
-    // KNOWN GAP, still: `doc` and `search` pass none of the three, so
-    // NoteEditorView's and SearchView's sections remain unnamed. `label` is now
-    // the mechanism for closing that; doing so is those two views' own ticket,
-    // since each draws its own header and has to decide what it is called.
+    // The KNOWN GAP this used to describe is closed from every side now:
+    // `doc` has no consumer at all (the note editor's Grove ticket left this
+    // frame entirely for its own `NoteFrame`, which names its own landmark),
+    // `search` passes a plain `title` rather than a composed one, and a
+    // composed title elsewhere reaches for `label`. Neither of the first two
+    // closures came from a change here; a future headerless variant or
+    // composed title is what `label` is for.
     <section
       aria-label={label ?? landmarkName(title) ?? landmarkName(eyebrow)}
       className={`view view--${variant}`}
@@ -183,8 +193,9 @@ function landmarkName(node: ReactNode): string | undefined {
  * from opening at a note's size, and the Grove shell answers that differently:
  * every view opens at one step inside the panel, and what tells them apart is
  * the density and shape below the head (docs/DESIGN_SYSTEM.md §1). The note
- * editor still spells its own larger step by hand, because a document genuinely
- * is the exception.
+ * editor was the last holdout and came down too: it spells this same step by
+ * hand, in its own frame, because its head is the document's first line rather
+ * than a frame header.
  */
 function renderHeader({
   eyebrow,

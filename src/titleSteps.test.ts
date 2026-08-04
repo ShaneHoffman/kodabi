@@ -85,23 +85,25 @@ describe("a view-title step is a triple, not a size", () => {
     expect(offences()).toEqual([]);
   });
 
-  it("actually looks at the files that carry the steps", () => {
+  it("actually reads the source tree", () => {
     // Without this, a broken walk or a too-eager exclude would make the check
     // above pass by scanning nothing at all.
     //
-    // The floor RATCHETS DOWN as Grove lands: a migrated screen sets its title
-    // with Grove utilities and stops spelling the legacy triple at all
-    // (`DestructiveConfirmDialog` was the fifth, until the primitives ticket
-    // moved it onto the Grove Dialog; `ConsentNudge` and `CreateProjectDialog`
-    // were the fourth and third, until the dialogs ticket did the same;
-    // `ViewFrame` was the second, until the shell ticket standardized every
-    // view head on one Grove step). Lower it to match reality when a migration
-    // takes one out; the whole file goes with the legacy layer.
+    // This used to count the files that still SPELL a step, ratcheting the
+    // floor down as Grove landed (`DestructiveConfirmDialog` was the fifth,
+    // until the primitives ticket moved it onto the Grove Dialog; `ConsentNudge`
+    // and `CreateProjectDialog` were the fourth and third, until the dialogs
+    // ticket did the same; `ViewFrame` was the second, until the shell ticket
+    // standardized every view head on one Grove step; `NoteEditorView` was the
+    // last, until this ticket). That floor has reached zero, and a floor of zero
+    // cannot tell "nothing left to guard" from "the walk is broken" — which is
+    // the one thing this test exists to tell apart.
     //
-    // One left: NoteEditorView, which spells the `doc` step by hand.
-    const scanned = sourceFiles(join(ROOT, "src")).filter((file) =>
-      STEPS.some((step) => readFileSync(file, "utf8").includes(`text-title-${step}`)),
-    );
-    expect(scanned.length).toBeGreaterThanOrEqual(1);
+    // So it checks the walk instead, which is what it was always really for.
+    // The guard above still forbids something real: `--fs-title-*` lives on in
+    // the frozen legacy layer (design/tokens.css, bridged by src/index.css), so
+    // the seven screens that have not migrated can still spell a bare size. The
+    // whole file goes when that layer does.
+    expect(sourceFiles(join(ROOT, "src")).length).toBeGreaterThan(50);
   });
 });

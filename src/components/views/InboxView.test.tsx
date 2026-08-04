@@ -207,6 +207,9 @@ describe("InboxView", () => {
       kind: "noteEditor",
       noteId: "n_a1b2c3",
       project: "Inbox",
+      // The note screen's back link returns to where the note was opened from,
+      // so opening one says where that was.
+      origin: { kind: "inbox" },
     });
   });
 
@@ -227,6 +230,9 @@ describe("InboxView", () => {
       kind: "noteEditor",
       noteId: "n_a1b2c3",
       project: "Inbox",
+      // The note screen's back link returns to where the note was opened from,
+      // so opening one says where that was.
+      origin: { kind: "inbox" },
     });
   });
 
@@ -829,6 +835,7 @@ describe("InboxView", () => {
           kind: "noteEditor",
           noteId: "n_x9y8z7",
           project: "briarwood-golf",
+          origin: { kind: "inbox" },
         });
       });
     });

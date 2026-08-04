@@ -181,7 +181,12 @@ export function ProjectView({ slug }: Props) {
                       type="button"
                       className={PROJECT_ROW}
                       onClick={() =>
-                        navigate({ kind: "noteEditor", noteId: note.id, project: slug })
+                        navigate({
+                          kind: "noteEditor",
+                          noteId: note.id,
+                          project: slug,
+                          origin: { kind: "project", slug },
+                        })
                       }
                     >
                       {/* Only phrasing content inside: the title, meta and
