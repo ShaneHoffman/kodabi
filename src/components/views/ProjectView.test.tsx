@@ -9,7 +9,7 @@ import {
   onCommand,
   resetTauriMocks,
 } from "../../test/tauri";
-import type { NoteSummary } from "../../useNotes";
+import { todayIsoDate, type NoteSummary } from "../../useNotes";
 import type { Project } from "../../useProjects";
 import { useVaultChangedBridge } from "../../useVaultChangedBridge";
 import { CapturePipelineProvider } from "../providers/CapturePipelineProvider";
@@ -197,17 +197,62 @@ describe("ProjectView index rows", () => {
     await user.click(await screen.findByRole("button", { name: /Growth/ }));
   }
 
-  it("names a row's kind when it is not a plain note", async () => {
+  it("leads a row's meta with the kind when it is not a plain note", async () => {
     await openGrowthWith([
       note({ id: "n_g7h8i9", title: "Irrigation contractor comparison", type: "chat" }),
     ]);
 
-    expect(await screen.findByText("2026-07-10 · chat")).toBeInTheDocument();
+    // Kind first, then the day: the row stacks, so its meta line is a caption
+    // under a title rather than a column to scan down.
+    expect(await screen.findByText("chat · 2026-07-10")).toBeInTheDocument();
   });
 
   it("says nothing about kind on a plain note's row", async () => {
     await openGrowthWith([note({ id: "n_a1b2c3", title: "Quarterly planning" })]);
 
     expect(await screen.findByText("2026-07-10")).toBeInTheDocument();
+  });
+
+  it("previews the body under the title, and draws nothing when there is none", async () => {
+    await openGrowthWith([
+      note({
+        id: "n_a1b2c3",
+        title: "Quarterly planning",
+        snippet: "Three fairways need reseeding before the club championship.",
+      }),
+      note({ id: "n_d4e5f6", title: "Range netting quote" }),
+    ]);
+
+    expect(
+      await screen.findByText("Three fairways need reseeding before the club championship."),
+    ).toBeInTheDocument();
+    // The second row carries an empty snippet, so it renders the title and the
+    // meta and stops — not a third, blank line holding its height open.
+    const bare = screen.getByRole("button", { name: /Range netting quote/ });
+    expect(bare.textContent).toBe("Range netting quote2026-07-10");
+  });
+
+  it("groups this month's notes under Recent and older ones under their month", async () => {
+    // Dated off the real clock rather than a frozen one: the grouping's own
+    // boundary cases are unit-tested in noteGroups.test.ts, and what this
+    // pins is that the view renders the labels at all.
+    await openGrowthWith([
+      note({ id: "n_a1b2c3", title: "Quarterly planning", date: todayIsoDate() }),
+      note({ id: "n_d4e5f6", title: "Range netting quote", date: "2025-01-15" }),
+    ]);
+
+    expect(await screen.findByText("Recent")).toBeInTheDocument();
+    expect(screen.getByText("January 2025")).toBeInTheDocument();
+  });
+
+  it("heads the view with the project's name and its slug, not the raw path", async () => {
+    await openGrowthWith([note({ id: "n_a1b2c3", title: "Quarterly planning" })]);
+
+    expect(
+      await screen.findByRole("heading", { name: "Growth", level: 2 }),
+    ).toBeInTheDocument();
+    // The count and the slug share the header's data line: the folder keeps the
+    // address every other surface calls it by.
+    expect(screen.getByText("1 note · Growth")).toBeInTheDocument();
   });
 });

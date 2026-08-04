@@ -53,6 +53,13 @@ type BaseProps = {
   eyebrow?: ReactNode;
   /** The view's name, at the one step every view opens on. */
   title?: ReactNode;
+  /**
+   * The section landmark's accessible name, for a view whose `title` is
+   * composed of elements rather than a plain string. Only that case needs it:
+   * a string title already names the landmark, and passing both here would be
+   * two sources for one name.
+   */
+  label?: string;
   children: ReactNode;
 };
 
@@ -121,6 +128,7 @@ export function ViewFrame({
   variant,
   eyebrow,
   title,
+  label,
   action,
   summary,
   children,
@@ -131,15 +139,19 @@ export function ViewFrame({
     // Named, so it is a real region landmark. A bare <section> has no
     // accessible name and is not exposed as one at all, which left the window
     // with a main, an aside and a nav and nothing identifying the view inside
-    // them. `title` when there is one, else `eyebrow`.
+    // them. `label` when one is given, else `title`, else `eyebrow`.
     //
-    // KNOWN GAP, deliberately not fixed here: `doc` and `search` pass neither,
-    // so NoteEditorView's and SearchView's sections are still unnamed — the
-    // exact failure above, for the two views that draw their own header. The
-    // fix is a decision of its own (a `label` prop, an aria-label on the view's
-    // own <header>, or accept it), not a side effect of the action contract.
+    // `label` exists because `landmarkName` only names a landmark from a plain
+    // string, and a view whose title is composed (ProjectView's hue dot beside
+    // its name) would otherwise lose its name on the way to Grove — the same
+    // failure above, arriving from the opposite direction.
+    //
+    // KNOWN GAP, still: `doc` and `search` pass none of the three, so
+    // NoteEditorView's and SearchView's sections remain unnamed. `label` is now
+    // the mechanism for closing that; doing so is those two views' own ticket,
+    // since each draws its own header and has to decide what it is called.
     <section
-      aria-label={landmarkName(title) ?? landmarkName(eyebrow)}
+      aria-label={label ?? landmarkName(title) ?? landmarkName(eyebrow)}
       className={`view view--${variant}`}
     >
       <div className="view__column">
