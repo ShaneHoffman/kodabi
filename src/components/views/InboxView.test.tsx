@@ -203,7 +203,7 @@ describe("InboxView", () => {
       await screen.findByText("Sprinkler quotes");
 
       // `folderHue("briarwood-golf")` is pinned by useProjects.test.ts.
-      expect(screen.getByTestId("inbox-row")).toHaveClass("border-l-coral");
+      expect(screen.getByTestId("inbox-card")).toHaveClass("border-l-coral");
       const guess = screen.getByTestId("inbox-row-guess");
       expect(guess).toHaveTextContent("→ briarwood-golf");
       // Same hue in the words as on the edge: one project, one colour.
@@ -213,7 +213,7 @@ describe("InboxView", () => {
       // outranks a bare `border-l-coral` on specificity — so without the
       // restatement the guess colour would drop off the edge exactly while
       // the card is being pointed at.
-      expect(screen.getByTestId("inbox-row")).toHaveClass("hover:border-l-coral");
+      expect(screen.getByTestId("inbox-card")).toHaveClass("hover:border-l-coral");
     });
 
     it("keeps its neutral edge under the pointer too", async () => {
@@ -222,7 +222,7 @@ describe("InboxView", () => {
       renderInbox();
       await screen.findByText("Ideas from the drive home");
 
-      expect(screen.getByTestId("inbox-row")).toHaveClass(
+      expect(screen.getByTestId("inbox-card")).toHaveClass(
         "border-l-ink-faint",
         "hover:border-l-ink-faint",
       );
@@ -234,7 +234,7 @@ describe("InboxView", () => {
       renderInbox();
       await screen.findByText("Ideas from the drive home");
 
-      expect(screen.getByTestId("inbox-row")).toHaveClass("border-l-ink-faint");
+      expect(screen.getByTestId("inbox-card")).toHaveClass("border-l-ink-faint");
       expect(screen.getByTestId("inbox-row-guess")).toHaveTextContent("no confident guess");
     });
 
@@ -252,7 +252,7 @@ describe("InboxView", () => {
       renderInbox();
       await screen.findByText("Ideas from the drive home");
 
-      expect(screen.getByTestId("inbox-row")).toHaveClass("border-l-ink-faint");
+      expect(screen.getByTestId("inbox-card")).toHaveClass("border-l-ink-faint");
       expect(screen.getByTestId("inbox-row-guess")).toHaveTextContent("no confident guess");
     });
 
@@ -337,7 +337,7 @@ describe("InboxView", () => {
     renderInbox();
     await screen.findByText("Quarterly planning");
 
-    const classes = Array.from(screen.getByTestId("inbox-row").classList);
+    const classes = Array.from(screen.getByTestId("inbox-card").classList);
     expect(classes.filter((name) => name.startsWith("transition-["))).toHaveLength(1);
     expect(classes.filter((name) => /^duration-\d/.test(name))).toHaveLength(1);
     // At rest that one recipe is the hover lift's, naming the two properties
@@ -940,7 +940,7 @@ describe("InboxView", () => {
       expect(rows).toHaveLength(1);
       // The arriving row plays the entrance the placeholder was holding its
       // place for, so the handoff reads as a fill-in rather than a swap.
-      expect(rows[0].closest("[data-testid='inbox-row']")).toHaveClass(
+      expect(rows[0].closest("[data-testid='inbox-card']")).toHaveClass(
         "starting:opacity-0",
       );
     });

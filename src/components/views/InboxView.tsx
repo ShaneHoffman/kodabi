@@ -779,7 +779,7 @@ function InboxRow({
     <li className={clsx(LIST_SLOT, leaving && LIST_SLOT_LEAVING)}>
       <div className={clsx(LIST_SLOT_INNER, leaving && LIST_SLOT_INNER_LEAVING)}>
         <div
-          data-testid="inbox-row"
+          data-testid="inbox-card"
           className={clsx(
             "glass-card flex items-center gap-6 border-l-[3px] py-4 pr-5 pl-5",
             // `hover:` is redefined in index.css as (hover: hover) and
@@ -814,9 +814,15 @@ function InboxRow({
                   ),
           )}
         >
+          {/* `inbox-row` names the OPENING control, not the card: the e2e
+              harness's `clickRowLabelled` (e2e/lib/page.mjs) calls `.click()`
+              directly on the element carrying this testid, and a native click
+              dispatches at its target and bubbles up — never down into a
+              child — so the testid has to sit on the thing that is actually
+              clickable. The outer card is `inbox-card`. */}
           <button
             type="button"
-            data-testid="inbox-row-body"
+            data-testid="inbox-row"
             className="focus-ring-inset min-w-0 flex-1 cursor-pointer rounded-[6px] text-left"
             onClick={() =>
               navigate({
