@@ -27,9 +27,11 @@ type Props = {
 /**
  * One line of capture status, paired with the listening dot.
  *
- * Both on-air surfaces render this — the sidebar's ListeningIndicator and the
- * always-on-top CaptureOverlayPill — and both used to spell out the same
- * uppercase treatment and the same live/faint ternary independently.
+ * The remaining pre-Grove on-air surfaces render this — the always-on-top
+ * CaptureOverlayPill and the quick-capture window — where they used to spell
+ * out the same uppercase treatment and the same live/faint ternary
+ * independently. (The main window's indicator no longer does: it is the Grove
+ * ListenPill in the transport bar, which carries its own label.)
  *
  * `role="status"` (polite) rather than `alert`: capture state is progress the
  * user initiated, not a failure sprung on them. One region per concern, so a

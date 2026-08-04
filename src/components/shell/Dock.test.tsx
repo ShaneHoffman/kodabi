@@ -2,7 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CapturePipelineProvider } from "../providers/CapturePipelineProvider";
-import { Sidebar } from "./Sidebar";
+import { Dock } from "./Dock";
 import { MainContent } from "./MainContent";
 import { NavigationProvider } from "../providers/NavigationProvider";
 import { DISTILL_STATE_EVENT } from "../../events";
@@ -22,12 +22,12 @@ function makeSession(slug: string, dismissed = false): FailedSession {
   };
 }
 
-/** The reads the sidebar and the views behind it make. */
+/** The reads the dock and the views behind it make. */
 function serveVault(sessions: FailedSession[] = []): void {
   onCommand("list_projects", () => ({ inbox_note_count: 0, projects: [] }));
   onCommand("list_notes", () => []);
   onCommand("list_failed_sessions", () => sessions);
-  // The listening indicator in the footer reads this on mount; left unrouted it
+  // The capture pipeline around the dock reads this on mount; left unrouted it
   // would reject and put an error beside the row under test.
   onCommand("capture_phase", () => ({
     phase: "idle",
@@ -39,14 +39,14 @@ function renderShell() {
   return render(
     <NavigationProvider>
       <CapturePipelineProvider>
-        <Sidebar onOpenPalette={() => {}} />
+        <Dock />
         <MainContent />
       </CapturePipelineProvider>
     </NavigationProvider>,
   );
 }
 
-describe("Sidebar needs-attention row", () => {
+describe("Dock needs-attention row", () => {
   beforeEach(() => {
     resetTauriMocks();
   });
@@ -152,5 +152,31 @@ describe("Sidebar needs-attention row", () => {
       screen.getByRole("heading", { name: "Needs attention", level: 2 }),
     ).toBeInTheDocument();
     expect(row).toHaveAttribute("aria-current", "page");
+  });
+});
+
+describe("Dock layout", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  // jsdom has no layout, so this pins the STRUCTURE that produces the
+  // behaviour: the destinations list is the scroll container, and the tools at
+  // the foot sit outside it. Put the scroll on the <aside> instead and the
+  // foot stops being a foot — `mt-auto` distributes free space, an overflowing
+  // column has none, and a vault past a dozen folders scrolls Chat and
+  // Terminal below the fold.
+  it("scrolls the destinations, not the pane, so the tools stay pinned", async () => {
+    serveVault();
+    renderShell();
+
+    const destinations = await screen.findByRole("navigation", {
+      name: "Knowledge base",
+    });
+    const tools = screen.getByRole("navigation", { name: "Tools" });
+
+    expect(destinations).toHaveClass("min-h-0", "flex-1", "overflow-y-auto");
+    expect(destinations).not.toContainElement(tools);
+    expect(tools.parentElement).not.toHaveClass("overflow-y-auto");
   });
 });

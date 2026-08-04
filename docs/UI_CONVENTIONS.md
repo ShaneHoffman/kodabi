@@ -65,10 +65,29 @@ The one thing arbitrary values may **not** carry is a colour (DESIGN_SYSTEM §7)
 | `gap-3.5` | Cards in a list |
 | `gap-5` | The dock and the main panel |
 | `p-5` | The body's frame around dock + panel |
-| `px-10 py-8` | Inside the main panel |
+| 34px / 40px | Inside the main panel (`--gutter-view-y` / `-x`, owned by `ViewFrame`) |
 
 These are the prototype's numbers, not a law. They are written down so a new screen starts from the
 same rhythm rather than re-deriving one.
+
+The panel's interior gutter is still spelled in the legacy token layer because `ViewFrame` owns it
+for every view at once; a screen's own Grove ticket is what moves it onto utilities. It shrank from
+44/60 when the shell landed: the panel is now an inset pane with 20px of ground around it, so the
+old pair stacked two gutters and pushed every view's first line a third of the way down the glass.
+
+### A view's head
+
+One shape for every view that draws one, so two screens cannot open at different volumes:
+
+| Part | Written |
+| --- | --- |
+| Eyebrow | `font-data text-[10px] uppercase tracking-[0.22em] text-ink-faint` |
+| Title | `text-[26px] font-semibold leading-[1.15] tracking-[-0.01em] text-ink` |
+| Summary | `font-data text-[11px] text-ink-dim tabular-nums` |
+| Together | Title and summary share a baseline: `flex items-baseline gap-4` |
+
+`ViewFrame` draws it — pass `eyebrow` / `title` / `summary`, never the classes. The note editor is
+the one exception, and it spells its larger step by hand because a document genuinely is one.
 
 ---
 
@@ -284,15 +303,24 @@ palette, and a toaster; the arithmetic is different at six.
 
 ## 5. Composition — where a control goes
 
-*Unchanged by Grove. This section is about structure, and Grove restyled surfaces without moving
-where things live.*
+*Mostly unchanged by Grove. This section is about structure, and Grove restyled surfaces without
+moving where things live. The one addition is the transport bar below.*
 
-### The shell has two regions, and a view fills one
+### The shell is a transport bar over two regions, and a view fills one
 
-`AppShell` renders the dock beside a single `<main>`, with the capture toast, the command palette and
-the consent nudge overlaid on top rather than docked beside. `MainContent` is a flat switch and every
-destination renders into that one main slot. **There is no inspector, no split, and no third rail.**
-A view that needs more room takes depth, not width.
+`AppShell` renders a transport bar above the dock and a single `<main>`, with the capture toast, the
+command palette and the consent nudge overlaid on top rather than docked beside. `MainContent` is a
+flat switch and every destination renders into that one main slot. **There is no inspector, no split,
+and no third rail.** A view that needs more room takes depth, not width.
+
+The transport bar holds what belongs to the WINDOW rather than to any view: the wordmark (which is
+also the way home), the listening pill, and the two pieces of chrome (Commands, Settings). It is not
+a third region and no view draws into it. The listening pill lives there for one reason: it is the
+app's on-air surface, and it must never move. Below, in a dock that grows, it shared a rail with
+destinations and sat under a list whose length it depended on.
+
+The dock therefore holds destinations only, in three groups: the vault-wide three (Inbox, Needs
+attention, Search), the folders, and the two tools under a hairline (Chat, Terminal).
 
 That is a decision, not an accident of what got built first. A region that some destinations have and
 others don't makes the main column's width depend on where you navigated, which reads as the layout
@@ -359,8 +387,8 @@ namespaced apart from the bridged ones (`--color-ground` vs `--color-bg`, `font-
 element, and with no `tailwind-merge` the winner is Tailwind's emission order, not the className.
 Today the legacy utility wins both (it sorts after), so an unmigrated screen keeps its own size and
 colour and its own component CSS keeps its geometry — which is why the primitives ticket left the
-sidebar looking as it did. Do not rely on it: when you migrate a screen, strip those from its call
-sites rather than reasoning about who wins.
+pre-Grove rail looking as it did. Do not rely on it: when you migrate a screen, strip those from its
+call sites rather than reasoning about who wins.
 
 **Check the built CSS when a utility is load-bearing.** `pnpm build`, then read
 `dist/assets/index-*.css`. That is how the press was caught animating nothing (`transition-transform`

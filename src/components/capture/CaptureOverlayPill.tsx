@@ -8,8 +8,8 @@ import { SpiritMark } from "./SpiritMark";
 import "./CaptureOverlayPill.css";
 
 /**
- * The always-on-top capture pill: the same mark-plus-status pairing as
- * {@link ListeningIndicator}, but in its own frameless window that floats over
+ * The always-on-top capture pill: the same mark-plus-status pairing as the
+ * transport bar's ListenPill, but in its own frameless window that floats over
  * full-screen apps.
  *
  * It exists for the one case the in-window indicator and the tray both miss:
@@ -23,8 +23,9 @@ import "./CaptureOverlayPill.css";
  */
 export function CaptureOverlayPill() {
   const captureState = useCaptureState();
-  // Same split as the sidebar indicator: the mark reacts instantly, the text
-  // follows a debounced state so a flapping source doesn't strobe the label.
+  // Same split as the transport bar's ListenPill: the mark reacts instantly,
+  // the text follows a debounced state so a flapping source doesn't strobe the
+  // label.
   const label = captureLabel(useDebouncedValue(captureState, 400));
 
   // Belt and braces. The window should already be hidden by the time capture

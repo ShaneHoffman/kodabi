@@ -4,15 +4,16 @@ import { ViewFrame } from "./ViewFrame";
 
 /**
  * The variants exist so a user can tell a queue from a library from a config
- * panel before reading the heading. These tests hold the differences that
- * carry that: the stance class each variant puts on the section, the title's
- * size step, and the summary's typographic role.
+ * panel before reading the heading. Since the Grove shell that is carried by
+ * the STANCE — the class each variant puts on the section, which owns its
+ * gutter, measure and density — and no longer by the title's size. These tests
+ * hold both halves: the stance stays per-variant, and the head does not.
  */
 describe("ViewFrame", () => {
-  it("folds a queue's workload into a one-line masthead", () => {
-    // A queue has no big title at all: its name and the amount of work in it
-    // are one sentence, because splitting them made a list of chores read like
-    // a chapter opening.
+  it("gives a queue the same head as every other view", () => {
+    // The queue's one-line masthead is gone. It existed so a list of chores
+    // would not read like a chapter opening, which the 26px step settles for
+    // every view at once — and it cost the Inbox a real heading to navigate to.
     const { container } = render(
       <ViewFrame variant="queue" title="Inbox" summary="5 to file">
         <p>rows</p>
@@ -20,31 +21,35 @@ describe("ViewFrame", () => {
     );
 
     expect(container.querySelector(".view--queue")).toBeInTheDocument();
-    expect(screen.queryByRole("heading")).not.toBeInTheDocument();
-    expect(screen.getByText("Inbox")).toHaveClass("font-semibold");
-    expect(screen.getByText("· 5 to file")).toHaveClass("text-text-faint");
+    expect(screen.getByRole("heading", { name: "Inbox", level: 2 })).toHaveClass(
+      "text-[26px]",
+      "font-semibold",
+      "tracking-[-0.01em]",
+    );
+    // The separator went with the masthead: the summary is its own node on the
+    // title's baseline, not a clause appended to the sentence.
+    expect(screen.getByText("5 to file")).toHaveClass("font-data", "text-ink-dim");
   });
 
-  it("opens a library at the largest title step", () => {
+  it("opens a library at the same step, in the same face", () => {
     render(
       <ViewFrame variant="library" title="briarwood-golf" summary="12 notes">
         <p>rows</p>
       </ViewFrame>,
     );
 
-    // The step is a triple, not a size: the leading and tracking that tighten
-    // with it travel together, so dropping one half cannot pass unnoticed.
     expect(screen.getByRole("heading", { name: "briarwood-golf" })).toHaveClass(
-      "font-serif",
-      "text-title-library",
-      "leading-title-library",
-      "tracking-title-library",
+      "text-[26px]",
+      "font-semibold",
+      "tracking-[-0.01em]",
     );
-    // Quieter than a queue's on purpose: nothing in a library is waiting on you.
-    expect(screen.getByText("12 notes")).toHaveClass("text-label", "text-text-faint");
+    // A count that changes under the user, so it holds its column.
+    expect(screen.getByText("12 notes")).toHaveClass("font-data", "tabular-nums");
   });
 
-  it("opens a config panel two steps smaller than a library", () => {
+  it("opens a config panel at that step too", () => {
+    // The step no longer distinguishes a panel from a library: what does is the
+    // stance class above and the density below.
     render(
       <ViewFrame variant="panel" title="Settings">
         <p>controls</p>
@@ -52,9 +57,8 @@ describe("ViewFrame", () => {
     );
 
     expect(screen.getByRole("heading", { name: "Settings" })).toHaveClass(
-      "text-title-panel",
-      "leading-title-panel",
-      "tracking-title-panel",
+      "text-[26px]",
+      "font-semibold",
     );
   });
 
@@ -116,8 +120,7 @@ describe("ViewFrame", () => {
     // And the render half, which is where the old silent drop happened: with
     // no `eyebrow` and no `title`, `renderHeader` returns before it reaches
     // the action, so nothing is drawn. Be precise about what that does NOT
-    // lock — unlike `summary`, whose render is gated on `SUMMARY_CLASS[variant]`
-    // being non-empty, `action` has no variant check at all. The guard is
+    // lock: `action` has no variant check at all. The guard is
     // `!eyebrow && !title`, so an untyped caller that passed a title as well
     // WOULD get the action, in a header nobody designed. The type above is the
     // enforcement here, not this render (docs/UI_CONVENTIONS.md says the same).

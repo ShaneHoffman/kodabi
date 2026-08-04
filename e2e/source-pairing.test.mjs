@@ -122,7 +122,7 @@ function titleOf(id) {
 /**
  * Opens a seeded Inbox note by title.
  *
- * Always via the sidebar, so each scenario starts from the same place whatever
+ * Always via the dock, so each scenario starts from the same place whatever
  * the one before it left on screen. The wait is on `note-read` rather than on
  * anything this file asserts about — waiting for the source section would beg
  * the question every scenario below is about to ask.
@@ -157,8 +157,8 @@ scenario("every seeded session is claimed by a note", async () => {
   // Needs-attention fixture instead — with the retention scenarios below still
   // passing, because the note is fine, it just points at nothing.
   //
-  // The sidebar row is absent entirely at zero (`Sidebar.tsx` returns null), and
-  // it keeps the row on a failed listing, so this cannot pass by the listing
+  // The dock row is absent entirely at zero (`Dock.tsx` returns null), and it
+  // keeps the row on a failed listing, so this cannot pass by the listing
   // having errored.
   assert.equal(await textOf(main, "needs-attention-nav"), null);
 });
