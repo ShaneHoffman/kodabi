@@ -87,7 +87,9 @@ One shape for every view that draws one, so two screens cannot open at different
 | Together | Title and summary share a baseline: `flex items-baseline gap-4` |
 
 `ViewFrame` draws it — pass `eyebrow` / `title` / `summary`, never the classes. The note editor is
-the one exception, and it spells its larger step by hand because a document genuinely is one.
+the one exception, and it spells the same step by hand: its head is not a frame header but the
+document's own first line, sitting beside Edit and Delete rather than above a list, and its body is
+two columns `ViewFrame`'s single measure cannot hold.
 
 ---
 

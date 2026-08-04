@@ -13,8 +13,8 @@
  * It also puts the CSP's `media-src` under test for the first time. That
  * directive has been annotated in `quick-capture.test.mjs` since the policy was
  * written, but nothing exercised it: the `<audio src={convertFileSrc(…)}>` in
- * `SessionArtifactsSection` is the app's only asset-protocol consumer, and that
- * slice never opens a note with a recording. Two scenarios here mount one.
+ * `SessionPanel` is the app's only asset-protocol consumer, and that slice never
+ * opens a note with a recording. Two scenarios here mount one.
  *
  * See docs/UI_E2E_HARNESS.md.
  */
@@ -109,14 +109,36 @@ after(async () => {
   await app?.stop({ keepArtifacts: failed });
 });
 
-/** A seeded note's title, read off the manifest rather than restated here — a
- *  catalogue edit cannot leave this file chasing a title that is gone. */
-function titleOf(id) {
+/** A seeded note, read off the manifest rather than restated here — a catalogue
+ *  edit cannot leave this file chasing a title or a count that is gone. */
+function noteOf(id) {
   const note = app.seeded.notes.find((candidate) => candidate.id === id);
   if (!note) {
     throw new Error(`no seeded note ${id}; seeded: ${app.seeded.notes.map((n) => n.id).join(", ")}`);
   }
-  return note.title;
+  return note;
+}
+
+function titleOf(id) {
+  return noteOf(id).title;
+}
+
+/** What the Transcript chip should read for a seeded note: the manifest counts
+ * the words its own fixture turns hold, so this stays honest through a
+ * catalogue edit. Joined by the session stem in the note's `source:`, which is
+ * the same link the app itself resolves.
+ *
+ * `toLocaleString` on both sides, matching the component. Every fixture is
+ * under a thousand words, where no locale inserts a separator — so this is an
+ * exact match today, and the day a fixture crosses 999 it will say so rather
+ * than drift. */
+function transcriptChipOf(id) {
+  const stem = noteOf(id).source.replace(/^sessions\//, "").replace(/\.jsonl$/, "");
+  const session = app.seeded.sessions.find((candidate) => candidate.stem === stem);
+  if (!session) {
+    throw new Error(`note ${id} points at no seeded session (${stem})`);
+  }
+  return session.words === 1 ? "Transcript 1 word" : `Transcript ${session.words.toLocaleString()} words`;
 }
 
 /**
@@ -134,10 +156,10 @@ async function openInboxNote(title) {
   await main.waitFor(`!!${byTestId("note-read")}`, { label: `the note screen for ${title}` });
 }
 
-/** Opens the disclosure and waits for the panel to actually be there. */
+/** Opens the transcript chip and waits for the turns to actually be there. */
 async function expandSource() {
   await clickWhenEnabled(main, "session-source");
-  await main.waitFor(`!!${byTestId("source-panel")}`, { label: "the source panel" });
+  await main.waitFor(`!!${byTestId("source-panel")}`, { label: "the transcript turns" });
 }
 
 scenario("the seeded vault reaches the Inbox", async () => {
@@ -163,23 +185,34 @@ scenario("every seeded session is claimed by a note", async () => {
   assert.equal(await textOf(main, "needs-attention-nav"), null);
 });
 
-scenario("both artifacts arrive together, and leave together", async () => {
+scenario("each surviving artifact gets its own chip, opened independently", async () => {
   await openInboxNote(titleOf("n_both0001"));
-  await waitForText(main, "session-source", "Source · recording · 3 segments");
+  await waitForText(main, "session-source", transcriptChipOf("n_both0001"));
   assert.equal(await textOf(main, "session-source-pruned"), null);
 
-  // One disclosure, both artifacts — the whole point of the composition:
-  // the recording and the transcript are used together, so they arrive
-  // together rather than behind a toggle each.
+  // A chip each, and each opens ONE thing. The recording opens in place — the
+  // rail holds a player — while the turns need the reading measure and land in
+  // the body column, which is why they are two controls rather than one.
   await expandSource();
-  assert.notEqual(await textOf(main, "reveal-recording"), null, "expected the recording");
+  assert.equal((await allTextOf(main, "session-turn")).length, 3);
+  assert.equal(await textOf(main, "reveal-recording"), null, "audio stayed shut");
+
+  await clickWhenEnabled(main, "session-audio");
+  await main.waitFor(`!!${byTestId("reveal-recording")}`, { label: "the recording opens" });
+  // ...and opening one did not close the other.
   assert.equal((await allTextOf(main, "session-turn")).length, 3);
 
-  // Collapsing unmounts the <audio>, which is the component's stated accepted
-  // consequence rather than an oversight. Asserted so a future "keep it mounted
-  // behind hidden" change is a deliberate one.
-  await clickWhenEnabled(main, "session-source");
-  await main.waitFor(`!${byTestId("reveal-recording")}`, { label: "the player unmounts" });
+  // The player stays MOUNTED when its chip closes — the deliberate reversal of
+  // the old section's accepted consequence, which stopped playback the moment
+  // you went back to reading. Hidden, not gone.
+  await clickWhenEnabled(main, "session-audio");
+  await main.waitFor(`!${byTestId("reveal-recording")}`, { label: "the recording shuts" });
+  const player = await main.evaluate(`(() => {
+    const audio = ${byTestId("recording-player")};
+    return audio ? { mounted: true, visible: audio.offsetParent !== null } : { mounted: false };
+  })()`);
+  assert.ok(player.mounted, "the player unmounted; closing the chip must only hide it");
+  assert.equal(player.visible, false, "the player stayed visible after closing the chip");
 });
 
 scenario("the retained recording loads through the asset protocol", async () => {
@@ -195,9 +228,11 @@ scenario("the retained recording loads through the asset protocol", async () => 
   // `readyState >= 1` is HAVE_METADATA: the fetch was served and decoded as
   // audio, which is also what proves the generated RIFF header is real rather
   // than merely present on disk.
+  // No click first: the player is mounted at rest so the chip can read a real
+  // duration off it, which means this probes the preload rather than a fetch a
+  // disclosure triggered.
   await openInboxNote(titleOf("n_both0001"));
-  await waitForText(main, "session-source", "Source · recording · 3 segments");
-  await expandSource();
+  await main.waitFor(`!!${byTestId("recording-player")}`, { label: "the player mounts" });
 
   const probe = await main.evaluate(`
     new Promise((resolve) => {
@@ -227,35 +262,39 @@ scenario("the retained recording loads through the asset protocol", async () => 
 
 scenario("a pruned recording leaves the transcript", async () => {
   await openInboxNote(titleOf("n_tran0002"));
-  await waitForText(main, "session-source", "Source · 3 segments");
+  await waitForText(main, "session-source", transcriptChipOf("n_tran0002"));
   assert.equal(await textOf(main, "session-source-pruned"), null);
+  // No artifact, no chip: the rail says nothing about a recording that is gone.
+  assert.equal(await textOf(main, "session-audio"), null, "the recording is gone");
 
   await expandSource();
   assert.equal((await allTextOf(main, "session-turn")).length, 3);
-  assert.equal(await textOf(main, "reveal-recording"), null, "the recording is gone");
+  assert.equal(await textOf(main, "recording-player"), null, "the recording is gone");
 });
 
 scenario("a pruned transcript leaves the recording", async () => {
   await openInboxNote(titleOf("n_reco0003"));
-  await waitForText(main, "session-source", "Source · recording");
+  await main.waitFor(`!!${byTestId("session-audio")}`, { label: "the audio chip" });
 
   // At rest, before any click: this sentence's whole job is that "checked
-  // against the source" never fails silently, which it would do until the click
-  // if it sat inside the panel.
+  // against the source" never fails silently, which it would do until a click
+  // if it sat behind a chip.
   assert.equal(await textOf(main, "session-source-pruned"), PRUNED);
+  assert.equal(await textOf(main, "session-source"), null, "nothing to transcribe");
 
-  await expandSource();
-  assert.notEqual(await textOf(main, "reveal-recording"), null, "expected the recording");
+  await clickWhenEnabled(main, "session-audio");
+  await main.waitFor(`!!${byTestId("reveal-recording")}`, { label: "the recording opens" });
   assert.equal((await allTextOf(main, "session-turn")).length, 0);
 });
 
 scenario("nothing survived means nothing to press", async () => {
   await openInboxNote(titleOf("n_none0004"));
-  await main.waitFor(`!!${byTestId("session-artifacts")}`, { label: "the source section" });
+  await main.waitFor(`!!${byTestId("session-artifacts")}`, { label: "the session panel" });
 
-  // The section mounts and fetches, and then offers no control at all — a
-  // disclosure over an empty panel would be worse than no disclosure.
-  assert.equal(await textOf(main, "session-source"), null, "expected no toggle");
+  // The panel mounts and fetches, and then offers no control at all — a chip
+  // over an empty artifact would be worse than no chip.
+  assert.equal(await textOf(main, "session-source"), null, "expected no transcript chip");
+  assert.equal(await textOf(main, "session-audio"), null, "expected no audio chip");
   assert.equal(await textOf(main, "session-source-pruned"), PRUNED);
 });
 
@@ -263,10 +302,10 @@ scenario("an empty transcript still counts as a transcript", async () => {
   await openInboxNote(titleOf("n_mpty0005"));
 
   // `transcript_available` is true — the file is there, it just holds nothing —
-  // so there is a toggle, a zero count, and no pruned sentence. This is a
+  // so there is a chip, a zero count, and no pruned sentence. This is a
   // documented soft spot rather than settled behaviour; the fixture pins it so a
   // change to it is visible rather than incidental.
-  await waitForText(main, "session-source", "Source · 0 segments");
+  await waitForText(main, "session-source", transcriptChipOf("n_mpty0005"));
   assert.equal(await textOf(main, "session-source-pruned"), null);
 
   await expandSource();
@@ -275,13 +314,13 @@ scenario("an empty transcript still counts as a transcript", async () => {
 
 scenario("a long transcript is not capped", async () => {
   await openInboxNote(titleOf("n_turn0008"));
-  await waitForText(main, "session-source", "Source · 50 segments");
+  await waitForText(main, "session-source", transcriptChipOf("n_turn0008"));
 
   await expandSource();
-  // Two different claims, and the second is the one worth having: the toggle
-  // above reads `segments.length` off the payload, this counts what actually
+  // Two different claims, and the second is the one worth having: the chip
+  // above counts words in the payload, this counts the turns that actually
   // reached the DOM. A future `.slice(0, 20)` or a virtualized list breaks only
-  // this one, and `Turns`'s doc comment promises neither ever happens.
+  // this one, and `TranscriptTurns`'s doc comment promises neither ever happens.
   assert.equal((await allTextOf(main, "session-turn")).length, 50);
 });
 

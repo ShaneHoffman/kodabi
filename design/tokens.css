@@ -804,11 +804,15 @@
   /* the boolean controls' geometry.
 
      Drawn twice before this pass — once in ui/Checkbox.css and once in
-     NoteEditorView.css for a note's GFM task list — as the same five literals
+     markdownReading.css for a note's GFM task list — as the same five literals
      in two files, which is exactly the drift a name prevents. The token guard
      could not see them: it scopes its spacing check to padding/margin/gap, so
      a width or a ring thickness is structurally invisible to it. Named here
      the two skins are provably one skin.
+
+     One consumer left: the note editor's Grove ticket moved a note's task list
+     onto utilities in NoteMarkdown.tsx, which draws the same skin from Grove
+     tokens and does not read these. Checkbox.css and ChatView still do.
 
      17px rather than 16: at 1rem the box sits a hair small beside the 15px
      sans label it is bound to, and the extra pixel is what makes the two read

@@ -96,7 +96,12 @@ export function ProjectView({ slug }: Props) {
                 type="button"
                 className="project__row ui-focus-ring"
                 onClick={() =>
-                  navigate({ kind: "noteEditor", noteId: note.id, project: slug })
+                  navigate({
+                    kind: "noteEditor",
+                    noteId: note.id,
+                    project: slug,
+                    origin: { kind: "project", slug },
+                  })
                 }
               >
                 {/* Serif, because in a library a title is something you read

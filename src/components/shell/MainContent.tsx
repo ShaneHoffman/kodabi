@@ -28,6 +28,7 @@ export function MainContent() {
           key={`${view.noteId ?? "new"}:${view.project ?? ""}`}
           noteId={view.noteId}
           project={view.project}
+          origin={view.origin}
         />
       );
     case "search":

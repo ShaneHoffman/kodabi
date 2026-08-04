@@ -69,8 +69,9 @@ The pre-Grove rule was the opposite: each kind of view had its own serif title s
 that a config panel and a note must not open at the same size. What told them apart in the running
 app was never the heading — it was the density and the shape below it, which is what the stance
 still fixes. Sizing the head per view only made the window's volume change when you clicked
-something. The note editor keeps a larger step, because a document is the one place the title *is*
-the content's first line.
+something. The note editor came last and came down: a document's title used to open at 36px against
+every other screen's 26px, and it now opens at the one step like everything else. What tells a note
+apart is the serif measure under it, not a bigger heading.
 
 ### Structure stretches, prose keeps its measure
 
