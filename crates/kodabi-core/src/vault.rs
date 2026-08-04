@@ -17,6 +17,7 @@ use crate::glossary;
 use crate::note::{
     self, Note, NoteEdit, NoteError, NoteId, NoteType, Result, Routing, Source, INBOX,
 };
+use crate::routing;
 use crate::routing_examples::{self, RoutingExample, RoutingExamples, RoutingExamplesError};
 
 /// A note found on disk: its absolute path, display title, and parsed content.
@@ -175,6 +176,48 @@ pub fn scan_project_notes(vault_root: &Path, project: &str) -> Result<NoteScan> 
             .then_with(|| a.path.file_name().cmp(&b.path.file_name()))
     });
     Ok(scan)
+}
+
+/// The router's best-guess destination for each of `notes`, scored against the
+/// vault's *current* signals — what the Inbox shows on a row so an unfiled note
+/// arrives with a suggestion rather than a blank.
+///
+/// Two things make this a fresh scoring rather than a replay of what the note
+/// already carries. It scores the note's title as well as its body, where
+/// capture-time routing deliberately passes `title: None` (`capture::route_preview`
+/// — a quick capture's first line seeds the filename, and counting it as a title
+/// signal too would double-count the same words). And it reads today's
+/// glossaries and corrections, so a project taught a new term surfaces on the
+/// notes already waiting rather than only on the next capture. The stored
+/// `confidence` stays the historical record of why the note landed here; this is
+/// the live answer to where it would go now.
+///
+/// Best-effort by construction: a signal-load failure degrades to all-`None`
+/// rather than failing the listing. A guess is an offer, and a listing that
+/// refuses to render because the router is briefly unreadable would trade the
+/// user's notes for a hint.
+///
+/// One signal load for the whole batch; scoring itself is pure and the note
+/// bodies are already in memory, so this costs no extra file reads per note.
+pub fn guess_note_destinations(
+    vault_root: &Path,
+    notes: &[ListedNote],
+) -> Vec<Option<routing::RouteGuess>> {
+    let Ok(loaded) = routing::load_project_signals(vault_root) else {
+        return vec![None; notes.len()];
+    };
+    notes
+        .iter()
+        .map(|listed| {
+            routing::best_candidate(
+                routing::NoteText {
+                    title: Some(&listed.title),
+                    body: &listed.note.body,
+                },
+                &loaded.signals,
+            )
+        })
+        .collect()
 }
 
 /// Finds the note carrying `id` inside `project` (linear scan, unparseable
@@ -1472,6 +1515,87 @@ mod tests {
         assert!(scan_project_notes(vault.path(), "../outside").is_err());
         assert!(scan_project_notes(vault.path(), "a\\b").is_err());
         assert!(scan_project_notes(vault.path(), "").is_err());
+    }
+
+    // --- guess_note_destinations -------------------------------------------
+
+    /// An Inbox note whose body is the routing evidence under test.
+    fn write_inbox_note_with_body(vault: &Path, id: &str, title: &str, body: &str) -> PathBuf {
+        let note = Note::new(
+            NoteId::parse(id).unwrap(),
+            NoteType::Note,
+            Routing::Routed {
+                project: INBOX.to_string(),
+                confidence: 0.1,
+            },
+            "2026-07-10",
+            Vec::new(),
+            Source::parse("manual").unwrap(),
+            body,
+        )
+        .unwrap();
+        note::write_note(vault, &note, Some(title)).unwrap()
+    }
+
+    #[test]
+    fn guess_note_destinations_scores_inbox_notes_against_current_signals() {
+        let vault = tempdir().unwrap();
+        // Two projects exist as folders, so discovery finds them as candidates.
+        fs::create_dir(vault.path().join("Briarwood Golf")).unwrap();
+        fs::create_dir(vault.path().join("Riverbend Deck")).unwrap();
+
+        write_inbox_note_with_body(
+            vault.path(),
+            "n_aaaaaa",
+            "sprinkler quotes",
+            "Vendor quotes for the Briarwood Golf irrigation heads.",
+        );
+        write_inbox_note_with_body(
+            vault.path(),
+            "n_bbbbbb",
+            "drive home ideas",
+            "A shared punch list, one place where all of it lives.",
+        );
+
+        let scan = scan_project_notes(vault.path(), INBOX).unwrap();
+        let guesses = guess_note_destinations(vault.path(), &scan.notes);
+        assert_eq!(guesses.len(), scan.notes.len());
+
+        let named = scan
+            .notes
+            .iter()
+            .zip(&guesses)
+            .find(|(listed, _)| listed.note.id.as_str() == "n_aaaaaa")
+            .map(|(_, guess)| guess)
+            .unwrap();
+        assert_eq!(
+            named.as_ref().map(|guess| guess.project.as_str()),
+            Some("Briarwood Golf")
+        );
+
+        // No evidence for either candidate is no suggestion, not a coin flip.
+        let unmatched = scan
+            .notes
+            .iter()
+            .zip(&guesses)
+            .find(|(listed, _)| listed.note.id.as_str() == "n_bbbbbb")
+            .map(|(_, guess)| guess)
+            .unwrap();
+        assert_eq!(*unmatched, None);
+    }
+
+    #[test]
+    fn guess_note_destinations_is_all_none_for_an_empty_vault() {
+        let vault = tempdir().unwrap();
+        write_inbox_note_with_body(
+            vault.path(),
+            "n_aaaaaa",
+            "sprinkler quotes",
+            "Vendor quotes for the Briarwood Golf irrigation heads.",
+        );
+        let scan = scan_project_notes(vault.path(), INBOX).unwrap();
+        let guesses = guess_note_destinations(vault.path(), &scan.notes);
+        assert_eq!(guesses, vec![None]);
     }
 
     // --- find_note ---------------------------------------------------------

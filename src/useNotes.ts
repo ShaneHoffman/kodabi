@@ -18,6 +18,16 @@ export type NoteType = "meeting" | "note" | "chat";
  * this literal string. */
 export const INBOX_PROJECT = "Inbox";
 
+/** Mirrors `RouteGuessDto` in `src-tauri/src/note_cmds.rs`: where the router
+ * would file an unfiled note today, scored against the vault's current
+ * signals. `confidence` is the strength of that suggestion, which is a
+ * different number from the sibling `NoteSummary.confidence` — that one
+ * records why the note landed in the Inbox in the first place. */
+export type RouteGuess = {
+  project: string;
+  confidence: number;
+};
+
 export type NoteSummary = {
   id: string;
   path: string;
@@ -31,14 +41,24 @@ export type NoteSummary = {
   /** A derived one-line body preview for list rows — a UI-only extension
    * beyond the doc'd MCP `NoteSummary`, never stored. */
   snippet: string;
+  /** The router's current best guess at a home, for Inbox rows to offer as a
+   * suggested destination. The other UI-only extension, likewise derived at
+   * list time and never stored; `null` outside Inbox listings, and `null` for
+   * a note the router has nothing to say about. */
+  guess: RouteGuess | null;
 };
 
 /** One opened note: the MCP `get_note` vocabulary, flattened. */
 export type NoteDetail = NoteSummary & { body_markdown: string };
 
 /** `write_note`'s echo: `title` is the caller-supplied seed, absent when the
- * filename fell back to the id (listing derives titles from filenames). */
-export type CreatedNote = Omit<NoteSummary, "title"> & { title: string | null };
+ * filename fell back to the id (listing derives titles from filenames). The
+ * two list-only extensions are omitted because the Rust `WrittenNote` doesn't
+ * send them — a write echoes the note it just made, and neither a body preview
+ * nor a routing guess is a fact about it. */
+export type CreatedNote = Omit<NoteSummary, "title" | "snippet" | "guess"> & {
+  title: string | null;
+};
 
 /** A note to create. `confidence` is deliberately absent: a hand-created note
  * has no routing score, so the backend files it as `Routing::Manual` and the

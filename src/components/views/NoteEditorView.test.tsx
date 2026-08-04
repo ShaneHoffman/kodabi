@@ -24,6 +24,7 @@ function makeNote(
     source: "manual",
     confidence: null,
     snippet: "",
+    guess: null,
     body_markdown: "Some body text.",
     ...overrides,
   };

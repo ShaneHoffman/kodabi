@@ -1,3 +1,4 @@
+import { clsx } from "clsx";
 import { useMemo, useState } from "react";
 import {
   pipelineStage,
@@ -7,8 +8,17 @@ import {
   type CapturePipeline,
   type PipelineStage,
 } from "../../useCapturePipeline";
+import {
+  LIST_ROW_ENTER,
+  LIST_ROW_EXIT,
+  LIST_ROW_LEAVING,
+  LIST_SLOT,
+  LIST_SLOT_INNER,
+  LIST_SLOT_INNER_LEAVING,
+  LIST_SLOT_LEAVING,
+} from "../../listMotion";
 import { useNavigation } from "../../useNavigation";
-import { matchScore, noteKind, noteMeta } from "../../noteMeta";
+import { matchScore, noteKind } from "../../noteMeta";
 import {
   fileNoteToProject,
   INBOX_PROJECT,
@@ -16,17 +26,17 @@ import {
   useProjectNotes,
   type NoteSummary,
 } from "../../useNotes";
-import { useProjects } from "../../useProjects";
+import { folderHue, useProjects, type FolderHue, type Project } from "../../useProjects";
 import { isSessionSource } from "../../useSessions";
 import { formatElapsed, useElapsed } from "../../useElapsed";
 import { useTimeout } from "../../useTimeout";
+import { SpiritMark } from "../capture/SpiritMark";
+import { CreateProjectDialog } from "../dialogs/CreateProjectDialog";
 import { DeleteNoteDialog } from "../dialogs/DeleteNoteDialog";
 import { Button } from "../ui/Button";
-import { Select, type SelectOption } from "../ui/Select";
+import { Menu } from "../ui/Menu";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
-// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this view's Grove ticket deletes it
-import "./InboxView.css";
 
 /** Mirrors `--dur-settle`: how long the placeholder's travel-left-and-vanish
  * plays once distill routes it to a project, before it hands off to the toast. */
@@ -48,6 +58,53 @@ const FILL_IN_MS = 200;
  * with a distill, and an Inbox-routed save whose vault refetch fails or
  * never lands. */
 const GRACE_MS = 10_000;
+
+/* The folder hues, written out rather than interpolated: Tailwind cannot see a
+   constructed class name and would emit none of these
+   (docs/UI_CONVENTIONS.md). The card edge, the guess words and the menu dot all
+   read from the same three tables, so a project is one colour wherever it
+   appears. */
+const GUESS_EDGE: Record<FolderHue, string> = {
+  coral: "border-l-coral",
+  cobalt: "border-l-cobalt",
+  teal: "border-l-teal",
+  plum: "border-l-plum",
+};
+const GUESS_TEXT: Record<FolderHue, string> = {
+  coral: "text-coral",
+  cobalt: "text-cobalt",
+  teal: "text-teal",
+  plum: "text-plum",
+};
+const HUE_DOT: Record<FolderHue, string> = {
+  coral: "bg-coral",
+  cobalt: "bg-cobalt",
+  teal: "bg-teal",
+  plum: "bg-plum",
+};
+
+/**
+ * How strong the router's suggestion has to be before the card wears it.
+ *
+ * The backend guess has no threshold of its own — it answers "who won" even
+ * when the winner won by nothing (a dead tie scores 0.0). A colour and a
+ * destination on the card are a claim, and a claim built on a coin flip is
+ * worse than an honest blank, so the display floor lives here rather than in
+ * the router: this is a presentation decision about how loudly to offer a
+ * hint, not a decision about where notes go.
+ */
+const GUESS_FLOOR = 0.2;
+
+/** The number of segments in the progress meter. Five is a reading, not a
+ * measurement: the caption beside it carries the actual counts. */
+const METER_SEGMENTS = 5;
+
+/** The suggested destination a card offers, or `null` when it has none worth
+ * offering. One derivation, read by the edge, the meta line and the menu. */
+function suggestion(note: NoteSummary): { slug: string; hue: FolderHue } | null {
+  if (!note.guess || note.guess.confidence < GUESS_FLOOR) return null;
+  return { slug: note.guess.project, hue: folderHue(note.guess.project) };
+}
 
 /**
  * The Inbox: notes the router couldn't place with confidence, each with a
@@ -71,20 +128,12 @@ export function InboxView() {
 
   // Real projects only — the Inbox itself is never a filing target. Memoized
   // (entries is stable from useProjects) so the same array reference reaches
-  // every row's picker and doesn't force a re-render of every row.
-  const options = useMemo<SelectOption[]>(
-    () =>
-      entries.flatMap((entry) =>
-        entry.kind === "project"
-          ? // The menu lists PATHS, not display names: filing is choosing a
-            // location, and a nested project's parentage is the whole reason
-            // you'd pick it over its sibling.
-            [{ value: entry.project.slug, label: entry.project.slug }]
-          : [],
-      ),
+  // every row's menu and doesn't force a re-render of every row.
+  const projects = useMemo<Project[]>(
+    () => entries.flatMap((entry) => (entry.kind === "project" ? [entry.project] : [])),
     [entries],
   );
-  const projectSlugs = options.map((option) => option.value);
+  const projectSlugs = projects.map((project) => project.slug);
 
   // The one pipeline subscription, held above the routed view (AppShell), so
   // the placeholder below reflects the current stage even when the Inbox
@@ -114,32 +163,31 @@ export function InboxView() {
 
   const remaining = notes.length;
   const handled = filedThisSession + remaining;
-  const cleared = handled > 0 ? (filedThisSession / handled) * 100 : 0;
+  const cleared = handled > 0 ? filedThisSession / handled : 0;
 
   return (
     <ViewFrame
       variant="queue"
       eyebrow="Unfiled"
       title="Inbox"
-      // The work, stated before the list is read. Omitted at zero: the empty
-      // state below says it better, and saying it twice says it worse.
-      summary={remaining > 0 ? `${remaining} to file` : undefined}
+      // The whole state of the work in one line: what is left, and what you
+      // have already done about it. Omitted at zero — the empty state below
+      // says it better, and saying it twice says it worse.
+      summary={
+        remaining > 0
+          ? `${remaining} unfiled · ${filedThisSession} filed this session`
+          : undefined
+      }
     >
       {error ? (
         <StatusMessage variant="error">Couldn&apos;t load the inbox: {error}</StatusMessage>
       ) : (
         <>
-          {remaining > 0 && (
-            <Progress filed={filedThisSession} remaining={remaining} percent={cleared} />
-          )}
+          {remaining > 0 && <Progress cleared={cleared} />}
           {remaining === 0 && !placeholder ? (
-            !loading && (
-              <StatusMessage variant="empty">
-                Nothing waiting. Notes the router can&apos;t place land here.
-              </StatusMessage>
-            )
+            !loading && <EmptyInbox />
           ) : (
-            <ul data-testid="inbox-list" className="inbox__list">
+            <ul data-testid="inbox-list" className="flex flex-col gap-3.5">
               {placeholder && <PipelinePlaceholder presence={placeholder} />}
               {notes.map((note) => (
                 // Keyed by path, not id: two files can carry the same id (an
@@ -147,7 +195,7 @@ export function InboxView() {
                 <InboxRow
                   key={note.path}
                   note={note}
-                  options={options}
+                  projects={projects}
                   onFiled={() => setFiledThisSession((count) => count + 1)}
                   fresh={note.path === freshNotePath}
                 />
@@ -158,6 +206,28 @@ export function InboxView() {
       )}
       {toast && <FiledToast toast={toast} onPause={pauseToast} onResume={resumeToast} />}
     </ViewFrame>
+  );
+}
+
+/**
+ * Nothing to file — the one screen in the app that is good news.
+ *
+ * First-run copy, not an apology (docs/DESIGN_SYSTEM.md §6): an idle kodama, a
+ * statement, and one line saying what would be here if there were anything.
+ * The mark is still — `idle` is the mode with no aura animation at all, which
+ * is the point. An empty queue is not the system working, and a creature
+ * breathing over "nothing waiting" would suggest it was.
+ */
+function EmptyInbox() {
+  return (
+    <div className="flex flex-col items-center gap-1.5 pt-24 pb-16 text-center">
+      <SpiritMark mode="idle" size="26px" className="mb-[18px]" />
+      <p className="text-[15px] font-semibold text-ink">Nothing waiting.</p>
+      <p className="max-w-[44ch] text-[12.5px] leading-[1.55] text-ink-faint">
+        Notes the router can&apos;t place with confidence land here. Right now everything is
+        filed where it belongs.
+      </p>
+    </div>
   );
 }
 
@@ -394,66 +464,110 @@ function usePipelinePresence(
 function PipelinePlaceholder({ presence }: { presence: PlaceholderPresence }) {
   return (
     <li
-      className={`inbox__slot${presence.vanishing ? " inbox__slot--leaving" : ""}`}
+      className={clsx(LIST_SLOT, presence.vanishing && LIST_SLOT_LEAVING)}
       data-testid="pipeline-placeholder"
     >
-      <div>
-        {/* The shell keeps the placeholder's box congruent with a real row's
-            (same negative bleed, same padded silhouette), so the fill-in
-            later is a fill-in and not a reflow. */}
-        <div className="inbox__rowShell">
-          <div
-            className={`inbox__row inbox__row--placeholder${
-              presence.vanishing ? " inbox__row--vanishing" : ""
-            }`}
-          >
-            <div role="status">
-              <p
-                aria-hidden="true"
-                className="inbox__pipeline-title text-row font-semibold tracking-row text-text-soft"
-              >
-                <span className="inbox__pipeline-dot" />
-                <span className="inbox__pipeline-stack">
-                  <span className={presence.phase === "transcribing" ? "is-visible" : ""}>
-                    Transcribing the capture
-                  </span>
-                  <span className={presence.phase === "distilling" ? "is-visible" : ""}>
-                    Distilling the meeting
-                  </span>
-                </span>
-              </p>
-              <p aria-hidden="true" className="mt-2xs font-mono text-cap text-text-faint">
-                <span className="inbox__pipeline-stack">
-                  <span className={presence.phase === "transcribing" ? "is-visible" : ""}>
-                    just stopped · queued
-                  </span>
-                  <span className={presence.phase === "distilling" ? "is-visible" : ""}>
-                    reading transcript · routing
-                  </span>
-                </span>
-                {/* A running clock, not a phase label: the real transcribe
-                    phase alone can hold "Transcribing the capture" for several
-                    seconds (model load, ASR, a headless Claude cleanup call),
-                    and a ticking number is the honest way to show the run is
-                    still alive without claiming to know which of those it's
-                    in right now. Inside the aria-hidden layer on purpose: a
-                    clock in a live region would announce every second. */}
-                <span className="ui-tnum"> · {formatElapsed(presence.elapsedSeconds)}</span>
-              </p>
-              {/* The announcement itself: one line whose text genuinely
-                  rewrites as the stage advances, which is what a live region
-                  actually reacts to — the crossfade above only flips classes,
-                  and a class flip announces nothing. */}
-              <span className="sr-only">
-                {presence.phase === "transcribing"
-                  ? "Transcribing the capture"
-                  : "Distilling the meeting"}
-              </span>
-            </div>
+      <div
+        className={clsx(LIST_SLOT_INNER, presence.vanishing && LIST_SLOT_INNER_LEAVING)}
+      >
+        {/* A real card's silhouette — same material, same padding, same
+            neutral edge a guessless row wears — so resolving into a real note
+            is a fill-in and not a reflow. It does not lift: it is not
+            actionable yet, and a card that offers a press it cannot honour is
+            worse than a still one. */}
+        <div
+          className={clsx(
+            "glass-card flex items-center gap-6 border-l-[3px] border-l-ink-faint py-4 pr-5 pl-5",
+            LIST_ROW_ENTER,
+            LIST_ROW_EXIT,
+            presence.vanishing && LIST_ROW_LEAVING,
+          )}
+        >
+          <div role="status" className="min-w-0 flex-1">
+            <p
+              aria-hidden="true"
+              className="flex items-center gap-2.5 text-[15.5px] font-semibold text-ink-dim"
+            >
+              {/* Ink, never green: green means audio is being recorded, and
+                  this whole run happens after a capture has already stopped
+                  (docs/DESIGN_SYSTEM.md §2). */}
+              <span className="size-[7px] flex-none animate-breathe rounded-full bg-ink-faint" />
+              <PhaseStack
+                phase={presence.phase}
+                transcribing="Transcribing the capture"
+                distilling="Distilling the meeting"
+              />
+            </p>
+            <p className="mt-1.5 flex items-center gap-1 font-data text-[10.5px] text-ink-faint tabular-nums">
+              <PhaseStack
+                phase={presence.phase}
+                transcribing="just stopped · queued"
+                distilling="reading transcript · routing"
+              />
+              {/* A running clock, not a phase label: the real transcribe
+                  phase alone can hold "Transcribing the capture" for several
+                  seconds (model load, ASR, a headless Claude cleanup call),
+                  and a ticking number is the honest way to show the run is
+                  still alive without claiming to know which of those it's
+                  in right now. Inside the aria-hidden layer on purpose: a
+                  clock in a live region would announce every second. */}
+              <span aria-hidden="true"> · {formatElapsed(presence.elapsedSeconds)}</span>
+            </p>
+            {/* The announcement itself: one line whose text genuinely
+                rewrites as the stage advances, which is what a live region
+                actually reacts to — the crossfade above only flips classes,
+                and a class flip announces nothing. */}
+            <span className="sr-only">
+              {presence.phase === "transcribing"
+                ? "Transcribing the capture"
+                : "Distilling the meeting"}
+            </span>
           </div>
         </div>
       </div>
     </li>
+  );
+}
+
+/**
+ * Two texts stacked in one grid cell, crossfading as the phase advances —
+ * rather than one line rewriting its content, which would reflow the box at
+ * exactly the moment the user is watching it for signs of life.
+ *
+ * `aria-hidden` because both texts exist at once, which is a lie to anything
+ * that reads rather than looks; the placeholder's `sr-only` line is the truth
+ * for that reader.
+ */
+function PhaseStack({
+  phase,
+  transcribing,
+  distilling,
+}: {
+  phase: PlaceholderPresence["phase"];
+  transcribing: string;
+  distilling: string;
+}) {
+  return (
+    <span aria-hidden="true" className="grid">
+      {(
+        [
+          ["transcribing", transcribing],
+          ["distilling", distilling],
+        ] as const
+      ).map(([key, text]) => (
+        <span
+          key={key}
+          data-visible={phase === key || undefined}
+          className={clsx(
+            "col-start-1 row-start-1 transition-opacity duration-200 ease-out-strong",
+            "motion-reduce:transition-none",
+            phase === key ? "opacity-100" : "opacity-0",
+          )}
+        >
+          {text}
+        </span>
+      ))}
+    </span>
   );
 }
 
@@ -502,7 +616,14 @@ function FiledToast({
   return (
     <button
       type="button"
-      className={`inbox__toast ui-focus-ring${toast.fading ? " inbox__toast--fading" : ""}`}
+      className={clsx(
+        "glass-pill focus-ring fixed right-6 bottom-6 z-10 flex cursor-pointer items-center gap-3.5 py-2.5 pr-4 pl-4.5",
+        "transition-[translate,opacity,scale] duration-220 ease-out-strong",
+        "starting:translate-y-2 starting:opacity-0",
+        "not-aria-disabled:active:scale-97 motion-reduce:transition-none",
+        // Faster out than in, like every exit in the app (DESIGN_SYSTEM §4).
+        toast.fading && "opacity-0 duration-130",
+      )}
       onClick={open}
       onMouseEnter={onPause}
       onMouseLeave={onResume}
@@ -510,13 +631,13 @@ function FiledToast({
       onBlur={onResume}
       aria-label={`Open the note filed to "${toast.slug}"`}
     >
-      <span role="status">
-        <span className="font-mono text-eyebrow uppercase tracking-eyebrow text-text-faint">
+      <span role="status" className="flex flex-col items-start">
+        <span className="font-data text-[10px] uppercase tracking-[0.22em] text-ink-faint">
           Filed to
         </span>
-        <span className="mt-3xs text-label font-semibold text-text">{toast.slug}</span>
+        <span className="mt-0.5 text-[13px] font-semibold text-ink">{toast.slug}</span>
       </span>
-      <span className="inbox__toast__arrow text-text-soft" aria-hidden="true">
+      <span className="text-[13px] text-ink-dim" aria-hidden="true">
         →
       </span>
     </button>
@@ -524,74 +645,93 @@ function FiledToast({
 }
 
 /**
- * How much of the queue you have cleared, as a rule and a sentence.
+ * How much of the queue you have cleared, as five lit segments.
  *
  * It sits between the masthead and the list because that is where a progress
  * reading is useful — before you start, not after you scroll. At zero filed it
- * still renders: an empty track that says "4 to go" is the honest starting
- * state, and a bar that only appears once you are winning is a bar that never
- * helps you begin.
+ * still renders: an unlit meter over a full queue is the honest starting
+ * state, and an instrument that only appears once you are winning is one that
+ * never helps you begin.
+ *
+ * Segments rather than a continuous bar because the quantity is discrete —
+ * notes cleared, not a percentage of anything — and because a bar that creeps
+ * by a pixel per note reads as a loading indicator for work the app is doing,
+ * which is exactly backwards here: the work is the user's.
+ *
+ * Lit segments are INK, never green. Progress is information, and green in
+ * this app is the kodama's voice — the system doing something with your words
+ * (docs/DESIGN_SYSTEM.md §2). Half strength so the meter reads as a quiet
+ * instrument beside the masthead rather than a second headline.
+ *
+ * `aria-hidden`, not `role="progressbar"`: the masthead summary directly above
+ * already says both numbers in words, and announcing this too would report the
+ * same fact twice, once as a percentage nobody asked for (§6, one region per
+ * concern).
  */
-function Progress({
-  filed,
-  remaining,
-  percent,
-}: {
-  filed: number;
-  remaining: number;
-  percent: number;
-}) {
+function Progress({ cleared }: { cleared: number }) {
+  // Rounded, but never down to nothing while the user is ahead: clearing your
+  // first note out of forty has to light something, or the instrument says the
+  // work you just did did not count.
+  const lit = Math.max(
+    cleared > 0 ? 1 : 0,
+    Math.round(cleared * METER_SEGMENTS),
+  );
   return (
-    <div className="inbox__progress mt-sm">
-      {/* aria-hidden, not role="progressbar". The bar is a redrawing of the
-          caption directly beneath it, which already says both numbers in
-          words; announcing it as a progressbar would report the same fact
-          twice, once as a percentage nobody asked for. One region per
-          concern (docs/DESIGN_SYSTEM.md §6). */}
-      <div className="inbox__track" aria-hidden="true">
-        <div className="inbox__fill" style={{ width: `${percent}%` }} />
-      </div>
-      {/* text-micro, not text-eyebrow. §1 reserves the eyebrow step for a
-          section label and requires it to be mono + uppercase + a tracking
-          step; this is neither, and §1 names text-micro for exactly this
-          role ("a progress caption"). Tabular figures because both numbers
-          change as the queue is cleared. */}
-      <p className="ui-tnum mt-2xs font-mono text-micro text-text-faint">
-        {filed} filed this session · {remaining} to go
-      </p>
+    <div className="mt-4 mb-6 flex gap-1" aria-hidden="true" data-testid="inbox-meter">
+      {Array.from({ length: METER_SEGMENTS }, (_, index) => (
+        <span
+          key={index}
+          data-lit={index < lit || undefined}
+          className={clsx(
+            "h-1 w-11 rounded-[2px] transition-colors duration-200 ease-out-strong",
+            index < lit ? "bg-ink/50" : "bg-wash",
+          )}
+        />
+      ))}
     </div>
   );
 }
 
 /**
- * One unfiled note. The whole card opens it — one full-surface button, like
- * a search row, so the hover lift and the click target are finally the same
- * shape — and the picker overlaid on its right files it. The picker is a
- * SIBLING of the button under the shell, never a child: a button cannot nest
- * a button, so the shell anchors it over the card instead (`.inbox__rowShell`
- * / `.inbox__rowActions` in InboxView.css). That also means its clicks never
- * pass through the navigation handler — no stopPropagation anywhere.
+ * One unfiled note, as a card with an action rail.
  *
- * On success the row plays its collapse/fade exit; the file command
- * broadcasts `vault:changed` itself, which refetches the list and the sidebar
- * count together and drops the row (the file watcher is a fallback for
- * external edits, not the only trigger, so the row leaves even if the watcher
- * never started). A failed file keeps the row and surfaces the message.
+ * The card's BODY opens the note and the rail beside it disposes of it, and
+ * they are plain flex siblings — the old arrangement overlaid the controls on
+ * a button that wrapped the whole card, because a button cannot nest a button.
+ * The card is no longer a button, so the workaround is gone with it: two
+ * regions, each the size of what it does, and no stopPropagation anywhere.
+ *
+ * The left edge carries the router's guess in that folder's own hue, and the
+ * meta line RESTATES it in words (`→ briarwood-golf`). The colour is the fast
+ * read, the words are the actual claim; a card that said it in colour alone
+ * would say nothing to a third of the people looking at it
+ * (docs/DESIGN_SYSTEM.md §6). No confident guess is a faint neutral edge and
+ * the words "no confident guess" — an honest blank, not a coin flip painted a
+ * colour.
+ *
+ * The card is the one thing in the app that LIFTS under the pointer. Grove's
+ * shape rule is that an action lifts where a destination fills, and this list
+ * is the app's one working queue: every card here is a thing to be handled.
+ *
+ * On success the row plays its exit; the file command broadcasts
+ * `vault:changed` itself, which refetches the list and the sidebar count
+ * together and drops the row (the file watcher is a fallback for external
+ * edits, not the only trigger, so the row leaves even if the watcher never
+ * started). A failed file keeps the row and surfaces the message.
  *
  * `fresh` marks the one row that just finished being the pipeline
- * placeholder: it plays a one-shot fill-in on mount instead of simply being
- * present, so the placeholder becoming this row reads as continuous rather
- * than as a swap. The modifier lives on the shell, whose two children are
- * the fill-in's two players (the card fades, the picker slides).
+ * placeholder: it plays a one-shot entrance instead of simply being present,
+ * so the placeholder becoming this row reads as continuous rather than as a
+ * swap.
  */
 function InboxRow({
   note,
-  options,
+  projects,
   onFiled,
   fresh,
 }: {
   note: NoteSummary;
-  options: SelectOption[];
+  projects: Project[];
   onFiled: () => void;
   fresh: boolean;
 }) {
@@ -600,6 +740,9 @@ function InboxRow({
   const [leaving, setLeaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [creatingProject, setCreatingProject] = useState(false);
+
+  const guess = suggestion(note);
 
   const route = (slug: string) => {
     setPending(true);
@@ -616,18 +759,32 @@ function InboxRow({
   };
 
   return (
-    <li className={`inbox__slot${leaving ? " inbox__slot--leaving" : ""}`}>
-      <div>
+    <li className={clsx(LIST_SLOT, leaving && LIST_SLOT_LEAVING)}>
+      <div className={clsx(LIST_SLOT_INNER, leaving && LIST_SLOT_INNER_LEAVING)}>
         <div
-          className={`inbox__rowShell${fresh ? " inbox__rowShell--fresh" : ""}`}
+          data-testid="inbox-row"
+          className={clsx(
+            "glass-card flex items-center gap-6 border-l-[3px] py-4 pr-5 pl-5",
+            // Named properties only: `translate` and the two the lift recipe
+            // sets. A `transition-all` here would put the guess edge's colour
+            // on the hover clock too, so a card whose guess changed would
+            // fade its edge as if the pointer had done it.
+            "transition-[translate,box-shadow,border-color] duration-180 ease-out-strong",
+            // `hover:` is redefined in index.css as (hover: hover) and
+            // (pointer: fine) — a lift that a touch device cannot undo is a
+            // card stuck in a state, so the gating is the variant's, not ours.
+            "hover:-translate-y-[2px] hover:glass-card-lift",
+            "motion-reduce:transition-none motion-reduce:hover:translate-y-0",
+            guess ? GUESS_EDGE[guess.hue] : "border-l-ink-faint",
+            LIST_ROW_EXIT,
+            leaving && LIST_ROW_LEAVING,
+            fresh && LIST_ROW_ENTER,
+          )}
         >
-          {/* Only phrasing content inside: the old title/meta/snippet <p>s
-              become block <span>s, because a button's content model allows
-              nothing more and the whole card is now the button. */}
           <button
             type="button"
-            data-testid="inbox-row"
-            className="inbox__row ui-focus-ring"
+            data-testid="inbox-row-body"
+            className="focus-ring-inset min-w-0 flex-1 cursor-pointer rounded-[6px] text-left"
             onClick={() =>
               navigate({
                 kind: "noteEditor",
@@ -636,29 +793,121 @@ function InboxRow({
               })
             }
           >
+            {/* Only phrasing content inside a button: the title/meta/snippet
+                are block <span>s rather than the <h3>/<p>s the design draws,
+                because a button's content model allows nothing more. */}
             <span
               data-testid="inbox-row-title"
-              className="block truncate text-row font-semibold tracking-row text-text"
+              className="block truncate text-[15.5px] font-semibold text-ink"
             >
               {note.title}
             </span>
-            <span className="mt-2xs block font-mono text-cap text-text-faint">
-              {noteMeta(note, noteKind(note.type), matchScore(note.confidence))}
+            <span className="mt-1.5 flex items-center gap-2.5 font-data text-[10.5px] text-ink-faint tabular-nums">
+              <span>{[noteKind(note.type), note.date.slice(0, 10)].filter(Boolean).join(" · ")}</span>
+              {/* The gauge and the words beside it are one fact twice: the
+                  bar is the glance, the percentage is the reading. It is the
+                  note's STORED score — why it landed in the Inbox — not the
+                  live guess strength, so the card agrees with the file on
+                  disk. */}
+              <span
+                aria-hidden="true"
+                className="h-[3px] w-13 overflow-hidden rounded-[2px] bg-wash"
+              >
+                <span
+                  data-testid="inbox-row-gauge"
+                  className="block h-full bg-ink-dim"
+                  style={{ width: `${Math.round((note.confidence ?? 0) * 100)}%` }}
+                />
+              </span>
+              <span>{matchScore(note.confidence)}</span>
+              <span
+                data-testid="inbox-row-guess"
+                className={clsx("truncate", guess && GUESS_TEXT[guess.hue])}
+              >
+                {guess ? `→ ${guess.slug}` : "no confident guess"}
+              </span>
             </span>
             {note.snippet && (
-              <span className="inbox__snippet mt-2xs block font-serif text-snippet leading-snippet text-text-soft">
+              <span className="mt-1.5 block truncate text-[13px] text-ink-dim">
                 {note.snippet}
               </span>
             )}
           </button>
-          {/* Delete is always offered — even in a project-less vault, where
-              there is nowhere to file — because an unwanted note must be
-              removable wherever it sits. The picker beside it is not: a control
-              whose only outcome is a dead end should not be offered, so it is
-              gated on there being a project to file into (the sidebar, where
-              task #84's create-project affordance lands, is where that fix
-              points). */}
-          <div className="inbox__rowActions">
+
+          {/* The rail: two equal controls in one hairline-separated column,
+              so the card's right edge reads as a single place where things
+              are decided rather than two loose buttons. */}
+          <div className="flex flex-none flex-col items-stretch gap-1.5 self-center border-l border-edge pl-6">
+            {/* Always offered, even in a project-less vault: the menu's foot
+                creates a project and files into it, so it can no longer be a
+                dead end. (It used to be gated on there being somewhere to
+                file — that gate was the fix for the dead end, and the foot is
+                the better one.) */}
+            <Menu.Root>
+              <Menu.Trigger
+                render={
+                  <Button
+                    loading={pending}
+                    loadingLabel="Filing…"
+                    disabled={leaving}
+                    aria-label={`File "${note.title}" to project`}
+                  >
+                    File
+                    <span aria-hidden="true" className="text-[10px] text-ink-faint">
+                      ▾
+                    </span>
+                  </Button>
+                }
+              />
+              {/* `end`: the trigger sits at the right edge of the thing it
+                  acts on, so the menu hangs back over the card rather than
+                  off the panel. */}
+              <Menu.Content align="end">
+                {guess && (
+                  // The suggestion, first and lit. base-ui highlights the
+                  // first item when the menu is opened from the keyboard, so
+                  // Enter files here — the ↵ is a description of what will
+                  // happen, not a decoration. Green is sanctioned on exactly
+                  // this: a routing suggestion the system is offering
+                  // (DESIGN_SYSTEM §2), in its text-carrying step.
+                  <Menu.Item variant="suggested" onClick={() => route(guess.slug)}>
+                    <span
+                      aria-hidden="true"
+                      className={clsx("size-[9px] flex-none rounded-[3px]", HUE_DOT[guess.hue])}
+                    />
+                    <span className="truncate">{guess.slug}</span>
+                    <span className="ml-auto pl-2 font-data text-[10.5px] text-kodama-ink">↵</span>
+                  </Menu.Item>
+                )}
+                {projects
+                  .filter((project) => project.slug !== guess?.slug)
+                  .map((project) => (
+                    // Slugs, not display names: filing is choosing a
+                    // location, and a nested project's parentage is the whole
+                    // reason you'd pick it over its sibling.
+                    <Menu.Item key={project.slug} onClick={() => route(project.slug)}>
+                      <span
+                        aria-hidden="true"
+                        className={clsx(
+                          "size-[9px] flex-none rounded-[3px]",
+                          HUE_DOT[folderHue(project.slug)],
+                        )}
+                      />
+                      <span className="truncate">{project.slug}</span>
+                      <span className="ml-auto pl-2 font-data text-[10.5px] text-ink-faint tabular-nums">
+                        {project.note_count}
+                      </span>
+                    </Menu.Item>
+                  ))}
+                <Menu.Separator />
+                <Menu.Item variant="foot" onClick={() => setCreatingProject(true)}>
+                  New project…
+                </Menu.Item>
+              </Menu.Content>
+            </Menu.Root>
+            {/* Delete is always offered — even in a project-less vault, where
+                there is nowhere to file — because an unwanted note must be
+                removable wherever it sits. */}
             <Button
               variant="quiet"
               aria-haspopup="dialog"
@@ -668,18 +917,6 @@ function InboxRow({
             >
               Delete
             </Button>
-            {options.length > 0 && (
-              <Select
-                hideLabel
-                variant="token"
-                label={`File "${note.title}" to project`}
-                value={null}
-                placeholder={pending ? "Filing" : "File"}
-                options={options}
-                busy={pending}
-                onChange={route}
-              />
-            )}
           </div>
         </div>
         {error && (
@@ -699,6 +936,18 @@ function InboxRow({
             onDeleted={() => {
               setConfirmingDelete(false);
               setLeaving(true);
+            }}
+          />
+        )}
+        {creatingProject && (
+          <CreateProjectDialog
+            onClose={() => setCreatingProject(false)}
+            // The errand was "file this note somewhere new", so creating the
+            // project finishes it rather than navigating away and leaving the
+            // note where it was.
+            onCreated={(project) => {
+              setCreatingProject(false);
+              route(project.slug);
             }}
           />
         )}

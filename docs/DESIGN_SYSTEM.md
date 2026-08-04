@@ -307,6 +307,13 @@ would bow out past the topmost of them.
 the ground, and blurring a blurred image again is mud, not depth — so a card's fill goes near-opaque
 and its depth comes from the lit edge and the shadow alone.
 
+**The card rung has a hover companion, `glass-card-lift`, and it is not a tenth thickness.** It
+changes no fill and no blur: it deepens the shadow and brightens the lit edge, which is what the same
+material looks like a little closer to the light. It exists because those two values are ground-
+specific literals, and a literal colour may not be written in a `className` (§7) — so the pointer
+state of a card is a recipe for the same reason the card itself is. Written `hover:glass-card-lift`,
+and only where a lift is the right signal: an Inbox row, where every card is a thing to be handled.
+
 ### The ladder
 
 | Layer | Radius | Is |
@@ -337,8 +344,13 @@ The scrim is the one exception, and not an omission: it has no `backdrop-filter`
 made opaque would blank the app rather than reveal it.
 
 Because the swap removes a *property* rather than remapping a value, it cannot live in a token or a
-variant — which is why the `glass-*` recipes are `@utility` blocks with the day branch and the
+variant — which is why the nine thickness recipes are `@utility` blocks with the day branch and the
 reduced-transparency branch nested inside each one, emitted together or not at all.
+
+`glass-card-lift` carries only the day branch, and that is correct rather than an omission: it sets a
+shadow and a border colour, neither of which the reduced-transparency swap touches (it changes fills
+and blurs). A recipe needs the third branch exactly when it has a `backdrop-filter` or a translucent
+fill to give up.
 
 ---
 
