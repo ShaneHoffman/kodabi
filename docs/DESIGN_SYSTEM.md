@@ -109,6 +109,14 @@ particular is information rather than voice, so a lit meter segment is ink at ha
 `--color-kodama` is the mark; `--color-kodama-ink` is the step green takes when it has to carry text
 (a highlighted match), because the mark value is not a reading value in day.
 
+**On the desktop overlay, the mark is the only green thing.** The always-on-top capture pill
+(`CaptureOverlayPill`) keeps its status label at dim ink in every state, so a capture running over
+somebody else's full-screen application announces itself with exactly one green element. The in-app
+listen pill deliberately differs — its live label does step up to `kodama-ink` — because inside
+Kodabi's own window the pill is a piece of the app's chrome rather than a mark laid over another
+program. A pill that is half green reads as an alert; the overlay's job is to be calm and
+unmissable at once.
+
 ### Marigold is failure, and nothing else
 
 `--color-warn` is reserved for failure surfaces: a capture that could not be transcribed, a card in
