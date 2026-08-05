@@ -193,13 +193,23 @@ Every view answers four questions, and a view that answers only the first is unf
 | Move | Duration | Curve | Used by |
 | --- | --- | --- | --- |
 | **Press** | 140ms | `ease-out-strong` | Every pressable thing (§2) |
-| **Exit** | 110–130ms | `ease` | Anything leaving: menus, dialogs, toasts, a filed card |
+| **Exit** | 110–130ms | `ease` | Anything leaving: menus, dialogs, toasts |
+| **Vanish** | 220ms card, inside a 280ms collapse | `ease-in-out-strong` | A row leaving a working list under its own power: the Inbox's routed capture |
 | **Materialize** | 220ms | `ease-out-strong` | A surface arriving: menu, dialog, toast |
 | **Rise-in** | 280ms, 45ms stagger | `ease-out-strong` | A list of rows appearing |
 | **Morph** | 300ms | `ease-out-strong` | A surface that stays put and changes what it means: the listen pill going on air, the kodama's core taking the green |
 
 **Exits are faster than entrances, always.** The user has already decided; waiting on the way out is
 what makes an interface feel slow.
+
+**Vanish is the sanctioned exception to that, and only because it is not a dismissal.** A menu closing
+is the user getting out of the way; a routed capture leaving the Inbox is the app showing its work,
+and it is the one departure the user is watching rather than waiting through. So it runs long enough
+to be read: the card slides left out of a 2px blur over 220ms while the slot beneath it closes over
+280, the two overlapping so the space is handed back behind a card that has already gone and the rows
+below glide up instead of snapping. A row that leaves because the user disposed of it gets the same
+movement for the same reason — they aimed at it, so they are looking at it. Under reduced motion it is
+a fade and nothing else: no travel, no collapse.
 
 **Morph is the one that is slower than an entrance, and deliberately.** Nothing arrives and nothing
 leaves — a thing already on screen changes state — so the length is what makes the change legible as

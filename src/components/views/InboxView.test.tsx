@@ -9,6 +9,7 @@ import { DISTILL_STATE_EVENT } from "../../events";
 import type { NoteSummary } from "../../useNotes";
 import type { Project } from "../../useProjects";
 import { notifyVaultChanged } from "../../useVaultQuery";
+import { applyReduceMotion } from "../../reduceMotion";
 import {
   emitFromBackend,
   invoke,
@@ -109,6 +110,34 @@ function renderInboxWithNavigateSpy(): (view: View) => void {
   return navigate;
 }
 
+/**
+ * Wait for something the app has dropped from state to actually leave the DOM.
+ *
+ * The filed toast is the one element here whose departure `AnimatePresence`
+ * owns, so it stays mounted until its exit finishes: "gone from the state" and
+ * "gone from the document" are two moments. Even with animations skipped
+ * (src/test/setup.ts) the completion that unmounts lands on a later tick of
+ * motion's frame loop, not inside the commit that dropped it.
+ *
+ * Plain `waitFor` cannot close that gap — it polls, but it does not drive the
+ * frame loop — and neither can a single fixed nudge, because `shouldAdvanceTime`
+ * is moving the same clock underneath and any one advance is a race it
+ * sometimes loses. This drives the loop explicitly instead, a frame at a time,
+ * until the element is gone. The step stays far below every timer this view
+ * runs (280 / 3500 / 10000), so settling an exit can never advance the state
+ * machine along with it.
+ */
+async function waitForRemoval(find: () => HTMLElement | null): Promise<void> {
+  const FRAME_MS = 20;
+  const MAX_FRAMES = 20;
+  for (let frame = 0; frame < MAX_FRAMES && find() !== null; frame += 1) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(FRAME_MS);
+    });
+  }
+  expect(find()).toBeNull();
+}
+
 /** A row's File trigger — the whole rail hangs off it. `aria-label` carries
  * the note title, so one exact string identifies one card. */
 function fileTrigger(title: string): HTMLElement {
@@ -158,6 +187,37 @@ describe("InboxView", () => {
 
     expect(await screen.findByText("Quarterly planning")).toBeInTheDocument();
     expect(screen.getByText("Vendor follow-up")).toBeInTheDocument();
+  });
+
+  /* The 14px between rows is not a `gap` on the list: it is an animated margin
+   * on each slot, so it can collapse with the row that owns it. That makes it
+   * the one piece of pure LAYOUT living inside a motion variant table, and a
+   * table is chosen per reduced-motion setting — so the spacing of this list
+   * now depends on a preference that should not touch spacing at all. Pinned
+   * on both grounds because the failure is silent: leave the margin out of one
+   * table and the whole Inbox goes flush, with nothing else to notice. */
+  describe("the space between rows", () => {
+    afterEach(() => {
+      applyReduceMotion(false);
+    });
+
+    async function rowMargins(): Promise<(string | null)[]> {
+      serveVault([PLANNING, VENDOR]);
+      renderInbox();
+      await screen.findByText("Quarterly planning");
+      return [...screen.getByTestId("inbox-list").querySelectorAll("li")].map(
+        (slot) => slot.style.marginBottom || null,
+      );
+    }
+
+    it("is 14px on every row", async () => {
+      expect(await rowMargins()).toEqual(["14px", "14px"]);
+    });
+
+    it("is still 14px when the user has asked us to hold still", async () => {
+      applyReduceMotion(true);
+      expect(await rowMargins()).toEqual(["14px", "14px"]);
+    });
   });
 
   it("names a row's kind when it is not a plain note", async () => {
@@ -945,10 +1005,11 @@ describe("InboxView", () => {
       const rows = screen.getAllByText("New capture");
       expect(rows).toHaveLength(1);
       // The arriving row plays the entrance the placeholder was holding its
-      // place for, so the handoff reads as a fill-in rather than a swap.
-      expect(rows[0].closest("[data-testid='inbox-card']")).toHaveClass(
-        "starting:opacity-0",
-      );
+      // place for, so the handoff reads as a fill-in rather than a swap. The
+      // placeholder itself leaves without an exit of its own — silently, in
+      // the same commit — which is what makes the two read as one note
+      // resolving rather than as one leaving and another arriving.
+      expect(rows[0].closest("[data-testid='inbox-card']")).toHaveAttribute("data-fresh");
     });
 
     it("vanishes immediately and hands off to a toast when distill routes elsewhere", async () => {
@@ -963,31 +1024,38 @@ describe("InboxView", () => {
           session_path: "s1.jsonl",
         });
       });
-      // No dwell on the row itself any more: it starts leaving at once — the
-      // slot collapsing while the card slides out of it.
-      expect(screen.getByTestId("pipeline-placeholder")).toHaveClass("grid-rows-[0fr]");
-      expect(screen.queryByRole("button", { name: /Open the note filed to/ })).not.toBeInTheDocument();
-
-      await act(async () => {
-        vi.advanceTimersByTime(200); // VANISH_MS
-      });
-      expect(screen.queryByTestId("pipeline-placeholder")).not.toBeInTheDocument();
+      // No dwell on the row itself any more: it starts leaving at once, and
+      // the toast is ALREADY up while it does. That overlap is the point —
+      // the eye follows the card out to the left and finds the answer
+      // arriving in the corner, with no beat in between where the app has
+      // nothing to say.
+      expect(screen.getByTestId("pipeline-placeholder")).toBeInTheDocument();
       const toast = screen.getByRole("button", {
         name: 'Open the note filed to "briarwood-golf"',
       });
       expect(toast).toHaveTextContent("Filed to");
       expect(toast).toHaveTextContent("briarwood-golf");
-      expect(screen.getByRole("status")).toHaveTextContent("briarwood-golf");
+      // Scoped to the toast: the placeholder is still up alongside it (that
+      // overlap is the point), and it carries a `role="status"` of its own.
+      expect(within(toast).getByRole("status")).toHaveTextContent("briarwood-golf");
+      // The hue of the folder it landed in, carried over from the card that
+      // wore it on the way out.
+      expect(toast).toHaveClass("border-l-coral");
 
+      await act(async () => {
+        vi.advanceTimersByTime(280); // VANISH_MS
+      });
+      expect(screen.queryByTestId("pipeline-placeholder")).not.toBeInTheDocument();
+
+      // The dwell ends and the toast is dropped from state; its own fade is
+      // the exit variant's, played on the way out rather than announced by a
+      // class first.
       await act(async () => {
         vi.advanceTimersByTime(3500); // TOAST_DWELL_MS
       });
-      expect(screen.getByRole("button", { name: /Open the note filed to/ })).toHaveClass("opacity-0");
-
-      await act(async () => {
-        vi.advanceTimersByTime(130); // TOAST_FADE_MS
-      });
-      expect(screen.queryByRole("button", { name: /Open the note filed to/ })).not.toBeInTheDocument();
+      await waitForRemoval(() =>
+        screen.queryByRole("button", { name: /Open the note filed to/ }),
+      );
     });
 
     it("pauses the toast's dwell while hovered, and resumes it on unhover", async () => {
@@ -1003,22 +1071,23 @@ describe("InboxView", () => {
           session_path: "s6.jsonl",
         });
       });
-      await act(async () => {
-        vi.advanceTimersByTime(200);
-      });
       const toast = screen.getByRole("button", { name: /Open the note filed to/ });
 
       await user.hover(toast);
       await act(async () => {
         vi.advanceTimersByTime(5000); // well past TOAST_DWELL_MS
       });
-      expect(screen.getByRole("button", { name: /Open the note filed to/ })).not.toHaveClass("opacity-0");
+      expect(
+        screen.getByRole("button", { name: /Open the note filed to/ }),
+      ).toBeInTheDocument();
 
       await user.unhover(toast);
       await act(async () => {
         vi.advanceTimersByTime(3500); // TOAST_DWELL_MS, restarted
       });
-      expect(screen.getByRole("button", { name: /Open the note filed to/ })).toHaveClass("opacity-0");
+      await waitForRemoval(() =>
+        screen.queryByRole("button", { name: /Open the note filed to/ }),
+      );
     });
 
     it("opens the filed note when the toast is clicked", async () => {
@@ -1044,9 +1113,6 @@ describe("InboxView", () => {
           path: "C:\\kb\\briarwood-golf\\vendor-sync.md",
           session_path: "s7.jsonl",
         });
-      });
-      await act(async () => {
-        vi.advanceTimersByTime(200);
       });
 
       await user.click(screen.getByRole("button", { name: /Open the note filed to/ }));
@@ -1078,9 +1144,6 @@ describe("InboxView", () => {
           path: "C:\\kb\\briarwood-golf\\vendor-sync.md",
           session_path: "s8.jsonl",
         });
-      });
-      await act(async () => {
-        vi.advanceTimersByTime(200);
       });
 
       await user.click(screen.getByRole("button", { name: /Open the note filed to/ }));
@@ -1157,15 +1220,14 @@ describe("InboxView", () => {
           session_path: "s9.jsonl",
         });
       });
-      await act(async () => {
-        vi.advanceTimersByTime(200);
-      });
       expect(screen.getByRole("button", { name: /Open the note filed to/ })).toBeInTheDocument();
 
       await act(async () => {
         emitFromBackend(CAPTURE_STATE_EVENT, LISTENING);
       });
-      expect(screen.queryByRole("button", { name: /Open the note filed to/ })).not.toBeInTheDocument();
+      await waitForRemoval(() =>
+        screen.queryByRole("button", { name: /Open the note filed to/ }),
+      );
     });
 
     it("does not replay the vanish or the filed toast when the Inbox remounts", async () => {
@@ -1187,19 +1249,18 @@ describe("InboxView", () => {
           session_path: "s10.jsonl",
         });
       });
-      await act(async () => {
-        vi.advanceTimersByTime(200); // VANISH_MS — the toast takes over
-      });
+      // The toast is up from the moment the outcome lands — it overlaps the
+      // vanish rather than following it.
       expect(screen.getByRole("button", { name: /Open the note filed to/ })).toBeInTheDocument();
       await act(async () => {
-        vi.advanceTimersByTime(3500); // TOAST_DWELL_MS
+        vi.advanceTimersByTime(280); // VANISH_MS — the placeholder is retired
       });
       await act(async () => {
-        vi.advanceTimersByTime(130); // TOAST_FADE_MS — seen out in full
+        vi.advanceTimersByTime(3500); // TOAST_DWELL_MS — seen out in full
       });
-      expect(
+      await waitForRemoval(() =>
         screen.queryByRole("button", { name: /Open the note filed to/ }),
-      ).not.toBeInTheDocument();
+      );
 
       // Navigate away and back. The provider — and the distill hook's
       // terminal `saved`, which persists until the next capture — survive
@@ -1246,6 +1307,12 @@ describe("InboxView", () => {
       act(() => {
         notifyVaultChanged();
       });
+      // Both conditions, and both matter. The note LANDING is what arms the
+      // fill-in timer below, and a wait for something to be absent would be
+      // satisfied by it never having arrived; the placeholder GOING is the
+      // handoff itself, and it settles a beat later if a refetch already in
+      // flight answers with the older list first.
+      await screen.findByText("New capture");
       await waitFor(() => {
         expect(screen.queryByTestId("pipeline-placeholder")).not.toBeInTheDocument();
       });
