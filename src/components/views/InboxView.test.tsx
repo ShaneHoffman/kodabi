@@ -9,6 +9,7 @@ import { DISTILL_STATE_EVENT } from "../../events";
 import type { NoteSummary } from "../../useNotes";
 import type { Project } from "../../useProjects";
 import { notifyVaultChanged } from "../../useVaultQuery";
+import { applyReduceMotion } from "../../reduceMotion";
 import {
   emitFromBackend,
   invoke,
@@ -186,6 +187,37 @@ describe("InboxView", () => {
 
     expect(await screen.findByText("Quarterly planning")).toBeInTheDocument();
     expect(screen.getByText("Vendor follow-up")).toBeInTheDocument();
+  });
+
+  /* The 14px between rows is not a `gap` on the list: it is an animated margin
+   * on each slot, so it can collapse with the row that owns it. That makes it
+   * the one piece of pure LAYOUT living inside a motion variant table, and a
+   * table is chosen per reduced-motion setting — so the spacing of this list
+   * now depends on a preference that should not touch spacing at all. Pinned
+   * on both grounds because the failure is silent: leave the margin out of one
+   * table and the whole Inbox goes flush, with nothing else to notice. */
+  describe("the space between rows", () => {
+    afterEach(() => {
+      applyReduceMotion(false);
+    });
+
+    async function rowMargins(): Promise<(string | null)[]> {
+      serveVault([PLANNING, VENDOR]);
+      renderInbox();
+      await screen.findByText("Quarterly planning");
+      return [...screen.getByTestId("inbox-list").querySelectorAll("li")].map(
+        (slot) => slot.style.marginBottom || null,
+      );
+    }
+
+    it("is 14px on every row", async () => {
+      expect(await rowMargins()).toEqual(["14px", "14px"]);
+    });
+
+    it("is still 14px when the user has asked us to hold still", async () => {
+      applyReduceMotion(true);
+      expect(await rowMargins()).toEqual(["14px", "14px"]);
+    });
   });
 
   it("names a row's kind when it is not a plain note", async () => {
@@ -697,8 +729,8 @@ describe("InboxView", () => {
         notifyVaultChanged();
       });
       await waitFor(() => {
-      expect(screen.queryByText("Quarterly planning")).not.toBeInTheDocument();
-    });
+        expect(screen.queryByText("Quarterly planning")).not.toBeInTheDocument();
+      });
       expect(screen.getByText("Vendor follow-up")).toBeInTheDocument();
     });
 

@@ -43,6 +43,10 @@ const TOAST_DWELL_MS = 3500;
  * app (docs/DESIGN_SYSTEM.md §4). Spent by the exit variant rather than by a
  * timer — `AnimatePresence` holds the element alive for exactly this long. */
 const TOAST_FADE_S = 0.13;
+/** The toast's arrival: the app's Materialize band, which every surface that
+ * arrives shares (docs/DESIGN_SYSTEM.md §4). Longer than the fade above, which
+ * is the rule for every entrance/exit pair in the app. */
+const TOAST_MATERIALIZE_S = 0.22;
 /** Covers `--dur-plane` with a little room: how long after an Inbox-routed
  * note lands before its outcome counts as fully presented — the fill-in has
  * played and there is nothing left for a remount to replay. */
@@ -135,7 +139,9 @@ const SLOT_MOVING: Variants = {
     height: "auto",
     opacity: 1,
     marginBottom: ROW_GAP,
-    transition: { duration: 0.3, ease: EASE_OUT_STRONG },
+    // Rise-in, the band for a row appearing (docs/DESIGN_SYSTEM.md §4), and
+    // the same 280 the collapse below runs on.
+    transition: { duration: 0.28, ease: EASE_OUT_STRONG },
   },
   gone: {
     height: 0,
@@ -144,12 +150,22 @@ const SLOT_MOVING: Variants = {
     transition: { duration: 0.28, ease: EASE_IN_OUT_STRONG },
   },
 };
-/** Fades only. No height, no margin: the collapse IS the movement, and the rule
- * is that movement goes while life stays (docs/DESIGN_SYSTEM.md §4). */
+/** Fades only. No height: the collapse IS the movement, and the rule is that
+ * movement goes while life stays (docs/DESIGN_SYSTEM.md §4).
+ *
+ * The margin is NOT movement, though, and it is not optional either: it is the
+ * list's 14px gap, which lives here rather than on the `ul` so it can collapse
+ * with the row that owns it. Every state carries the same value, so it is set
+ * once and never animated — leave it out of one of them and the rows go flush
+ * the moment the preference is on. */
 const SLOT_STILL: Variants = {
-  enter: { opacity: 0 },
-  rest: { opacity: 1, transition: { duration: 0.2 } },
-  gone: { opacity: 0, transition: { duration: TOAST_FADE_S } },
+  enter: { opacity: 0, marginBottom: ROW_GAP },
+  rest: { opacity: 1, marginBottom: ROW_GAP, transition: { duration: 0.2 } },
+  gone: {
+    opacity: 0,
+    marginBottom: ROW_GAP,
+    transition: { duration: TOAST_FADE_S },
+  },
 };
 
 function slotVariants(reduce: boolean): Variants {
@@ -841,11 +857,17 @@ function FiledToast({
       // Faster out than in, like every exit in the app (DESIGN_SYSTEM §4), and
       // a plain fade: it is being dismissed, not travelling anywhere.
       exit={{ opacity: 0, transition: { duration: TOAST_FADE_S } }}
-      transition={{ duration: 0.3, ease: EASE_OUT_STRONG }}
+      // Materialize: 220ms, the band for a surface arriving
+      // (docs/DESIGN_SYSTEM.md §4). It is the toast's own clock, not the
+      // list's — the choreography next door runs longer because it is showing
+      // work, and a toast is not.
+      transition={{ duration: TOAST_MATERIALIZE_S, ease: EASE_OUT_STRONG }}
       // The app's one press spec. `whileTap` rather than `active:scale-97`
       // because motion owns this element's transform while it is arriving, and
-      // a CSS `scale` landing mid-entrance would fight it.
-      whileTap={{ scale: 0.97 }}
+      // a CSS `scale` landing mid-entrance would fight it. Its own 140ms
+      // (DESIGN_SYSTEM §2) rather than the entrance's, which the element-level
+      // `transition` above would otherwise lend it.
+      whileTap={{ scale: 0.97, transition: { duration: 0.14, ease: EASE_OUT_STRONG } }}
       onClick={open}
       onMouseEnter={onPause}
       onMouseLeave={onResume}
