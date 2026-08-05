@@ -45,9 +45,10 @@ type Props = {
   /**
    * What is wrong, when something is (`captureLabel().detail`). Shown only
    * while NOT live, because that is the case the headline cannot carry on its
-   * own: a start whose every source failed reads as a bare "Idle", which is
-   * indistinguishable from never having pressed anything. Live, the headline
-   * already names what is recording ("Mic only") and the clock has the slot.
+   * own: a start whose every source failed reads as a bare "Not listening",
+   * which is indistinguishable from never having pressed anything. Live, the
+   * headline already names what is recording ("Mic only") and the clock has
+   * the slot.
    */
   detail?: string | null;
   /** Whole seconds recorded, from useElapsed. Shown only while live. */
@@ -112,7 +113,7 @@ export function ListenPill({
           <>
             {/* A real space, not just the margin: the two spans concatenate
                 into one accessible name, and without it a screen reader says
-                "IdleCapture failed to start". */}{" "}
+                "Not listeningCapture failed to start". */}{" "}
             <span className="ml-1 font-normal tracking-normal normal-case text-ink-faint">
               {detail}
             </span>

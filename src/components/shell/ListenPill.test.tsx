@@ -66,14 +66,20 @@ describe("ListenPill", () => {
 
   it("says why, when idle is a failure rather than a rest", () => {
     render(
-      <ListenPill mode="idle" label="Idle" detail="Capture failed to start" />,
+      <ListenPill
+        mode="idle"
+        label="Not listening"
+        detail="Capture failed to start"
+      />,
     );
 
-    // In the same live region as the state it explains: a bare "Idle" is
+    // The label is the one `captureLabel` actually produces for this state, so
+    // the assertion pins the sentence a screen reader really hears. In the same
+    // live region as the state it explains: a bare "Not listening" is
     // indistinguishable from never having pressed anything, and no other
     // surface reports a start that captured nothing.
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Idle Capture failed to start",
+      "Not listening Capture failed to start",
     );
   });
 

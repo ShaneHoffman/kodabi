@@ -428,9 +428,14 @@ cleared 4.5 — and that number is the card's 4.62, with only 0.12 of headroom. 
 than `glass-card` would put faint metadata under the floor**, which is the constraint any new
 material has to clear.
 
-**`ink-faint` is a metadata register and is not spent on anything else.** Timestamps, counts, ids,
+**`ink-faint` is a metadata register and is spent on no other text.** Timestamps, counts, ids,
 eyebrows, keyboard hints. The moment it carries a sentence the user has to read, it is the wrong
 token.
+
+The one thing it colours that is not text is the spirit-mark's dormant core (`src/index.css` §3),
+and that is the same claim in another material: the mark at idle is metadata about the capture, not
+a lit indicator. It stays legal because a graphic answers to the 3:1 non-text floor, which the step
+clears on every surface in the table above with room to spare.
 
 ### Hues as text
 
