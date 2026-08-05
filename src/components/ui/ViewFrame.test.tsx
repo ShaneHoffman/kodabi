@@ -62,6 +62,38 @@ describe("ViewFrame", () => {
     );
   });
 
+  it("names the landmark from `label` when the title is composed of elements", () => {
+    // `landmarkName` only names a section from a plain string, so a view that
+    // puts anything beside its name — ProjectView's folder-hue dot — would
+    // otherwise render an unnamed region. `label` is what keeps it a landmark.
+    render(
+      <ViewFrame
+        variant="library"
+        title={
+          <span>
+            <span aria-hidden>dot</span>
+            Briarwood Golf
+          </span>
+        }
+        label="Briarwood Golf"
+      >
+        <p>rows</p>
+      </ViewFrame>,
+    );
+
+    expect(screen.getByRole("region", { name: "Briarwood Golf" })).toBeInTheDocument();
+  });
+
+  it("still names the landmark from a plain-string title", () => {
+    render(
+      <ViewFrame variant="queue" title="Inbox">
+        <p>rows</p>
+      </ViewFrame>,
+    );
+
+    expect(screen.getByRole("region", { name: "Inbox" })).toBeInTheDocument();
+  });
+
   it("gives each variant its own stance class, so the gutters cannot merge", () => {
     // The per-view gutters and measures live in ViewFrame.css keyed off these
     // classes. If a variant stopped emitting its own, two view types would

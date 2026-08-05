@@ -62,7 +62,8 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   `error` both → `aria-describedby`, error described first),
   `StatusMessage` (variant → ARIA role), `ViewFrame` (eight variants; `summary` a **type
   error** outside `queue`/`library`/`health`, `action` a **type error** on `doc`/`search`,
-  neither a silent no-op), `Overlay` (click-not-pointerdown, both ends on the backdrop, no
+  neither a silent no-op; `label` names the section landmark when `title` is composed of
+  elements rather than a plain string), `Overlay` (click-not-pointerdown, both ends on the backdrop, no
   focus trap), `DestructiveConfirmDialog` (presentational, never self-closing; the copy
   structure — title, `subject` strip, consequence, the dialog's own permanence line, quiet
   Cancel before the danger confirm).
