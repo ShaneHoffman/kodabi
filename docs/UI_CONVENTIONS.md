@@ -195,7 +195,7 @@ every one of them.
 | `Checkbox` | A box and its label | — |
 | `Select` | A hand-rolled combobox (full listbox, no headless library) | — |
 | `Overlay` | The pre-Grove modal shell, for the callers `Dialog` has not taken yet | — |
-| `ViewFrame` | A view's scaffold: gutter, column, header | `queue`, `library`, `panel`, `health`, `doc`, `search`, `terminal`, `chat` |
+| `ViewFrame` | A view's scaffold: gutter, column, header | `queue`, `library`, `panel`, `health`, `doc`, `search`, `terminal` |
 | `StatusMessage` | The one way a view says nothing/failed/working | `empty`, `error`, `status` |
 | `DestructiveConfirmDialog` | The shared shape of a destructive confirmation | — |
 
@@ -255,7 +255,11 @@ those two utilities on a row exactly as `Menu.test.tsx` counts these.
 - **`ViewFrame`'s `variant` is required and discriminates the props.** `summary` is a **type error**
   outside `queue` / `library` / `health`, and `action` is a **type error** on `doc` / `search` (the two
   that draw no header of their own) — neither is a silent no-op. `action` is one node and one action;
-  a caller with two is in the wrong slot (§5).
+  a caller with two is in the wrong slot (§5). **`label` is how a composed title still names the
+  region:** the frame labels its `<section>` from `title`, but only when `title` is a plain string
+  ("[object Object]" being worse than silence), so a view that puts anything beside its name — the
+  folder-hue dot on a project — passes `label` too or ships an unnamed landmark. A string title needs
+  it not at all, and passing both is two sources for one name.
 - **`Dialog` traps focus; `Overlay` does not.** That is the whole reason `Dialog` exists: base-ui
   owns the trap, Escape, the outside press, the scroll lock and the focus restore, where every
   `Overlay` caller hand-rolled a Tab strategy of its own. Pass `initialFocus` where the first

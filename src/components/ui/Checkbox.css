@@ -17,11 +17,11 @@
    is actually being recorded (docs/UI_CONVENTIONS.md), and a checked task
    claiming that would be a lie.
 
-   THE GEOMETRY IS THE --check-* TOKENS, not literals. A GFM task list
-   (.md-reading input[type="checkbox"] in markdownReading.css) draws the same
-   skin, and the two used to be the same five numbers typed out twice in two
-   files with nothing able to catch a drift between them: the token guard
-   scopes its spacing check to padding/margin/gap, so a width or a ring
+   THE GEOMETRY IS THE --check-* TOKENS, not literals. A GFM task list drew the
+   same skin (once in markdownReading.css, since deleted; now from Grove tokens
+   in NoteMarkdown.tsx), and the two used to be the same five numbers typed out
+   twice in two files with nothing able to catch a drift between them: the token
+   guard scopes its spacing check to padding/margin/gap, so a width or a ring
    thickness was structurally invisible to it.
    ============================================================ */
 

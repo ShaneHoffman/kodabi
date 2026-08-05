@@ -32,10 +32,6 @@ import "./ViewFrame.css";
  *   terminal— the embedded Claude Code terminal. A small masthead over a
  *             full-bleed pane: its body (the xterm mount) grows to fill the
  *             height the gutter leaves, and scrolls inside itself.
- *   chat    — the designed chat over the knowledge base. The terminal's
- *             full-height stance on a document's measure (--chat-measure):
- *             the log scrolls inside itself and the composer stays put, but
- *             what fills the pane is prose, so it caps like a doc.
  *
  * `doc` and `search` render no header of their own: their headers are a
  * genuinely different shape (a back link and its own actions; a query field)
@@ -52,14 +48,20 @@ type Variant =
   | "health"
   | "doc"
   | "search"
-  | "terminal"
-  | "chat";
+  | "terminal";
 
 type BaseProps = {
   /** The small uppercase label above the title. Names the section, not the field. */
   eyebrow?: ReactNode;
   /** The view's name, at the one step every view opens on. */
   title?: ReactNode;
+  /**
+   * The section landmark's accessible name, for a view whose `title` is
+   * composed of elements rather than a plain string. Only that case needs it:
+   * a string title already names the landmark, and passing both here would be
+   * two sources for one name.
+   */
+  label?: string;
   children: ReactNode;
 };
 
@@ -128,6 +130,7 @@ export function ViewFrame({
   variant,
   eyebrow,
   title,
+  label,
   action,
   summary,
   children,
@@ -138,21 +141,22 @@ export function ViewFrame({
     // Named, so it is a real region landmark. A bare <section> has no
     // accessible name and is not exposed as one at all, which left the window
     // with a main, an aside and a nav and nothing identifying the view inside
-    // them. `title` when there is one, else `eyebrow`.
+    // them. `label` when one is given, else `title`, else `eyebrow`.
     //
-    // KNOWN GAP, deliberately not fixed here: `doc` and `search` used to both
-    // pass neither `title` nor `eyebrow`, so a view on either was unnamed — the
-    // exact failure above, for the two variants that draw their own header.
-    // Both closed their own half since: `search` passes a plain `title` when
-    // it moved to Grove, and the note editor answered its half by leaving this
-    // frame entirely for a `NoteFrame` that names its own landmark — `doc`
-    // therefore has no consumer at all now, and goes with the legacy layer.
-    // Neither closure came from a change here; if a future headerless variant
-    // needs the same, the fix is a
-    // decision of its own (a `label` prop, an aria-label on the view's own
-    // <header>, or accept it), not a side effect of the action contract.
+    // `label` exists because `landmarkName` only names a landmark from a plain
+    // string, and a view whose title is composed (ProjectView's hue dot beside
+    // its name) would otherwise lose its name on the way to Grove — the same
+    // failure above, arriving from the opposite direction.
+    //
+    // The KNOWN GAP this used to describe is closed from every side now:
+    // `doc` has no consumer at all (the note editor's Grove ticket left this
+    // frame entirely for its own `NoteFrame`, which names its own landmark),
+    // `search` passes a plain `title` rather than a composed one, and a
+    // composed title elsewhere reaches for `label`. Neither of the first two
+    // closures came from a change here; a future headerless variant or
+    // composed title is what `label` is for.
     <section
-      aria-label={landmarkName(title) ?? landmarkName(eyebrow)}
+      aria-label={label ?? landmarkName(title) ?? landmarkName(eyebrow)}
       className={`view view--${variant}`}
     >
       <div className="view__column">
