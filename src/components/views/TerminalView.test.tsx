@@ -11,6 +11,7 @@ vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
 const { xtermRegistry } = vi.hoisted(() => ({
   xtermRegistry: {
     instances: [] as Array<{
+      options: Record<string, unknown>;
       onDataHandler: ((data: string) => void) | null;
       writes: unknown[];
     }>,
@@ -84,6 +85,29 @@ describe("TerminalView", () => {
     expect(invokedCommands()).toContain("terminal_open");
   });
 
+  // The Grove spec's two type facts about the pane. `allowTransparency` is the
+  // load-bearing half: without it the theme's transparent background is
+  // composited away and the glass-term well behind the mount never shows.
+  it("builds xterm at the Grove step, over a transparent background", () => {
+    render(<TerminalView />);
+    const { options } = latestTerminal();
+    expect(options.fontSize).toBe(12.5);
+    expect(options.allowTransparency).toBe(true);
+  });
+
+  it("reads the session's state in the header, and flips it on exit", () => {
+    render(<TerminalView />);
+    expect(screen.getByText("claude · kodabi mcp connected")).toBeInTheDocument();
+
+    act(() => {
+      emitFromBackend("terminal:exit", { code: 0 });
+    });
+    expect(screen.getByText("claude · exited")).toBeInTheDocument();
+    expect(
+      screen.queryByText("claude · kodabi mcp connected"),
+    ).not.toBeInTheDocument();
+  });
+
   it("streams keystrokes to the PTY via terminal_write", () => {
     render(<TerminalView />);
     act(() => {
@@ -114,5 +138,6 @@ describe("TerminalView", () => {
     await waitFor(() =>
       expect(screen.queryByText(/session ended/i)).not.toBeInTheDocument(),
     );
+    expect(screen.getByText("claude · kodabi mcp connected")).toBeInTheDocument();
   });
 });

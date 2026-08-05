@@ -31,7 +31,9 @@ import "./ViewFrame.css";
  *             panel's full width, and its rows are rows.
  *   terminal— the embedded Claude Code terminal. A small masthead over a
  *             full-bleed pane: its body (the xterm mount) grows to fill the
- *             height the gutter leaves, and scrolls inside itself.
+ *             height the gutter leaves, and scrolls inside itself. Its summary
+ *             is the hosted session's state, which is the one thing the chrome
+ *             can say about a pane whose contents belong to another program.
  *
  * `doc` and `search` render no header of their own: their headers are a
  * genuinely different shape (a back link and its own actions; a query field)
@@ -87,7 +89,8 @@ type HeaderlessVariant = "doc" | "search";
  * `summary` is only accepted by the variants that draw one.
  *
  * The line beside the title — a workload sentence for a queue, a count for a
- * library, a state for a health view. Deliberately not a free styling slot:
+ * library, a state for a health view, the hosted session's state for the
+ * terminal. Deliberately not a free styling slot:
  * the frame fixes its typographic role, so a count can never render at a
  * heading's weight in one view and a caption's in another. Pass the content,
  * never a class. Omit it at zero — the empty state speaks then, and two
@@ -114,7 +117,7 @@ type Props = BaseProps &
  * have no typographic role for one, so passing it there is a mistake rather
  * than a no-op — the type below is what says so, at the call site, instead of
  * the value being silently dropped at render. */
-type SummaryVariant = "queue" | "library" | "health";
+type SummaryVariant = "queue" | "library" | "health" | "terminal";
 
 /**
  * The page scaffold every full view sits in: the gutter, the column, and the

@@ -114,14 +114,16 @@ Always the token utility, never the literal:
 | A duration | `duration-140`, `duration-220`, … (bare ms; the canonical four are in DESIGN_SYSTEM §4) |
 | A glass surface | `glass-top`, `glass-dock`, `glass-panel`, `glass-card`, `glass-overlay`, `glass-dialog`, `glass-palette`, `glass-pill`, `glass-sheet`, `glass-scrim` |
 | A card that lifts under the pointer | `hover:-translate-y-[2px] hover:glass-card-lift` (DESIGN_SYSTEM §5) |
+| A well sunk into a panel | `glass-term` (the terminal's pane; DESIGN_SYSTEM §5) |
 | A row that enters or leaves a working list | the class strings in [`src/listMotion.ts`](../src/listMotion.ts) — **one at a time**, chosen by state, never stacked |
 | The focus ring | `focus-ring`, or `focus-ring-inset` where the control fills its container |
 
 Each recipe carries a whole surface — its fill, blur, lit edge, border, shadow and rung of the radius
 ladder — plus its own `.day` branch, so a surface cannot be spelled at the wrong roundness or lose
-half its material. The nine thicknesses each carry a `prefers-reduced-transparency` branch too;
-`glass-scrim` is the deliberate exception on both counts (a fill and nothing else, and no blur to
-drop), and DESIGN_SYSTEM §5 says which parts each one omits and why. They are `@utility` rather than
+half its material. The nine thicknesses and `glass-term` each carry a
+`prefers-reduced-transparency` branch too; `glass-scrim` is the deliberate exception on both counts
+(a fill and nothing else, and no blur to drop), and DESIGN_SYSTEM §5 says which parts each one omits
+and why. They are `@utility` rather than
 a stack of classes because reduced transparency removes a *property* (`backdrop-filter`) rather than
 remapping a value, which no token and no variant can express. Add layout at the call site, not
 material: `glass-card p-4`, never `glass-card bg-*`.

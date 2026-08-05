@@ -30,7 +30,9 @@ in `eslint.config.js` fail any non-blessed file at the
   DOM: `useCommandPalette` (global ⌘K/Ctrl-K keydown), `useDialogFocus` (dialog
   focus hand-off), `useScrollIntoView` (active-descendant row visibility),
   `useOutsidePointerDown` (dismiss on outside press), `useXterm` (the embedded
-  terminal's xterm.js `Terminal` + `ResizeObserver`, streaming to the PTY).
+  terminal's xterm.js `Terminal`, streaming to the PTY, with the `ResizeObserver`
+  that keeps the grid sized and the `MutationObserver` that re-reads the palette
+  when the theme class changes).
   Timers:
   `useDebouncedValue`, `useTimeout`, `useElapsed` (the one-second
   recording clock). The list is duplicated as the override
