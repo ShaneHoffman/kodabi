@@ -68,8 +68,14 @@ const MENU_SURFACE =
  *   foot      — the row that leaves the list to do something else ("New
  *               project…"). Smaller and quieter: it is the way out, not one
  *               more thing to pick.
+ *
+ * Exported because `Select` — a listbox, not a menu, and hand-rolled — draws
+ * the same row on the same surface. It sets `data-highlighted` on its active
+ * option itself, so the one attribute keeps carrying "pointer is here OR the
+ * keyboard walked here" in both controls. The alternative was a second copy of
+ * this recipe drifting from this one.
  */
-const menuRow = cva(
+export const menuRow = cva(
   [
     "flex w-full cursor-default select-none items-center gap-2 rounded-[9px] px-2.5 py-2",
     "font-ui font-medium leading-none outline-hidden",

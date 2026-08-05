@@ -64,7 +64,11 @@ function renderProjects(props: Partial<Parameters<typeof Select>[0]> = {}) {
 
 /*
  * Assert the highlight, both halves at once: the id assistive tech follows and
- * the class the eye follows. Checking only one lets a half-moved highlight pass.
+ * the mark the eye follows. Checking only one lets a half-moved highlight pass.
+ *
+ * `data-highlighted` is that second half — the attribute Menu's shared row
+ * recipe keys its wash off, so the two lists in the app light a row the same
+ * way and this assertion holds whatever the class string turns into.
  *
  * The ids come from React's useId and are deliberately never written out here —
  * they are opaque and React-version-shaped ("«r0»" under 19). Read the row's own
@@ -73,7 +77,7 @@ function renderProjects(props: Partial<Parameters<typeof Select>[0]> = {}) {
 function expectActive(trigger: HTMLElement, label: string): void {
   const row = screen.getByRole("option", { name: label });
   expect(trigger).toHaveAttribute("aria-activedescendant", row.id);
-  expect(row).toHaveClass("is-active");
+  expect(row).toHaveAttribute("data-highlighted");
 }
 
 // One test spies on Element.prototype.scrollIntoView, which is a shared

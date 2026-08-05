@@ -910,6 +910,79 @@
   }
 }
 
+/* ---------- the select's menu, anchored to its own trigger ----------
+   CSS anchor positioning, which buys three things a plain absolute list has no
+   answer for: the menu flips above when there is no room below it, it escapes a
+   clipping ancestor with no portal, and it can scale out of the edge it hangs
+   off. (`Menu` gets all three from base-ui's positioner instead; `Select` is
+   hand-rolled, and this is its half of that job.)
+
+   It is CSS rather than utilities because of the GUARD, which no className can
+   express: a multi-property `@supports` wrapping several selectors. Kodabi ships
+   against one evergreen Chromium (WebView2), which is what makes any of it
+   available — but no floor is declared in src-tauri/tauri.conf.json and Tauri
+   v2's own documented floor is 125, which is below anchor-scope's 131. So the
+   whole layer is guarded and the utilities on `.ui-select__list` stay the base
+   branch (docs/decisions/popover-primitive.md §5.1).
+
+   The guard tests anchor-scope on purpose, not only the two properties this
+   block obviously needs. Without anchor-scope every element sharing an
+   anchor-name resolves to the LAST one in source order, and this control renders
+   twice on the settings page — so between 125 and 131 a guard asking only about
+   anchor-name would PASS and hang both menus off the lower trigger. Silently,
+   which is the worst way to fail (§5.4).
+
+   Ported from the deleted Select.css. What did NOT come with it is the
+   entrance: the list wears `animate-materialize` at the call site now, on the
+   same clock as every other Grove surface, and an animation and a
+   @starting-style transition cannot both drive one transform.
+
+   `fixed` is what escapes the clipping ancestor; position-anchor keeps the menu
+   glued to the trigger regardless. That escape is contingent rather than free —
+   any ancestor carrying transform, filter, backdrop-filter, perspective,
+   contain, will-change on one of those, or container-type becomes the
+   containing block. That list of seven is the standing grep (§6), and it is not
+   empty today: `.ui-overlay` carries backdrop-filter (Overlay.css) UNLESS the OS
+   asks for reduced transparency, so ConsentNudge's menu is contained by the
+   scrim rather than the viewport in one of those two states and not the other.
+   It does not move the menu, because the scrim is `fixed inset-0` and therefore
+   geometrically identical to the viewport either way — which is why the grep is
+   worth re-running rather than trusted as clean. Note what it demonstrates: an
+   accessibility preference can add or remove a containing block, so "which
+   ancestors carry one of the seven" is not a property of the stylesheet alone.
+
+   The two `auto`s release the base branch's own insets, which position-area has
+   no say over. The offset turns symmetric with them — margin-block, not
+   margin-top — because the menu can sit above the trigger now, and it matches
+   Menu's own `sideOffset={8}`.
+
+   transform-origin is the one thing a flip cannot carry: @position-try accepts
+   insets, margins, sizing, self-alignment, position-anchor and position-area,
+   and not this (w3c/csswg-drafts#11666). A flipped menu therefore still scales
+   from its top edge where it should scale from its bottom. Accepted rather than
+   papered over with a class toggled from JS, which is the thing this layer
+   exists to avoid (docs/DESIGN_SYSTEM.md §4). */
+@supports (anchor-scope: --x) and (anchor-name: --x) and (position-area: block-end) {
+  .ui-select {
+    anchor-scope: --ui-select-trigger;
+  }
+
+  .ui-select__trigger {
+    anchor-name: --ui-select-trigger;
+  }
+
+  .ui-select__list {
+    position: fixed;
+    position-anchor: --ui-select-trigger;
+    position-area: block-end span-inline-start;
+    position-try-fallbacks: flip-block;
+    position-visibility: anchors-visible;
+    inset-inline-end: auto;
+    inset-block-start: auto;
+    margin-block: 8px;
+  }
+}
+
 /* ---------- global chrome ----------
    Scrollbars and selection: two pieces of the window that belong to no
    component, and that ship as a platform default nobody chose — a light
