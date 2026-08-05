@@ -16,10 +16,11 @@ import { clsx } from "clsx";
  * adopted"), not a side effect of a settings ticket.
  *
  * WHAT CARRIES THE STATE IS THE KNOB, not the track. The on-track fill is a
- * supporting cue that does not clear 3:1 against the panel it sits on at any
- * alpha quiet enough to belong there; the knob is ink on that track at ~15:1,
- * and it moves 18px, which is a distance you can see at a glance down a column
- * of rows (docs/DESIGN_SYSTEM.md §6). That is also why the knob's travel is
+ * supporting cue that does not clear 3:1 against the card it sits on at any
+ * alpha quiet enough to belong there (2.05 night, 1.33 day); the knob clears
+ * that floor several times over against the track in every ground, and it moves
+ * 18px, which is a distance you can see at a glance down a column of rows
+ * (docs/DESIGN_SYSTEM.md §6). That is also why the knob's travel is
  * gated by DURATION alone under reduced motion, never suppressed: position is
  * the readout, so it must still arrive — just at once rather than over 180ms.
  */

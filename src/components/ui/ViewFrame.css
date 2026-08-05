@@ -53,8 +53,10 @@
 /* `queue`, `library`, `panel` and `health` deliberately cap nothing here. Their
    rows are rows, not prose: they take the width the gutter leaves them, the
    same width on every one of those views. A queue row's serif snippet caps
-   itself at --measure-snippet, and a settings row caps at --measure-setting on
-   the row, so the tab rail above can still run the pane's full width. */
+   itself at --measure-snippet, and Settings caps its own card stack, which is
+   what a view capping itself rather than being capped by the frame buys: the
+   cap can sit on the thing that needs one. (It used to be phrased as leaving
+   room for Settings' tab rail; that rail is gone, and the reason survives it.) */
 
 /* ---------- terminal ----------
    The terminal is the one view that must NOT grow the page: it fills the height

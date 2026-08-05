@@ -7,6 +7,7 @@ import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Field } from "../ui/Field";
 import { Menu } from "../ui/Menu";
+import { Select } from "../ui/Select";
 import { Switch } from "../ui/Switch";
 
 /*
@@ -116,6 +117,7 @@ export function PrimitiveGallery() {
   // the only thing worth looking at.
   const [reduceMotion, setReduceMotion] = useState(false);
   const [increaseContrast, setIncreaseContrast] = useState(true);
+  const [retention, setRetention] = useState("keep_days");
 
   return (
     <div className="grove-ground min-h-dvh font-ui text-ink">
@@ -199,7 +201,7 @@ export function PrimitiveGallery() {
 
           <Section
             title="Fields"
-            note="The same glass a button is, at input size. Focus moves the border; the caret is the kodama's."
+            note="The same glass a button is, at input size. Focus moves the border; the caret is the kodama's. The select is that glass as a value button."
           >
             {/* Uncontrolled on purpose: a catalogue page has no business
                 holding the value of every control it displays. */}
@@ -220,6 +222,29 @@ export function PrimitiveGallery() {
                 error="A project cannot be called inbox."
               />
               <Field label="Days to keep" type="number" min={1} defaultValue={30} />
+              {/* Controlled, like the switches below: the trigger's whole job
+                  is to read back the chosen value. Open it to check that the
+                  list wears the same material the menu above does, that it
+                  anchors to this trigger rather than to the last one on the
+                  page, and that the trigger does not scale while it is an
+                  anchor (the press would drag the list sideways). */}
+              <Select
+                label="Retention"
+                value={retention}
+                onChange={setRetention}
+                options={[
+                  { value: "keep_all", label: "Keep all transcripts and recordings" },
+                  { value: "keep_days", label: "Keep for a number of days" },
+                  { value: "discard_after_distill", label: "Discard after distilling" },
+                ]}
+              />
+              <Select
+                label="Retention"
+                value={retention}
+                onChange={setRetention}
+                options={[]}
+                busy
+              />
             </div>
           </Section>
 

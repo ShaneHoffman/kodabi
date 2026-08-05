@@ -166,8 +166,10 @@
      step deeper: the two tracks sit side by side down a settings card and
      have to be told apart at a glance, not compared.
      It is the SUPPORTING cue and never the only one — the knob's 18px of
-     travel is what actually carries the state, and it is ink on the track
-     at ~15:1, because no fill this quiet clears 3:1 against the panel
+     travel is what actually carries the state. No fill this quiet clears
+     3:1 against the card it sits on (2.05 night, 1.33 day), and none that
+     did would still be a card's material; the knob clears it several times
+     over on every ground, which is why position is the readout
      (docs/DESIGN_SYSTEM.md §6). */
   --color-switch-on: rgb(255 255 255 / 0.22);
 

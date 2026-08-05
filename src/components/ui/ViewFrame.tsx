@@ -19,8 +19,8 @@ import "./ViewFrame.css";
  *   queue   — work to get through. Its summary is a workload sentence rather
  *             than a count. Caps no column.
  *   library — a place to browse. Caps no column: its rows are rows, not prose.
- *   panel   — configuration. No column cap, so a tab rail can run the full pane
- *             (its rows cap themselves).
+ *   panel   — configuration. No column cap: Settings caps its own card stack, so
+ *             the cap sits on the thing that needs one.
  *   health  — system state to recover from. A short list of pre-lifted cards.
  *             Caps no column.
  *   doc     — a note, on the measure it was written to (--measure-doc). No
