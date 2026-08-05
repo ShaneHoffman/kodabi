@@ -12,7 +12,9 @@ import {
   onCommand,
   resetTauriMocks,
 } from "../../test/tauri";
-import type { ChatSnapshot } from "../../chat";
+import type { ChatEntry, ChatNoteRef, ChatSnapshot } from "../../chat";
+import { citationsFor } from "../../chatCitations";
+import { NavigationContext, type View } from "../../useNavigation";
 import { ChatView } from "./ChatView";
 
 const CHAT_ID = "3c9a35a1-0000-4000-8000-000000000000";
@@ -29,11 +31,34 @@ function snapshot(overrides: Partial<ChatSnapshot> = {}): ChatSnapshot {
   };
 }
 
+/** A tool-use entry. Most calls cite nothing; a `get_note` carries the note it
+ * read, which is what the citation chips render. */
+function toolUse(summary: string, note: ChatNoteRef | null = null): ChatEntry {
+  return { kind: "tool_use", summary, note };
+}
+
+function noteRef(overrides: Partial<ChatNoteRef> = {}): ChatNoteRef {
+  return {
+    id: "n_a1b2c3",
+    title: "Deck railing material decision",
+    project: "Briarwood Golf",
+    ...overrides,
+  };
+}
+
+/** Where a citation chip sent the reader. ChatView navigates, so every render
+ * needs the context; the spy is what the chip tests assert on. */
+let navigate: ReturnType<typeof vi.fn<(view: View) => void>>;
+
 /** Mount and let the `chat_open` snapshot land (loading renders nothing).
  * Returns the render result so the motion tests can reach for the entrance
- * class by selector — there is no accessible handle on a wrapper div. */
+ * marker by selector — there is no accessible handle on a wrapper div. */
 async function renderChat() {
-  const view = render(<ChatView />);
+  const view = render(
+    <NavigationContext.Provider value={{ view: { kind: "chat" }, navigate }}>
+      <ChatView />
+    </NavigationContext.Provider>,
+  );
   await waitFor(() => expect(invokedCommands()).toContain("chat_open"));
   await screen.findByRole("region", { name: "Chat" });
   return view;
@@ -41,6 +66,7 @@ async function renderChat() {
 
 describe("ChatView", () => {
   beforeEach(() => {
+    navigate = vi.fn<(view: View) => void>();
     resetTauriMocks();
     onCommand("chat_open", () => snapshot());
     onCommand("chat_send", () => undefined);
@@ -61,7 +87,7 @@ describe("ChatView", () => {
       snapshot({
         entries: [
           { kind: "user", text: "What projects do I have?" },
-          { kind: "tool_use", summary: "Listed projects" },
+          toolUse("Listed projects"),
           { kind: "assistant", text: "You have **Briarwood Golf**." },
         ],
         streaming_text: "And one more thing",
@@ -148,13 +174,13 @@ describe("ChatView", () => {
 
   // ---------- the answer's entrance (docs/DESIGN_SYSTEM.md §4) ----------
   // jsdom runs neither @starting-style nor transitions, so what these lock in
-  // is the class contract: which element carries `.chat-view__answer`, and
+  // is the class contract: which element carries `[data-live-answer]`, and
   // just as importantly which is denied it. That IS the design — see the
   // comment on ChatEntryRow's assistant case.
 
   it("marks the arriving answer and keeps the same node across deltas", async () => {
     const { container } = await renderChat();
-    expect(container.querySelector(".chat-view__answer")).toBeNull();
+    expect(container.querySelector("[data-live-answer]")).toBeNull();
 
     act(() => {
       emitFromBackend("chat:event", {
@@ -163,7 +189,7 @@ describe("ChatView", () => {
         text: "Streaming ",
       });
     });
-    const arriving = container.querySelector(".chat-view__answer");
+    const arriving = container.querySelector("[data-live-answer]");
     expect(arriving).toHaveTextContent("Streaming");
 
     act(() => {
@@ -176,7 +202,7 @@ describe("ChatView", () => {
     // The same DOM node, grown — not a replacement. @starting-style resolves
     // only on insertion, so a fresh node here would re-run the entrance on
     // every delta, which at the backend's 16ms coalesce window is ~60Hz.
-    expect(container.querySelector(".chat-view__answer")).toBe(arriving);
+    expect(container.querySelector("[data-live-answer]")).toBe(arriving);
     expect(arriving).toHaveTextContent("Streaming onward.");
   });
 
@@ -190,7 +216,7 @@ describe("ChatView", () => {
         text: "The answer is 42.",
       });
     });
-    expect(container.querySelector(".chat-view__answer")).not.toBeNull();
+    expect(container.querySelector("[data-live-answer]")).not.toBeNull();
 
     act(() => {
       emitFromBackend("chat:event", {
@@ -203,7 +229,7 @@ describe("ChatView", () => {
     // holding the same prose. If that entry carried the entrance class, every
     // turn would end by fading in an answer the reader has already read.
     expect(screen.getByText("The answer is 42.")).toBeInTheDocument();
-    expect(container.querySelector(".chat-view__answer")).toBeNull();
+    expect(container.querySelector("[data-live-answer]")).toBeNull();
   });
 
   it("marks each answer block a tool-using turn hands back", async () => {
@@ -221,7 +247,7 @@ describe("ChatView", () => {
         text: "Let me look.",
       });
     });
-    const first = container.querySelector(".chat-view__answer");
+    const first = container.querySelector("[data-live-answer]");
     expect(first).not.toBeNull();
 
     // One `act` per delivery, because that is what the backend does: the pump
@@ -240,9 +266,10 @@ describe("ChatView", () => {
         type: "tool_use",
         chat_id: CHAT_ID,
         summary: "Searched notes",
+        note: null,
       });
     });
-    expect(container.querySelector(".chat-view__answer")).toBeNull();
+    expect(container.querySelector("[data-live-answer]")).toBeNull();
 
     act(() => {
       emitFromBackend("chat:event", {
@@ -251,11 +278,11 @@ describe("ChatView", () => {
         text: "You have two.",
       });
     });
-    const second = container.querySelector(".chat-view__answer");
+    const second = container.querySelector("[data-live-answer]");
     expect(second).toHaveTextContent("You have two.");
     expect(second).not.toBe(first);
     // Still exactly one live block: the first one settled into a still entry.
-    expect(container.querySelectorAll(".chat-view__answer")).toHaveLength(1);
+    expect(container.querySelectorAll("[data-live-answer]")).toHaveLength(1);
   });
 
   it("leaves a backlog hydrated from the snapshot entirely still", async () => {
@@ -263,7 +290,7 @@ describe("ChatView", () => {
       snapshot({
         entries: [
           { kind: "user", text: "What projects do I have?" },
-          { kind: "tool_use", summary: "Listed projects" },
+          toolUse("Listed projects"),
           { kind: "assistant", text: "You have **Briarwood Golf**." },
         ],
       }),
@@ -273,7 +300,7 @@ describe("ChatView", () => {
     // Why "scrollback never animates" is provable rather than asserted: no
     // entry carries the class, so returning to the Chat tab has nothing to
     // replay.
-    expect(container.querySelectorAll(".chat-view__answer")).toHaveLength(0);
+    expect(container.querySelectorAll("[data-live-answer]")).toHaveLength(0);
   });
 
   it("still marks a mid-turn answer hydrated from the snapshot", async () => {
@@ -290,7 +317,7 @@ describe("ChatView", () => {
     );
     const { container } = await renderChat();
 
-    const arriving = container.querySelectorAll(".chat-view__answer");
+    const arriving = container.querySelectorAll("[data-live-answer]");
     expect(arriving).toHaveLength(1);
     expect(arriving[0]).toHaveTextContent("You have");
   });
@@ -314,6 +341,7 @@ describe("ChatView", () => {
         type: "tool_use",
         chat_id: CHAT_ID,
         summary: 'Searched notes for "budget"',
+        note: null,
       });
     });
     expect(screen.getByText('Searched notes for "budget"')).toBeInTheDocument();
@@ -459,10 +487,152 @@ describe("ChatView", () => {
     onCommand("chat_open", () => {
       throw new Error("claude not found");
     });
-    render(<ChatView />);
+    render(
+      <NavigationContext.Provider value={{ view: { kind: "chat" }, navigate }}>
+        <ChatView />
+      </NavigationContext.Provider>,
+    );
 
     expect(
       await screen.findByText(/Couldn't start chat: .*claude not found/),
     ).toBeInTheDocument();
+  });
+
+  // ---------- citations ----------
+
+  it("chips the notes an answer read and opens one on click", async () => {
+    const user = userEvent.setup();
+    onCommand("chat_open", () =>
+      snapshot({
+        entries: [
+          { kind: "user", text: "What did we decide about the deck railing?" },
+          toolUse("Opened note n_a1b2c3", noteRef()),
+          { kind: "assistant", text: "You are leaning toward aluminum." },
+        ],
+      }),
+    );
+    await renderChat();
+
+    await user.click(
+      screen.getByRole("button", { name: "Deck railing material decision" }),
+    );
+
+    // `origin` is what makes the editor's back link read "← Chat" and return
+    // to this conversation (NoteEditorView's backTarget).
+    expect(navigate).toHaveBeenCalledWith({
+      kind: "noteEditor",
+      noteId: "n_a1b2c3",
+      project: "Briarwood Golf",
+      origin: { kind: "chat" },
+    });
+  });
+
+  it("files a citation with no project under the inbox", async () => {
+    const user = userEvent.setup();
+    onCommand("chat_open", () =>
+      snapshot({
+        entries: [
+          { kind: "user", text: "What did I capture yesterday?" },
+          toolUse("Opened note n_x", noteRef({ id: "n_x", project: null })),
+          { kind: "assistant", text: "A note about the railing." },
+        ],
+      }),
+    );
+    await renderChat();
+
+    await user.click(
+      screen.getByRole("button", { name: "Deck railing material decision" }),
+    );
+
+    expect(navigate).toHaveBeenCalledWith(
+      expect.objectContaining({ noteId: "n_x", project: "Inbox" }),
+    );
+  });
+
+  it("chips only the notes actually read", async () => {
+    onCommand("chat_open", () =>
+      snapshot({
+        entries: [
+          { kind: "user", text: "What did we decide?" },
+          // A search sees notes it may never draw on, so it carries no note
+          // and earns no chip.
+          toolUse('Searched notes for "railing"'),
+          { kind: "assistant", text: "Aluminum." },
+        ],
+      }),
+    );
+    await renderChat();
+
+    expect(screen.getByText('Searched notes for "railing"')).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Deck railing/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("attributes each answer only the notes read for it", () => {
+    const first = noteRef();
+    const second = noteRef({ id: "n_d4e5f6", title: "Call with Dana" });
+    const entries: ChatEntry[] = [
+      { kind: "user", text: "One?" },
+      toolUse("Opened note n_a1b2c3", first),
+      { kind: "assistant", text: "Answer one." },
+      { kind: "user", text: "Two?" },
+      toolUse("Opened note n_d4e5f6", second),
+      { kind: "assistant", text: "Answer two." },
+    ];
+
+    expect(citationsFor(entries, 2)).toEqual([first]);
+    // The run stops at the turn boundary: the first answer's reads do not
+    // leak onto the second.
+    expect(citationsFor(entries, 5)).toEqual([second]);
+  });
+
+  it("cites a note once however often it was read", () => {
+    const note = noteRef();
+    const entries: ChatEntry[] = [
+      { kind: "user", text: "What did we decide?" },
+      toolUse("Opened note n_a1b2c3", note),
+      // A permission card mid-run does not end the run: the tools still ran
+      // for this answer.
+      {
+        kind: "permission",
+        question: "File note n_a1b2c3 to Briarwood Golf?",
+        tool: "file_note_to_project",
+        allowed: true,
+        resolution: "user",
+      },
+      toolUse("Opened note n_a1b2c3", note),
+      { kind: "assistant", text: "Aluminum." },
+    ];
+
+    expect(citationsFor(entries, 4)).toEqual([note]);
+  });
+
+  // ---------- the in-flight pulse ----------
+
+  it("pulses while a turn runs with nothing yet to show", async () => {
+    onCommand("chat_open", () =>
+      snapshot({
+        entries: [{ kind: "user", text: "What projects do I have?" }],
+        turn_active: true,
+      }),
+    );
+    await renderChat();
+    expect(screen.getByTestId("chat-thinking")).toBeInTheDocument();
+
+    // Prose replaces it the moment there is any to render.
+    act(() => {
+      emitFromBackend("chat:event", {
+        type: "delta",
+        chat_id: CHAT_ID,
+        text: "You have two.",
+      });
+    });
+    expect(screen.queryByTestId("chat-thinking")).not.toBeInTheDocument();
+  });
+
+  it("does not pulse when no turn is running", async () => {
+    await renderChat();
+    expect(screen.queryByTestId("chat-thinking")).not.toBeInTheDocument();
   });
 });

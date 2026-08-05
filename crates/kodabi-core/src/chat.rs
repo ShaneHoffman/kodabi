@@ -364,6 +364,20 @@ pub fn tool_use_summary(tool_name: &str, input: &Value) -> String {
     }
 }
 
+/// The note a tool call read, when it read one — `get_note`'s `id`.
+///
+/// The seam the chat's citation chips hang off: a citation is a note the answer
+/// actually opened, so only `get_note` qualifies. `search_notes` sees titles it
+/// may never use, and a write tool (`file_note_to_project`) acts on a note
+/// rather than drawing on it; neither earns a chip. Unknown tools cite nothing,
+/// so a tool added later degrades to no chip with no change here.
+pub fn cited_note_id<'v>(tool_name: &str, input: &'v Value) -> Option<&'v str> {
+    match short_tool_name(tool_name) {
+        "get_note" => input_str(input, "id"),
+        _ => None,
+    }
+}
+
 /// The question an inline permission card asks for a write-tool request.
 /// `display_name` is the CLI-provided human title (e.g. "Add Glossary Term"),
 /// the fallback when the tool is one this build doesn't know.
@@ -814,6 +828,43 @@ mod tests {
         assert_eq!(
             tool_use_summary("mcp__kodabi__list_outstanding_items", &json!({})),
             "Called list_outstanding_items"
+        );
+    }
+
+    #[test]
+    fn only_reading_a_note_cites_one() {
+        assert_eq!(
+            cited_note_id("mcp__kodabi__get_note", &json!({"id": "n_a1b2c3"})),
+            Some("n_a1b2c3")
+        );
+        // The un-namespaced name is the same tool.
+        assert_eq!(
+            cited_note_id("get_note", &json!({"id": "n_a1b2c3"})),
+            Some("n_a1b2c3")
+        );
+        // A malformed call cites nothing rather than guessing.
+        assert_eq!(cited_note_id("mcp__kodabi__get_note", &json!({})), None);
+        assert_eq!(
+            cited_note_id("mcp__kodabi__get_note", &json!({"id": 7})),
+            None
+        );
+        // A search sees notes it may never draw on; a write acts on one rather
+        // than citing it. Neither is a citation.
+        assert_eq!(
+            cited_note_id("mcp__kodabi__search_notes", &json!({"query": "budget"})),
+            None
+        );
+        assert_eq!(
+            cited_note_id(
+                "mcp__kodabi__file_note_to_project",
+                &json!({"id": "n_a1b2c3", "project": "Briarwood Golf"})
+            ),
+            None
+        );
+        // A tool this build doesn't know cites nothing.
+        assert_eq!(
+            cited_note_id("mcp__kodabi__list_outstanding_items", &json!({"id": "n_x"})),
+            None
         );
     }
 

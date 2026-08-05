@@ -35,6 +35,8 @@ use kodabi_core::chat::{
 use kodabi_core::device::DeviceId;
 use kodabi_llm::chat::{spawn_chat, ChatChild, ChatChildEvent, ChatProcessConfig};
 
+use crate::index_state::IndexState;
+
 /// Every chat lifecycle event, tagged payloads with the session's `chat_id`
 /// on each variant. Mirrors `ChatEventPayload` in `src/chat.ts`.
 pub const CHAT_EVENT: &str = "chat:event";
@@ -286,6 +288,10 @@ pub enum ChatEntryDto {
     },
     ToolUse {
         summary: String,
+        /// The note this call read, when it read one — the chat's citation
+        /// chip. `None` for every other tool, and for a `get_note` the index
+        /// couldn't resolve.
+        note: Option<NoteRefDto>,
     },
     /// A permission card. `resolution`/`allowed` are `None` while it waits
     /// (the live card itself is `ChatSnapshot::pending_permission`; this
@@ -299,6 +305,21 @@ pub enum ChatEntryDto {
     Error {
         message: String,
     },
+}
+
+/// A note an answer drew on, enriched from the index when the call was seen.
+/// Mirrors `ChatNoteRef` in `src/chat.ts`.
+///
+/// The title is a snapshot: a note renamed later still shows the title it had
+/// when the answer read it. The `id` is what navigation uses, so the chip keeps
+/// working regardless; re-resolving titles on every render would cost an index
+/// read per chip to correct a label nobody is looking at.
+#[derive(Clone, Serialize)]
+pub struct NoteRefDto {
+    id: String,
+    title: String,
+    /// The note's project, or `None` for one still sitting in the inbox.
+    project: Option<String>,
 }
 
 /// Mirrors `PendingPermission` in `src/chat.ts`.
@@ -339,18 +360,13 @@ pub struct ChatSnapshot {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ChatEventPayload {
     /// A coalesced run of streamed assistant text.
-    Delta {
-        chat_id: String,
-        text: String,
-    },
+    Delta { chat_id: String, text: String },
     /// A completed assistant block, authoritative over the accumulated deltas.
-    AssistantDone {
-        chat_id: String,
-        text: String,
-    },
+    AssistantDone { chat_id: String, text: String },
     ToolUse {
         chat_id: String,
         summary: String,
+        note: Option<NoteRefDto>,
     },
     PermissionRequest {
         chat_id: String,
@@ -372,10 +388,27 @@ pub enum ChatEventPayload {
         error: Option<String>,
     },
     /// The chat process exited (naturally — a restart/app-exit reap is silent).
-    Exited {
-        chat_id: String,
-        code: Option<i32>,
-    },
+    Exited { chat_id: String, code: Option<i32> },
+}
+
+/// The citation chip a tool call earns, if any: the note it read, resolved to a
+/// title and project through `lookup`.
+///
+/// `lookup` is a parameter rather than a direct index call so the decision
+/// (which tools cite, what a failed resolution does) stays testable without an
+/// index — the caller supplies the real read.
+fn tool_use_note_ref(
+    tool_name: &str,
+    input: &Value,
+    lookup: impl FnOnce(&str) -> Option<(String, Option<String>)>,
+) -> Option<NoteRefDto> {
+    let id = chat::cited_note_id(tool_name, input)?;
+    let (title, project) = lookup(id)?;
+    Some(NoteRefDto {
+        id: id.to_owned(),
+        title,
+        project,
+    })
 }
 
 fn resolution_str(resolution: PermissionResolution) -> &'static str {
@@ -707,6 +740,13 @@ fn handle_item(
         }
         ChatStreamItem::ToolUse { name, input, .. } => {
             let summary = chat::tool_use_summary(&name, &input);
+            // Resolved here, while the call is in hand: the entry it lands in
+            // is what a later `chat_open` replays, so the snapshot carries the
+            // same chip the live event did.
+            let note = tool_use_note_ref(&name, &input, |id| {
+                app.try_state::<IndexState>()
+                    .and_then(|index| index.note_title_project(id))
+            });
             shared.record(ChatRecord::ToolUse {
                 ts: chat::now_ts(),
                 tool: name,
@@ -715,12 +755,14 @@ fn handle_item(
             });
             shared.push_entry(ChatEntryDto::ToolUse {
                 summary: summary.clone(),
+                note: note.clone(),
             });
             emit(
                 app,
                 &ChatEventPayload::ToolUse {
                     chat_id: chat_id.to_owned(),
                     summary,
+                    note,
                 },
             );
         }
@@ -879,5 +921,77 @@ mod tests {
 
         assert!(claim_distill_once(&first));
         assert!(claim_distill_once(&second));
+    }
+
+    /// A note the answer read becomes a chip, resolved through the index.
+    #[test]
+    fn reading_a_note_earns_a_citation() {
+        let note = tool_use_note_ref(
+            "mcp__kodabi__get_note",
+            &serde_json::json!({"id": "n_a1b2c3"}),
+            |id| {
+                assert_eq!(id, "n_a1b2c3");
+                Some((
+                    "Deck railing material decision".to_owned(),
+                    Some("Briarwood Golf".to_owned()),
+                ))
+            },
+        )
+        .expect("a resolved note cites");
+
+        assert_eq!(note.id, "n_a1b2c3");
+        assert_eq!(note.title, "Deck railing material decision");
+        assert_eq!(note.project.as_deref(), Some("Briarwood Golf"));
+    }
+
+    /// An unresolvable id (no index this session, or a row the reconcile hasn't
+    /// caught up to) drops the chip. The tool line still renders.
+    #[test]
+    fn an_unresolvable_note_drops_the_citation() {
+        let note = tool_use_note_ref(
+            "mcp__kodabi__get_note",
+            &serde_json::json!({"id": "n_missing"}),
+            |_| None,
+        );
+
+        assert!(note.is_none());
+    }
+
+    /// A non-citing tool never reaches the index at all.
+    #[test]
+    fn a_search_costs_no_index_read() {
+        let note = tool_use_note_ref(
+            "mcp__kodabi__search_notes",
+            &serde_json::json!({"query": "budget"}),
+            |_| panic!("a search must not resolve a note"),
+        );
+
+        assert!(note.is_none());
+    }
+
+    /// The wire shape the frontend mirrors: `note` is present on every tool-use
+    /// entry, as an object or as an explicit null.
+    #[test]
+    fn tool_use_entries_always_carry_a_note_field() {
+        let cited = serde_json::to_value(ChatEntryDto::ToolUse {
+            summary: "Opened note n_a1b2c3".to_owned(),
+            note: Some(NoteRefDto {
+                id: "n_a1b2c3".to_owned(),
+                title: "Deck railing material decision".to_owned(),
+                project: None,
+            }),
+        })
+        .unwrap();
+        assert_eq!(cited["kind"], "tool_use");
+        assert_eq!(cited["note"]["id"], "n_a1b2c3");
+        assert_eq!(cited["note"]["title"], "Deck railing material decision");
+        assert!(cited["note"]["project"].is_null());
+
+        let uncited = serde_json::to_value(ChatEntryDto::ToolUse {
+            summary: "Listed projects".to_owned(),
+            note: None,
+        })
+        .unwrap();
+        assert!(uncited["note"].is_null());
     }
 }
