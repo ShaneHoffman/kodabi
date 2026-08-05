@@ -1,6 +1,5 @@
+import { clsx } from "clsx";
 import { useId, type InputHTMLAttributes, type ReactNode } from "react";
-// eslint-disable-next-line no-restricted-syntax -- pre-Grove; the primitives' Grove ticket deletes it
-import "./Checkbox.css";
 
 type Props = Omit<
   InputHTMLAttributes<HTMLInputElement>,
@@ -18,15 +17,20 @@ type Props = Omit<
 };
 
 /**
- * A labelled boolean control. A real `<input type="checkbox">` under a token
+ * A labelled boolean control. A real `<input type="checkbox">` under a Grove
  * skin (appearance: none), so keyboard, form semantics and screen-reader state
  * come from the platform rather than from re-implemented ARIA.
  *
  * The checked state reads through value, not hue: the mark is ink, never the
  * reserved green, which means "audio is being recorded" and nothing else
- * (docs/UI_CONVENTIONS.md). The box and its hairline live in Checkbox.css, the
- * focus ring comes from the shared `ui-focus-ring` recipe, and the label sits
- * inline beside the control.
+ * (docs/UI_CONVENTIONS.md).
+ *
+ * UNCHECKED IS A RING, NOT A BOX. It carries no fill at all, so a column of
+ * action items reads as a column of labels with a mark beside each rather than
+ * a column of empty containers — space instead of boxes (docs/DESIGN.md). The
+ * ring is `ink-faint` rather than `edge` precisely because it is the whole
+ * affordance: it is the only thing marking the control, so it has to clear the
+ * contrast floor on its own, and `.hc` promotes that step for free.
  */
 export function Checkbox({
   label,
@@ -42,23 +46,68 @@ export function Checkbox({
   const hintId = hint ? `${inputId}-hint` : undefined;
 
   return (
-    <div className="flex flex-col gap-3xs">
-      <div className="flex items-center gap-2xs">
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center gap-2">
         <input
           type="checkbox"
           id={inputId}
           checked={checked}
           aria-describedby={hintId}
           onChange={(event) => onChange(event.target.checked)}
-          className={`ui-checkbox ui-focus-ring rounded-sm${className ? ` ${className}` : ""}`}
+          className={clsx(
+            "grid size-[17px] flex-none cursor-pointer appearance-none place-content-center rounded-[4px] bg-transparent",
+            // 1.4px rather than a hairline: the ring is the whole control, and
+            // there is no fill behind it doing half the work.
+            "shadow-[0_0_0_1.4px_var(--color-ink-faint)]",
+            // The same clock and curve as Button's press. `scale` is the
+            // property, not a transform function, so the transition has to
+            // name it or the press lands as a snap (see Button.tsx).
+            "transition-[scale,background-color,box-shadow] duration-140 ease-out-strong",
+            // Hover firms the ring one step up the ink ladder, spent on the
+            // only mark the control has.
+            "not-disabled:not-checked:hover:shadow-[0_0_0_1.4px_var(--color-ink-dim)]",
+            // The press: one step firmer again, plus the app's one press
+            // scale. At 3% on a 17px box the scale is sub-pixel, so the RING
+            // still carries the press; the scale is what makes it the same
+            // press every other control performs (DESIGN_SYSTEM §2).
+            "not-disabled:active:shadow-[0_0_0_1.4px_var(--color-ink-read)]",
+            "not-disabled:active:scale-97",
+            // The swap repeats the guard on purpose: `:not()` takes its
+            // argument's specificity, so an unguarded stillness rule loses the
+            // cascade and would be dead in the markup (see Button.tsx).
+            "motion-reduce:not-disabled:active:scale-100",
+            // Checked is an ink fill with a ground-coloured glyph — value, not
+            // hue. The reserved green is never spent here.
+            "checked:bg-ink checked:shadow-none",
+            "checked:not-disabled:active:bg-ink-read",
+            // A check drawn from two borders, rotated — no icon font, no SVG.
+            // The transform is an arbitrary PROPERTY rather than Tailwind's
+            // split `rotate-*`/`translate-*` utilities: those apply in a fixed
+            // order (translate, then rotate), which would spend the 1px nudge
+            // in unrotated coordinates and land the glyph off-centre.
+            "before:h-[0.3rem] before:w-[0.55rem] before:border-b-2 before:border-l-2 before:border-ground before:opacity-0 before:content-['']",
+            "before:[transform:rotate(-45deg)_translate(1px,-1px)]",
+            "checked:before:opacity-100",
+            // The box has no text to fade, so it dims instead — the one
+            // sanctioned opacity fade in the system (DESIGN_SYSTEM §2).
+            "disabled:cursor-not-allowed disabled:opacity-50",
+            "focus-ring",
+            className,
+          )}
           {...rest}
         />
-        <label htmlFor={inputId} className="text-cap text-text-soft">
+        <label htmlFor={inputId} className="font-ui text-[12.5px] text-ink-read">
           {label}
         </label>
       </div>
       {hint && (
-        <p id={hintId} className="ui-checkbox__hint text-cap text-text-faint">
+        // Indented under the LABEL rather than the box, so the text column
+        // reads as one block. 25px restates the box's own 17px plus the 8px
+        // gap beside it; it tracks the box, not the spacing rhythm.
+        <p
+          id={hintId}
+          className="pl-[25px] font-ui text-[11.5px] leading-relaxed text-ink-faint"
+        >
           {hint}
         </p>
       )}

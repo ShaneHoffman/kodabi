@@ -27,7 +27,6 @@
 @import "tailwindcss";
 /* LEGACY — unmigrated screens only. See section 4. */
 @import "../design/tokens.css";
-@import "./components/ui/ui.css";
 
 /* ============================================================
    1. THE GROVE THEME

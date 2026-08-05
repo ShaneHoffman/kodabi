@@ -49,7 +49,7 @@ export class AppErrorBoundary extends Component<Props, State> {
     if (this.state.message === null) return this.props.children;
     return (
       <ViewFrame variant="health" eyebrow="System" title="This screen stopped">
-        <div className="flex flex-col items-start gap-sm">
+        <div className="flex flex-col items-start gap-4">
           <StatusMessage variant="error">
             This screen stopped while drawing itself. Your notes are files on
             disk and were not touched.
@@ -63,16 +63,17 @@ export class AppErrorBoundary extends Component<Props, State> {
           <Button onClick={() => this.setState({ message: null })}>
             Try this screen again
           </Button>
-          <p className="text-body text-text-soft">
+          <p className="text-[15px] leading-relaxed text-ink-dim">
             If it keeps happening, pick another screen in the sidebar. Closing
             and reopening Kodabi is safe.
           </p>
-          {/* --text-soft, and prefixed. This is the raw exception, and it is
-              the one string on this screen a user might have to read back to
+          {/* `ink-dim`, and prefixed. This is the raw exception, and it is the
+              one string on this screen a user might have to read back to
               somebody: it used to render bare (docs/DESIGN_SYSTEM.md §3 —
-              "never leak an exception") at --text-faint, which §6 records as
-              failing the 4.5:1 floor. Mono because it is machine text. */}
-          <p className="font-mono text-cap text-text-soft">
+              "never leak an exception") a step fainter, which §6 records as
+              failing the 4.5:1 floor. The data face because it is machine
+              text. */}
+          <p className="font-data text-[12px] text-ink-dim">
             Reported by the app: {this.state.message}
           </p>
         </div>

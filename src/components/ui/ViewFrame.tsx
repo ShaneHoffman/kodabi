@@ -1,6 +1,5 @@
+import { clsx } from "clsx";
 import type { ReactNode } from "react";
-// eslint-disable-next-line no-restricted-syntax -- pre-Grove; the primitives' Grove ticket deletes it
-import "./ViewFrame.css";
 
 /**
  * What kind of place this view is. Not decoration: the variant is the one
@@ -13,8 +12,20 @@ import "./ViewFrame.css";
  * under the head, not how loudly the head is set.
  *
  * It does NOT fix the gutter or the alignment either. Those are the same on
- * every view, on all four sides, and nothing centres — see the banner in
- * ViewFrame.css for why moving them per view failed in the running app.
+ * every view, on all four sides, and nothing centres.
+ *
+ * THE GUTTER IS THE SAME ON EVERY VIEW, AND ON ALL FOUR SIDES. Each variant
+ * used to state its own padding and its own column alignment, so that where
+ * the content sat was itself a signal of what kind of place you were in. Sound
+ * in theory; in the running app it read as the page shifting under the pointer
+ * every time you clicked a different sidebar row, because the eye reads a
+ * moved left edge as instability long before it reads it as identity. A view
+ * type is still meant to be recognisable before any heading is read — that
+ * work is done by the header, by density, and by where the weight falls, all
+ * of which stay per-variant. The frame holds still underneath them.
+ *
+ * The `view view--{variant}` classes remain, unstyled, as the stance hook the
+ * tests query and a future view may need to say something with.
  *
  *   queue   — work to get through. Its summary is a workload sentence rather
  *             than a count. Caps no column.
@@ -23,10 +34,10 @@ import "./ViewFrame.css";
  *             the cap sits on the thing that needs one.
  *   health  — system state to recover from. A short list of pre-lifted cards.
  *             Caps no column.
- *   doc     — a note, on the measure it was written to (--measure-doc). No
- *             consumer since the note editor's Grove ticket: a note is two
- *             columns now, and one measure cannot hold both. Kept with the
- *             legacy layer it belongs to rather than removed on its own.
+ *   doc     — a note, on the measure it was written to (660px). No consumer
+ *             since the note editor's Grove ticket: a note is two columns now,
+ *             and one measure cannot hold both. Kept as the one stance that
+ *             caps a column, for the next thing that needs one.
  *   search  — results under a query field. Caps no column: the field runs the
  *             panel's full width, and its rows are rows.
  *   terminal— the embedded Claude Code terminal. A small masthead over a
@@ -160,9 +171,32 @@ export function ViewFrame({
     // composed title is what `label` is for.
     <section
       aria-label={label ?? landmarkName(title) ?? landmarkName(eyebrow)}
-      className={`view view--${variant}`}
+      className={clsx(
+        "view",
+        `view--${variant}`,
+        "flex min-h-full flex-col px-10 py-[34px]",
+        // The terminal is the one view that must NOT grow the page: it fills
+        // the height the shared gutter leaves and scrolls inside itself, so
+        // the window never gains a scrollbar of its own.
+        variant === "terminal" && "h-full",
+      )}
     >
-      <div className="view__column">
+      <div
+        className={clsx(
+          "view__column w-full",
+          // A measure only decides how far content may run to the right before
+          // a line gets too long to track, so it is set where line length
+          // actually hurts reading and left unset where the content is a list
+          // of rows that should use the width it has. Nothing centres: a
+          // centred column puts a different amount of space on the left of
+          // each view depending on how wide its measure happens to be, which
+          // is the instability the shared gutter above just removed.
+          variant === "doc" && "max-w-[660px]",
+          // `min-h-0` lets the mount shrink below its content, which is what
+          // lets xterm size to real pixels.
+          variant === "terminal" && "flex min-h-0 flex-1 flex-col",
+        )}
+      >
         {header}
         {children}
       </div>
@@ -220,7 +254,7 @@ function renderHeader({
       )}
       <div className="flex items-baseline gap-4">
         {title && (
-          <h2 className="ui-balance text-[26px] font-semibold leading-[1.15] tracking-[-0.01em] text-ink">
+          <h2 className="text-balance text-[26px] font-semibold leading-[1.15] tracking-[-0.01em] text-ink">
             {title}
           </h2>
         )}
