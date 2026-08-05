@@ -59,12 +59,14 @@ describe("CaptureOverlayPill", () => {
 
     const label = screen.getByRole("status");
     expect(label).toHaveTextContent("Listening");
-    // Two carriers, and the invariant needs both. The reserved green claims
-    // audio is genuinely being recorded and lives on the mark alone (as text it
-    // fails the AA contrast floor in the light theme); the label says the same
-    // thing through value, at full ink rather than faint.
+    // Two carriers, and the invariant needs both, but only one of them is
+    // green: the reserved green claims audio is genuinely being recorded and
+    // lives on the mark alone, so that on a desktop this window shares with
+    // other people's applications there is exactly one green thing. The label
+    // carries the same claim in words, at faint ink in every state.
     expect(container.querySelector(".spirit-mark")).toHaveClass("is-listening");
-    expect(label).toHaveClass("text-kodama-ink");
+    expect(label).toHaveClass("text-ink-dim");
+    expect(label).not.toHaveClass("text-kodama-ink");
   });
 
   it("renders nothing at all while capture is idle", async () => {
@@ -112,14 +114,15 @@ describe("CaptureOverlayPill", () => {
 
     const label = screen.getByRole("status");
     // Never plain "Listening" while only one source survives, but still on air:
-    // the mic genuinely is recording, so the mark keeps the green and the label
-    // stays at full ink.
+    // the mic genuinely is recording, so the mark keeps the green. The label
+    // reports the narrowed state in words, not by changing colour.
     expect(label).toHaveTextContent("Mic only");
     expect(container.querySelector(".spirit-mark")).toHaveClass("is-degraded");
-    expect(label).toHaveClass("text-kodama-ink");
+    expect(label).toHaveClass("text-ink-dim");
+    expect(label).not.toHaveClass("text-kodama-ink");
   });
 
-  it("drops the green when a degraded capture has nothing live", async () => {
+  it("drops the green from the mark when a degraded capture has nothing live", async () => {
     const { container } = await renderSeeded({
       phase: "degraded",
       sources: { loopback: "stalled", microphone: "stalled" },
@@ -127,8 +130,9 @@ describe("CaptureOverlayPill", () => {
 
     const label = screen.getByRole("status");
     expect(label).toHaveTextContent("Reconnecting");
-    // Nothing is reaching disk, so neither carrier may claim it is: the mark
-    // falls back to the moving ink form, and the label recedes to faint.
+    // Nothing is reaching disk, so the one carrier that can claim it stops:
+    // the mark falls back to the moving ink form. The label, faint throughout,
+    // says so in words instead.
     expect(container.querySelector(".spirit-mark")).toHaveClass("is-reconnecting");
     expect(label).toHaveClass("text-ink-dim");
     expect(label).not.toHaveClass("text-kodama-ink");

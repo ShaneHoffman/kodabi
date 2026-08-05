@@ -1,4 +1,3 @@
-import { clsx } from "clsx";
 import { captureLabel, markMode } from "../../captureLabel";
 import { isCaptureActive, useCaptureState } from "../../useCaptureState";
 import { useDebouncedValue } from "../../useDebouncedValue";
@@ -58,14 +57,17 @@ export function CaptureOverlayPill() {
       >
         <SpiritMark mode={markMode(captureState)} size="13px" halo="10px" />
         {/* The live region is the label alone. Wrapping the clock in it too
-            would announce a new time every second, forever. */}
+            would announce a new time every second, forever.
+
+            Faint ink in every state, unlike the in-app ListenPill, whose label
+            does step up to `kodama-ink` while live. That divergence is the
+            point: this window floats over other people's applications, and on
+            the desktop the mark is the only green thing while audio is being
+            captured (DESIGN_SYSTEM §2). A pill that is half green reads as an
+            alert; the signal here is calm and always on. */}
         <span
           role="status"
-          className={clsx(
-            "min-w-0 grow truncate font-ui text-[11px] font-semibold tracking-[0.12em] uppercase",
-            "transition-colors duration-300 ease-out-strong",
-            label.live ? "text-kodama-ink" : "text-ink-dim",
-          )}
+          className="min-w-0 grow truncate font-ui text-[11px] font-semibold tracking-[0.12em] text-ink-dim uppercase"
         >
           {label.text}
         </span>
