@@ -12,6 +12,10 @@
 > trigger, wherever that lands. Whoever replaces `Select` with base-ui should read §8.2 first so the
 > replacement is verified against it rather than inheriting it.
 >
+> **Its vocabulary is pre-Grove throughout.** `design/tokens.css`, the `--dur-*` / `--ease-standard`
+> tokens, the `ui-*` classes and the per-component stylesheets it cites were all deleted by the
+> Grove cleanup. Read the mechanics and the measurements, not the token names.
+>
 > What is dead is the conclusion and the zero-UI-dependency posture it defended. The evidence is not.
 >
 > **Addendum, 2026-08-04:** the Grove Inbox migration removed this document's most-cited call site —

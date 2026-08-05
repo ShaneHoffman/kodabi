@@ -250,7 +250,8 @@ and milestone, and the full detail behind the Phase 5 candidates.*
 ### Phase 0 — Foundations (decisions + skeleton) — ✅ complete
 
 Shipped: license (**AGPL-3.0-only**), design system ([`DESIGN.md`](DESIGN.md),
-`design/tokens.css`, [`SPIRIT_MARK.md`](SPIRIT_MARK.md)), Tauri + Rust workspace scaffold with CI,
+`design/tokens.css` — since replaced by the Grove theme in `src/index.css`,
+[`SPIRIT_MARK.md`](SPIRIT_MARK.md)), Tauri + Rust workspace scaffold with CI,
 the frontmatter schema ([`FRONTMATTER_SCHEMA.md`](FRONTMATTER_SCHEMA.md)), and the MCP tool
 surface ([`MCP_TOOL_SURFACE.md`](MCP_TOOL_SURFACE.md)). One item still open, tracked in the
 backlog: reserve the domain and package names (kodabi.app / kodabi.dev, plus the crates.io / npm

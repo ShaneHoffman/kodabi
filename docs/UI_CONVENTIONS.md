@@ -28,8 +28,14 @@ exception lives in the entry file with a comment saying why.** CSS is the delibe
 the habit.
 
 Enforced: eslint fails a `.css` import outside `src/index.css` unless it carries a disable comment
-justifying it, and fails a colour literal in a `className`. See DESIGN_SYSTEM §7 for what those two
-guards do and do not catch.
+justifying it, and fails a colour literal in a `className`. The app's own code carries no such
+disable — the only one left is xterm's third-party stylesheet, which is the shape a new exception
+has to argue itself into. See DESIGN_SYSTEM §7 for what those two guards do and do not catch.
+
+**Check the built CSS when a utility is load-bearing.** Several failures in this system are silent
+in the markup and obvious in the output: a transition that names `transform` while the utility sets
+the `scale` property, a reduced-motion swap that loses on specificity, an arbitrary property that
+did not parse. `pnpm build`, then read `dist/assets/index-*.css` for the class you wrote.
 
 ### Reach for `@utility`, not a class
 
@@ -65,15 +71,16 @@ The one thing arbitrary values may **not** carry is a colour (DESIGN_SYSTEM §7)
 | `gap-3.5` | Cards in a list |
 | `gap-5` | The dock and the main panel |
 | `p-5` | The body's frame around dock + panel |
-| 34px / 40px | Inside the main panel (`--gutter-view-y` / `-x`, owned by `ViewFrame`) |
+| `px-10 py-[34px]` | Inside the main panel, owned by `ViewFrame` for every view at once |
 
 These are the prototype's numbers, not a law. They are written down so a new screen starts from the
 same rhythm rather than re-deriving one.
 
-The panel's interior gutter is still spelled in the legacy token layer because `ViewFrame` owns it
-for every view at once; a screen's own Grove ticket is what moves it onto utilities. It shrank from
-44/60 when the shell landed: the panel is now an inset pane with 20px of ground around it, so the
-old pair stacked two gutters and pushed every view's first line a third of the way down the glass.
+The panel's interior gutter shrank from 44/60 when the shell landed: the panel is now an inset pane
+with 20px of ground around it, so the old pair stacked two gutters and pushed every view's first
+line a third of the way down the glass. A screen that leaves `ViewFrame` for its own frame (ChatView,
+the note editor) spells the same `px-10 py-[34px]` by hand, so the left edge holds still across a
+navigation either way.
 
 ### A view's head
 
@@ -174,18 +181,15 @@ whatever the order. Repeat the guards: `motion-reduce:not-disabled:not-aria-disa
 defaults everywhere they appear. `hover:` also requires `(pointer: fine)`, because a touch device can
 satisfy `(hover: hover)` and then strand a tapped control in its hover state. `motion-reduce:` also
 matches `[data-reduce-motion="on"]`, the root attribute the Settings switch writes — without it the
-in-app toggle would work on legacy screens and silently do nothing on Grove ones.
+in-app toggle would be inert on every Grove primitive, which is all of them.
 
 ---
 
 ## 4. Primitives
 
-`src/components/ui/` holds the shared controls. **`Button`, `Menu`, `Dialog`, `Field`, `Switch`,
-`Select` and `DestructiveConfirmDialog` are Grove; the rest are pre-Grove** and three still carry
-their own stylesheet (`Checkbox`, `Overlay`, `ViewFrame` — `StatusMessage` never had one), which
-their screen tickets delete. **Behaviour is not pre-Grove either way** — the
-contracts below are live, they are what the components actually promise, and a restyle must preserve
-every one of them.
+`src/components/ui/` holds the shared controls. **Every one of them is Grove**, styled with
+utilities in the component; none carries a stylesheet. The contracts below are what the components
+actually promise, and a restyle must preserve every one of them.
 
 | Primitive | Is | Variants |
 | --- | --- | --- |
@@ -196,7 +200,6 @@ every one of them.
 | `Switch` | A boolean that takes effect on press; the knob's travel is the state | — |
 | `Checkbox` | A box and its label | — |
 | `Select` | A hand-rolled combobox (full listbox, no headless library) | — |
-| `Overlay` | The pre-Grove modal shell, for the callers `Dialog` has not taken yet | — |
 | `ViewFrame` | A view's scaffold: gutter, column, header | `queue`, `library`, `panel`, `health`, `doc`, `search`, `terminal` |
 | `StatusMessage` | The one way a view says nothing/failed/working | `empty`, `error`, `status` |
 | `DestructiveConfirmDialog` | The shared shape of a destructive confirmation | — |
@@ -262,17 +265,12 @@ those two utilities on a row exactly as `Menu.test.tsx` counts these.
   ("[object Object]" being worse than silence), so a view that puts anything beside its name — the
   folder-hue dot on a project — passes `label` too or ships an unnamed landmark. A string title needs
   it not at all, and passing both is two sources for one name.
-- **`Dialog` traps focus; `Overlay` does not.** That is the whole reason `Dialog` exists: base-ui
-  owns the trap, Escape, the outside press, the scroll lock and the focus restore, where every
-  `Overlay` caller hand-rolled a Tab strategy of its own. Pass `initialFocus` where the first
+- **`Dialog` traps focus.** That is the whole reason it exists: base-ui owns the trap, Escape, the
+  outside press, the scroll lock and the focus restore, where every caller of the pre-Grove
+  `Overlay` it replaced hand-rolled a Tab strategy of its own. Pass `initialFocus` where the first
   tabbable control is the destructive one, so the dialog opens on the safe action. Its centering is
   `inset-0 m-auto h-fit` and must stay margin-based: the `materialize` keyframe animates
   `transform`, so a translate-centred popup opens in the corner.
-- **`Overlay` dismisses on click, not pointerdown**, and only when the gesture both started and ended
-  on the backdrop. It deliberately does **not** trap focus — each of its former callers passed its own
-  `onKeyDown`. It is now callerless: the consent nudge and the create-project dialog have each moved to
-  `Dialog`, and the palette never used it at all — it composes base-ui's dialog parts directly. `Overlay`,
-  `Overlay.css` and `useDialogFocus` are dead code pending their own removal ticket.
 - **`Menu.Trigger` composes, it does not wrap.** Pass the control through `render`
   (`<Menu.Trigger render={<Button variant="quiet">File</Button>} />`) so there is one `<button>`
   carrying both the Grove chrome and base-ui's wiring, not a button inside a button.
@@ -402,38 +400,20 @@ global, so it lives in the other region entirely.
 
 ---
 
-## 6. Migrating a screen
+## 6. Building a screen
 
-Grove lands screen by screen. While that runs, two systems are live at once and both work.
+Grove is the whole system now: there is no second vocabulary to migrate off, and no frozen layer to
+avoid. A screen styles with the utilities and tokens in §3, takes `cva` for any variant it has, and
+writes its reduced-motion swap at the call site beside the motion it undoes.
 
-**A migrated screen:**
+Two habits from the migration are worth keeping, because both catch failures the markup cannot show:
 
-- styles with Grove utilities and the tokens in §3
-- deletes its own `Component.css` and the `eslint-disable` comment on its import
-- uses `cva` for any variant it has
-- writes its reduced-motion swap at the call site
-
-**An unmigrated screen** keeps `design/tokens.css`, the `@theme inline` bridge at the bottom of
-`src/index.css`, and its own stylesheet. It is frozen: fix bugs in it, but do not extend it, and do
-not add a new token to `design/tokens.css`.
-
-**Nothing new may consume the legacy layer.** A new component is Grove even if the screen around it
-is not — the two vocabularies coexist in one tree without conflict, because the Grove tokens are
-namespaced apart from the bridged ones (`--color-ground` vs `--color-bg`, `font-ui` vs `font-sans`).
-
-**The one place they do collide is a shared CSS property.** An unmigrated screen that passes
-`text-body text-text-soft` to a Grove `Button` has two `font-size` rules and two `color` rules on one
-element, and with no `tailwind-merge` the winner is Tailwind's emission order, not the className.
-Today the legacy utility wins both (it sorts after), so an unmigrated screen keeps its own size and
-colour and its own component CSS keeps its geometry — which is why the primitives ticket left the
-pre-Grove rail looking as it did. Do not rely on it: when you migrate a screen, strip those from its
-call sites rather than reasoning about who wins.
-
-**Check the built CSS when a utility is load-bearing.** `pnpm build`, then read
-`dist/assets/index-*.css`. That is how the press was caught animating nothing (`transition-transform`
-against Tailwind v4's standalone `scale` property) and how you confirm a `@utility` recipe emitted
-its `.day` and `prefers-reduced-transparency` branches.
-
-The final cleanup ticket deletes `design/tokens.css`, the `@theme inline` block, `src/fonts.ts`, and
-the three `@fontsource` dependencies once the last screen has moved. Grove's three faces ship with
-Windows, so the finished app fetches no font.
+- **Read the built CSS when a utility is load-bearing** (§1). That is how the press was caught
+  animating nothing — `transition-transform` against Tailwind v4's standalone `scale` property —
+  and how you confirm a `@utility` recipe emitted its `.day` and `prefers-reduced-transparency`
+  branches.
+- **A token name must not collide with an unlayered declaration.** `@theme` emits into
+  `@layer theme`, and unlayered CSS beats every layer, so a shared name silently hands the utility
+  the other value rather than conflicting loudly. `rounded-card` shipped at 12px instead of 14px
+  that way, against the pre-Grove tokens. One stylesheet leaves the collision nowhere to come from;
+  a new one would reopen it, which is half of why the `.css`-import guard exists.

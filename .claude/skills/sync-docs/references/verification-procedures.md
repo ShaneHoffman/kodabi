@@ -79,12 +79,10 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   particular are only correct if the control stays focusable and declines activation.
 - **Failure:** a documented variant or prop the component no longer has, a new primitive
   §4 omits, or a contract in the list that the component no longer honours.
-- **§4 documents behaviour, not styling.** The primitives §4 still calls pre-Grove carry their
-  own stylesheets, and §4 says which. Do not report their styling as drift against
-  `DESIGN_SYSTEM.md` — each is restyled by a ticket of its own, and until then the two
-  documents are describing different layers on purpose. `Select` has had that ticket (its
-  chrome is Grove and `Select.css` is gone, minus the anchor-positioning block that moved to
-  `src/index.css` §3); its **behaviour** contract above is unchanged by it, which is the point.
+- **§4 documents behaviour, not styling.** Every primitive is Grove now and none carries a
+  stylesheet, so §4's job is the contracts: what a prop promises, which variant fixes an ARIA
+  role, what is a type error. A restyle that preserves every contract is not drift against
+  this anchor, and a styling question belongs to anchor 6.
 
 > This list is the thing an auditor works from, so **it goes stale the moment a
 > primitive is added or removed** and nothing else will catch that. Updating it is
@@ -143,12 +141,13 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 - **Nothing here is machine-checked, unlike the pre-Grove anchor.** The old token
   guard asserted theme-block coverage in `pnpm test`; Grove retired it along with the
   stylesheets it scanned. Every check above is this auditor's job in full.
-
-> **Migration note (Phase 4).** `design/tokens.css`, the `@theme inline` bridge at the
-> bottom of `src/index.css`, and the per-component `*.css` files are frozen legacy for
-> unmigrated screens. They are **not** an anchor: do not audit them against
-> `DESIGN_SYSTEM.md`, which no longer describes them. Delete this note when the final
-> cleanup ticket removes them.
+- **`src/index.css` should be the only stylesheet in the repo.** The pre-Grove layer
+  (`design/tokens.css`, the `@theme inline` bridge, the per-component `*.css` files,
+  `src/fonts.ts` and the `@fontsource` dependencies) was deleted by the Grove cleanup.
+  A second stylesheet reappearing is itself a finding: it reopens the token-shadowing
+  trap in §7, since unlayered CSS outranks `@layer theme`. `design/` keeps only the
+  Phase-0 moodboard and spirit-mark pages, which no build reads and which
+  `docs/DESIGN.md` already labels as drifted.
 
 ## Anchor 7 — MCP tool surface ↔ the server's committed schemas
 

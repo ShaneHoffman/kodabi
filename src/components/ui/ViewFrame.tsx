@@ -132,8 +132,8 @@ type SummaryVariant = "queue" | "library" | "health" | "terminal";
 
 /**
  * The page scaffold every full view sits in: the gutter, the column, and the
- * header. The gutter and column come from ViewFrame.css, keyed off the
- * variant; the header is built here.
+ * header. The gutter is the same on every variant and the column caps only
+ * where a measure earns it; the header is built here.
  *
  * The eyebrow in particular is why this is worth a component: it is one exact
  * recipe, and when each view spelled it out by hand most of them reached for

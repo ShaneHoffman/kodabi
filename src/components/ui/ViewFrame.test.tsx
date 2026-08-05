@@ -94,10 +94,10 @@ describe("ViewFrame", () => {
     expect(screen.getByRole("region", { name: "Inbox" })).toBeInTheDocument();
   });
 
-  it("gives each variant its own stance class, so the gutters cannot merge", () => {
-    // The per-view gutters and measures live in ViewFrame.css keyed off these
-    // classes. If a variant stopped emitting its own, two view types would
-    // silently start sharing a layout — the exact thing the redesign undid.
+  it("gives each variant its own stance class", () => {
+    // The classes carry no styling now — the gutter is shared and the two
+    // variants that differ say so in utilities — but they are the stance hook
+    // a view is identified by, in a test and in a future rule that needs one.
     for (const variant of ["queue", "library", "panel", "health", "doc", "search"] as const) {
       const { container, unmount } = render(
         <ViewFrame variant={variant} title="Title">
