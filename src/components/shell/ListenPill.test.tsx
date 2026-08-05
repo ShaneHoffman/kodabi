@@ -42,7 +42,10 @@ describe("ListenPill", () => {
 
     expect(pill(container)).toHaveClass("bg-wash", "border-edge");
     expect(screen.getByRole("status")).toHaveClass("text-ink-dim");
-    expect(mark(container).className.trim()).toBe("spirit-mark");
+    // Dormant, and provably not on air: the mark wears its idle class and none
+    // of the classes that put green in the core.
+    expect(mark(container)).toHaveClass("is-idle");
+    expect(mark(container)).not.toHaveClass("is-listening", "is-degraded");
   });
 
   it.each([

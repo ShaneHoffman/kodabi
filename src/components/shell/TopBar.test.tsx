@@ -90,9 +90,9 @@ describe("TopBar", () => {
   it("reports what capture is doing, wherever the user is standing", async () => {
     serveVault();
     renderShell();
-    // Idle is not silence: the pill says so rather than disappearing, which is
-    // what makes "is it recording" answerable in one place.
-    expect(await screen.findByRole("status")).toHaveTextContent("Idle");
+    // Not listening is not silence: the pill says so rather than disappearing,
+    // which is what makes "is it recording" answerable in one place.
+    expect(await screen.findByRole("status")).toHaveTextContent("Not listening");
 
     act(() => {
       emitFromBackend(CAPTURE_STATE_EVENT, {
@@ -119,7 +119,7 @@ describe("TopBar", () => {
     // carries distill and transcription failures only.
     serveVault();
     renderShell();
-    expect(await screen.findByRole("status")).toHaveTextContent("Idle");
+    expect(await screen.findByRole("status")).toHaveTextContent("Not listening");
 
     act(() => {
       emitFromBackend(CAPTURE_STATE_EVENT, {

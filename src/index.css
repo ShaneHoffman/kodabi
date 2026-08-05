@@ -1243,6 +1243,16 @@
     transform 300ms var(--ease-out-strong);
 }
 
+/* Dormant: no session running at all. The core steps down to the faint ink so
+   the mark reads as asleep rather than as a lit indicator — on the capture
+   windows especially, where a full-ink disc beside "Capture a thought…" is the
+   one thing that must never be mistaken for "recording". `starting` and
+   `reconnecting` keep the base's full ink on purpose (they are engaged, just
+   not on air), which is why this is its own class rather than a dimmer base. */
+.spirit-mark.is-idle .spirit-mark__core {
+  background-color: var(--color-ink-faint);
+}
+
 /* Listening and degraded both wear the green: audio IS reaching disk in both,
    and hiding that would falsely imply privacy (DESIGN_SYSTEM §2). What
    degraded loses is the field of ma — no aura — so it is visibly not full

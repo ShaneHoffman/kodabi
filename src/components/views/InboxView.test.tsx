@@ -612,7 +612,13 @@ describe("InboxView", () => {
       moved: true,
     }));
     renderInbox();
+    // BOTH rows, not just the first. This is the one filing test with more than
+    // one note in the queue, and the first row resolves while the second is
+    // still arriving — clicking into a list that is still mounting races the
+    // row's own entrance and the File menu can open against a trigger that
+    // re-renders under it.
     await screen.findByText("Quarterly planning");
+    await screen.findByText("Vendor follow-up");
 
     // Nothing cleared yet: an unlit meter over a full queue is the honest
     // starting state.

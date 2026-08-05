@@ -100,10 +100,47 @@
       return { ...found, body_markdown: body };
     },
     capture_phase: () => capturePhase,
+    // Mirrors `FailedSession` in src/useSessions.ts — `file_name` and
+    // `dismissed` included, since NeedsAttentionView reads both and a fixture
+    // missing either takes the whole screen to its error boundary.
     list_failed_sessions: () => [
-      { path: "sessions/s_1.jsonl", slug: "team-weekly", captured_at: "2026-07-19T16:42:00Z" },
-      { path: "sessions/s_2.jsonl", slug: null, captured_at: "2026-07-18T08:05:00Z" },
+      {
+        path: "sessions/s_1.jsonl",
+        file_name: "2026-07-19T16-42-00--team-weekly.jsonl",
+        slug: "team-weekly",
+        captured_at: "2026-07-19T16:42:00Z",
+        dismissed: false,
+      },
+      {
+        path: "sessions/s_2.jsonl",
+        file_name: "2026-07-18T08-05-00.jsonl",
+        slug: null,
+        captured_at: "2026-07-18T08:05:00Z",
+        dismissed: false,
+      },
     ],
+    // Mirrors `ChatSnapshot` in src/chat.ts. Without this the view reads
+    // `chat_id` off the null fallback below and the whole screen renders as a
+    // start error, which is not a state worth photographing.
+    chat_open: () => ({
+      chat_id: "c_preview",
+      running: true,
+      turn_active: false,
+      streaming_text: null,
+      pending_permission: null,
+      entries: [
+        { kind: "user", text: "What did we decide about the clubhouse budget?" },
+        {
+          kind: "tool_use",
+          summary: "Read Budget review with owners",
+          note: { id: "n_p1", title: "Budget review with owners", project: "briarwood-golf" },
+        },
+        {
+          kind: "assistant",
+          text: "The owners walked the Q3 budget and left the clubhouse line as the swing item. Nothing was committed: the decision waits on the refinance, which would free budget for the range netting and the cart-barn roof.",
+        },
+      ],
+    }),
     get_settings: () => ({
       consent_acknowledged: true,
       retention: { policy: "keep_days", days: 30 },

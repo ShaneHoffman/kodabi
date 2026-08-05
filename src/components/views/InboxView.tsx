@@ -38,18 +38,19 @@ const VANISH_MS = 280;
 /** How long "Filed to <project>" stays up before it goes — the same dwell
  * `CaptureToast` used to give a success notice. */
 const TOAST_DWELL_MS = 3500;
-/** Mirrors `--dur-exit`: the toast's own fade-out, once the dwell ends. It is
- * shorter than the entrance it undoes, which is the rule for every exit in the
- * app (docs/DESIGN_SYSTEM.md §4). Spent by the exit variant rather than by a
- * timer — `AnimatePresence` holds the element alive for exactly this long. */
+/** The app's Exit band (110–130ms, docs/DESIGN_SYSTEM.md §4): the toast's own
+ * fade-out, once the dwell ends. It is shorter than the entrance it undoes,
+ * which is the rule for every exit in the app. Spent by the exit variant rather
+ * than by a timer — `AnimatePresence` holds the element alive for exactly this
+ * long. */
 const TOAST_FADE_S = 0.13;
 /** The toast's arrival: the app's Materialize band, which every surface that
  * arrives shares (docs/DESIGN_SYSTEM.md §4). Longer than the fade above, which
  * is the rule for every entrance/exit pair in the app. */
 const TOAST_MATERIALIZE_S = 0.22;
-/** Covers `--dur-plane` with a little room: how long after an Inbox-routed
- * note lands before its outcome counts as fully presented — the fill-in has
- * played and there is nothing left for a remount to replay. */
+/** Covers the row's own fill-in with a little room: how long after an
+ * Inbox-routed note lands before its outcome counts as fully presented — the
+ * fill-in has played and there is nothing left for a remount to replay. */
 const FILL_IN_MS = 200;
 /** Covers the three ways a stage could otherwise wait forever: a stop the
  * backend never acknowledges (a mis-tap under its minimum session duration
@@ -405,10 +406,16 @@ export function InboxView() {
  */
 function EmptyInbox() {
   return (
-    <div className="flex flex-col items-center gap-1.5 pt-24 pb-16 text-center">
+    <div className="flex flex-col items-center gap-1.5 pt-24 pb-[70px] text-center">
+      {/* The mark's own `idle` mode carries the dormant ink step, so this needs
+          no per-screen dimming (src/index.css §3). */}
       <SpiritMark mode="idle" size="26px" className="mb-[18px]" />
       <p className="text-[15px] font-semibold text-ink">Nothing waiting.</p>
-      <p className="max-w-[44ch] text-[12.5px] leading-[1.55] text-ink-faint">
+      {/* Dim, not faint: `ink-faint` is the metadata register and is spent on
+          timestamps, counts and ids (docs/DESIGN_SYSTEM.md §6). This is a
+          sentence the user reads for meaning, which is the one thing that
+          register may not carry. */}
+      <p className="max-w-[44ch] text-[12.5px] leading-[1.55] text-ink-dim">
         Notes the router can&apos;t place with confidence land here. Right now everything is
         filed where it belongs.
       </p>

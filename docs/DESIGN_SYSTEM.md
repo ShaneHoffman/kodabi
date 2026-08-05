@@ -407,24 +407,26 @@ fill to give up.
 
 ### Contrast, measured
 
-Every ink step clears **4.5:1 on both the ground and the glass panel above it**. The panel is the
-tighter of the two, and that is the number that matters: faint metadata is almost never rendered
-directly on the ground.
+Every ink step clears **4.5:1 on the ground, on the glass panel above it, and on a card inside that
+panel**. Night's card is the tightest surface in the system, and that is the number that matters:
+faint metadata is almost never rendered directly on the ground.
 
 Measured with a WCAG 2.1 relative-luminance check, alpha composited first (night panel resolves to
-`#1c211b`, day panel to `#f6f7f1`):
+`#1c211b` and its card to `#1c2318`; day panel to `#f6f7f1` and its card to `#fdfdfc`):
 
-| Token | Night | on ground | on panel | Day | on ground | on panel |
-| --- | --- | --- | --- | --- | --- | --- |
-| `ink` | `#eef2e7` | 16.02 | 14.41 | `#1e2418` | 13.67 | 14.76 |
-| `ink-read` | `#d7ddcd` | 13.10 | 11.78 | `#333d29` | 9.81 | 10.59 |
-| `ink-dim` | `#a6b09b` | 8.06 | 7.25 | `#55604a` | 5.72 | 6.17 |
-| `ink-faint` | `#838d78` | 5.24 | **4.71** | `#5f6a54` | 4.91 | 5.30 |
+| Token | Night | on ground | on panel | on card | Day | on ground | on panel | on card |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `ink` | `#eef2e7` | 16.02 | 14.41 | 14.14 | `#1e2418` | 13.67 | 14.76 | 15.64 |
+| `ink-read` | `#d7ddcd` | 13.10 | 11.78 | 11.56 | `#333d29` | 9.81 | 10.59 | 11.23 |
+| `ink-dim` | `#a6b09b` | 8.06 | 7.25 | 7.12 | `#55604a` | 5.72 | 6.17 | 6.54 |
+| `ink-faint` | `#838d78` | 5.24 | 4.71 | **4.62** | `#5f6a54` | 4.91 | 5.30 | 5.62 |
 
 `ink-faint` is the step that sets the floor, and it is the reason the night value is `#838d78` rather
 than the `#7e8873` first drawn: that value cleared 4.90 on the ground but only **4.41 on the panel**,
-which is where faint text actually renders. It was lightened until the tighter of the two numbers
-cleared 4.5.
+which is where faint text actually renders. It was lightened until the tightest of the three numbers
+cleared 4.5 — and that number is the card's 4.62, with only 0.12 of headroom. **A surface darker
+than `glass-card` would put faint metadata under the floor**, which is the constraint any new
+material has to clear.
 
 **`ink-faint` is a metadata register and is not spent on anything else.** Timestamps, counts, ids,
 eyebrows, keyboard hints. The moment it carries a sentence the user has to read, it is the wrong
