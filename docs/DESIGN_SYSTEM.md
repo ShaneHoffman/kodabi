@@ -527,9 +527,11 @@ And in `pnpm test`:
 - **[`src/contrast.test.ts`](../src/contrast.test.ts)** pins that `.hc` is the OR of the two requests,
   which is what makes the switch additive.
 - **[`PrimitiveGallery.test.tsx`](../src/components/dev/PrimitiveGallery.test.tsx)** renders every
-  primitive under all four grounds (night, day, `.hc`, `.hc.day`). It proves they *render*, not that
-  they look right — the looking is what `/gallery.html` is for, served by `pnpm dev` and absent from
-  the build.
+  Grove **control** under all four grounds (night, day, `.hc`, `.hc.day`). Controls, not all ten of
+  UI_CONVENTIONS §4's primitives: `ViewFrame` is a page scaffold with nothing to show in a catalogue
+  row and has its own tests, and the three overlays are summoned rather than resident. It proves
+  they *render*, not that they look right — the looking is what `/gallery.html` is for, served by
+  `pnpm dev` and absent from the build.
 
 **Everything else in this document is review's job, and this document is the checklist.** Nothing
 checks that green stayed on the kodama, that a verb got a rectangle, that an exit came in under its

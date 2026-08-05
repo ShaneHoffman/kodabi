@@ -138,8 +138,9 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   justifying `eslint-disable` comment — there are no exceptions left in the app's own code, so a new
   stylesheet has to argue its case. `pnpm test` adds `src/theme.test.ts` and `src/contrast.test.ts`,
   which pin the two variant classes to the DOM, and
-  `src/components/dev/PrimitiveGallery.test.tsx`, which renders every primitive under all four
-  grounds. The primitives themselves are on `/gallery.html` — a dev-only Vite entry, deliberately
+  `src/components/dev/PrimitiveGallery.test.tsx`, which renders every Grove control under all four
+  grounds (`ViewFrame` is a page scaffold and has its own tests). The controls themselves are on
+  `/gallery.html` — a dev-only Vite entry, deliberately
   absent from `build.rollupOptions.input`, so `pnpm dev` serves it and the packaged app never
   carries it. Look there before and after touching a primitive.
   `docs/DESIGN_SYSTEM.md` is the doctrine and decides every visual question the tokens don't (what
@@ -148,7 +149,8 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   write, the primitive catalogue, and the six-slot composition rule).
   **The migration is finished.** `design/tokens.css`, the `@theme inline` bridge, every
   per-component stylesheet, `src/fonts.ts` and the `@fontsource` dependencies are gone;
-  `src/index.css` is the only stylesheet in the app, and Grove's three faces ship with Windows, so
+  `src/index.css` is the only stylesheet the repo owns (xterm's third-party sheet is the one other
+  import, and carries the only surviving disable), and Grove's three faces ship with Windows, so
   the packaged app fetches no font. `design/` keeps only the Phase-0 moodboard and spirit-mark
   pages, as historical artefacts that no build reads.
 - **Spec agreement:** `docs/FRONTMATTER_SCHEMA.md` and `docs/MCP_TOOL_SURFACE.md` mirror each

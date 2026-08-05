@@ -24,7 +24,7 @@ afterEach(() => {
     window.localStorage.removeItem(key);
   }
   root.removeAttribute("data-reduce-motion");
-  root.removeAttribute("data-contrast");
+  root.classList.remove("hc");
 });
 
 /** The shipped defaults: no pill for captures you start, one for auto-detected

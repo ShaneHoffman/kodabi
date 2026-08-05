@@ -10,11 +10,16 @@ import { PrimitiveGallery } from "./PrimitiveGallery";
  * assert. jsdom applies no stylesheet at all, so an assertion about a blur
  * here would be theatre.
  *
- * What it can prove is the half that silently rots: that every primitive still
- * renders under each of the four grounds Grove ships (night, day, high
- * contrast, and the two together), which is the acceptance criterion the
- * primitives ticket names. A variant renamed out from under the gallery, or a
- * primitive that throws when a root class is set, fails here.
+ * What it can prove is the half that silently rots: that every control the
+ * gallery holds still renders under each of the four grounds Grove ships
+ * (night, day, high contrast, and the two together), which is the acceptance
+ * criterion the primitives ticket names. A variant renamed out from under the
+ * gallery, or a primitive that throws when a root class is set, fails here.
+ *
+ * "Every control", not every primitive in UI_CONVENTIONS §4: `ViewFrame` is a
+ * page scaffold with nothing to show in a catalogue row and has its own tests,
+ * and the three overlays are summoned rather than resident (the dialog gets
+ * its own single-ground test below).
  */
 
 afterEach(() => {
@@ -45,7 +50,27 @@ describe("PrimitiveGallery", () => {
     const selects = screen.getAllByRole("combobox", { name: /Retention/ });
     expect(selects).toHaveLength(2);
     expect(selects[1]).toHaveAttribute("aria-busy", "true");
-    expect(screen.getByRole("alert")).toHaveTextContent("A project cannot be called inbox.");
+    // The checkbox, in the states its ring has to be looked at in: checked,
+    // unchecked, hinted, and the one that dims rather than fades.
+    expect(screen.getByRole("checkbox", { name: "Draft the follow-up email" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Send the revised scope" })).not.toBeChecked();
+    expect(screen.getByRole("checkbox", { name: /Book the venue/ })).toHaveAccessibleDescription(
+      /indents under the LABEL/,
+    );
+    expect(screen.getByRole("checkbox", { name: "Archived, cannot be changed" })).toBeDisabled();
+    // StatusMessage's variant fixes the role, so the roles ARE the coverage:
+    // `empty` announces nothing, `status` is polite, `error` is assertive.
+    // Queried by text rather than by role, because the kodama row's five
+    // ListenPills are themselves `role="status"`.
+    expect(screen.getByText("Nothing in the inbox.")).not.toHaveAttribute("role");
+    expect(screen.getByText("Transcribing, 2 minutes in.")).toHaveAttribute("role", "status");
+    // Two alerts now: the field's error and the status message's.
+    expect(screen.getAllByRole("alert").map((node) => node.textContent)).toEqual(
+      expect.arrayContaining([
+        "A project cannot be called inbox.",
+        "That note could not be filed.",
+      ]),
+    );
     // The switch, in the three states it has to be looked at in — and each
     // answering to the words printed beside it, which is the contract that
     // makes the control usable by voice.

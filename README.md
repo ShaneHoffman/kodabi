@@ -45,11 +45,11 @@ docs/                   # Strategy & spec docs — roadmap, aesthetic direction,
 design/                 # Historical Phase-0 artefacts — the moodboard and spirit-mark
                         # pages. No build reads them; the live design system is the
                         # Grove theme in src/index.css.
-src/                    # React + TypeScript frontend. src/index.css is the app's one
-                        # and only stylesheet: the Grove theme (Tailwind v4 @theme
-                        # tokens, keyframes, the .day/.hc variants) and the short list
-                        # of things a utility cannot express. Grove's three faces ship
-                        # with Windows, so the app fetches no font.
+src/                    # React + TypeScript frontend. src/index.css is the only
+                        # stylesheet the repo owns: the Grove theme (Tailwind v4
+                        # @theme tokens, keyframes, the .day/.hc variants) and the
+                        # short list of things a utility cannot express. Grove's three
+                        # faces ship with Windows, so the app fetches no font.
 src-tauri/              # Tauri v2 binary crate — the desktop shell and its three
                         # windows (main, quick capture, capture overlay pill).
 crates/kodabi-core/     # Pure, UI-agnostic, unit-testable data layer: settings, the

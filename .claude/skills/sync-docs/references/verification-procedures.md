@@ -66,13 +66,19 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   `StatusMessage` (variant → ARIA role), `ViewFrame` (seven variants; `summary` a **type
   error** outside `queue`/`library`/`health`, `action` a **type error** on `doc`/`search`,
   neither a silent no-op; `label` names the section landmark when `title` is composed of
-  elements rather than a plain string), `Overlay` (click-not-pointerdown, both ends on the backdrop, no
-  focus trap), `DestructiveConfirmDialog` (presentational, never self-closing; the copy
+  elements rather than a plain string), `Dialog` (base-ui owns the focus trap, Escape, the outside
+  press and the scroll lock; `initialFocus` where the first tabbable control is destructive;
+  margin centering, since `materialize` animates `transform`),
+  `DestructiveConfirmDialog` (presentational, never self-closing; the copy
   structure — title, `subject` strip, consequence, the dialog's own permanence line, quiet
   Cancel before the danger confirm).
 - **Do not look for `Textarea`, `ListRow` or `PlaceholderView`.** All three were
   deleted (they had no call sites); §4 keeps a "there is no X primitive" note saying what
   to do instead. A live reference to any of them anywhere is itself a failure.
+- **Nor for `Overlay`.** The pre-Grove modal shell was deleted by the Grove cleanup once
+  `Dialog` had taken its last caller, and `src/useDialogFocus.ts` went with it. Surviving
+  mentions are past-tense comparisons in `Dialog`'s contract and are correct; a *live*
+  reference is a failure.
 - **Verify:** read each primitive's exported prop types and compare against the documented
   variants and the contract list. The contracts are behavioural, so check the
   implementation and the component's tests, not just the type — `loading` and `busy` in

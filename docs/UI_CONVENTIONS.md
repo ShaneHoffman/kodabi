@@ -193,7 +193,7 @@ actually promise, and a restyle must preserve every one of them.
 
 | Primitive | Is | Variants |
 | --- | --- | --- |
-| `Button` | Every pressable thing | `action`, `danger`, `quiet`, `pill` |
+| `Button` | Every pressable thing | `action`, `danger`, `quiet`, `pill`, `chip` |
 | `Menu` | An anchored menu (base-ui). `Menu.Item` takes the variant | `default`, `suggested`, `foot` |
 | `Dialog` | A modal: scrim, glass panel, focus trap (base-ui) | — |
 | `Field` | A labelled input in a glass row | — |
@@ -204,9 +204,11 @@ actually promise, and a restyle must preserve every one of them.
 | `StatusMessage` | The one way a view says nothing/failed/working | `empty`, `error`, `status` |
 | `DestructiveConfirmDialog` | The shared shape of a destructive confirmation | — |
 
-`Button`'s four variants are two shapes: `action`, `danger` and `quiet` are the same rectangle
-(`rounded-button`, 8x16) so a rail of them lines up, and `pill` is the token shape for a thing you
-open rather than a verb you perform (DESIGN_SYSTEM §2). **The component owns its whole box** — the
+`Button`'s five variants are three shapes: `action`, `danger` and `quiet` are the same rectangle
+(`rounded-button`, 8x16) so a rail of them lines up; `pill` is the token shape for a thing you
+open rather than a verb you perform (DESIGN_SYSTEM §2); and `chip` is the smaller 10px rectangle for
+a control that sits *inside* content rather than in the chrome around it — the source panel's
+Reveal and its audio toggle (`SessionPanel.tsx`). **The component owns its whole box** — the
 pre-Grove `quiet` deferred padding to each consumer's stylesheet, and that is how the rails stopped
 agreeing. A caller passes layout (`w-full`, `self-start`), not geometry, and never a `text-*` size or
 colour: there is no `tailwind-merge`, so a call site that restates a property the primitive owns is
