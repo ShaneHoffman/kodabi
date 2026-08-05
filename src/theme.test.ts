@@ -3,55 +3,43 @@ import { applyTheme } from "./theme";
 import { setMediaMatches } from "./test/media";
 
 /*
- * The theme's DOM contract, both halves of it.
+ * The theme's DOM contract: the `day` class on <html>, and nothing else.
  *
- * Two systems run side by side while the Grove migration is in flight, and they
- * answer "system" differently — which is the whole reason this file exists:
- *
- *   - `data-theme` is pre-Grove. It DEFERS: "system" removes the attribute and
- *     design/tokens.css answers `prefers-color-scheme` itself.
- *   - the `day` class is Grove's. It RESOLVES: the Grove tokens are plain CSS
- *     with no media query of their own, so applyTheme has to read the query and
- *     decide.
- *
- * A test that only checked the attribute would pass on a build where the class
- * never moved, which is precisely the regression worth pinning.
+ * The interesting half is "system". Grove's tokens are plain CSS with no media
+ * query of their own, so applyTheme has to READ `prefers-color-scheme` and
+ * decide — it cannot defer to the stylesheet the way the pre-Grove layer did
+ * through its `data-theme` attribute. That resolution is what these tests pin:
+ * a build where the class never moved under "system" would leave every window
+ * stuck at night whatever the desktop is set to.
  */
 
 const LIGHT = "(prefers-color-scheme: light)";
 const root = () => document.documentElement;
 
 afterEach(() => {
-  root().removeAttribute("data-theme");
   root().classList.remove("day");
 });
 
 describe("applyTheme", () => {
-  it("puts an explicit light theme in both systems", () => {
+  it("puts an explicit light theme on the class", () => {
     applyTheme("light");
-    expect(root()).toHaveAttribute("data-theme", "light");
     expect(root()).toHaveClass("day");
   });
 
-  it("puts an explicit dark theme in both systems", () => {
+  it("leaves the class off for an explicit dark theme", () => {
     applyTheme("dark");
-    expect(root()).toHaveAttribute("data-theme", "dark");
     expect(root()).not.toHaveClass("day");
   });
 
-  it("defers data-theme but resolves the class when the OS asks for light", () => {
+  it("resolves the class when the OS asks for light under system", () => {
     setMediaMatches(LIGHT, true);
     applyTheme("system");
-    // Deferred: tokens.css answers the query on its own.
-    expect(root()).not.toHaveAttribute("data-theme");
-    // Resolved: Grove's tokens cannot.
     expect(root()).toHaveClass("day");
   });
 
   it("leaves the class off under system when the OS is dark", () => {
     setMediaMatches(LIGHT, false);
     applyTheme("system");
-    expect(root()).not.toHaveAttribute("data-theme");
     expect(root()).not.toHaveClass("day");
   });
 

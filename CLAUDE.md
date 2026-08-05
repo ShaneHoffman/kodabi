@@ -135,24 +135,24 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   **Enforced by two eslint rules, not by review** (`no-restricted-syntax` in `eslint.config.js`): no
   colour literal in a `className` (a hex survives both variants unchanged, which is the one literal
   that is not merely untidy but wrong), and no `.css` import outside `src/index.css` without a
-  justifying `eslint-disable` comment — so each surviving pre-Grove stylesheet stays countable and
-  dated. `pnpm test` adds `src/theme.test.ts` and `src/contrast.test.ts`, which pin the two variant
-  classes to the DOM, `src/groveTokenNames.test.ts`, which fails any Grove token whose name a legacy
-  stylesheet also declares (unlayered CSS beats `@layer theme`, so the collision is silent), and
-  `src/components/dev/PrimitiveGallery.test.tsx`, which renders every primitive under all four
-  grounds. The primitives themselves are on `/gallery.html` — a dev-only Vite entry, deliberately
+  justifying `eslint-disable` comment — there are no exceptions left in the app's own code, so a new
+  stylesheet has to argue its case. `pnpm test` adds `src/theme.test.ts` and `src/contrast.test.ts`,
+  which pin the two variant classes to the DOM, and
+  `src/components/dev/PrimitiveGallery.test.tsx`, which renders every Grove control under all four
+  grounds (`ViewFrame` is a page scaffold and has its own tests). The controls themselves are on
+  `/gallery.html` — a dev-only Vite entry, deliberately
   absent from `build.rollupOptions.input`, so `pnpm dev` serves it and the packaged app never
   carries it. Look there before and after touching a primitive.
   `docs/DESIGN_SYSTEM.md` is the doctrine and decides every visual question the tokens don't (what
   green may mean, rectangles vs pills, the one press spec, motion and its reduced-motion swaps,
   glass, the measured contrast floor); `docs/UI_CONVENTIONS.md` is the mechanics (which utility to
-  write, the primitive catalogue, the six-slot composition rule, and how to migrate a screen).
-  **The migration is in flight.** `design/tokens.css`, the `@theme inline` bridge at the bottom of
-  `src/index.css`, and the per-component `*.css` files are frozen legacy, kept alive for screens
-  that have not moved yet: fix bugs in them, never extend them, and **never let new code consume
-  them**. Each screen ticket deletes its own stylesheet; a final cleanup ticket removes the rest
-  along with `src/fonts.ts` and the `@fontsource` dependencies (Grove's three faces ship with
-  Windows, so the finished app fetches no font).
+  write, the primitive catalogue, and the six-slot composition rule).
+  **The migration is finished.** `design/tokens.css`, the `@theme inline` bridge, every
+  per-component stylesheet, `src/fonts.ts` and the `@fontsource` dependencies are gone;
+  `src/index.css` is the only stylesheet the repo owns (xterm's third-party sheet is the one other
+  import, and carries the only surviving disable), and Grove's three faces ship with Windows, so
+  the packaged app fetches no font. `design/` keeps only the Phase-0 moodboard and spirit-mark
+  pages, as historical artefacts that no build reads.
 - **Spec agreement:** `docs/FRONTMATTER_SCHEMA.md` and `docs/MCP_TOOL_SURFACE.md` mirror each
   other (frontmatter fields ≡ the MCP `NoteSummary` shape). Editing one requires checking the
   other in the same change.

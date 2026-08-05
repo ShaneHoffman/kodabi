@@ -16,22 +16,19 @@ const MORE = "(prefers-contrast: more)";
 const root = () => document.documentElement;
 
 afterEach(() => {
-  root().removeAttribute("data-contrast");
   root().classList.remove("hc");
   window.localStorage.clear();
 });
 
 describe("applyContrast", () => {
-  it("sets both systems when the user asks for more", () => {
+  it("sets the class when the user asks for more", () => {
     applyContrast(true);
-    expect(root()).toHaveAttribute("data-contrast", "more");
     expect(root()).toHaveClass("hc");
   });
 
-  it("clears both when the user turns it off", () => {
+  it("clears it when the user turns it off", () => {
     applyContrast(true);
     applyContrast(false);
-    expect(root()).not.toHaveAttribute("data-contrast");
     expect(root()).not.toHaveClass("hc");
   });
 
@@ -39,9 +36,6 @@ describe("applyContrast", () => {
     setMediaMatches(MORE, true);
     applyContrast(false);
     expect(root()).toHaveClass("hc");
-    // The attribute stays off: it mirrors the app preference alone, and the
-    // pre-Grove tokens.css answers the OS query itself.
-    expect(root()).not.toHaveAttribute("data-contrast");
   });
 
   it("cannot overrule the OS — turning the toggle off leaves the OS request standing", () => {

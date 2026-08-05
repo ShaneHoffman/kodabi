@@ -4,15 +4,23 @@ import { HC_CLASS } from "../../contrast";
 import { SpiritMark } from "../capture/SpiritMark";
 import { ListenPill } from "../shell/ListenPill";
 import { Button } from "../ui/Button";
+import { Checkbox } from "../ui/Checkbox";
 import { Dialog } from "../ui/Dialog";
 import { Field } from "../ui/Field";
 import { Menu } from "../ui/Menu";
 import { Select } from "../ui/Select";
+import { StatusMessage } from "../ui/StatusMessage";
 import { Switch } from "../ui/Switch";
 
 /*
- * The Grove primitives, all of them, on one page — the acceptance harness for
- * the primitives ticket and the reference for every screen ticket after it.
+ * Every Grove CONTROL on one page — the acceptance harness for the primitives
+ * ticket and the reference for every screen ticket after it.
+ *
+ * Controls, not all ten of §4's primitives: `ViewFrame` is a page scaffold
+ * whose whole subject is the gutter it puts around a whole view, so it has
+ * nothing to show in a catalogue row and is exercised by its own tests
+ * instead. `DestructiveConfirmDialog` is summoned from the Buttons section
+ * rather than resident, like the other two overlays.
  *
  * It is a DEV PAGE, not a screen: `gallery.html` is deliberately absent from
  * the Vite build inputs, so Vite serves it at /gallery.html while `pnpm dev` is
@@ -118,6 +126,7 @@ export function PrimitiveGallery() {
   const [reduceMotion, setReduceMotion] = useState(false);
   const [increaseContrast, setIncreaseContrast] = useState(true);
   const [retention, setRetention] = useState("keep_days");
+  const [checkedTask, setCheckedTask] = useState(true);
 
   return (
     <div className="grove-ground min-h-dvh font-ui text-ink">
@@ -205,10 +214,10 @@ export function PrimitiveGallery() {
           >
             {/* Uncontrolled on purpose: a catalogue page has no business
                 holding the value of every control it displays. */}
-            {/* An arbitrary value, not `max-w-sm`: the legacy bridge's named
-                spacing aliases shadow Tailwind's container scale, so `max-w-sm`
-                caps this column at 16px and it collapses (see the note in
-                src/index.css section 4). */}
+            {/* An arbitrary value rather than `max-w-sm`, which is 24rem and
+                would happen to match: a measure is a reading decision, so it is
+                spelled as the number it is instead of borrowing a container
+                step that can be re-scaled from under it. */}
             <div className="flex max-w-[24rem] flex-col gap-5" id="fields">
               <Field
                 label="Project name"
@@ -273,6 +282,42 @@ export function PrimitiveGallery() {
               {/* Busy, the only inert form: still focusable, still in the tab
                   order, and it declines its own press. Tab to it and try. */}
               <SwitchRow label="Pill for captures you start" checked busy onChange={() => {}} />
+            </div>
+          </Section>
+
+          <Section
+            title="Checkboxes"
+            note="Unchecked is a RING, not a box: 1.4px of ink-faint, firming a step on hover and again under the press. Checked is an ink fill with a ground-coloured glyph — value, never the reserved green."
+          >
+            <div className="flex flex-col gap-3" id="checkboxes">
+              <Checkbox
+                label="Draft the follow-up email"
+                checked={checkedTask}
+                onChange={setCheckedTask}
+              />
+              <Checkbox label="Send the revised scope" checked={false} onChange={() => {}} />
+              <Checkbox
+                label="Book the venue"
+                checked
+                onChange={() => {}}
+                hint="The hint indents under the LABEL, not the box, so the text column reads as one block."
+              />
+              {/* Disabled dims rather than fades its text: the box has no text
+                  to fade, which is the one sanctioned opacity drop. */}
+              <Checkbox label="Archived, cannot be changed" checked disabled onChange={() => {}} />
+            </div>
+          </Section>
+
+          <Section
+            title="Status messages"
+            note="The variant fixes the ARIA role, which is the whole point of the primitive. All three read at ink-dim: a status line is the last thing that should be hardest to read."
+          >
+            <div className="flex flex-col gap-3" id="status-messages">
+              <StatusMessage variant="empty">Nothing in the inbox.</StatusMessage>
+              <StatusMessage variant="status">Transcribing, 2 minutes in.</StatusMessage>
+              <StatusMessage variant="error" compact>
+                That note could not be filed.
+              </StatusMessage>
             </div>
           </Section>
 

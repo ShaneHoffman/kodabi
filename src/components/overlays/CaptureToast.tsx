@@ -1,7 +1,5 @@
 import { useState } from "react";
 import { useCapturePipeline } from "../../useCapturePipeline";
-// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this overlay's Grove ticket deletes it
-import "./CaptureToast.css";
 
 type Notice = {
   /** Identity, not content: it keys the dismissal record, so a second
@@ -80,13 +78,26 @@ export function CaptureToast() {
   if (!showing) return null;
 
   return (
-    <div className="toast" role="alert" data-testid="capture-toast">
-      <p className="text-label text-text">{showing.text}</p>
+    // Bottom right because that is the emptiest corner of every view in the
+    // app: content is pinned left or centred on a measure, and the sidebar
+    // owns the left edge outright.
+    //
+    // No entrance animation, and nothing for reduced motion to disable:
+    // showing the surface IS the transition (FOUNDING_DOC §4). A toast that
+    // slides in arrives after the thing it is reporting.
+    <div
+      className="glass-overlay fixed right-6 bottom-6 z-50 flex max-w-[236px] items-center gap-3 px-4 py-3"
+      role="alert"
+      data-testid="capture-toast"
+    >
+      <p className="font-ui text-[13.5px] leading-snug text-ink">{showing.text}</p>
       <button
         type="button"
         aria-label="Dismiss"
         onClick={() => setDismissedId(showing.id)}
-        className="toast__dismiss ui-focus-ring text-label text-text-soft"
+        // The hit target grows by one step in three directions without moving
+        // the label, so the pad and its bleed are the same step read twice.
+        className="focus-ring -my-1 -mr-1 flex-none rounded-[6px] p-1 font-ui text-[13.5px] text-ink-dim transition-colors duration-140 ease-out-strong hover:bg-wash hover:text-ink"
       >
         ×
       </button>

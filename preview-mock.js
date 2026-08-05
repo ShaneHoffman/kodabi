@@ -128,8 +128,6 @@
     },
   };
 
-  if (forcedTheme) document.documentElement.setAttribute("data-theme", forcedTheme);
-
   // Headless screenshots run on a virtual clock that fast-forwards timers but
   // never advances the CSS animation clock, so a plane that transitions over
   // 150ms is frozen at frame zero — the outgoing row still lit, the incoming

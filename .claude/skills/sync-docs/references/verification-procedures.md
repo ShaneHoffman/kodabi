@@ -66,25 +66,29 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   `StatusMessage` (variant → ARIA role), `ViewFrame` (seven variants; `summary` a **type
   error** outside `queue`/`library`/`health`, `action` a **type error** on `doc`/`search`,
   neither a silent no-op; `label` names the section landmark when `title` is composed of
-  elements rather than a plain string), `Overlay` (click-not-pointerdown, both ends on the backdrop, no
-  focus trap), `DestructiveConfirmDialog` (presentational, never self-closing; the copy
+  elements rather than a plain string), `Dialog` (base-ui owns the focus trap, Escape, the outside
+  press and the scroll lock; `initialFocus` where the first tabbable control is destructive;
+  margin centering, since `materialize` animates `transform`),
+  `DestructiveConfirmDialog` (presentational, never self-closing; the copy
   structure — title, `subject` strip, consequence, the dialog's own permanence line, quiet
   Cancel before the danger confirm).
 - **Do not look for `Textarea`, `ListRow` or `PlaceholderView`.** All three were
   deleted (they had no call sites); §4 keeps a "there is no X primitive" note saying what
   to do instead. A live reference to any of them anywhere is itself a failure.
+- **Nor for `Overlay`.** The pre-Grove modal shell was deleted by the Grove cleanup once
+  `Dialog` had taken its last caller, and `src/useDialogFocus.ts` went with it. Surviving
+  mentions are past-tense comparisons in `Dialog`'s contract and are correct; a *live*
+  reference is a failure.
 - **Verify:** read each primitive's exported prop types and compare against the documented
   variants and the contract list. The contracts are behavioural, so check the
   implementation and the component's tests, not just the type — `loading` and `busy` in
   particular are only correct if the control stays focusable and declines activation.
 - **Failure:** a documented variant or prop the component no longer has, a new primitive
   §4 omits, or a contract in the list that the component no longer honours.
-- **§4 documents behaviour, not styling.** The primitives §4 still calls pre-Grove carry their
-  own stylesheets, and §4 says which. Do not report their styling as drift against
-  `DESIGN_SYSTEM.md` — each is restyled by a ticket of its own, and until then the two
-  documents are describing different layers on purpose. `Select` has had that ticket (its
-  chrome is Grove and `Select.css` is gone, minus the anchor-positioning block that moved to
-  `src/index.css` §3); its **behaviour** contract above is unchanged by it, which is the point.
+- **§4 documents behaviour, not styling.** Every primitive is Grove now and none carries a
+  stylesheet, so §4's job is the contracts: what a prop promises, which variant fixes an ARIA
+  role, what is a type error. A restyle that preserves every contract is not drift against
+  this anchor, and a styling question belongs to anchor 6.
 
 > This list is the thing an auditor works from, so **it goes stale the moment a
 > primitive is added or removed** and nothing else will catch that. Updating it is
@@ -143,12 +147,13 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 - **Nothing here is machine-checked, unlike the pre-Grove anchor.** The old token
   guard asserted theme-block coverage in `pnpm test`; Grove retired it along with the
   stylesheets it scanned. Every check above is this auditor's job in full.
-
-> **Migration note (Phase 4).** `design/tokens.css`, the `@theme inline` bridge at the
-> bottom of `src/index.css`, and the per-component `*.css` files are frozen legacy for
-> unmigrated screens. They are **not** an anchor: do not audit them against
-> `DESIGN_SYSTEM.md`, which no longer describes them. Delete this note when the final
-> cleanup ticket removes them.
+- **`src/index.css` should be the only stylesheet in the repo.** The pre-Grove layer
+  (`design/tokens.css`, the `@theme inline` bridge, the per-component `*.css` files,
+  `src/fonts.ts` and the `@fontsource` dependencies) was deleted by the Grove cleanup.
+  A second stylesheet reappearing is itself a finding: it reopens the token-shadowing
+  trap in §7, since unlayered CSS outranks `@layer theme`. `design/` keeps only the
+  Phase-0 moodboard and spirit-mark pages, which no build reads and which
+  `docs/DESIGN.md` already labels as drifted.
 
 ## Anchor 7 — MCP tool surface ↔ the server's committed schemas
 

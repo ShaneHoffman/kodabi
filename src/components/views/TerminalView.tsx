@@ -33,8 +33,8 @@ const STATUS_LINE: Record<TerminalStatus, string> = {
  * from the same tokens by `useXterm`.
  *
  * The two children sit directly in the frame's column rather than in a wrapper
- * of their own: `.view--terminal .view__column` is already the flex column that
- * gives the well its height (ViewFrame.css), and a second one only repeated it.
+ * of their own: the terminal variant's column is already the flex column that
+ * gives the well its height (ViewFrame.tsx), and a second one only repeated it.
  */
 export function TerminalView() {
   const mount = useRef<HTMLDivElement>(null);

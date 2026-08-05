@@ -505,31 +505,33 @@ persisted. `src/contrast.test.ts` pins that property.
 
 Grove is enforced far more lightly than the system it replaced, and that is deliberate. The old guard
 scanned stylesheets for literal colours, durations, and spacing — a check that only made sense while
-every screen had a stylesheet. Grove has one.
+every screen had a stylesheet. Grove has one, and it is the app's only one.
 
 What remains machine-checked, in `pnpm exec eslint . --max-warnings=0`:
 
 - **No colour literals in `className`.** A hex in a class string is a value no theme block can
   re-map, so it survives `.day` and `.hc` unchanged and breaks both variants silently. This is the
   one literal that is not merely untidy but wrong.
-- **No `.css` import outside `src/index.css`.** Every existing one carries an `eslint-disable` naming
-  the ticket that deletes it, which keeps the pre-Grove stylesheets countable and dated. A new one is
-  possible, but it has to be argued in a comment.
+- **No `.css` import outside `src/index.css`.** There is nothing left to except: the app's own code
+  imports no other stylesheet, and the single surviving `eslint-disable` covers xterm's third-party
+  one. A new import is possible, but it has to be argued in a comment. Keeping the count at one is
+  also what keeps the token-shadowing trap closed — `@theme` emits into `@layer theme`, and an
+  unlayered declaration of the same name would silently win (UI_CONVENTIONS §6).
 
 And in `pnpm test`:
 
-- **[`src/theme.test.ts`](../src/theme.test.ts)** pins that `.day` is *resolved* under "system" while
-  `data-theme` is *deferred* — the two halves answer the OS differently, and a test on the attribute
-  alone would pass on a build where the class never moved.
+- **[`src/theme.test.ts`](../src/theme.test.ts)** pins that `.day` is *resolved* under "system":
+  Grove's tokens carry no media query of their own, so `applyTheme` has to read
+  `prefers-color-scheme` and decide, and a build where the class never moved would strand every
+  window at night.
 - **[`src/contrast.test.ts`](../src/contrast.test.ts)** pins that `.hc` is the OR of the two requests,
   which is what makes the switch additive.
-- **[`src/groveTokenNames.test.ts`](../src/groveTokenNames.test.ts)** pins that no Grove token shares
-  a name with the unlayered legacy layer, which would hand the Grove utility the legacy value
-  silently.
 - **[`PrimitiveGallery.test.tsx`](../src/components/dev/PrimitiveGallery.test.tsx)** renders every
-  primitive under all four grounds (night, day, `.hc`, `.hc.day`). It proves they *render*, not that
-  they look right — the looking is what `/gallery.html` is for, served by `pnpm dev` and absent from
-  the build.
+  Grove **control** under all four grounds (night, day, `.hc`, `.hc.day`). Controls, not all ten of
+  UI_CONVENTIONS §4's primitives: `ViewFrame` is a page scaffold with nothing to show in a catalogue
+  row and has its own tests, and the three overlays are summoned rather than resident. It proves
+  they *render*, not that they look right — the looking is what `/gallery.html` is for, served by
+  `pnpm dev` and absent from the build.
 
 **Everything else in this document is review's job, and this document is the checklist.** Nothing
 checks that green stayed on the kodama, that a verb got a rectangle, that an exit came in under its

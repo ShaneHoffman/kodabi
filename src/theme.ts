@@ -27,24 +27,17 @@ let currentTheme: Theme = "system";
 /**
  * Reflect a theme choice on the <html> element (document.documentElement).
  *
- * Two systems are driven here, because two live side by side while the Grove
- * migration runs:
+ * Grove's tokens are plain CSS with no media query of their own, so "system"
+ * has to be *resolved* here rather than deferred to the stylesheet — which is
+ * why this function reads matchMedia. (The pre-Grove layer answered the query
+ * itself, through a `data-theme` attribute this also used to write; both went
+ * with design/tokens.css.)
  *
- *   - `data-theme` — the pre-Grove one. "system" removes the attribute so
- *     design/tokens.css falls back to its own prefers-color-scheme query.
- *   - the `day` class — Grove's. Its tokens are plain CSS with no media query
- *     of their own, so "system" has to be *resolved* here rather than deferred.
- *     That is the real difference between the two halves, and the reason this
- *     function grew a matchMedia read.
- *
- * Must target documentElement, not body — both systems key off :root.
+ * Must target documentElement, not body — the variants key off :root.
  */
 export function applyTheme(theme: Theme): void {
   currentTheme = theme;
   const root = document.documentElement;
-
-  if (theme === "system") root.removeAttribute("data-theme");
-  else root.setAttribute("data-theme", theme);
 
   // A window with no matchMedia (jsdom without a stub) can still honour an
   // explicit choice; only "system" needs the query, and unresolved reads as
@@ -59,9 +52,8 @@ export function applyTheme(theme: Theme): void {
  *
  * Called imperatively from each entry module, not from a component: this is
  * one-time document-level bootstrap, which `.claude/rules/no-use-effect.md`
- * names as explicitly not an effect (the same reason `fonts.ts` is imported
- * rather than hooked). It also has to work in the quick-capture and overlay
- * windows, which mount no shell at all.
+ * names as explicitly not an effect. It also has to work in the quick-capture
+ * and overlay windows, which mount no shell at all.
  *
  * The caller applies "system" synchronously first, so the window paints in the
  * OS theme rather than flashing a default while the read is in flight; this
@@ -76,10 +68,9 @@ export function startThemeSync(): void {
   void getSettings().then(applyFrom, () => {});
   void listen<Settings>(SETTINGS_CHANGED_EVENT, (event) => applyFrom(event.payload));
 
-  // The OS half of "system". tokens.css answers the media query itself, but the
-  // Grove class was resolved once in applyTheme and would otherwise be stale the
-  // moment the desktop flips at sunset. Guarded on the current choice so it goes
-  // quiet as soon as the user picks a side.
+  // The OS half of "system". The class was resolved once in applyTheme and
+  // would otherwise be stale the moment the desktop flips at sunset. Guarded on
+  // the current choice so it goes quiet as soon as the user picks a side.
   prefersLight?.addEventListener("change", () => {
     if (currentTheme === "system") applyTheme("system");
   });

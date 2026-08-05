@@ -27,8 +27,8 @@ in `eslint.config.js` fail any non-blessed file at the
   `useChatSession` (the chat view's backend session: `chat_open` on mount +
   the `chat:event` stream), `useRoutePreview` (the quick-capture footer's
   debounced routing-guess call).
-  DOM: `useCommandPalette` (global ⌘K/Ctrl-K keydown), `useDialogFocus` (dialog
-  focus hand-off), `useScrollIntoView` (active-descendant row visibility),
+  DOM: `useCommandPalette` (global ⌘K/Ctrl-K keydown),
+  `useScrollIntoView` (active-descendant row visibility),
   `useOutsidePointerDown` (dismiss on outside press), `useXterm` (the embedded
   terminal's xterm.js `Terminal`, streaming to the PTY, with the `ResizeObserver`
   that keeps the grid sized and the `MutationObserver` that re-reads the palette
@@ -49,6 +49,7 @@ in `eslint.config.js` fail any non-blessed file at the
   its own cleanup, it isn't a bridge hook — it belongs inside an existing one,
   or it isn't an effect at all.
 - **One-time DOM bootstrap is not an effect.** Document-level setup that runs
-  once at startup (the theme class, font loading) lives in `src/theme.ts` and
-  `src/fonts.ts`, called imperatively from the entry modules (`src/main.tsx`,
-  `src/capture.tsx`, `src/overlay.tsx`) — not from a component.
+  once at startup (the theme class, the contrast and reduced-motion
+  preferences) lives in `src/theme.ts`, `src/contrast.ts` and
+  `src/reduceMotion.ts`, called imperatively from the entry modules
+  (`src/main.tsx`, `src/capture.tsx`, `src/overlay.tsx`) — not from a component.

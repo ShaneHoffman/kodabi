@@ -29,7 +29,8 @@ reserved about colour than v2 was, by holding to the same four rules against a d
 The visual companion to this document is [`design/moodboard.html`](../design/moodboard.html) — a
 self-contained page that *demonstrates* everything below in real material. Read this for the
 intent; open that to feel it. The moodboard still shows the Phase 0 indicative values; for the
-material as it ships, [`design/tokens.css`](../design/tokens.css) is the source of truth.
+material as it ships, the `@theme` block in [`src/index.css`](../src/index.css) is the source of
+truth, and [`DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) is its doctrine.
 
 ---
 
@@ -189,11 +190,10 @@ never copy their imagery.
   breathes. The mark itself is designed in P0-5 — this document only reserves the color and the
   feeling.
 
-**Locked in P0-4, re-tuned in v2:** the design tokens live in
-[`design/tokens.css`](../design/tokens.css). **Typefaces are unchanged** — **Source Sans 3**
-(interface) + **Source Serif 4** (reading views) + **Source Code Pro** (mono), self-hosted so they
-render offline, at the weights the `--fw-*` scale names (400/500/600/700, plus a sans italic) and
-no others.
+**Locked in P0-4, re-tuned in v2:** the design tokens lived in `design/tokens.css`. **Typefaces are
+unchanged** — **Source Sans 3** (interface) + **Source Serif 4** (reading views) + **Source Code
+Pro** (mono), self-hosted so they render offline, at the weights the `--fw-*` scale names
+(400/500/600/700, plus a sans italic) and no others.
 
 What v2 replaced is the values P0-4 adopted from the moodboard. The palette was rebuilt to product
 grade (above), and the **type ramp split into two voices**: the interface ramp tightened while the
@@ -207,11 +207,15 @@ steps only made the same role render at two sizes for no reader's benefit.
 > enumerated `--fs-*` ramp this sentence pointed at: Grove sets sizes with utilities and names only
 > the one size that must never drift, the reading step. §1 of that document describes Grove's type,
 > not the v2 ramp, and §6 its contrast — do not read either as a continuation of this paragraph.
+>
+> **The Source trio is gone too.** Grove's three faces (Bahnschrift, Cascadia Mono, Georgia) all
+> ship with Windows, so the app self-hosts nothing and fetches no font; `design/tokens.css` and the
+> `@fontsource` dependencies were deleted with the rest of the pre-Grove layer.
 
-> **`design/tokens.html` and `design/moodboard.html` are Phase-0 artefacts and have drifted.** Both
-> still demonstrate `--accent` and a recessed `bg-sink` plane, neither of which exists any more.
-> They are kept as a record of where the aesthetic started, not as a reference for what it is. The
-> file above is the source of truth; when the two disagree, the file wins.
+> **`design/moodboard.html` is a Phase-0 artefact and has drifted.** It still demonstrates
+> `--accent` and a recessed `bg-sink` plane, neither of which exists any more. It is kept as a
+> record of where the aesthetic started, not as a reference for what it is; `src/index.css` is the
+> source of truth, and when the two disagree the stylesheet wins.
 
 ---
 
