@@ -1,4 +1,5 @@
 import { clsx } from "clsx";
+import { AnimatePresence, motion, type Variants } from "motion/react";
 import { useMemo, useState } from "react";
 import {
   pipelineStage,
@@ -8,15 +9,6 @@ import {
   type CapturePipeline,
   type PipelineStage,
 } from "../../useCapturePipeline";
-import {
-  LIST_ROW_ENTER,
-  LIST_ROW_EXIT,
-  LIST_ROW_LEAVING,
-  LIST_SLOT,
-  LIST_SLOT_INNER,
-  LIST_SLOT_INNER_LEAVING,
-  LIST_SLOT_LEAVING,
-} from "../../listMotion";
 import { useNavigation } from "../../useNavigation";
 import { matchScore, noteKind } from "../../noteMeta";
 import {
@@ -29,6 +21,7 @@ import {
 import { folderHue, useProjects, type FolderHue, type Project } from "../../useProjects";
 import { isSessionSource } from "../../useSessions";
 import { formatElapsed, useElapsed } from "../../useElapsed";
+import { useReduceMotion } from "../../useReduceMotion";
 import { useTimeout } from "../../useTimeout";
 import { SpiritMark } from "../capture/SpiritMark";
 import { CreateProjectDialog } from "../dialogs/CreateProjectDialog";
@@ -38,16 +31,18 @@ import { Menu } from "../ui/Menu";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
 
-/** Mirrors `--dur-settle`: how long the placeholder's travel-left-and-vanish
- * plays once distill routes it to a project, before it hands off to the toast. */
-const VANISH_MS = 200;
-/** How long "Filed to <project>" stays up before it fades — the same dwell
+/** How long the placeholder's travel-left-and-vanish plays once distill routes
+ * it to a project: the card clears in 220ms inside a slot that closes in 280,
+ * so this is the slot's clock — the moment there is nothing left to see. */
+const VANISH_MS = 280;
+/** How long "Filed to <project>" stays up before it goes — the same dwell
  * `CaptureToast` used to give a success notice. */
 const TOAST_DWELL_MS = 3500;
 /** Mirrors `--dur-exit`: the toast's own fade-out, once the dwell ends. It is
  * shorter than the entrance it undoes, which is the rule for every exit in the
- * app (docs/DESIGN_SYSTEM.md §4). */
-const TOAST_FADE_MS = 130;
+ * app (docs/DESIGN_SYSTEM.md §4). Spent by the exit variant rather than by a
+ * timer — `AnimatePresence` holds the element alive for exactly this long. */
+const TOAST_FADE_S = 0.13;
 /** Covers `--dur-plane` with a little room: how long after an Inbox-routed
  * note lands before its outcome counts as fully presented — the fill-in has
  * played and there is nothing left for a remount to replay. */
@@ -58,6 +53,142 @@ const FILL_IN_MS = 200;
  * with a distill, and an Inbox-routed save whose vault refetch fails or
  * never lands. */
 const GRACE_MS = 10_000;
+
+/*
+ * THE MOTION OF A ROW IN THIS LIST.
+ *
+ * The `motion` package drives it rather than CSS, and this list is why the
+ * package is in the stack at all: a row leaving has to collapse a height nobody
+ * measured, while its neighbours glide up to meet it, while a new row may be
+ * arriving into the same list — three things on one timeline, interruptible
+ * halfway through. CSS can express any one of them and none of them together.
+ * Everything else in the app stays CSS (docs/UI_CONVENTIONS.md).
+ *
+ * Two elements per row, and the split is load-bearing: the SLOT (the `li`) owns
+ * the space, the CARD inside it owns the travel. Collapsing the space and
+ * sliding the card are different clocks on purpose — the card is gone at 220ms
+ * while the slot is still closing at 280, so the space hands itself back behind
+ * a card that has already left, and the row below never appears to shove it
+ * out. They are one movement because they overlap, not because they match.
+ *
+ * The variants are keyed by label, so the slot and the card can be told
+ * "you are leaving" once, on the parent, and each answer in its own values.
+ *
+ * TWO THINGS THIS DELIBERATELY DOES NOT USE, both of which the ticket named.
+ *
+ * No `layout` prop. The neighbours glide because the slot's HEIGHT is animating
+ * and they are in normal flow behind it — the same trick the prototype used,
+ * and it needs no projection. `layout` would put every row in a projection tree
+ * that writes its own transforms, fighting the card's `x` underneath it: two
+ * writers of one property. It earns its keep when items REORDER, and nothing
+ * here reorders. Rows only arrive and leave.
+ *
+ * No `exit` variant on the list's children either, and this one is a real
+ * constraint rather than a preference. A departure here is always something the
+ * app already knows about BEFORE the element unmounts — `vanishing` on the
+ * placeholder, `leaving` on a row — because both start the moment the command
+ * succeeds rather than whenever the vault refetch happens to land. Animating
+ * from that state is both earlier and more honest than animating on the way
+ * out. `exit` would also make each row's unmount wait on an animation
+ * completing inside a subtree that holds a base-ui menu and two dialogs, and a
+ * row that can fail to unmount is a far worse bug than a collapse that gets
+ * clipped. `AnimatePresence` is kept for the filed toast, whose departure genuinely
+ * has no state to animate from: it is dropped and then gone.
+ *
+ * The placeholder's silent handoff is the case that proves the rule — see the
+ * comment on its `motion.li`.
+ *
+ * Each table is one FROZEN module constant per reduced-motion setting, picked
+ * by a getter, rather than an object literal built during render. A variants
+ * object is part of a `motion` element's identity: handing it a structurally
+ * identical but newly-allocated one on every render is a change as far as the
+ * animator is concerned, and it re-reads the whole table each time — on a list
+ * that re-renders on every vault refetch, every keystroke in a dialog and
+ * every menu open.
+ */
+
+/** `--ease-out-strong`, as numbers: entrances and arrivals. */
+const EASE_OUT_STRONG = [0.23, 1, 0.32, 1] as const;
+/** `--ease-in-out-strong`, as numbers: departures, which leave under power. */
+const EASE_IN_OUT_STRONG = [0.77, 0, 0.175, 1] as const;
+
+/** The gap between rows, in px. It lives on each slot as an animated margin
+ * rather than on the list as a flex `gap`, because a gap cannot collapse: a
+ * row whose height reaches zero with a live gap under it still holds 14px of
+ * the list open, and the neighbours land with a jump at the end of a
+ * choreography built to avoid exactly that. */
+const ROW_GAP = 14;
+
+/**
+ * The slot: the space a row occupies, and the only thing that ever animates a
+ * height. `height: "auto"` is motion measuring the row for us — the same
+ * problem the `1fr → 0fr` grid trick used to solve, minus the grid.
+ *
+ * `overflow: "clip"` is set (not animated) at the start of the exit, so the
+ * clipping exists only while collapsing. A resting row must never be clipped:
+ * it would crop its own hover lift and, worse, its focus ring, in the densest
+ * list in the app.
+ */
+const SLOT_MOVING: Variants = {
+  enter: { height: 0, opacity: 0, marginBottom: 0 },
+  rest: {
+    height: "auto",
+    opacity: 1,
+    marginBottom: ROW_GAP,
+    transition: { duration: 0.3, ease: EASE_OUT_STRONG },
+  },
+  gone: {
+    height: 0,
+    marginBottom: 0,
+    overflow: "clip",
+    transition: { duration: 0.28, ease: EASE_IN_OUT_STRONG },
+  },
+};
+/** Fades only. No height, no margin: the collapse IS the movement, and the rule
+ * is that movement goes while life stays (docs/DESIGN_SYSTEM.md §4). */
+const SLOT_STILL: Variants = {
+  enter: { opacity: 0 },
+  rest: { opacity: 1, transition: { duration: 0.2 } },
+  gone: { opacity: 0, transition: { duration: TOAST_FADE_S } },
+};
+
+function slotVariants(reduce: boolean): Variants {
+  return reduce ? SLOT_STILL : SLOT_MOVING;
+}
+
+/**
+ * The card: what the eye actually follows. Out to the LEFT, because that is
+ * where this list came from — a row leaves along the axis it arrived on rather
+ * than picking a new direction on the way out — carrying a 2px blur, which is
+ * the part that makes it read as departing rather than as being deleted.
+ */
+/* The blur appears ONLY in `gone`, never in the resting states, and that is a
+   correctness point rather than a tidiness one: a `filter` in the resting
+   variant would sit in the inline style of every card in the list forever, and
+   a filtered element is a containing block for fixed-position descendants and
+   its own stacking context. Each row holds a menu and two dialogs that position
+   against the viewport, so a resting `blur(0px)` would quietly re-anchor them
+   to the card. Motion reads the computed value as the start of the exit, which
+   is what it should be animating from anyway. */
+const CARD_MOVING: Variants = {
+  enter: { opacity: 0, x: 0 },
+  rest: { opacity: 1, x: 0 },
+  gone: {
+    opacity: 0,
+    x: -24,
+    filter: "blur(2px)",
+    transition: { duration: 0.22, ease: EASE_IN_OUT_STRONG },
+  },
+};
+const CARD_STILL: Variants = {
+  enter: { opacity: 0 },
+  rest: { opacity: 1 },
+  gone: { opacity: 0, transition: { duration: TOAST_FADE_S } },
+};
+
+function cardVariants(reduce: boolean): Variants {
+  return reduce ? CARD_STILL : CARD_MOVING;
+}
 
 /* The folder hues, written out rather than interpolated: Tailwind cannot see a
    constructed class name and would emit none of these
@@ -94,6 +225,16 @@ const HUE_DOT: Record<FolderHue, string> = {
   cobalt: "bg-cobalt",
   teal: "bg-teal",
   plum: "bg-plum",
+};
+/** The toast's left edge, in the hue of the folder the note landed in — the
+ * same fast read the card carried, kept through the handoff, so the thing that
+ * announces where a note went is the colour of where it went. No hover
+ * restatement here: nothing repaints this surface's border. */
+const TOAST_EDGE: Record<FolderHue, string> = {
+  coral: "border-l-coral",
+  cobalt: "border-l-cobalt",
+  teal: "border-l-teal",
+  plum: "border-l-plum",
 };
 
 /**
@@ -159,6 +300,11 @@ export function InboxView() {
     notes,
     projectSlugs,
   );
+  // Read here as well as at the shell's `MotionConfig`, because that setting
+  // covers the transforms and the layout animations and this list also
+  // animates a height and a blur — neither of which "reduced motion" turns off
+  // on its own, and both of which are exactly the choreography to drop.
+  const reduce = useReduceMotion();
 
   // The note an Inbox-routed distill just produced, if it has landed in this
   // list yet — purely derived, so it needs no state of its own and cannot go
@@ -200,8 +346,10 @@ export function InboxView() {
           {remaining === 0 && !placeholder ? (
             !loading && <EmptyInbox />
           ) : (
-            <ul data-testid="inbox-list" className="flex flex-col gap-3.5">
-              {placeholder && <PipelinePlaceholder presence={placeholder} />}
+            // No flex `gap`: the 14px is an animated margin on each slot, so
+            // it collapses with the row that owns it (see `ROW_GAP`).
+            <ul data-testid="inbox-list" className="flex flex-col">
+              {placeholder && <PipelinePlaceholder presence={placeholder} reduce={reduce} />}
               {notes.map((note) => (
                 // Keyed by path, not id: two files can carry the same id (an
                 // external copy), and duplicate keys would mis-reconcile rows.
@@ -211,13 +359,21 @@ export function InboxView() {
                   projects={projects}
                   onFiled={() => setFiledThisSession((count) => count + 1)}
                   fresh={note.path === freshNotePath}
+                  reduce={reduce}
                 />
               ))}
             </ul>
           )}
         </>
       )}
-      {toast && <FiledToast toast={toast} onPause={pauseToast} onResume={resumeToast} />}
+      {/* Its own presence group: the toast is not in the list, and it has to
+          be able to arrive while the placeholder that summoned it is still
+          leaving. */}
+      <AnimatePresence>
+        {toast && (
+          <FiledToast toast={toast} onPause={pauseToast} onResume={resumeToast} reduce={reduce} />
+        )}
+      </AnimatePresence>
     </ViewFrame>
   );
 }
@@ -309,8 +465,12 @@ type PlaceholderPresence = {
 /** The one success announcement left after `CaptureToast` went
  * failures-only: a note filed to a different project. Inbox-owned rather
  * than shared with `CaptureToast`, so that component's failures-only
- * contract stays exactly what it says. */
-type FiledToastPresence = { slug: string; savedPath: string; fading: boolean };
+ * contract stays exactly what it says.
+ *
+ * No `fading` flag: the toast's exit belongs to `AnimatePresence` now, which
+ * keeps the element alive for the length of its own exit variant. Dropping it
+ * from state is the whole of dismissing it. */
+type FiledToastPresence = { slug: string; savedPath: string };
 
 /**
  * What the placeholder row and the filed-toast show, and for how long: a
@@ -333,9 +493,7 @@ function usePipelinePresence(
   const resolved = resolvePlaceholderStage(stage, notes, projectSlugs, pipeline.handledFiledId);
 
   const [waivedId, setWaivedId] = useState<string | null>(null);
-  const [toast, setToast] = useState<
-    { id: string; slug: string; savedPath: string; fading: boolean } | null
-  >(null);
+  const [toast, setToast] = useState<{ id: string; slug: string; savedPath: string } | null>(null);
   const [toastPaused, setToastPaused] = useState(false);
   const [runStartedAt, setRunStartedAt] = useState<number | null>(null);
 
@@ -364,6 +522,18 @@ function usePipelinePresence(
   const visible = resolved !== null && resolved.id !== waivedId;
   const vanishing = visible && resolved?.kind === "filedToProject";
 
+  // The toast rises on the same frame the placeholder starts leaving, rather
+  // than waiting for it to finish. That overlap is the point: the eye follows
+  // the card out to the left and finds the answer already arriving in the
+  // corner, with no beat in between where the app has nothing to say. Adjusted
+  // during render rather than from the vanish timer
+  // (.claude/rules/no-use-effect.md), and guarded on the stage id so a
+  // re-render cannot re-open a toast the user already dismissed.
+  if (vanishing && resolved?.kind === "filedToProject" && toast?.id !== resolved.id) {
+    setToastPaused(false);
+    setToast({ id: resolved.id, slug: resolved.slug, savedPath: resolved.savedPath });
+  }
+
   // Covers a stop the backend never acknowledges (a mis-tap under its
   // minimum session duration emits nothing at all), a dev/mock build
   // (distill never follows a saved transcript), and an Inbox-routed save
@@ -390,19 +560,13 @@ function usePipelinePresence(
   );
 
   // The vanish plays for VANISH_MS; when it finishes the placeholder is gone
-  // for good — marked handled at the shell, so a remount cannot replay it —
-  // and the toast it hands off to takes over the announcement.
+  // for good — marked handled at the shell, so a remount cannot replay it.
+  // The toast is already up by now (opened at the start of the vanish, above);
+  // all this does is retire the row that handed off to it.
   useTimeout(
     () => {
       if (!resolved || resolved.kind !== "filedToProject") return;
       pipeline.markFiledHandled(resolved.id);
-      setToastPaused(false);
-      setToast({
-        id: resolved.id,
-        slug: resolved.slug,
-        savedPath: resolved.savedPath,
-        fading: false,
-      });
     },
     vanishing ? VANISH_MS : null,
     resolved?.id ?? null,
@@ -426,16 +590,13 @@ function usePipelinePresence(
     stage?.id ?? null,
   );
 
-  // The toast's own lifecycle: dwell (paused while the user is reading or
-  // about to click it), then fade, then gone.
-  useTimeout(
-    () => setToast((current) => (current ? { ...current, fading: true } : current)),
-    toast && !toast.fading && !toastPaused ? TOAST_DWELL_MS : null,
-    toast?.id ?? null,
-  );
+  // The toast's own lifecycle, now one timer instead of two: dwell (paused
+  // while the user is reading it or on their way to click it), then drop it
+  // from state. The fade that used to need its own flag and its own timer is
+  // the exit variant's, played by `AnimatePresence` after this.
   useTimeout(
     () => setToast(null),
-    toast?.fading ? TOAST_FADE_MS : null,
+    toast && !toastPaused ? TOAST_DWELL_MS : null,
     toast?.id ?? null,
   );
 
@@ -450,7 +611,7 @@ function usePipelinePresence(
 
   return {
     placeholder,
-    toast: toast ? { slug: toast.slug, savedPath: toast.savedPath, fading: toast.fading } : null,
+    toast: toast ? { slug: toast.slug, savedPath: toast.savedPath } : null,
     pauseToast: () => setToastPaused(true),
     resumeToast: () => setToastPaused(false),
   };
@@ -474,29 +635,39 @@ function usePipelinePresence(
  * class flip alone would announce nothing, and a live clock would announce
  * every second.
  */
-function PipelinePlaceholder({ presence }: { presence: PlaceholderPresence }) {
+function PipelinePlaceholder({
+  presence,
+  reduce,
+}: {
+  presence: PlaceholderPresence;
+  reduce: boolean;
+}) {
   return (
-    <li
-      className={clsx(LIST_SLOT, presence.vanishing && LIST_SLOT_LEAVING)}
+    <motion.li
       data-testid="pipeline-placeholder"
+      variants={slotVariants(reduce)}
+      // It grows in — the one deliberate entrance the app spends on
+      // distill-and-route — where a real row arriving simply appears.
+      initial="enter"
+      // The vanish plays HERE, while the element is still mounted, and the
+      // state machine holds it mounted for exactly as long as it takes
+      // (VANISH_MS). That is what makes an exit variant not merely
+      // unnecessary but wrong: this element unmounts down two paths and only
+      // one of them is a departure. Routed to a project, it leaves — the
+      // slide-and-collapse above. Routed to the Inbox, it unmounts the instant
+      // the real row appears, and that has to be SILENT, because the row
+      // taking its place is the same note. An exit there would turn a fill-in
+      // into a swap, and the user would watch their note leave and arrive
+      // instead of resolve. `exit` cannot tell those two apart. This can.
+      animate={presence.vanishing ? "gone" : "rest"}
     >
-      <div
-        className={clsx(LIST_SLOT_INNER, presence.vanishing && LIST_SLOT_INNER_LEAVING)}
-      >
+      <motion.div variants={cardVariants(reduce)} className="min-h-0">
         {/* A real card's silhouette — same material, same padding, same
             neutral edge a guessless row wears — so resolving into a real note
             is a fill-in and not a reflow. It does not lift: it is not
             actionable yet, and a card that offers a press it cannot honour is
             worse than a still one. */}
-        <div
-          className={clsx(
-            "glass-card flex items-center gap-6 border-l-[3px] border-l-ink-faint py-4 pr-5 pl-5",
-            // One recipe at a time, as on a real row: entrance and exit each
-            // carry their own `duration-*`, and both on the element at once
-            // means the longer one silently wins for both legs.
-            presence.vanishing ? clsx(LIST_ROW_EXIT, LIST_ROW_LEAVING) : LIST_ROW_ENTER,
-          )}
-        >
+        <div className="glass-card flex items-center gap-6 border-l-[3px] border-l-ink-faint py-4 pr-5 pl-5">
           <div role="status" className="min-w-0 flex-1">
             <p
               aria-hidden="true"
@@ -538,8 +709,8 @@ function PipelinePlaceholder({ presence }: { presence: PlaceholderPresence }) {
             </span>
           </div>
         </div>
-      </div>
-    </li>
+      </motion.div>
+    </motion.li>
   );
 }
 
@@ -551,6 +722,13 @@ function PipelinePlaceholder({ presence }: { presence: PlaceholderPresence }) {
  * `aria-hidden` because both texts exist at once, which is a lie to anything
  * that reads rather than looks; the placeholder's `sr-only` line is the truth
  * for that reader.
+ *
+ * A 2px blur bridges the swap: the outgoing text softens as it goes and the
+ * incoming one resolves as it arrives, so the two read as one thing changing
+ * rather than as two things overlapping. Deliberately still CSS — a crossfade
+ * between two known states is what a transition is for, and the `motion`
+ * package earns its place on this screen for the list choreography it drives,
+ * not for everything that moves (docs/UI_CONVENTIONS.md).
  */
 function PhaseStack({
   phase,
@@ -573,9 +751,9 @@ function PhaseStack({
           key={key}
           data-visible={phase === key || undefined}
           className={clsx(
-            "col-start-1 row-start-1 transition-opacity duration-200 ease-out-strong",
+            "col-start-1 row-start-1 transition-[opacity,filter] duration-200 ease-out-strong",
             "motion-reduce:transition-none",
-            phase === key ? "opacity-100" : "opacity-0",
+            phase === key ? "opacity-100 blur-none" : "opacity-0 blur-[2px]",
           )}
         >
           {text}
@@ -596,15 +774,24 @@ function PhaseStack({
  *
  * The dwell pauses while hovered or focused, so the toast cannot vanish out
  * from under a pointer that is already headed for it.
+ *
+ * It rises out of the corner it lives in, which is the app's rule for a
+ * surface materializing (docs/DESIGN_SYSTEM.md §4): up, up to full size, and
+ * out of a 3px blur, all from a bottom-right origin — so it reads as having
+ * come from that corner rather than having been placed there. Its left edge
+ * carries the hue of the folder the note landed in, the same fast read the
+ * card wore on its way out.
  */
 function FiledToast({
   toast,
   onPause,
   onResume,
+  reduce,
 }: {
   toast: FiledToastPresence;
   onPause: () => void;
   onResume: () => void;
+  reduce: boolean;
 }) {
   const { navigate } = useNavigation();
 
@@ -633,19 +820,32 @@ function FiledToast({
   };
 
   return (
-    <button
+    <motion.button
       type="button"
       className={clsx(
-        "glass-pill focus-ring fixed right-6 bottom-6 z-10 flex cursor-pointer items-center gap-3.5 py-2.5 pr-4 pl-4.5",
-        "transition-[translate,opacity,scale] ease-out-strong",
-        "starting:translate-y-2 starting:opacity-0",
-        "not-aria-disabled:active:scale-97 motion-reduce:transition-none",
-        // Faster out than in, like every exit in the app (DESIGN_SYSTEM §4) —
-        // and the two durations are a ternary rather than an override, because
-        // Tailwind resolves a second `duration-*` by emission order (the
-        // larger value wins) rather than by where it sits in the className.
-        toast.fading ? "opacity-0 duration-130" : "duration-220",
+        // `fixed`, not absolute inside the panel: the panel scrolls, and a
+        // toast that scrolled with the list it is reporting on would be an
+        // announcement you could lose by moving. The page gutter is 5 and this
+        // inset is 6, so it still lands just inside the panel's own corner.
+        "glass-overlay focus-ring fixed right-6 bottom-6 z-10 flex cursor-pointer items-center gap-3.5",
+        "rounded-card border-l-[3px] py-2.5 pr-4 pl-4.5",
+        TOAST_EDGE[folderHue(toast.slug)],
       )}
+      // Bottom right, because that is the corner it occupies: a surface
+      // materializes from its own origin, not from the middle of the screen.
+      style={{ transformOrigin: "bottom right" }}
+      initial={reduce ? { opacity: 0 } : { opacity: 0, y: 12, scale: 0.97, filter: "blur(3px)" }}
+      animate={
+        reduce ? { opacity: 1 } : { opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }
+      }
+      // Faster out than in, like every exit in the app (DESIGN_SYSTEM §4), and
+      // a plain fade: it is being dismissed, not travelling anywhere.
+      exit={{ opacity: 0, transition: { duration: TOAST_FADE_S } }}
+      transition={{ duration: 0.3, ease: EASE_OUT_STRONG }}
+      // The app's one press spec. `whileTap` rather than `active:scale-97`
+      // because motion owns this element's transform while it is arriving, and
+      // a CSS `scale` landing mid-entrance would fight it.
+      whileTap={{ scale: 0.97 }}
       onClick={open}
       onMouseEnter={onPause}
       onMouseLeave={onResume}
@@ -662,7 +862,7 @@ function FiledToast({
       <span className="text-[13px] text-ink-dim" aria-hidden="true">
         →
       </span>
-    </button>
+    </motion.button>
   );
 }
 
@@ -751,11 +951,13 @@ function InboxRow({
   projects,
   onFiled,
   fresh,
+  reduce,
 }: {
   note: NoteSummary;
   projects: Project[];
   onFiled: () => void;
   fresh: boolean;
+  reduce: boolean;
 }) {
   const { navigate } = useNavigation();
   const [pending, setPending] = useState(false);
@@ -781,10 +983,23 @@ function InboxRow({
   };
 
   return (
-    <li className={clsx(LIST_SLOT, leaving && LIST_SLOT_LEAVING)}>
-      <div className={clsx(LIST_SLOT_INNER, leaving && LIST_SLOT_INNER_LEAVING)}>
+    <motion.li
+      variants={slotVariants(reduce)}
+      // Only the row that just stopped being the placeholder plays an
+      // entrance — that IS the fill-in, and it is why the handoff reads as one
+      // note resolving rather than as a swap. Every other row is simply
+      // already there.
+      initial={fresh ? "enter" : false}
+      // `leaving` starts the departure the moment the command succeeds, rather
+      // than waiting for the vault refetch to drop the row: the click has to
+      // be answered now, and the refetch lands whenever it lands. By the time
+      // it does, the row is already at these values and the unmount is silent.
+      animate={leaving ? "gone" : "rest"}
+    >
+      <motion.div variants={cardVariants(reduce)} className="min-h-0">
         <div
           data-testid="inbox-card"
+          data-fresh={fresh || undefined}
           className={clsx(
             "glass-card flex items-center gap-6 border-l-[3px] py-4 pr-5 pl-5",
             // `hover:` is redefined in index.css as (hover: hover) and
@@ -793,30 +1008,13 @@ function InboxRow({
             "hover:-translate-y-[2px] hover:glass-card-lift",
             "motion-reduce:hover:translate-y-0",
             guess ? GUESS_EDGE[guess.hue] : NEUTRAL_EDGE,
-            // EXACTLY ONE transition recipe on the card at a time, because two
-            // are not additive: `transition-[…]` and `duration-*` are single
-            // properties, and a second utility for either is resolved by
-            // Tailwind's emission order rather than by the className — the
-            // longest property list and the longest duration simply win
-            // (docs/UI_CONVENTIONS.md §4). Written as a chain, the three
-            // states cannot stack, so each says exactly what it means.
-            //
-            // The states are mutually exclusive in fact as well as in code: a
-            // row that is leaving is not being hovered for a lift, and a row
-            // still playing its arrival is not yet leaving.
-            leaving
-              ? clsx(LIST_ROW_EXIT, LIST_ROW_LEAVING)
-              : fresh
-                ? LIST_ROW_ENTER
-                : // Named properties only: `translate` and the two the lift
-                  // recipe sets. A `transition-all` here would put the guess
-                  // edge's colour on the hover clock too, so a card whose
-                  // guess changed would fade its edge as if the pointer had
-                  // done it.
-                  clsx(
-                    "transition-[translate,box-shadow,border-color] duration-180 ease-out-strong",
-                    "motion-reduce:transition-none",
-                  ),
+            // The card's only transition, now that entering and leaving belong
+            // to motion: the hover lift. Named properties only — a
+            // `transition-all` here would put the guess edge's colour on the
+            // hover clock too, so a card whose guess changed would fade its
+            // edge as if the pointer had done it.
+            "transition-[translate,box-shadow,border-color] duration-180 ease-out-strong",
+            "motion-reduce:transition-none",
           )}
         >
           {/* `inbox-row` names the OPENING control, not the card: the e2e
@@ -996,7 +1194,7 @@ function InboxRow({
             }}
           />
         )}
-      </div>
-    </li>
+      </motion.div>
+    </motion.li>
   );
 }

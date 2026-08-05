@@ -24,7 +24,10 @@
  */
 
 const STORAGE_KEY = "kodabi:reduce-motion";
-const ATTRIBUTE = "data-reduce-motion";
+/** The root attribute the preference is reflected on. Exported because
+ * [`useReduceMotion`](useReduceMotion.ts) watches it: the reader and the writer
+ * have to name the same string, and a second literal would drift silently. */
+export const REDUCE_MOTION_ATTRIBUTE = "data-reduce-motion";
 
 /** Whether the user has asked us to hold still. Reads storage directly, so a
  * component can seed state from it during render without an effect. */
@@ -56,8 +59,8 @@ export function applyReduceMotion(reduce: boolean): void {
  * back in turn. */
 function reflectReduceMotion(reduce: boolean): void {
   const root = document.documentElement;
-  if (reduce) root.setAttribute(ATTRIBUTE, "on");
-  else root.removeAttribute(ATTRIBUTE);
+  if (reduce) root.setAttribute(REDUCE_MOTION_ATTRIBUTE, "on");
+  else root.removeAttribute(REDUCE_MOTION_ATTRIBUTE);
 }
 
 /** Reflect the stored preference at window start, and follow it when another

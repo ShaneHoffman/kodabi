@@ -1,6 +1,7 @@
 import "@testing-library/jest-dom/vitest";
 import { afterEach } from "vitest";
 import { cleanup } from "@testing-library/react";
+import { MotionGlobalConfig } from "motion/react";
 import { installMatchMedia, resetMatchMedia } from "./media";
 
 /*
@@ -30,6 +31,16 @@ if (!("ResizeObserver" in globalThis)) {
   }
   globalThis.ResizeObserver = ResizeObserverStub as unknown as typeof ResizeObserver;
 }
+
+// The `motion` package drives its animations from a frameloop that jsdom never
+// runs — under fake timers it does not tick at all, so an exiting element would
+// sit at its resting values forever and `AnimatePresence` would never unmount
+// it. Skipping animations jumps every value straight to its target and lets the
+// removal land on the next flush, which is what these tests actually assert on:
+// that a row leaves, that a toast arrives, not how it travelled. The motion of
+// it is verified by eye in the real app (docs/UI_CONVENTIONS.md §6 — some
+// failures are only visible in the built CSS, or in the window).
+MotionGlobalConfig.skipAnimations = true;
 
 // jsdom has no `matchMedia`. Installed here rather than per-file because
 // `theme.ts` and `contrast.ts` capture their queries at import time, so the stub

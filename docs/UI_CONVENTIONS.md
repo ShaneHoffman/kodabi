@@ -116,7 +116,7 @@ Always the token utility, never the literal:
 | A glass surface | `glass-top`, `glass-dock`, `glass-panel`, `glass-card`, `glass-overlay`, `glass-dialog`, `glass-palette`, `glass-pill`, `glass-sheet`, `glass-scrim` |
 | A card that lifts under the pointer | `hover:-translate-y-[2px] hover:glass-card-lift` (DESIGN_SYSTEM §5) |
 | A well sunk into a panel | `glass-term` (the terminal's pane; DESIGN_SYSTEM §5) |
-| A row that enters or leaves a working list | the class strings in [`src/listMotion.ts`](../src/listMotion.ts) — **one at a time**, chosen by state, never stacked |
+| A row that enters or leaves a working list | the `motion` variant tables in [`src/components/views/InboxView.tsx`](../src/components/views/InboxView.tsx) — a slot that collapses its own height, a card that travels; see "When motion, when CSS" below |
 | The focus ring | `focus-ring`, or `focus-ring-inset` where the control fills its container |
 
 Each recipe carries a whole surface — its fill, blur, lit edge, border, shadow and rung of the radius
@@ -175,6 +175,41 @@ defaults everywhere they appear. `hover:` also requires `(pointer: fine)`, becau
 satisfy `(hover: hover)` and then strand a tapped control in its hover state. `motion-reduce:` also
 matches `[data-reduce-motion="on"]`, the root attribute the Settings switch writes — without it the
 in-app toggle would work on legacy screens and silently do nothing on Grove ones.
+
+### When motion, when CSS
+
+**CSS is the default and `motion` is the exception**, and the exception has a shape: reach for the
+package when the movement needs something a transition cannot express — a height nobody measured, an
+element that has to survive its own removal, or several movements on one interruptible timeline.
+Presses, hovers, crossfades, and surfaces materializing are transitions, and they stay transitions
+even on a screen that also uses `motion` for something else. The Inbox is the live example: its list
+choreography is `motion`, and the stage crossfade three lines away is still a `transition-[opacity,filter]`.
+
+Two things to know before writing any:
+
+**Variant tables are module constants, never built during render.** A variants object is part of a
+`motion` element's identity, so handing it a structurally identical but freshly-allocated one each
+render reads as a change and re-reads the whole table. On a list that re-renders on every refetch
+that is a measurable cost. Write one frozen constant per reduced-motion setting and pick between them.
+
+**A `filter` belongs only in the state that uses it.** A resting variant carrying `blur(0px)` leaves a
+filter in the element's inline style forever, and a filtered element is its own stacking context and a
+containing block for fixed-position descendants — which quietly re-anchors any menu, tooltip or dialog
+inside it. Motion reads the computed value as the start of the animation anyway.
+
+**Reduced motion needs our hook, not the package's.** `motion`'s own `useReducedMotion()` reads
+`prefers-reduced-motion` and nothing else, so it cannot see `[data-reduce-motion="on"]` — the one place
+the preference is expressed *in-app* is the one place it would be ignored. Read
+[`useReduceMotion`](../src/useReduceMotion.ts) instead, which unions both channels; `AppShell` feeds it
+to a `MotionConfig reducedMotion` so every call site inherits the policy. Note what that setting does
+and does not cover: it drops transforms and layout animations and keeps opacity — exactly the doctrine
+— but it does **not** turn off an animated `height` or `filter`, so a component animating either must
+also branch on the hook itself.
+
+Tests run with `MotionGlobalConfig.skipAnimations` on (`src/test/setup.ts`), which lands every value at
+its target immediately. An element `AnimatePresence` is holding open for an exit still unmounts a frame
+later, so a test asserting it is gone has to drive the frame loop — see `waitForRemoval` in
+`InboxView.test.tsx`.
 
 ---
 
@@ -314,7 +349,7 @@ The curated stack is installed and is the direction of travel:
 | `sonner` | Toasts |
 | `motion` | Motion that CSS cannot express — gestures, layout animation, interruptible transitions |
 
-**Four are adopted.** `cva` gives `Button` its variants and `clsx` composes classes wherever a
+**Five are adopted.** `cva` gives `Button` its variants and `clsx` composes classes wherever a
 primitive has conditions (`Field`, `Dialog`, `CommandPalette`); a component with no variants needs no
 `cva` table. `@base-ui/react` is behind `Menu` and `Dialog` — the two pieces of behaviour that are
 hard, invisible when they work, and not Grove's opinion: anchoring a popup to its trigger with a flip
@@ -322,11 +357,17 @@ at the window edge, and trapping focus in a modal. And `cmdk` is behind `Command
 **both**: cmdk owns the list (fuzzy scoring, the arrow keys, the listbox ARIA, one highlight shared by
 pointer and keyboard) inside base-ui's dialog parts, which own the modal. Note what that rules out —
 cmdk's own `Command.Dialog` wraps `@radix-ui/react-dialog`, and taking it would have put a second
-dialog implementation in the app beside base-ui's. **A library is worth adopting for the part of it
-you need, not the whole surface it offers.** Everything visible about all four is still ours.
+dialog implementation in the app beside base-ui's. And `motion` drives the Inbox's capture flow — the
+pipeline placeholder growing into the list, the routed card travelling out while its slot closes
+behind it — which is the case CSS genuinely cannot hold: an unmeasured height, an element that has to
+outlive its own removal, and both on one timeline that can be interrupted. **A library is worth
+adopting for the part of it you need, not the whole surface it offers.** Everything visible about all
+five is still ours.
 
-**`sonner` and `motion` are installed, not adopted**, and each is its own decision in its own
-ticket — installing a package is not the same as adopting it. The same holds for what base-ui has
+**`sonner` is installed, not adopted**, and remains its own decision in its own
+ticket — installing a package is not the same as adopting it. The Inbox's filed toast is the live
+example of the distinction: it is hand-rolled, on Grove's own glass, and adopting `motion` for the
+movement underneath it did not drag `sonner` in with it. The same holds for what base-ui has
 NOT taken: `Select` is a working, tested, accessible combobox, and it gets replaced when someone has
 read what `@base-ui/react` gives in exchange, not on sight. Its Grove ticket re-skinned it and left
 every line of that behaviour alone, which is what the distinction looks like in practice: the list
