@@ -25,13 +25,18 @@ export function captureLabel(state: CaptureStateEvent): CaptureLabel {
 
   switch (state.phase) {
     case "idle": {
-      // A start that failed outright leaves both sources failed. Saying only
-      // "Idle" would read as "you never pressed anything".
+      // "Not listening" rather than "Idle": this is the pill's privacy claim,
+      // and it is the one state the user checks the chrome to confirm. A
+      // machine word makes them infer it; the negation states it.
+      //
+      // A start that failed outright leaves both sources failed, where the
+      // headline alone would read as "you never pressed anything" — the detail
+      // below is what separates the two.
       const failed =
         state.sources.loopback === "failed" ||
         state.sources.microphone === "failed";
       return {
-        text: "Idle",
+        text: "Not listening",
         live: false,
         detail: failed ? "Capture failed to start" : null,
       };

@@ -332,12 +332,9 @@ export function NeedsAttentionView() {
               // means (docs/DESIGN_SYSTEM.md §3): empty is first-run copy, not
               // an apology. The mark is aria-hidden, so the two lines carry it.
               <div className="flex flex-col items-center gap-1.5 pt-24 pb-[70px] text-center">
-                {/* Held back from full ink: the idle mark is dormant, and at
-                    26px a solid disc outweighs the sentence it is there to
-                    accompany. Opacity rather than a colour, so it lands on the
-                    faint step in both grounds without the primitive growing a
-                    mode only this screen would use. */}
-                <SpiritMark mode="idle" size="26px" className="mb-[18px] opacity-60" />
+                {/* The mark's own `idle` mode carries the dormant ink step, so
+                    this needs no per-screen dimming (src/index.css §3). */}
+                <SpiritMark mode="idle" size="26px" className="mb-[18px]" />
                 <p className="text-[15px] font-semibold text-ink">All clear.</p>
                 {/* Dim, not faint: `ink-faint` is the metadata register and is
                     spent on timestamps, counts and ids (docs/DESIGN_SYSTEM.md

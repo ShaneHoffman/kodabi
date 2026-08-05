@@ -612,7 +612,13 @@ describe("InboxView", () => {
       moved: true,
     }));
     renderInbox();
+    // Both rows, asserted rather than awaited: one `list_notes` read serves the
+    // whole queue, so they land in the same commit and the second find cannot
+    // wait on anything. It is here because this is the one filing test with
+    // more than one note in the queue, and the tally assertions below are only
+    // meaningful if the queue really started at two.
     await screen.findByText("Quarterly planning");
+    expect(screen.getByText("Vendor follow-up")).toBeInTheDocument();
 
     // Nothing cleared yet: an unlit meter over a full queue is the honest
     // starting state.

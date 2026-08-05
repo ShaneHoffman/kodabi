@@ -29,6 +29,7 @@ const mark = (container: HTMLElement) =>
 
 describe("SpiritMark", () => {
   it.each([
+    ["idle", "is-idle"],
     ["starting", "is-starting"],
     ["listening", "is-listening"],
     ["degraded", "is-degraded"],
@@ -39,10 +40,16 @@ describe("SpiritMark", () => {
     expect(mark(container)).toHaveClass("spirit-mark", expected);
   });
 
-  it("gives idle no mode class — it is the resting state, not a state class", () => {
-    const { container } = render(<SpiritMark mode="idle" />);
+  it("keeps the engaged-but-silent modes off the dormant class", () => {
+    // `starting` and `reconnecting` share idle's base style but are NOT
+    // dormant: a capture is engaged, just not on air yet. They must not pick up
+    // the faint core, or the one mark that reports capture stops distinguishing
+    // "nothing is running" from "coming up".
+    for (const mode of ["starting", "reconnecting"] as const) {
+      const { container } = render(<SpiritMark mode={mode} />);
 
-    expect(mark(container).className.trim()).toBe("spirit-mark");
+      expect(mark(container)).not.toHaveClass("is-idle");
+    }
   });
 
   it("renders the aura subtree and the core by default", () => {

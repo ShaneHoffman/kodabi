@@ -34,7 +34,12 @@ type Props = {
 };
 
 const MODE_CLASS: Record<SpiritMarkMode, string> = {
-  idle: "",
+  // Idle carries a class of its own because dormant is a LOOK, not merely the
+  // absence of one: the core steps down to the faint ink so a mark that is
+  // doing nothing cannot be mistaken for one that is. The base style is shared
+  // with `starting` and `reconnecting`, which are engaged and must stay at full
+  // ink — so this cannot be spelled by dimming the base.
+  idle: " is-idle",
   starting: " is-starting",
   listening: " is-listening",
   degraded: " is-degraded",
