@@ -41,7 +41,20 @@ describe("PrimitiveGallery", () => {
     // rest, carrying an error, and holding a number.
     expect(screen.getAllByLabelText("Project name")).toHaveLength(2);
     expect(screen.getByRole("spinbutton", { name: "Days to keep" })).toBeInTheDocument();
+    // The select, at rest and busy — the two states its chrome differs in.
+    const selects = screen.getAllByRole("combobox", { name: /Retention/ });
+    expect(selects).toHaveLength(2);
+    expect(selects[1]).toHaveAttribute("aria-busy", "true");
     expect(screen.getByRole("alert")).toHaveTextContent("A project cannot be called inbox.");
+    // The switch, in the three states it has to be looked at in — and each
+    // answering to the words printed beside it, which is the contract that
+    // makes the control usable by voice.
+    expect(screen.getByRole("switch", { name: "Reduce motion" })).not.toBeChecked();
+    expect(screen.getByRole("switch", { name: "Increase contrast" })).toBeChecked();
+    expect(screen.getByRole("switch", { name: "Pill for captures you start" })).toHaveAttribute(
+      "aria-busy",
+      "true",
+    );
     // The marks are aria-hidden, so the kodama row is checked through the
     // pills' words — which is also the pairing the mark requires.
     for (const state of ["Listening", "Mic only", "Starting", "Reconnecting", "Not listening"]) {

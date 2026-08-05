@@ -20,6 +20,17 @@
 > that genuinely stops working is §12's instruction to reproduce the flip case on "the bottom-most
 > Inbox row", which must now use another `Select` call site. `ConsentNudge` still renders one, so
 > §8.2's live bug and its repro are unaffected.
+>
+> **Addendum, 2026-08-04 (Grove Settings):** `src/components/ui/Select.css` no longer exists. The
+> control's chrome is Tailwind utilities at the call site, and the anchor-positioning layer this
+> document specifies — the `@supports` guard of §5.2, verbatim, `anchor-scope` included — moved to
+> §3 of `src/index.css`. Read every "`Select.css`" below as that block: §4.5 and §6's "which stays"
+> is no longer true of the file, only of the mechanism; §8.1's caveat is carried as a comment there;
+> §12's collision repro applies unchanged to whatever `Select` call sites remain.
+> `SettingsView.css` went with it, so §8.2's `.settings__control` is gone too — the Settings selects
+> now sit in a flex row that still shrink-wraps its trigger, which is the shape that measurement
+> assumed, so **§8.2's live bug and its ConsentNudge repro are again unaffected**. The three remedies
+> it lists are still open, and remedy 2 now means moving `anchor-name` in `src/index.css`.
 
 **Decision (superseded): no headless UI dependency. The hand-rolled `Select` stays. Closed 2026-07-28.**
 

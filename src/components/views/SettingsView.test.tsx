@@ -1,9 +1,10 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsView } from "./SettingsView";
 import type { OverlaySettings, Settings } from "../../useSettings";
-import { invoke, onCommand, resetTauriMocks } from "../../test/tauri";
+import { INDEX_STATE_EVENT } from "../../events";
+import { emitFromBackend, invoke, onCommand, resetTauriMocks } from "../../test/tauri";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
@@ -41,40 +42,37 @@ function settingsWith(overlay: OverlaySettings): Settings {
 }
 
 /**
- * Render with `get_settings` seeded, wait for the load to land, and open the
- * tab the assertions need. The tabs FILTER, so a control that is not in the
- * active category is genuinely not rendered — reaching one is a click, exactly
- * as it is for the user.
+ * Render with `get_settings` seeded and wait for the load to land.
+ *
+ * There is no tab to open any more: the four cards are all on the page at once,
+ * so every control is reachable the moment the settings arrive. The wait is on
+ * a card rather than the view's own heading, because the heading renders before
+ * `get_settings` resolves and would let an assertion run against an empty page.
  */
-async function renderSeeded(
-  settings: Settings = DEFAULTS,
-  tab: "Privacy" | "Appearance" | "Capture" = "Privacy",
-) {
+async function renderSeeded(settings: Settings = DEFAULTS) {
   onCommand("get_settings", () => settings);
   const result = render(<SettingsView />);
-  await screen.findByRole("tab", { name: "Privacy" });
-  if (tab !== "Privacy") {
-    await userEvent.setup().click(screen.getByRole("tab", { name: tab }));
-  }
+  await screen.findByRole("region", { name: "Privacy" });
   return result;
 }
 
-/** The two pill toggles. Each one's accessible name IS its visible row label —
- * exact strings rather than a loose regex, because that parity is the thing the
- * rename bought: the "Capture pill" group supplies the context the old
- * "Show the capture pill during captures you start" had to carry alone. */
+/** A card, by the name its `<section aria-label>` gives it. Each one is a real
+ * region landmark, which is what replaced the `role="group"` clusters: the
+ * hierarchy on this screen is card-then-rows, with no indent below that. */
+function card(name: string): HTMLElement {
+  return screen.getByRole("region", { name });
+}
+
+/** The two pill switches. Each one's accessible name IS its visible row label —
+ * exact strings rather than a loose regex, because that parity is what let the
+ * "Capture pill" group go: the labels now carry their own context instead of
+ * borrowing it from a heading above them. */
 function manualToggle(): HTMLElement {
-  return screen.getByRole("switch", { name: "Captures you start" });
+  return screen.getByRole("switch", { name: "Pill for captures you start" });
 }
 
 function autoToggle(): HTMLElement {
-  return screen.getByRole("switch", { name: "Auto detected captures" });
-}
-
-/** The pill cluster's `role="group"`, which is where its rows and its one error
- * slot live. */
-function pillGroup(): HTMLElement {
-  return screen.getByRole("group", { name: "Capture pill" });
+  return screen.getByRole("switch", { name: "Pill for auto detected captures" });
 }
 
 /** The `overlay` argument of the last `set_capture_overlay` call. */
@@ -92,17 +90,14 @@ describe("SettingsView capture overlay", () => {
   });
 
   it("reflects the stored flags", async () => {
-    await renderSeeded(
-      settingsWith({ manual_captures: true, auto_captures: false }),
-      "Capture",
-    );
+    await renderSeeded(settingsWith({ manual_captures: true, auto_captures: false }));
 
     expect(manualToggle()).toBeChecked();
     expect(autoToggle()).not.toBeChecked();
   });
 
   it("shows the shipped defaults: manual off, auto detected on", async () => {
-    await renderSeeded(DEFAULTS, "Capture");
+    await renderSeeded(DEFAULTS);
 
     expect(manualToggle()).not.toBeChecked();
     expect(autoToggle()).toBeChecked();
@@ -110,7 +105,7 @@ describe("SettingsView capture overlay", () => {
 
   it("sends both flags when one is toggled, and adopts the echoed result", async () => {
     const user = userEvent.setup();
-    await renderSeeded(DEFAULTS, "Capture");
+    await renderSeeded(DEFAULTS);
     const saved = settingsWith({ manual_captures: true, auto_captures: true });
     onCommand("set_capture_overlay", () => saved);
 
@@ -128,7 +123,7 @@ describe("SettingsView capture overlay", () => {
 
   it("toggles the dormant auto-detected flag independently", async () => {
     const user = userEvent.setup();
-    await renderSeeded(DEFAULTS, "Capture");
+    await renderSeeded(DEFAULTS);
     onCommand("set_capture_overlay", () =>
       settingsWith({ manual_captures: false, auto_captures: false }),
     );
@@ -144,17 +139,17 @@ describe("SettingsView capture overlay", () => {
 
   it("surfaces a failed save and leaves the toggle showing stored truth", async () => {
     const user = userEvent.setup();
-    await renderSeeded(DEFAULTS, "Capture");
+    await renderSeeded(DEFAULTS);
     onCommand("set_capture_overlay", () => {
       throw "settings.toml is read only";
     });
 
     await user.click(manualToggle());
 
-    // Inside the group, not merely somewhere on the page. It used to render at
-    // the foot of the tab, below Echo check and Search index, where it read as
-    // THEIR failure.
-    expect(await within(pillGroup()).findByRole("alert")).toHaveTextContent(
+    // Inside the Capture card, not merely somewhere on the page. It used to
+    // render at the foot of the tab, below Echo check and Search index, where
+    // it read as THEIR failure.
+    expect(await within(card("Capture")).findByRole("alert")).toHaveTextContent(
       "settings.toml is read only",
     );
     // Nothing was persisted, so the control must not imply otherwise.
@@ -162,7 +157,7 @@ describe("SettingsView capture overlay", () => {
   });
 
   it("explains that auto detection does not exist yet", async () => {
-    await renderSeeded(DEFAULTS, "Capture");
+    await renderSeeded(DEFAULTS);
 
     // The setting is user-changeable now but has nothing to act on, and the
     // copy has to say so rather than implying Kodabi is watching for meetings.
@@ -171,24 +166,26 @@ describe("SettingsView capture overlay", () => {
     ).toBeInTheDocument();
   });
 
-  it("reads the two toggles as one concept: a named group with a heading", async () => {
-    await renderSeeded(DEFAULTS, "Capture");
+  it("keeps both pill switches in the Capture card, with no group between them", async () => {
+    await renderSeeded(DEFAULTS);
 
-    // The relationship is in the accessibility tree, not only in the indent.
-    expect(within(pillGroup()).getAllByRole("switch")).toHaveLength(2);
-    // "Capture pill" is a concept and owns no control of its own, so the group
-    // draws it as a heading rather than borrowing one of its two rows — which is
-    // also what stops the indent claiming one toggle depends on the other.
-    expect(within(pillGroup()).getByText("Capture pill")).toBeInTheDocument();
+    // Two switches, in the card that names the concern. The "Capture pill"
+    // group they used to share is gone on purpose: it existed to supply context
+    // the short labels lacked, and the labels carry it themselves now, so the
+    // indent that came with it claimed a dependency that was never there.
+    expect(within(card("Capture")).getAllByRole("switch")).toHaveLength(2);
+    expect(screen.queryByRole("group", { name: "Capture pill" })).not.toBeInTheDocument();
   });
 
   it("gives each toggle the same accessible name as the row you can see", async () => {
-    await renderSeeded(DEFAULTS, "Capture");
+    await renderSeeded(DEFAULTS);
 
     // These used to diverge: the visible row said "Capture pill" while the
     // switch answered to "Show the capture pill during captures you start", so
     // what someone reads was not what they could say to a voice-control tool.
-    for (const label of ["Captures you start", "Auto detected captures"]) {
+    // The labels are self-naming now, which is what carries that parity without
+    // a heading standing over them.
+    for (const label of ["Pill for captures you start", "Pill for auto detected captures"]) {
       expect(screen.getByRole("switch", { name: label })).toBeInTheDocument();
       expect(screen.getByText(label)).toBeInTheDocument();
     }
@@ -200,15 +197,17 @@ describe("SettingsView retention", () => {
     resetTauriMocks();
   });
 
-  it("nests the day count under the policy it depends on", async () => {
+  it("sits the day count inline beside the policy it depends on", async () => {
     await renderSeeded({ ...DEFAULTS, retention: { policy: "keep_days", days: 30 } });
 
-    // The policy owns a control, so its row heads the group and the group draws
-    // no heading of its own. That is what licenses the short child label: the
-    // group's name carries the rest, so "Days" and not "Days to keep".
-    const group = screen.getByRole("group", { name: "Retention" });
-    expect(within(group).getByRole("combobox", { name: /Retention/ })).toBeInTheDocument();
-    expect(within(group).getByRole("spinbutton", { name: "Days" })).toHaveValue(30);
+    // Both controls in one row of the Privacy card, rather than the field being
+    // indented into a row of its own under a `role="group"`. Sitting beside the
+    // control that summoned it is the dependency claim now, and it is also what
+    // licenses the short label: the policy is a word away, so "Days" and not
+    // "Days to keep".
+    const privacy = card("Privacy");
+    expect(within(privacy).getByRole("combobox", { name: /Retention/ })).toBeInTheDocument();
+    expect(within(privacy).getByRole("spinbutton", { name: "Days" })).toHaveValue(30);
   });
 
   it("has no day count while the policy does not keep days", async () => {
@@ -217,7 +216,7 @@ describe("SettingsView retention", () => {
     expect(screen.queryByRole("spinbutton", { name: "Days" })).not.toBeInTheDocument();
   });
 
-  it("acknowledges the day field's own commit, at the day field's indent", async () => {
+  it("acknowledges the day field's own commit", async () => {
     const user = userEvent.setup();
     const stored: Settings = { ...DEFAULTS, retention: { policy: "keep_days", days: 45 } };
     onCommand("set_retention_policy", () => stored);
@@ -234,11 +233,10 @@ describe("SettingsView retention", () => {
   });
 
   it("does not acknowledge the day field when it was the policy that changed", async () => {
-    // The line is indented under the day count, and an indent claims the line
-    // belongs to that field. Choosing a policy used to print "Saved." there
-    // without the field having been touched — the group's own rule broken by
-    // its own screen. The Select is committed-on-select, so the value it now
-    // shows is its confirmation, exactly as Theme's is.
+    // "Saved." reports the day field's commit, so only the day field may raise
+    // it. Choosing a policy used to print it without the field having been
+    // touched. The Select is committed-on-select, so the value it now shows is
+    // its confirmation, exactly as Theme's is.
     const user = userEvent.setup();
     const stored: Settings = { ...DEFAULTS, retention: { policy: "keep_days", days: 30 } };
     onCommand("set_retention_policy", () => stored);
@@ -256,40 +254,36 @@ describe("SettingsView retention", () => {
   });
 });
 
-describe("SettingsView tabs", () => {
+describe("SettingsView layout", () => {
   beforeEach(() => {
     resetTauriMocks();
   });
 
-  it("names itself Settings and offers the three categories as tabs", async () => {
-    // Horizontal tabs, not a vertical list: a second column of destinations
-    // beside the sidebar reads as navigation, and these filter the page.
+  it("names itself Settings and lays the four concerns out as cards", async () => {
     await renderSeeded();
 
     expect(
       screen.getByRole("heading", { name: "Settings", level: 2 }),
     ).toBeInTheDocument();
-    for (const category of ["Privacy", "Appearance", "Capture"]) {
-      expect(screen.getByRole("tab", { name: category })).toBeInTheDocument();
+    // Named regions, so the four concerns are landmarks a screen reader can
+    // jump between rather than tabs a pointer has to find.
+    for (const concern of ["Privacy", "Appearance", "Capture", "Maintenance"]) {
+      expect(screen.getByRole("region", { name: concern })).toBeInTheDocument();
     }
+    // The rail is gone with them: it filtered the page, so three quarters of
+    // the settings were somewhere you had to remember to look.
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
   });
 
-  it("filters: only the active category's settings are on the page", async () => {
-    const user = userEvent.setup();
+  it("puts every setting on the page at once, with nothing behind a filter", async () => {
     await renderSeeded();
 
-    // Privacy is the landing tab.
+    // The pairs the tab rail used to keep apart: a Privacy row and an
+    // Appearance row, both readable without a click.
     expect(screen.getByText("Recording consent")).toBeInTheDocument();
-    expect(screen.queryByText("Reduce motion")).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("tab", { name: "Appearance" }));
-
     expect(screen.getByText("Reduce motion")).toBeInTheDocument();
-    expect(screen.queryByText("Recording consent")).not.toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Appearance" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    expect(screen.getByText("Echo check")).toBeInTheDocument();
+    expect(screen.getByText("Search index")).toBeInTheDocument();
   });
 
   it("shows a read-only value as plain text, with no control to press", async () => {
@@ -310,7 +304,7 @@ describe("SettingsView appearance", () => {
   });
 
   it("reflects the stored theme", async () => {
-    await renderSeeded({ ...DEFAULTS, appearance: { theme: "dark" } }, "Appearance");
+    await renderSeeded({ ...DEFAULTS, appearance: { theme: "dark" } });
 
     expect(screen.getByRole("combobox", { name: /Theme/ })).toHaveTextContent("Dark");
   });
@@ -319,7 +313,7 @@ describe("SettingsView appearance", () => {
     const user = userEvent.setup();
     const stored: Settings = { ...DEFAULTS, appearance: { theme: "dark" } };
     onCommand("set_appearance", () => stored);
-    await renderSeeded(DEFAULTS, "Appearance");
+    await renderSeeded(DEFAULTS);
 
     await user.click(screen.getByRole("combobox", { name: /Theme/ }));
     await user.click(screen.getByRole("option", { name: "Dark" }));
@@ -335,7 +329,7 @@ describe("SettingsView appearance", () => {
     onCommand("set_appearance", () => {
       throw "the settings file is read only";
     });
-    await renderSeeded(DEFAULTS, "Appearance");
+    await renderSeeded(DEFAULTS);
 
     await user.click(screen.getByRole("combobox", { name: /Theme/ }));
     await user.click(screen.getByRole("option", { name: "Dark" }));
@@ -354,7 +348,7 @@ describe("SettingsView appearance", () => {
     // for people who do not want to change a system-wide preference. It has to
     // reach the <html> element or the CSS floor never fires.
     const user = userEvent.setup();
-    await renderSeeded(DEFAULTS, "Appearance");
+    await renderSeeded(DEFAULTS);
 
     await user.click(screen.getByRole("switch", { name: "Reduce motion" }));
 
@@ -371,7 +365,7 @@ describe("SettingsView appearance", () => {
     // palette over wholesale, so this override is the branch that actually
     // delivers the high-contrast palette (src/contrast.ts).
     const user = userEvent.setup();
-    await renderSeeded(DEFAULTS, "Appearance");
+    await renderSeeded(DEFAULTS);
 
     await user.click(screen.getByRole("switch", { name: "Increase contrast" }));
 
@@ -390,9 +384,48 @@ describe("SettingsView appearance", () => {
     // the preference be a plain synchronous read rather than a bridge hook.
     window.localStorage.setItem("kodabi:contrast", "more");
 
-    await renderSeeded(DEFAULTS, "Appearance");
+    await renderSeeded(DEFAULTS);
 
     expect(screen.getByRole("switch", { name: "Increase contrast" })).toBeChecked();
+  });
+});
+
+describe("SettingsView search index", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  it("reports what the rebuild event says, not what the click hoped", async () => {
+    // The command returns as soon as the job is QUEUED, so the outcome only
+    // ever arrives on `index:state`. Emitting it is the whole test: a control
+    // that reported success on the click would be lying about a job still
+    // running.
+    const user = userEvent.setup();
+    onCommand("rebuild_index", () => null);
+    await renderSeeded();
+
+    await user.click(screen.getByRole("button", { name: "Rebuild" }));
+    expect(invoke).toHaveBeenCalledWith("rebuild_index");
+
+    act(() => emitFromBackend(INDEX_STATE_EVENT, { status: "ready", notes: 3 }));
+
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "Index rebuilt. 3 notes indexed.",
+    );
+  });
+
+  it("surfaces a command-level failure, which emits no event of its own", async () => {
+    const user = userEvent.setup();
+    onCommand("rebuild_index", () => {
+      throw "the index is unavailable this session";
+    });
+    await renderSeeded();
+
+    await user.click(screen.getByRole("button", { name: "Rebuild" }));
+
+    expect(await within(card("Maintenance")).findByRole("alert")).toHaveTextContent(
+      "the index is unavailable this session",
+    );
   });
 });
 
@@ -406,7 +439,7 @@ describe("SettingsView mic test", () => {
   }
 
   it("shows no result line until a test has ever run", async () => {
-    await renderSeeded(DEFAULTS, "Capture");
+    await renderSeeded(DEFAULTS);
 
     expect(screen.queryByText(/Checked/)).not.toBeInTheDocument();
   });
@@ -418,7 +451,7 @@ describe("SettingsView mic test", () => {
       mic_check: { outcome: "headphones", measured_at: "2026-07-22T00:48:18Z" },
     };
     onCommand("run_mic_test", () => stored);
-    await renderSeeded(DEFAULTS, "Capture");
+    await renderSeeded(DEFAULTS);
 
     await user.click(runTestButton());
 
@@ -440,7 +473,7 @@ describe("SettingsView mic test", () => {
       },
     };
     onCommand("run_mic_test", () => stored);
-    await renderSeeded(DEFAULTS, "Capture");
+    await renderSeeded(DEFAULTS);
 
     await user.click(runTestButton());
 
@@ -456,7 +489,7 @@ describe("SettingsView mic test", () => {
       mic_check: { outcome: "mic_silent", measured_at: "2026-07-22T00:48:18Z" },
     };
     onCommand("run_mic_test", () => stored);
-    await renderSeeded(DEFAULTS, "Capture");
+    await renderSeeded(DEFAULTS);
 
     await user.click(runTestButton());
 
@@ -474,7 +507,7 @@ describe("SettingsView mic test", () => {
     onCommand("run_mic_test", () => {
       throw "stop the current capture before running the mic test";
     });
-    await renderSeeded(seeded, "Capture");
+    await renderSeeded(seeded);
 
     await user.click(runTestButton());
 

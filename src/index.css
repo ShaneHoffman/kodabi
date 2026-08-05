@@ -161,6 +161,18 @@
   --color-wash: rgb(255 255 255 / 0.05);
   --color-wash-hover: rgb(255 255 255 / 0.09);
 
+  /* A switch's track once it is on. The only fill in the system whose job
+     is to report a boolean, which is why it is not just `wash-hover` a
+     step deeper: the two tracks sit side by side down a settings card and
+     have to be told apart at a glance, not compared.
+     It is the SUPPORTING cue and never the only one — the knob's 18px of
+     travel is what actually carries the state. No fill this quiet clears
+     3:1 against the card it sits on (2.05 night, 1.33 day), and none that
+     did would still be a card's material; the knob clears it several times
+     over on every ground, which is why position is the readout
+     (docs/DESIGN_SYSTEM.md §6). */
+  --color-switch-on: rgb(255 255 255 / 0.22);
+
   /* ---------- type ----------
      Three faces, three jobs, no overlap. UI is the interface's own
      voice; data is anything that lines up in a column (clocks, counts,
@@ -401,6 +413,10 @@
 
   --color-wash: rgb(24 32 16 / 0.06);
   --color-wash-hover: rgb(24 32 16 / 0.09);
+
+  /* Shallower than night's, for the same reason the fills above are: ink
+     over a pale ground carries further than white over a dark one. */
+  --color-switch-on: rgb(24 32 16 / 0.14);
 }
 
 /* More contrast is a promotion, not a palette. Faint ink is promoted to
@@ -410,11 +426,16 @@
 .hc {
   --color-ink-faint: #a6b09b;
   --color-edge: rgb(255 255 255 / 0.26);
+  /* A switch's on-track is a state readout rather than structure, so it
+     takes the promotion too: the knob still carries the state, but the
+     fill it rides on stops being a hint. */
+  --color-switch-on: rgb(255 255 255 / 0.3);
 }
 
 .hc.day {
   --color-ink-faint: #4a543f;
   --color-edge: rgb(24 32 16 / 0.32);
+  --color-switch-on: rgb(24 32 16 / 0.22);
 }
 
 /* ============================================================
@@ -966,6 +987,79 @@
   }
 }
 
+/* ---------- the select's menu, anchored to its own trigger ----------
+   CSS anchor positioning, which buys three things a plain absolute list has no
+   answer for: the menu flips above when there is no room below it, it escapes a
+   clipping ancestor with no portal, and it can scale out of the edge it hangs
+   off. (`Menu` gets all three from base-ui's positioner instead; `Select` is
+   hand-rolled, and this is its half of that job.)
+
+   It is CSS rather than utilities because of the GUARD, which no className can
+   express: a multi-property `@supports` wrapping several selectors. Kodabi ships
+   against one evergreen Chromium (WebView2), which is what makes any of it
+   available — but no floor is declared in src-tauri/tauri.conf.json and Tauri
+   v2's own documented floor is 125, which is below anchor-scope's 131. So the
+   whole layer is guarded and the utilities on `.ui-select__list` stay the base
+   branch (docs/decisions/popover-primitive.md §5.1).
+
+   The guard tests anchor-scope on purpose, not only the two properties this
+   block obviously needs. Without anchor-scope every element sharing an
+   anchor-name resolves to the LAST one in source order, and this control renders
+   twice on the settings page — so between 125 and 131 a guard asking only about
+   anchor-name would PASS and hang both menus off the lower trigger. Silently,
+   which is the worst way to fail (§5.4).
+
+   Ported from the deleted Select.css. What did NOT come with it is the
+   entrance: the list wears `animate-materialize` at the call site now, on the
+   same clock as every other Grove surface, and an animation and a
+   @starting-style transition cannot both drive one transform.
+
+   `fixed` is what escapes the clipping ancestor; position-anchor keeps the menu
+   glued to the trigger regardless. That escape is contingent rather than free —
+   any ancestor carrying transform, filter, backdrop-filter, perspective,
+   contain, will-change on one of those, or container-type becomes the
+   containing block. That list of seven is the standing grep (§6), and it is not
+   empty today: `.ui-overlay` carries backdrop-filter (Overlay.css) UNLESS the OS
+   asks for reduced transparency, so ConsentNudge's menu is contained by the
+   scrim rather than the viewport in one of those two states and not the other.
+   It does not move the menu, because the scrim is `fixed inset-0` and therefore
+   geometrically identical to the viewport either way — which is why the grep is
+   worth re-running rather than trusted as clean. Note what it demonstrates: an
+   accessibility preference can add or remove a containing block, so "which
+   ancestors carry one of the seven" is not a property of the stylesheet alone.
+
+   The two `auto`s release the base branch's own insets, which position-area has
+   no say over. The offset turns symmetric with them — margin-block, not
+   margin-top — because the menu can sit above the trigger now, and it matches
+   Menu's own `sideOffset={8}`.
+
+   transform-origin is the one thing a flip cannot carry: @position-try accepts
+   insets, margins, sizing, self-alignment, position-anchor and position-area,
+   and not this (w3c/csswg-drafts#11666). A flipped menu therefore still scales
+   from its top edge where it should scale from its bottom. Accepted rather than
+   papered over with a class toggled from JS, which is the thing this layer
+   exists to avoid (docs/DESIGN_SYSTEM.md §4). */
+@supports (anchor-scope: --x) and (anchor-name: --x) and (position-area: block-end) {
+  .ui-select {
+    anchor-scope: --ui-select-trigger;
+  }
+
+  .ui-select__trigger {
+    anchor-name: --ui-select-trigger;
+  }
+
+  .ui-select__list {
+    position: fixed;
+    position-anchor: --ui-select-trigger;
+    position-area: block-end span-inline-start;
+    position-try-fallbacks: flip-block;
+    position-visibility: anchors-visible;
+    inset-inline-end: auto;
+    inset-block-start: auto;
+    margin-block: 8px;
+  }
+}
+
 /* ---------- global chrome ----------
    Scrollbars and selection: two pieces of the window that belong to no
    component, and that ship as a platform default nobody chose — a light
@@ -1312,7 +1406,17 @@
      Align Tailwind's numeric grid to the same 4px base as --space-*, and
      expose the named steps as semantic aliases. The named form is the only
      sanctioned spelling (docs/UI_CONVENTIONS.md); eslint fails the numeric
-     one. Per-view geometry is not here — it is Layer 4, read from CSS. */
+     one. Per-view geometry is not here — it is Layer 4, read from CSS.
+
+     TRAP, and it is the reason `max-w-md` is not what you think: v4 resolves
+     `max-w-<name>` against the spacing namespace as well as `--container-*`,
+     and the aliases below shadow the built-in container scale by name. So
+     `max-w-sm` is 16px and `max-w-md` is 24px — not 24rem and 28rem. They
+     collapse a column to nothing rather than capping it, and the failure is
+     silent, exactly like the `--radius-*` collision src/groveTokenNames.test.ts
+     was written for (that guard cannot see this one: these are Tailwind's own
+     names, not Grove's). Until this bridge is deleted, spell a width cap as an
+     arbitrary value — `max-w-[28rem]`, `max-w-[66ch]`. */
   --spacing: 0.25rem;
   --spacing-3xs: var(--space-3xs);
   --spacing-2xs: var(--space-2xs);

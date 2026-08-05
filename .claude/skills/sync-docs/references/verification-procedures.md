@@ -58,9 +58,12 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 - **Mirror:** §4 of `docs/UI_CONVENTIONS.md` — the primitive table (name → variants) and
   the "contracts worth not breaking" list beneath it: `Button` (`loading` vs `disabled`,
   and the focus reason), `Select` (`busy` vs `disabled`, the combobox keyboard set,
-  `hideLabel`, `emptyLabel`), `Field` (`error` + `aria-invalid` travel together, `hint` and
+  `hideLabel`, `emptyLabel`), `Switch` (`busy` as its only inert form — no `disabled` prop
+  exists; `label` is the visible words verbatim; the knob's travel is duration-gated, so it
+  still arrives under reduced motion),
+  `Field` (`error` + `aria-invalid` travel together, `hint` and
   `error` both → `aria-describedby`, error described first),
-  `StatusMessage` (variant → ARIA role), `ViewFrame` (eight variants; `summary` a **type
+  `StatusMessage` (variant → ARIA role), `ViewFrame` (seven variants; `summary` a **type
   error** outside `queue`/`library`/`health`, `action` a **type error** on `doc`/`search`,
   neither a silent no-op; `label` names the section landmark when `title` is composed of
   elements rather than a plain string), `Overlay` (click-not-pointerdown, both ends on the backdrop, no
@@ -76,10 +79,12 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   particular are only correct if the control stays focusable and declines activation.
 - **Failure:** a documented variant or prop the component no longer has, a new primitive
   §4 omits, or a contract in the list that the component no longer honours.
-- **§4 documents behaviour, not styling.** These primitives are pre-Grove and still carry
-  their own stylesheets; §4 says so. Do not report their styling as drift against
-  `DESIGN_SYSTEM.md` — the primitives' Grove ticket restyles them, and until then the two
-  documents are describing different layers on purpose.
+- **§4 documents behaviour, not styling.** The primitives §4 still calls pre-Grove carry their
+  own stylesheets, and §4 says which. Do not report their styling as drift against
+  `DESIGN_SYSTEM.md` — each is restyled by a ticket of its own, and until then the two
+  documents are describing different layers on purpose. `Select` has had that ticket (its
+  chrome is Grove and `Select.css` is gone, minus the anchor-positioning block that moved to
+  `src/index.css` §3); its **behaviour** contract above is unchanged by it, which is the point.
 
 > This list is the thing an auditor works from, so **it goes stale the moment a
 > primitive is added or removed** and nothing else will catch that. Updating it is
@@ -128,9 +133,13 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 - **Failure:** an animation or radius the doc omits, a contrast figure that no longer
   matches the tokens in either column, a `.day` override with no base token, or an
   enforcement claim the guards do not make.
-- **The `.hc` block is a closed set, and §6 says so.** It moves exactly `ink-faint`
-  and `edge`. If it has grown a third token, §6's "nothing else moves, because the
-  table shows nothing else needs to" is now false and the table should show why.
+- **The `.hc` block is a closed set, and §6 says so.** It moves exactly `ink-faint`,
+  `edge` and `switch-on`. If it has grown a fourth token, §6's "nothing else moves,
+  because the table shows nothing else needs to" is now false and the table should show
+  why — the doctrine's own test is that an addition here is justified by a ratio the
+  table is *missing*, which is the argument §6 makes for `switch-on` (a switch's track
+  reports a state and clears 3:1 at no alpha that belongs on a card, so the knob's
+  travel is the readout and the fill is a hint worth strengthening).
 - **Nothing here is machine-checked, unlike the pre-Grove anchor.** The old token
   guard asserted theme-block coverage in `pnpm test`; Grove retired it along with the
   stylesheets it scanned. Every check above is this auditor's job in full.

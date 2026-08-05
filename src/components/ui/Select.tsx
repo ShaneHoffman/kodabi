@@ -1,3 +1,4 @@
+import { clsx } from "clsx";
 import {
   useId,
   useRef,
@@ -7,8 +8,7 @@ import {
 } from "react";
 import { useOutsidePointerDown } from "../../useOutsidePointerDown";
 import { useScrollIntoView } from "../../useScrollIntoView";
-// eslint-disable-next-line no-restricted-syntax -- pre-Grove; the primitives' Grove ticket deletes it
-import "./Select.css";
+import { menuRow } from "./Menu";
 
 export type SelectOption = { value: string; label: string };
 
@@ -19,10 +19,7 @@ type Props = {
   options: SelectOption[];
   /** Optional explicit id; one is generated (useId) when omitted. */
   id?: string;
-  /**
-   * What the trigger reads when nothing is chosen. On `token` it is the verb
-   * rather than a placeholder — the arrow after it is drawn by the control.
-   */
+  /** What the trigger reads when nothing is chosen. */
   placeholder?: string;
   /** Hide the label visually (still an accessible name) — for a control whose
    * purpose is clear from context, e.g. a per-row picker in a list. */
@@ -54,32 +51,28 @@ type Props = {
   /** What the list says when there are no options. It opens and says this
    * rather than refusing to open, so the control never looks broken. */
   emptyLabel?: string;
-  /**
-   * How much the resting control weighs.
-   *
-   *   boxed — a form or settings control, and reads like one: a raised chip
-   *           carrying its value and a chevron. The default.
-   *   token — an affordance sitting beside content it must not out-weigh (a
-   *           queue row's "File →"). Rests as quiet mono text with no box at
-   *           all and takes a soft pill only while the pointer or the
-   *           keyboard is on it.
-   *
-   * Never `token` inside a form: a field that does not look like a field is a
-   * field people do not fill in (docs/UI_CONVENTIONS.md).
-   */
-  variant?: "boxed" | "token";
 };
 
 /**
- * A token-styled dropdown, hand-rolled as a collapsible listbox
- * (WAI-ARIA active-descendant) rather than reaching for a headless
- * dependency — the same combobox know-how the command palette proves
- * (src/components/overlays/CommandPalette.tsx), minus the dep. Focus stays on the
- * trigger; ↑/↓ move a virtual highlight via aria-activedescendant,
+ * The app's dropdown, hand-rolled as a collapsible listbox (WAI-ARIA
+ * active-descendant) rather than reaching for a headless dependency — the same
+ * combobox know-how the command palette proves
+ * (src/components/overlays/CommandPalette.tsx), minus the dep. Focus stays on
+ * the trigger; ↑/↓ move a virtual highlight via aria-activedescendant,
  * Enter/Space selects, Escape closes, typing jumps.
  *
- * Both variants share one open list, on the overlay plane. The active row is
- * the menu-hover fill, never the reserved green (docs/DESIGN.md).
+ * Grove re-skinned the chrome and left every line of that behaviour alone. The
+ * trigger is a glass value-button and the list wears `Menu`'s material and
+ * `Menu`'s rows, so the two popups in the app are one surface; what did NOT
+ * happen here is the swap to `@base-ui/react`, which is its own ticket and its
+ * own conversation (.claude/rules/typescript-style.md).
+ *
+ * The second variant went with the re-skin. `token` was a demoted picker for an
+ * Inbox row that now files through `Menu`, so it had no caller left and no
+ * Grove chrome was invented for it.
+ *
+ * The active row is the menu-hover wash, never the reserved green
+ * (docs/DESIGN_SYSTEM.md §2).
  */
 export function Select({
   label,
@@ -92,7 +85,6 @@ export function Select({
   disabled = false,
   busy = false,
   emptyLabel = "Nothing to choose yet.",
-  variant = "boxed",
 }: Props) {
   const generatedId = useId();
   const baseId = id ?? generatedId;
@@ -117,7 +109,6 @@ export function Select({
   const typedTimer = useRef<number | null>(null);
 
   const active = options.length > 0 ? Math.min(activeIndex, options.length - 1) : 0;
-  const token = variant === "token";
   // Busy, not disabled — an explicit `disabled` wins. Mirrors Button.tsx.
   const isBusy = busy && !disabled;
 
@@ -232,12 +223,15 @@ export function Select({
       ref={rootRef}
       // `ui-select` carries the anchor-scope that keeps each instance's menu on
       // its OWN trigger; `relative` is the containing block the un-anchored
-      // fallback still needs (Select.css, the two branches of its @supports).
-      className={`ui-select relative flex flex-col${hideLabel ? "" : " gap-2xs"}`}
+      // fallback still needs (src/index.css §3, the anchored block and the
+      // utilities on the list below it).
+      className={clsx("ui-select relative flex flex-col", !hideLabel && "gap-1.5")}
     >
       <span
         id={labelId}
-        className={hideLabel ? "sr-only" : "text-cap text-text-soft"}
+        className={
+          hideLabel ? "sr-only" : "font-ui text-[11.5px] font-medium text-ink-dim"
+        }
       >
         {label}
       </span>
@@ -265,63 +259,80 @@ export function Select({
           else openList();
         }}
         onKeyDown={onKeyDown}
-        // Boxed shrink-wraps to its value: it is a chip, and a chip that
+        // It shrink-wraps to its value: this is a chip, and a chip that
         // stretched to its column would be a field pretending to be a chip.
-        // Token shrink-wraps too — with no ring holding its two ends together,
-        // a full-width trigger left the label and the arrow marooned at
-        // opposite sides of the column, reading as two unrelated scraps.
-        className={`ui-select__trigger ui-select__trigger--${variant} ui-focus-ring flex w-auto items-center self-start disabled:cursor-not-allowed disabled:text-text-faint aria-disabled:cursor-not-allowed aria-disabled:text-text-faint ${
-          token
-            ? // --text-soft, not --text-faint. `token` rests as quiet mono
-              // text with no box, so its COLOUR is the whole control: at the
-              // metadata register it measured 3.12:1 in the day theme, and
-              // this trigger is the Inbox's only filing affordance. It still
-              // reads as demoted beside the row's ink title — one step down
-              // the ladder rather than two (docs/DESIGN_SYSTEM.md §6).
-              "gap-2xs font-mono text-cap tracking-token text-text-soft"
-            : "gap-2xs text-label text-text"
-        }`}
+        //
+        // The press is Button's — scale 97 over 140ms, with the matched
+        // reduced-motion guard `:not()` specificity demands — and it carries
+        // one extra exclusion nothing else in the app needs. NOT while the menu
+        // is open: an open list is anchored to this trigger, and CSS anchor
+        // positioning reads the anchor's TRANSFORMED border box live, so
+        // scaling it would drag the whole menu sideways. The element is a chip
+        // being pressed or it is an anchor, never both. `aria-expanded` also
+        // takes the hover fill, so it stays visibly the thing the list hangs
+        // off while it cannot move.
+        className={clsx(
+          "ui-select__trigger focus-ring inline-flex w-auto select-none items-center gap-2 self-start",
+          "rounded-button border border-edge bg-wash px-3 py-2",
+          "font-ui text-[13px] font-medium text-ink",
+          "shadow-[inset_0_1px_0_var(--color-edge-lit)]",
+          "transition-[scale,background-color,border-color,color] duration-140 ease-out-strong",
+          "not-disabled:not-aria-disabled:hover:bg-wash-hover",
+          "aria-expanded:bg-wash-hover",
+          "not-disabled:not-aria-disabled:not-aria-expanded:active:scale-97",
+          "motion-reduce:not-disabled:not-aria-disabled:not-aria-expanded:active:scale-100",
+          "disabled:cursor-not-allowed disabled:text-ink-faint",
+          "aria-disabled:cursor-not-allowed aria-disabled:text-ink-faint",
+        )}
       >
-        <span
-          className={
-            selectedLabel === null && !token ? "text-text-faint" : undefined
-          }
-        >
+        <span className={selectedLabel === null ? "text-ink-faint" : undefined}>
           {selectedLabel ?? placeholder}
         </span>
-        {token ? (
-          // The arrow IS the state: → at rest, ↓ the moment the menu is under
-          // it. A chevron would have said "there is a list here"; this says
-          // "the list is open", which is the only thing worth saying twice.
-          <span aria-hidden="true">{open ? "↓" : "→"}</span>
-        ) : (
-          <svg className="ui-select__caret" viewBox="0 0 12 12" aria-hidden="true">
-            <path
-              d="M2.5 4.5 6 8l3.5-3.5"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.25"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        )}
+        {/* Functional affordance, not decoration: it scales with the type and
+            rests one step down the ink ladder. */}
+        <svg
+          className="size-[0.7em] flex-none text-ink-faint"
+          viewBox="0 0 12 12"
+          aria-hidden="true"
+        >
+          <path
+            d="M2.5 4.5 6 8l3.5-3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.25"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
       </button>
       {open && (
         <ul
           id={listboxId}
           role="listbox"
           aria-labelledby={labelId}
-          // Placement lives in Select.css, which states it twice: anchored to
-          // the trigger where the engine supports it, and the old
-          // `absolute right-0 top-full mt-2xs` where it does not. Only the
-          // list's own scroll box stays here.
-          className="ui-select__list max-h-64 overflow-y-auto"
+          // Menu's material, so the app has one popup surface rather than two
+          // that nearly match. The placement here is the FALLBACK — right
+          // aligned under the trigger, which is where every trigger that opens
+          // one sits — and the anchored block in src/index.css §3 overrides it
+          // where the engine supports anchor positioning.
+          //
+          // The entrance is materialize, the same 220ms every other Grove
+          // surface arrives on. There is deliberately NO exit: the list is
+          // conditionally rendered, so closing unmounts it — which is what the
+          // ARIA wiring, both bridge hooks and every "the list is gone"
+          // assertion in Select.test.tsx rest on — and a fade-out would mean
+          // keeping a listbox mounted at all times just to transition
+          // `display`. A dismissal is allowed to be instant.
+          className={clsx(
+            "ui-select__list glass-overlay absolute top-full right-0 z-50 mt-2",
+            "max-h-64 min-w-56 origin-top-right overflow-y-auto p-1.5 outline-hidden",
+            "animate-materialize motion-reduce:animate-fade-in",
+          )}
         >
           {options.length === 0 && (
             // Not a role=option: there is nothing to choose, so it must not be
             // reachable by the arrow keys or announced as selectable.
-            <li className="ui-select__option text-cap text-text-faint">{emptyLabel}</li>
+            <li className="px-2.5 py-2 text-[11.5px] text-ink-faint">{emptyLabel}</li>
           )}
           {options.map((option, index) => (
             <li
@@ -338,14 +349,18 @@ export function Select({
                 if (moved && index !== active) setActiveIndex(index);
               }}
               onClick={() => choose(index)}
-              // Mono in a token menu, because what it lists are paths — the
-              // filing destination is a location, and mono is how this app
-              // writes locations everywhere else.
-              className={`ui-select__option flex cursor-pointer items-center justify-between gap-2xs ${
-                token ? "font-mono text-label" : "text-label"
-              } ${index === active ? "ui-wash is-active" : "text-text-soft"}${
-                index === selectedIndex ? " is-selected" : ""
-              }`}
+              // `data-highlighted` rather than a class of this file's own: it
+              // is the attribute Menu's row recipe already keys its wash off,
+              // and one attribute for two things — the pointer is over the row,
+              // or the keyboard has walked to it — is exactly what keeps a list
+              // from ever showing two rows lit at once. The highlight is driven
+              // from JS here (onMouseMove sets the active index) rather than
+              // from :hover, for that same reason.
+              data-highlighted={index === active ? "" : undefined}
+              // The chosen row reads through weight and a check — value, never
+              // hue — and menuRow is already at font-medium, so the check is
+              // the whole mark.
+              className={clsx(menuRow(), "cursor-pointer justify-between")}
             >
               <span>{option.label}</span>
               {index === selectedIndex && (
@@ -355,13 +370,12 @@ export function Select({
                   viewBox="0 0 14 14"
                   fill="none"
                   aria-hidden="true"
-                  // --text-soft, not --text-faint. This glyph is drawn on the
-                  // row it marks, and that row is very often the active one,
-                  // where the ground is --menu-hover rather than the overlay
-                  // plane: faint ink on that fill measures 3.07:1 in the day
-                  // theme and 2.83:1 at night, which is under even the 3:1 a
-                  // graphic is held to (docs/DESIGN_SYSTEM.md §6).
-                  className="flex-none text-text-soft"
+                  // `dim`, not `faint`. This glyph is drawn on the row it
+                  // marks, and that row is very often the highlighted one,
+                  // where the ground is the wash rather than the overlay plane:
+                  // faint ink on that fill lands under even the 3:1 a graphic
+                  // is held to (docs/DESIGN_SYSTEM.md §6).
+                  className="flex-none text-ink-dim"
                 >
                   <path
                     d="M2.5 7.5l3 3 6-7"

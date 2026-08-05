@@ -23,9 +23,8 @@ import { useTimeout } from "../../useTimeout";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
 import { StatusMessage } from "../ui/StatusMessage";
+import { Switch } from "../ui/Switch";
 import { ViewFrame } from "../ui/ViewFrame";
-// eslint-disable-next-line no-restricted-syntax -- pre-Grove; this view's Grove ticket deletes it
-import "./SettingsView.css";
 
 /** The capture toggle's global shortcut, mirroring `DEFAULT_TOGGLE_SHORTCUT`
  * in `src-tauri/src/capture_control.rs`. Rendered rather than editable: the
@@ -34,23 +33,14 @@ import "./SettingsView.css";
  * what it is. */
 const CAPTURE_SHORTCUT = "Ctrl + Shift + K";
 
-const TABS = ["Privacy", "Appearance", "Capture"] as const;
-type Tab = (typeof TABS)[number];
-
 /** How long a "that worked" line stays on screen.
  *
  * Successes are announcements, not state: they report something that has just
  * happened, and a report that never clears reads as a label describing how
  * things are. Long enough to be read without hunting for it, short enough
- * that coming back to the tab later shows the panel rather than the news.
+ * that coming back to the screen later shows the panel rather than the news.
  * Failures are never on this timer — see the note at its call site. */
 const CONFIRMATION_MS = 4000;
-
-/** Ids wiring the tab rail to the pane it filters. Module-level constants
- * rather than `useId`: there is exactly one Settings view mounted at a time,
- * and a stable id is what lets the arrow-key handler focus a tab by name. */
-const PANEL_ID = "settings-panel";
-const tabId = (name: Tab) => `settings-tab-${name.toLowerCase()}`;
 
 /** The `index:state` payload, mirroring the Rust `IndexStateEvent` tagged enum
  * in `src-tauri/src/index_state.rs`. */
@@ -62,144 +52,95 @@ type IndexStateEvent =
 type RebuildStatus = { status: "idle" } | IndexStateEvent;
 
 /**
- * One setting: its name on the left, its control right-aligned into the
- * shared column. Nearly everything on this screen is one of these, which is
- * what makes the column scannable — the eye runs down the controls, not the
- * prose.
+ * One concern, as a card.
  *
- * `nested` marks a row that depends on the one above it, inside a `Group`. It
- * indents the LABEL and nothing else: the row still spans --measure-setting,
- * so the 1fr label track absorbs the indent and the `auto` control track stays
- * flush to exactly the same right edge. The single scannable column survives
- * the hierarchy, which is the only reason the hierarchy is drawn this way.
+ * The four of them stack one per row down the panel, and the card is what
+ * replaced the tab rail: a rail filtered the page, so three quarters of the
+ * settings were somewhere you had to remember to look. Four cards are the same
+ * information with nothing hidden, and the eyebrow does the work the tab did —
+ * naming the group — without also being a control.
+ *
+ * `<section aria-label>` rather than a bare div, so each card is a real region
+ * landmark a screen reader can jump between. That is the whole hierarchy on
+ * this screen now: the card names the concern, and every row inside it sits at
+ * one rank. No indents anywhere.
  */
-function Row({
-  label,
-  nested = false,
-  children,
-}: {
-  label: string;
-  nested?: boolean;
-  children: ReactNode;
-}) {
+function Card({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div className={`settings__row${nested ? " settings__row--nested" : ""}`}>
-      <span className="text-label text-text-soft">{label}</span>
-      <div className="settings__control">{children}</div>
-    </div>
+    <section aria-label={title} className="glass-card flex flex-col px-5 pt-4 pb-1">
+      {/* The one eyebrow recipe, verbatim: font-data at 10px on wide tracking.
+          Never a second level of it on one surface (docs/DESIGN_SYSTEM.md §1). */}
+      <h3 className="font-data text-[10px] tracking-[0.22em] text-ink-faint uppercase">
+        {title}
+      </h3>
+      <div className="mt-1 flex flex-col">{children}</div>
+    </section>
   );
 }
 
 /**
- * A cluster of settings that only reads correctly as one thing: an option and
- * the option it depends on, or two halves of one concept. `role="group"` plus a
- * name, so the relationship reaches a screen reader rather than living only in
- * the indent — the same shape the command palette gives its sections.
+ * One setting: its name and its one line of explanation stacked on the left,
+ * its control flush right. Every control on the page lands on the same right
+ * edge, which is what makes the column scannable — the eye runs down the
+ * controls, not the prose.
  *
- * Two shapes, and one question picks between them: DOES THE CONCEPT ALREADY OWN
- * A CONTROL?
+ * THERE IS NO INDENT, and nothing on this screen needs one. A dependent control
+ * sits inline beside the control it depends on (the day field beside the
+ * retention policy), and two independent switches say what they are in their
+ * own labels rather than borrowing meaning from a group heading above them. An
+ * indent is a claim about what a line belongs to, and every claim this screen
+ * used to make that way is now made by position or by words.
  *
- *   It does — that row heads the group, and `hideLabel` keeps `label` as the
- *     accessible name alone (the same prop `Select` takes, for the same
- *     reason). Retention heads its own group; "Days" nests under it.
- *   It does not — the group draws `label` as a heading row and the rows under
- *     it are PEERS at one indent. "Capture pill" is a concept rather than a
- *     setting, and its two toggles are independent booleans: nesting one under
- *     the other would draw a dependency that is not there. An indent is a
- *     mapping claim, so it has to be true.
- *
- * Deliberately NOT a disclosure. An expander is a control, and this screen sits
- * exactly on the four-control ceiling (docs/UI_CONVENTIONS.md, "How much one
- * surface may hold"). A group adds rank without adding anything to press.
- *
- * The heading ranks up with weight and ink, never with size and never with a
- * fourth eyebrow tracking step (docs/DESIGN_SYSTEM.md §1).
+ * `foot` is the row's own status and error lines. They sit INSIDE the row's
+ * hairline unit rather than after it, so an error belongs visibly to the
+ * control that raised it rather than to whatever follows.
  */
-function Group({
+function Row({
   label,
-  hideLabel = false,
+  hint,
+  foot,
   children,
 }: {
   label: string;
-  hideLabel?: boolean;
-  children: ReactNode;
+  hint?: ReactNode;
+  foot?: ReactNode;
+  children?: ReactNode;
 }) {
   return (
-    <div className="settings__group" role="group" aria-label={label}>
-      {!hideLabel && (
-        <p className="settings__groupLabel text-label font-medium text-text">{label}</p>
-      )}
-      {children}
+    <div className="border-t border-edge py-3 first:border-t-0">
+      <div className="flex items-center justify-between gap-5">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-[13.5px] font-semibold text-ink">{label}</span>
+          {/* The one short line a setting is allowed to explain itself with,
+              capped at the measure a hint gets (docs/DESIGN_SYSTEM.md §1).
+              Never a paragraph: a config panel that argues with you is a config
+              panel nobody finishes reading. */}
+          {hint && (
+            <p className="max-w-[46ch] text-[11.5px] leading-relaxed text-ink-faint">
+              {hint}
+            </p>
+          )}
+        </div>
+        {children && <div className="flex flex-none items-center gap-2">{children}</div>}
+      </div>
+      {foot}
     </div>
   );
 }
 
-/** The one short line a setting is allowed to explain itself with. Never a
- * paragraph: a config panel that argues with you is a config panel nobody
- * finishes reading. `nested` puts it at its row's indent — it belongs to the
- * line above it, so it travels with it. */
-function SubLabel({
-  nested = false,
-  children,
-}: {
-  nested?: boolean;
-  children: ReactNode;
-}) {
+/** A row's "that worked" line: an ANNOUNCEMENT, not a label, which is why it
+ * reads in the data face at the quietest step and why every one of them is on
+ * a timer somewhere above. `role="status"` is polite — it accompanies something
+ * the user started, so it waits its turn rather than interrupting. */
+function ConfirmLine({ children }: { children: ReactNode }) {
   return (
-    <p
-      className={`settings__sublabel${
-        nested ? " settings__sublabel--nested" : ""
-      } text-cap text-text-faint`}
-    >
+    <p role="status" className="mt-1.5 max-w-[56ch] font-data text-[11px] text-ink-dim">
       {children}
     </p>
   );
 }
 
-/** A boolean whose state is its geometry. `role="switch"` rather than a
- * checkbox: the platform semantics for "this takes effect immediately" differ
- * from "this is one of several things you are about to submit". */
-function Toggle({
-  label,
-  checked,
-  onChange,
-  busy = false,
-}: {
-  label: string;
-  checked: boolean;
-  onChange: (next: boolean) => void;
-  /**
-   * A write is in flight. `aria-disabled` + `aria-busy`, never the native
-   * `disabled` attribute: this control is the thing the user just pressed, so
-   * it is the thing that holds focus, and `disabled` would blur it and reset
-   * focus to <body> for the length of every save (docs/DESIGN_SYSTEM.md §6).
-   * It stays focusable and declines its own activation instead.
-   *
-   * There is no genuine-disable case for a toggle here — every switch in
-   * Settings is always meaningful — so `busy` is the only inert form it takes.
-   */
-  busy?: boolean;
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      aria-disabled={busy || undefined}
-      aria-busy={busy || undefined}
-      onClick={() => {
-        if (busy) return;
-        onChange(!checked);
-      }}
-      className="settings__toggle ui-focus-ring aria-disabled:cursor-not-allowed"
-    >
-      <span className="settings__knob" />
-    </button>
-  );
-}
-
-/** The Capture tab's stored mic-test result, phrased for what it means for a
+/** The Capture card's stored mic-test result, phrased for what it means for a
  * recording rather than just what was measured. */
 function micCheckSummary(result: MicCheckResult): string {
   switch (result.outcome) {
@@ -224,10 +165,10 @@ function RebuildIndexControl() {
 
   // A success that never clears stops being a report and becomes a label: the
   // old "Index rebuilt." sat under the button for the rest of the session, so
-  // a user coming back to this tab an hour later read it as the current state
-  // rather than as something that had just happened. The failure below is
-  // deliberately NOT on a timer — an error the user may not have been looking
-  // at has to stay until it is read (docs/DESIGN_SYSTEM.md §3).
+  // a user coming back an hour later read it as the current state rather than
+  // as something that had just happened. The failure below is deliberately NOT
+  // on a timer — an error the user may not have been looking at has to stay
+  // until it is read (docs/DESIGN_SYSTEM.md §3).
   useTimeout(
     () => setState({ status: "idle" }),
     state.status === "ready" ? CONFIRMATION_MS : null,
@@ -245,52 +186,52 @@ function RebuildIndexControl() {
   };
 
   return (
-    <>
-      <Row label="Search index">
-        <Button
-          onClick={rebuild}
-          loading={state.status === "rebuilding"}
-          loadingLabel="Rebuilding…"
-        >
-          Rebuild
-        </Button>
-      </Row>
-      <SubLabel>
-        Reconstructs the index from your note files. It reads them and writes
-        nothing back, so nothing you have written can be lost.
-      </SubLabel>
-      {state.status === "ready" && (
-        <StatusMessage variant="status" compact>
-          Index rebuilt. {state.notes} {state.notes === 1 ? "note" : "notes"} indexed.
-        </StatusMessage>
-      )}
-      {state.status === "error" && (
-        <StatusMessage variant="error" compact>
-          Couldn&apos;t rebuild the index: {state.message}
-        </StatusMessage>
-      )}
-    </>
+    <Row
+      label="Search index"
+      hint="Reconstructs the index from your note files. It reads them and writes nothing back, so nothing you have written can be lost."
+      foot={
+        <>
+          {state.status === "ready" && (
+            <ConfirmLine>
+              Index rebuilt. {state.notes} {state.notes === 1 ? "note" : "notes"} indexed.
+            </ConfirmLine>
+          )}
+          {state.status === "error" && (
+            <StatusMessage variant="error" compact>
+              Couldn&apos;t rebuild the index: {state.message}
+            </StatusMessage>
+          )}
+        </>
+      }
+    >
+      <Button
+        onClick={rebuild}
+        loading={state.status === "rebuilding"}
+        loadingLabel="Rebuilding…"
+      >
+        Rebuild
+      </Button>
+    </Row>
   );
 }
 
 /**
  * Settings — the app's CONFIG PANEL, and it announces that before a word is
- * read: a small title, no list anywhere, and a horizontal tab rail that
- * filters the page rather than navigating it.
+ * read: four cards stacked one per row, each named by a mono eyebrow, holding
+ * nothing but label-and-control rows.
  *
- * Every setting is one label-and-control row on a shared grid, so all the
- * controls line up into a single column you can run your eye down. Controls
- * are raised chips; read-only values stay plain text or a mono chip and take
- * no chevron, so "you can change this" and "this is how it is" are told apart
- * by shape rather than by being greyed out.
+ * Every control lands on one right edge for the whole page, so the column is
+ * scannable end to end. Controls are glass; read-only values stay plain text or
+ * mono and take no chevron, so "you can change this" and "this is how it is"
+ * are told apart by shape rather than by being greyed out.
  *
- * Where a setting only means something given another one, the two sit in a
- * `Group`: the dependent row indents, and the indent comes out of the LABEL
- * column, so the control column never moves.
+ * What is gone from the previous version is every indent, and the tab rail that
+ * made three of the four concerns invisible at any one time. A dependent
+ * control sits inline beside its parent instead; independent controls name
+ * themselves.
  */
 export function SettingsView() {
   const { settings, error, setSettings } = useSettings();
-  const [tab, setTab] = useState<Tab>("Privacy");
 
   // Raw input string so the field can be cleared mid-edit rather than snapping
   // to 0; `buildRetentionPolicy` parses and clamps it on apply.
@@ -334,8 +275,8 @@ export function SettingsView() {
 
   // Clears the day field's acknowledgement after a beat, for the same reason
   // the index rebuild's does: "Saved." that stays put has stopped reporting an
-  // event and started describing a state. The three error lines on this screen
-  // are deliberately not on a timer.
+  // event and started describing a state. The error lines on this screen are
+  // deliberately not on a timer.
   useTimeout(
     () => setDaysSaved(false),
     daysSaved ? CONFIRMATION_MS : null,
@@ -357,12 +298,9 @@ export function SettingsView() {
   };
 
   // `acknowledge` is the day field saying "this commit was mine", and only it
-  // ever passes it. "Saved." is indented under that field, and an indent is a
-  // claim about what a line belongs to (docs/UI_CONVENTIONS.md, *A dependent
-  // setting is grouped, not just listed*) — so the line has to be raised by the
-  // control it points at. The Select raising it too meant that merely choosing
-  // "Keep for a number of days" printed "Saved." under a day count nobody had
-  // touched, which is the group's own rule broken by its own screen.
+  // ever passes it. The Select raising "Saved." too meant that merely choosing
+  // "Keep for a number of days" announced a save of a day count nobody had
+  // touched.
   //
   // The Select needs no acknowledgement of its own, and per docs/DESIGN_SYSTEM.md
   // §3 it may not have one: a control that visibly moved is its own
@@ -394,13 +332,11 @@ export function SettingsView() {
 
   // Both flags travel together (the command takes the whole struct), so each
   // toggle sends the stored pair with its own field replaced. Its own error
-  // slot, not the retention one: an error has to appear beside the control
-  // that failed, or it reads as a failure of whatever it sits under. It now
-  // renders inside the "Capture pill" group for that same reason — it used to
-  // sit at the foot of the tab, under Echo check and Search index, which is
-  // exactly the failure this comment warns about. One slot for both toggles is
-  // right, not a shortcut: this command writes the whole struct and holds one
-  // error, so the pair IS the unit that fails.
+  // slot, not the retention one: an error has to appear beside the control that
+  // failed, or it reads as a failure of whatever it sits under. One slot for
+  // both switches is right, not a shortcut: this command writes the whole
+  // struct and holds one error, so the pair IS the unit that fails — and the
+  // slot sits in the second of the two rows, which is where the pair ends.
   const applyOverlay = async (change: Partial<OverlaySettings>) => {
     if (!settings) return;
     setOverlayError(null);
@@ -432,333 +368,249 @@ export function SettingsView() {
 
   return (
     <ViewFrame variant="panel" eyebrow="System" title="Settings">
-      {/* The rail filters; it does not navigate. Real tab semantics, so a
-          screen reader announces it as a filter rather than as a second set
-          of destinations competing with the sidebar.
-
-          "Real" now means the whole contract, not half of it. Before this the
-          rail had role=tablist and role=tab and nothing else: no ids, no
-          aria-controls, no tabpanel under it, and every tab its own tab stop
-          with the arrow keys doing nothing. A tablist that Tab walks through
-          one tab at a time is a tablist in name only — the pattern is a SINGLE
-          tab stop that Arrow keys move within, which is also what makes it
-          faster than the thing it was imitating. */}
-      <div className="settings__rail">
-        <div
-          className="settings__tabs"
-          role="tablist"
-          aria-label="Settings categories"
-          onKeyDown={(event) => {
-            const step =
-              event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
-            let next: Tab | null = null;
-            if (step !== 0) {
-              // Wraps: a rail of three is short enough that running off the
-              // end and stopping feels like a bug rather than a boundary.
-              const at = TABS.indexOf(tab);
-              next = TABS[(at + step + TABS.length) % TABS.length];
-            } else if (event.key === "Home") next = TABS[0];
-            else if (event.key === "End") next = TABS[TABS.length - 1];
-            if (!next) return;
-            event.preventDefault();
-            setTab(next);
-            document.getElementById(tabId(next))?.focus();
-          }}
-        >
-          {TABS.map((name) => (
-            <button
-              key={name}
-              id={tabId(name)}
-              type="button"
-              role="tab"
-              aria-selected={tab === name}
-              aria-controls={PANEL_ID}
-              // Roving tabindex: the rail is one stop in the page's tab order
-              // and the arrow keys move inside it.
-              tabIndex={tab === name ? 0 : -1}
-              onClick={() => setTab(name)}
-              className={`settings__tab ui-focus-ring text-label font-semibold ${
-                tab === name ? "text-text" : "text-text-soft"
-              }`}
-            >
-              {name}
-            </button>
-          ))}
-        </div>
-        <hr className="settings__rule" />
-      </div>
-
       {error && (
         <StatusMessage variant="error">Couldn&apos;t load settings: {error}</StatusMessage>
       )}
 
       {settings && (
-        <div
-          id={PANEL_ID}
-          role="tabpanel"
-          aria-labelledby={tabId(tab)}
-          className="settings__rows mt-sm"
-        >
-          {tab === "Privacy" && (
-            <>
-              <Row label="Recording consent">
-                {/* Read-only, so it stays plain text with a check glyph — no
-                    chip, no chevron, nothing that invites a click.
+        <div className="mt-6 flex max-w-[660px] flex-col gap-4">
+          <Card title="Privacy">
+            <Row label="Recording consent">
+              {/* Read-only, so it stays plain text with a check glyph — no
+                  chip, no chevron, nothing that invites a click.
 
-                    THE CHECK IS GATED ON THE VALUE. It used to render
-                    unconditionally, so a profile that had never been shown the
-                    consent nudge got a tick beside the words "Not yet shown" —
-                    a false affirmative on the one row in the app that reports
-                    a privacy state. --text-soft rather than --text-faint for
-                    the same reason: this is a fact the user may need to read,
-                    not a caption (docs/DESIGN_SYSTEM.md §6). */}
-                <span className="inline-flex items-center gap-2xs text-label text-text-soft">
-                  {settings.consent_acknowledged && (
-                    <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
-                      <path
-                        d="M2.5 7.5l3 3 6-7"
-                        stroke="currentColor"
-                        strokeWidth="1.5"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
-                  )}
-                  {settings.consent_acknowledged
-                    ? "Acknowledged"
-                    : "Not shown yet. It appears before your first capture."}
-                </span>
-              </Row>
-
-              {/* The policy owns a control, so its row heads the group and the
-                  group's name is the accessible one alone. */}
-              <Group hideLabel label="Retention">
-                <Row label="Retention">
-                  <Select
-                    hideLabel
-                    label="Retention"
-                    value={kind}
-                    onChange={(value) => apply(value as RetentionKind, Number(days))}
-                    options={RETENTION_OPTIONS}
-                    busy={savingRetention}
-                  />
-                </Row>
-                {/* Explains the head row, so it sits at the head row's rank. */}
-                <SubLabel>
-                  Kodabi deletes raw transcripts and recordings past this age.
-                  Your notes are never removed.
-                </SubLabel>
-
-                {/* "Days", not "Days to keep". The group is named Retention and
-                    that name is what a screen reader announces on entry, so the
-                    child only has to name what it ADDS. ConsentNudge keeps the
-                    long form on purpose (see the note at its call site): that
-                    dialog is a flat column of fields with no group to lean on,
-                    so the field there has to carry the whole meaning itself. */}
-                {kind === "keep_days" && (
-                  <Row nested label="Days">
-                    <input
-                      type="number"
-                      min={1}
-                      value={days}
-                      aria-label="Days"
-                      className="settings__chip ui-focus-ring w-24 text-right text-label text-text"
-                      onChange={(event) => {
-                        setDays(event.target.value);
-                        setDaysSaved(false);
-                      }}
-                      // Enter as well as blur. Blur-only made this the one setting
-                      // a keyboard user could change without ever being told it
-                      // saved, and without a way to commit it deliberately
-                      // (docs/DESIGN_SYSTEM.md §6).
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          event.preventDefault();
-                          void apply("keep_days", Number(days), true);
-                        }
-                      }}
-                      onBlur={() => apply("keep_days", Number(days), true)}
+                  THE CHECK IS GATED ON THE VALUE. It used to render
+                  unconditionally, so a profile that had never been shown the
+                  consent nudge got a tick beside the words "Not shown yet" — a
+                  false affirmative on the one row in the app that reports a
+                  privacy state. `read` rather than `faint` for the same reason:
+                  this is a fact the user may need to read, not a caption
+                  (docs/DESIGN_SYSTEM.md §6). */}
+              <span className="inline-flex items-center gap-1.5 text-[13px] text-ink-read">
+                {settings.consent_acknowledged && (
+                  <svg width="13" height="13" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+                    <path
+                      d="M2.5 7.5l3 3 6-7"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                     />
-                  </Row>
+                  </svg>
                 )}
-                {/* The DAY FIELD's acknowledgement, so it sits at the day
-                    field's indent. The error below it is the GROUP's: the Select
-                    and the field both call apply(), so either can raise it, and
-                    it belongs at the rank the two of them share. */}
-                {daysSaved && kind === "keep_days" && (
-                  <StatusMessage
-                    variant="status"
-                    compact
-                    className="settings__status--nested"
-                  >
-                    Saved.
-                  </StatusMessage>
-                )}
-                {saveError && (
+                {settings.consent_acknowledged
+                  ? "Acknowledged"
+                  : "Not shown yet. It appears before your first capture."}
+              </span>
+            </Row>
+
+            <Row
+              label="Retention"
+              hint="Kodabi deletes raw transcripts and recordings past this age. Your notes are never removed."
+              foot={
+                <>
+                  {daysSaved && kind === "keep_days" && <ConfirmLine>Saved.</ConfirmLine>}
+                  {saveError && (
+                    <StatusMessage variant="error" compact>
+                      Couldn&apos;t save the retention policy: {saveError}
+                    </StatusMessage>
+                  )}
+                </>
+              }
+            >
+              <Select
+                hideLabel
+                label="Retention"
+                value={kind}
+                onChange={(value) => apply(value as RetentionKind, Number(days))}
+                options={RETENTION_OPTIONS}
+                busy={savingRetention}
+              />
+              {/* The dependent control, INLINE beside the policy it depends on
+                  rather than indented under it: it appears only under
+                  keep_days, and appearing beside the thing that summoned it is
+                  a clearer claim than a nested row was. It reads in the data
+                  face because it is a number you compare, right-aligned so the
+                  digits line up with themselves as they change.
+
+                  "Days", not "Days to keep": the row it sits in is named
+                  Retention and the policy is a word away, so the field only has
+                  to name what it ADDS. ConsentNudge keeps the long form on
+                  purpose — that dialog is a flat column of fields with no row
+                  to lean on. */}
+              {kind === "keep_days" && (
+                <input
+                  type="number"
+                  min={1}
+                  value={days}
+                  aria-label="Days"
+                  className="focus-ring w-20 rounded-button border border-edge bg-wash px-2.5 py-2 text-right font-data text-[12.5px] text-ink caret-kodama shadow-[inset_0_1px_0_var(--color-edge-lit)] transition-[border-color] duration-140 ease-out-strong outline-hidden focus:border-ink-faint"
+                  onChange={(event) => {
+                    setDays(event.target.value);
+                    setDaysSaved(false);
+                  }}
+                  // Enter as well as blur. Blur-only made this the one setting
+                  // a keyboard user could change without ever being told it
+                  // saved, and without a way to commit it deliberately
+                  // (docs/DESIGN_SYSTEM.md §6).
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      void apply("keep_days", Number(days), true);
+                    }
+                  }}
+                  onBlur={() => apply("keep_days", Number(days), true)}
+                />
+              )}
+            </Row>
+          </Card>
+
+          <Card title="Appearance">
+            <Row
+              label="Theme"
+              // Only true on `system`, so only said there. It used to render
+              // under every choice, telling a user who had just picked Light
+              // that the app follows their OS.
+              hint={
+                settings.appearance.theme === "system"
+                  ? "Follows your OS light and dark setting."
+                  : undefined
+              }
+              foot={
+                appearanceError && (
                   <StatusMessage variant="error" compact>
-                    Couldn&apos;t save the retention policy: {saveError}
+                    Couldn&apos;t save the theme: {appearanceError}
                   </StatusMessage>
-                )}
-              </Group>
-            </>
-          )}
+                )
+              }
+            >
+              <Select
+                hideLabel
+                label="Theme"
+                value={settings.appearance.theme}
+                onChange={(value) => applyAppearanceTheme(value as Theme)}
+                options={THEME_OPTIONS}
+                busy={savingAppearance}
+              />
+            </Row>
 
-          {tab === "Appearance" && (
-            <>
-              <Row label="Theme">
-                <Select
-                  hideLabel
-                  label="Theme"
-                  value={settings.appearance.theme}
-                  onChange={(value) => applyAppearanceTheme(value as Theme)}
-                  options={THEME_OPTIONS}
-                  busy={savingAppearance}
-                />
-              </Row>
-              {/* Only true on `system`, so only said there. It used to render
-                  under every choice, telling a user who had just picked Light
-                  that the app follows their OS. */}
-              {settings.appearance.theme === "system" && (
-                <SubLabel>Follows your OS light and dark setting.</SubLabel>
-              )}
+            <Row
+              label="Reduce motion"
+              hint="Nothing slides, grows or spins. Fades and colour changes stay. Your OS setting already does this; here it applies to Kodabi alone."
+            >
+              <Switch
+                label="Reduce motion"
+                checked={reduceMotion}
+                onChange={(next) => {
+                  // Applied in the handler, not an effect: it happens because
+                  // the user did something (.claude/rules/no-use-effect.md).
+                  setReduceMotion(next);
+                  applyReduceMotion(next);
+                }}
+              />
+            </Row>
 
-              <Row label="Reduce motion">
-                <Toggle
-                  label="Reduce motion"
-                  checked={reduceMotion}
-                  onChange={(next) => {
-                    // Applied in the handler, not an effect: it happens
-                    // because the user did something
-                    // (.claude/rules/no-use-effect.md).
-                    setReduceMotion(next);
-                    applyReduceMotion(next);
-                  }}
-                />
-              </Row>
-              <SubLabel>
-                Nothing slides, grows or spins. Fades and colour changes stay.
-                Your OS setting already does this; here it applies to Kodabi
-                alone.
-              </SubLabel>
+            <Row
+              label="Increase contrast"
+              hint="Faint text and hairline edges take a stronger value. Your OS setting already does this; here it applies to Kodabi alone."
+            >
+              <Switch
+                label="Increase contrast"
+                checked={contrast}
+                onChange={(next) => {
+                  // Applied in the handler, not an effect: it happens because
+                  // the user did something (.claude/rules/no-use-effect.md).
+                  setContrast(next);
+                  applyContrast(next);
+                }}
+              />
+            </Row>
+          </Card>
 
-              <Row label="Increase contrast">
-                <Toggle
-                  label="Increase contrast"
-                  checked={contrast}
-                  onChange={(next) => {
-                    // Applied in the handler, not an effect: it happens
-                    // because the user did something
-                    // (.claude/rules/no-use-effect.md).
-                    setContrast(next);
-                    applyContrast(next);
-                  }}
-                />
-              </Row>
-              <SubLabel>
-                Faint text and hairline edges take a stronger value. Your OS
-                setting already does this; here it applies to Kodabi alone.
-              </SubLabel>
+          <Card title="Capture">
+            <Row label="Global shortcut" hint="Starts and stops a capture from anywhere.">
+              {/* Mono, because it is a key sequence — the same voice the
+                  palette hint and every path in the app uses. */}
+              <span className="font-data text-[12.5px] text-ink-read">
+                {CAPTURE_SHORTCUT}
+              </span>
+            </Row>
 
-              {appearanceError && (
-                <StatusMessage variant="error" compact>
-                  Couldn&apos;t save the theme: {appearanceError}
-                </StatusMessage>
-              )}
-            </>
-          )}
+            {/* The two pill switches used to be an indented group under a
+                "Capture pill" heading, because their labels ("Captures you
+                start") only meant something with that heading above them. They
+                name themselves now, which is what let the group go: two
+                independent booleans reading as two independent rows, with no
+                indent claiming a dependency that was never there. */}
+            <Row
+              label="Pill for captures you start"
+              hint="Stays on top of full screen apps, so a recording is never invisible."
+            >
+              <Switch
+                label="Pill for captures you start"
+                checked={settings.overlay.manual_captures}
+                busy={savingOverlay}
+                onChange={(checked) => applyOverlay({ manual_captures: checked })}
+              />
+            </Row>
 
-          {tab === "Capture" && (
-            <>
-              <Row label="Global shortcut">
-                {/* Mono, because it is a key sequence — the same voice the
-                    palette hint and every path in the app uses. */}
-                <span className="settings__chip font-mono text-action text-text">
-                  {CAPTURE_SHORTCUT}
-                </span>
-              </Row>
-              <SubLabel>Starts and stops a capture from anywhere.</SubLabel>
-
-              {/* The pill is a concept and owns no control of its own, so the
-                  group draws it as a heading and the two toggles under it are
-                  PEERS. They are independent flags: nesting the auto one under
-                  the manual one would claim turning the pill off silences the
-                  auto pill too, and it does not.
-
-                  Each toggle's accessible name is now its visible row label,
-                  verbatim. It used to be neither: the row read "Capture pill"
-                  while the switch answered to "Show the capture pill during
-                  captures you start", so what you read was not what you could
-                  say to a voice-control tool. The context those long names
-                  carried is the group's name now, which is where it belongs. */}
-              <Group label="Capture pill">
-                {/* Under the heading, not under a row: it describes the pill,
-                    which is what both toggles switch. It used to hang off the
-                    manual toggle and explain the auto one by accident. */}
-                <SubLabel>
-                  Stays on top of full screen apps, so a recording is never invisible.
-                </SubLabel>
-
-                <Row nested label="Captures you start">
-                  <Toggle
-                    label="Captures you start"
-                    checked={settings.overlay.manual_captures}
-                    busy={savingOverlay}
-                    onChange={(checked) => applyOverlay({ manual_captures: checked })}
-                  />
-                </Row>
-
-                <Row nested label="Auto detected captures">
-                  <Toggle
-                    label="Auto detected captures"
-                    checked={settings.overlay.auto_captures}
-                    busy={savingOverlay}
-                    onChange={(checked) => applyOverlay({ auto_captures: checked })}
-                  />
-                </Row>
-                <SubLabel nested>
-                  Kodabi does not detect meetings on its own yet, so this has nothing
-                  to act on today.
-                </SubLabel>
-
-                {/* Moved here from the foot of the tab, where it sat below Echo
-                    check and Search index and read as THEIR failure. One slot
-                    for both toggles, at the group's own rank rather than
-                    indented under one of the two — see applyOverlay. */}
-                {overlayError && (
+            <Row
+              label="Pill for auto detected captures"
+              hint="Kodabi does not detect meetings on its own yet, so this has nothing to act on today."
+              // The pair's one error slot, at the foot of the pair. See
+              // applyOverlay: the command writes the whole struct and holds one
+              // error, so the two switches are the unit that fails.
+              foot={
+                overlayError && (
                   <StatusMessage variant="error" compact>
                     Couldn&apos;t save the capture pill setting: {overlayError}
                   </StatusMessage>
-                )}
-              </Group>
+                )
+              }
+            >
+              <Switch
+                label="Pill for auto detected captures"
+                checked={settings.overlay.auto_captures}
+                busy={savingOverlay}
+                onChange={(checked) => applyOverlay({ auto_captures: checked })}
+              />
+            </Row>
 
-              <Row label="Echo check">
-                <Button
-                  onClick={runMicTestClick}
-                  loading={runningMicTest}
-                  loadingLabel="Testing…"
-                >
-                  Run test
-                </Button>
-              </Row>
-              <SubLabel>
-                Plays a short tone through your speakers and listens for it on
-                your microphone, so you can see whether the two stay separate.
-              </SubLabel>
-              {settings.mic_check && !runningMicTest && (
-                <StatusMessage variant="status" compact>
-                  {micCheckSummary(settings.mic_check)} Checked{" "}
-                  {new Date(settings.mic_check.measured_at).toLocaleString()}.
-                </StatusMessage>
-              )}
-              {micTestError && (
-                <StatusMessage variant="error" compact>
-                  Couldn&apos;t run the mic test: {micTestError}
-                </StatusMessage>
-              )}
+            <Row
+              label="Echo check"
+              hint="Plays a short tone through your speakers and listens for it on your microphone, so you can see whether the two stay separate."
+              foot={
+                <>
+                  {/* A stored fact rather than an announcement, so it is the
+                      one status line on this screen with no timer: it stays
+                      until another test replaces it. */}
+                  {settings.mic_check && !runningMicTest && (
+                    <ConfirmLine>
+                      {micCheckSummary(settings.mic_check)} Checked{" "}
+                      {new Date(settings.mic_check.measured_at).toLocaleString()}.
+                    </ConfirmLine>
+                  )}
+                  {micTestError && (
+                    <StatusMessage variant="error" compact>
+                      Couldn&apos;t run the mic test: {micTestError}
+                    </StatusMessage>
+                  )}
+                </>
+              }
+            >
+              <Button
+                onClick={runMicTestClick}
+                loading={runningMicTest}
+                loadingLabel="Testing…"
+              >
+                Run test
+              </Button>
+            </Row>
+          </Card>
 
-              <RebuildIndexControl />
-            </>
-          )}
+          <Card title="Maintenance">
+            <RebuildIndexControl />
+          </Card>
         </div>
       )}
     </ViewFrame>

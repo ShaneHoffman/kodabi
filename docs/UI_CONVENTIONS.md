@@ -107,6 +107,7 @@ Always the token utility, never the literal:
 | A project | `text-coral`, `bg-cobalt`, `border-teal`, `text-plum` |
 | A control's fill | `bg-action-bg` / `bg-action-bg-hover` / `border-action-edge`, and the coral trio `bg-danger-bg` / `bg-danger-bg-hover` / `border-danger-edge` |
 | The faintest fill | `bg-wash` (a quiet control's hover, a pill at rest, a menu row's highlight), `bg-wash-hover` |
+| A switch's track once it is on | `bg-switch-on` (the resting track is `bg-wash-hover`; the knob's travel is the state, §6) |
 | A face | `font-ui`, `font-data`, `font-note` |
 | Reading size | `text-note` (carries its own leading) |
 | A radius | `rounded-panel`, `rounded-card`, `rounded-dialog`, `rounded-button`, `rounded-pill` |
@@ -179,9 +180,9 @@ in-app toggle would work on legacy screens and silently do nothing on Grove ones
 
 ## 4. Primitives
 
-`src/components/ui/` holds the shared controls. **`Button`, `Menu`, `Dialog`, `Field` and
-`DestructiveConfirmDialog` are Grove; the rest are pre-Grove** and four still carry their own
-stylesheet (`Checkbox`, `Select`, `Overlay`, `ViewFrame` — `StatusMessage` never had one), which
+`src/components/ui/` holds the shared controls. **`Button`, `Menu`, `Dialog`, `Field`, `Switch`,
+`Select` and `DestructiveConfirmDialog` are Grove; the rest are pre-Grove** and three still carry
+their own stylesheet (`Checkbox`, `Overlay`, `ViewFrame` — `StatusMessage` never had one), which
 their screen tickets delete. **Behaviour is not pre-Grove either way** — the
 contracts below are live, they are what the components actually promise, and a restyle must preserve
 every one of them.
@@ -192,8 +193,9 @@ every one of them.
 | `Menu` | An anchored menu (base-ui). `Menu.Item` takes the variant | `default`, `suggested`, `foot` |
 | `Dialog` | A modal: scrim, glass panel, focus trap (base-ui) | — |
 | `Field` | A labelled input in a glass row | — |
+| `Switch` | A boolean that takes effect on press; the knob's travel is the state | — |
 | `Checkbox` | A box and its label | — |
-| `Select` | A hand-rolled combobox (full listbox, no headless library) | `boxed`, `token` |
+| `Select` | A hand-rolled combobox (full listbox, no headless library) | — |
 | `Overlay` | The pre-Grove modal shell, for the callers `Dialog` has not taken yet | — |
 | `ViewFrame` | A view's scaffold: gutter, column, header | `queue`, `library`, `panel`, `health`, `doc`, `search`, `terminal` |
 | `StatusMessage` | The one way a view says nothing/failed/working | `empty`, `error`, `status` |
@@ -238,6 +240,12 @@ those two utilities on a row exactly as `Menu.test.tsx` counts these.
   `aria-activedescendant`; Enter/Space selects; Escape closes and returns focus to the trigger;
   outside click closes; typing jumps. `hideLabel` keeps the accessible name and drops the visual row.
   `emptyLabel` is what the open list says when there is nothing in it.
+- **`Switch`'s `busy` is that distinction a third time**, and it is the only inert form it has: a
+  switch with nothing to switch is a row that should not be on the screen, so there is no `disabled`
+  prop to pass. Its `label` is the accessible name and must be the words printed beside it, verbatim.
+  **The knob's travel is the state readout, so it is gated by duration alone** — under reduced motion
+  it arrives at once rather than not arriving. No fill quiet enough to sit on a card clears 3:1, which
+  is why the position has to carry it (§6 of the design system).
 - **`Field` takes `error`, not a hand-rolled message.** The copy and `aria-invalid` have to travel
   together, and every hand-rolled version in the app set one without the other. `hint` is wired
   through `aria-describedby` too, and the error is described first, so it is heard before the hint
@@ -320,7 +328,9 @@ you need, not the whole surface it offers.** Everything visible about all four i
 **`sonner` and `motion` are installed, not adopted**, and each is its own decision in its own
 ticket — installing a package is not the same as adopting it. The same holds for what base-ui has
 NOT taken: `Select` is a working, tested, accessible combobox, and it gets replaced when someone has
-read what `@base-ui/react` gives in exchange, not on sight.
+read what `@base-ui/react` gives in exchange, not on sight. Its Grove ticket re-skinned it and left
+every line of that behaviour alone, which is what the distinction looks like in practice: the list
+now wears `Menu`'s material and `Menu`'s row recipe, and the combobox underneath is still ours.
 
 This supersedes the zero-UI-dependency posture and
 [`docs/decisions/popover-primitive.md`](decisions/popover-primitive.md), which held against base-ui
@@ -380,9 +390,10 @@ never by where there happened to be room.
 | **Disclosure** — the toggle that summons a subordinate section | content stacked below the view's subject | **one per section, and it does not nest** |
 
 **Four kinds of control are deliberately outside that list.** Getting around is not acting — a back
-link, and Settings' tab rail, which *filters* the pane rather than navigating (`role="tablist"`, so a
-screen reader announces it as a filter and not as a second set of destinations competing with the
-dock). Affordances *inside* the content belong to the content: a note's tag chips, a recording's
+link. (Settings used to be the other example here: a `role="tablist"` rail that *filtered* the pane
+rather than navigating it. Its Grove ticket deleted the rail rather than defending it — a filter that
+hides three quarters of a config panel is a filter over four cards that all fit.) Affordances
+*inside* the content belong to the content: a note's tag chips, a recording's
 `<audio>` player. A control a **view state** raised belongs to that state and not to the frame,
 whether it recovers or announces — Terminal's Restart, Chat's Start a new chat, the error boundary's
 Try this screen again, and the Inbox's filed toast all sit inside a state block, and the vocabulary

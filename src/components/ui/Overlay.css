@@ -18,7 +18,8 @@
    half only: `--scrim` is a real alpha fill rather than a filter, so the panel
    still reads as being in front of a dimmed app. Dropping the blur also drops
    this element's containing block for `position: fixed` descendants; that is
-   benign, and Select.css's standing grep is where it is written down.
+   benign, and the standing grep beside the select's anchored block
+   (src/index.css §3) is where it is written down.
 
    No entrance animation, and nothing for prefers-reduced-motion to disable:
    FOUNDING_DOC §4 reserves "one deliberate motion" for the distill-and-route

@@ -7,6 +7,8 @@ import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Field } from "../ui/Field";
 import { Menu } from "../ui/Menu";
+import { Select } from "../ui/Select";
+import { Switch } from "../ui/Switch";
 
 /*
  * The Grove primitives, all of them, on one page — the acceptance harness for
@@ -36,6 +38,29 @@ function Section({ title, note, children }: { title: string; note?: string; chil
       </div>
       {children}
     </section>
+  );
+}
+
+/** A switch on the row it is built for: name left, control flush right, a
+ * hairline between siblings. The visible label and the accessible name are the
+ * same string on purpose — what you read is what you can say to a voice-control
+ * tool (see Switch.tsx). */
+function SwitchRow({
+  label,
+  checked,
+  onChange,
+  busy = false,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  busy?: boolean;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-5 border-t border-edge py-3 first:border-t-0">
+      <span className="text-[13.5px] font-semibold text-ink">{label}</span>
+      <Switch label={label} checked={checked} onChange={onChange} busy={busy} />
+    </div>
   );
 }
 
@@ -87,6 +112,12 @@ function DisplayToggles() {
 export function PrimitiveGallery() {
   const [confirming, setConfirming] = useState(false);
   const cancelRef = useRef<HTMLButtonElement>(null);
+  // Controlled, unlike the fields above: a switch's whole appearance IS its
+  // value, so an uncontrolled one would show a single frozen state and hide
+  // the only thing worth looking at.
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const [increaseContrast, setIncreaseContrast] = useState(true);
+  const [retention, setRetention] = useState("keep_days");
 
   return (
     <div className="grove-ground min-h-dvh font-ui text-ink">
@@ -102,7 +133,16 @@ export function PrimitiveGallery() {
 
       <div className="flex gap-5 p-5">
         <nav className="glass-dock flex w-56 flex-none flex-col gap-1 p-3" aria-label="Sections">
-          {["Buttons", "Fields", "Glass", "Overlays", "Kodama", "Scrollbars", "Focus"].map((name) => (
+          {[
+            "Buttons",
+            "Fields",
+            "Switches",
+            "Glass",
+            "Overlays",
+            "Kodama",
+            "Scrollbars",
+            "Focus",
+          ].map((name) => (
             <a
               key={name}
               href={`#${name.toLowerCase()}`}
@@ -161,11 +201,15 @@ export function PrimitiveGallery() {
 
           <Section
             title="Fields"
-            note="The same glass a button is, at input size. Focus moves the border; the caret is the kodama's."
+            note="The same glass a button is, at input size. Focus moves the border; the caret is the kodama's. The select is that glass as a value button."
           >
             {/* Uncontrolled on purpose: a catalogue page has no business
                 holding the value of every control it displays. */}
-            <div className="flex max-w-sm flex-col gap-5" id="fields">
+            {/* An arbitrary value, not `max-w-sm`: the legacy bridge's named
+                spacing aliases shadow Tailwind's container scale, so `max-w-sm`
+                caps this column at 16px and it collapses (see the note in
+                src/index.css section 4). */}
+            <div className="flex max-w-[24rem] flex-col gap-5" id="fields">
               <Field
                 label="Project name"
                 placeholder="project-name"
@@ -182,6 +226,53 @@ export function PrimitiveGallery() {
                 error="A project cannot be called inbox."
               />
               <Field label="Days to keep" type="number" min={1} defaultValue={30} />
+              {/* Controlled, like the switches below: the trigger's whole job
+                  is to read back the chosen value. Open it to check that the
+                  list wears the same material the menu above does, that it
+                  anchors to this trigger rather than to the last one on the
+                  page, and that the trigger does not scale while it is an
+                  anchor (the press would drag the list sideways). */}
+              <Select
+                label="Retention"
+                value={retention}
+                onChange={setRetention}
+                options={[
+                  { value: "keep_all", label: "Keep all transcripts and recordings" },
+                  { value: "keep_days", label: "Keep for a number of days" },
+                  { value: "discard_after_distill", label: "Discard after distilling" },
+                ]}
+              />
+              <Select
+                label="Retention"
+                value={retention}
+                onChange={setRetention}
+                options={[]}
+                busy
+              />
+            </div>
+          </Section>
+
+          <Section
+            title="Switches"
+            note="The knob carries the state: 16px on a 38x22 track, 18px of travel over 180ms. Toggle Reduce motion — it still arrives, at once."
+          >
+            {/* Shown on the row they live on, because a switch's whole job is
+                to sit at the right edge of a settings row and be scanned down
+                a column with its siblings. */}
+            <div className="glass-card flex max-w-[28rem] flex-col px-5" id="switches">
+              <SwitchRow
+                label="Reduce motion"
+                checked={reduceMotion}
+                onChange={setReduceMotion}
+              />
+              <SwitchRow
+                label="Increase contrast"
+                checked={increaseContrast}
+                onChange={setIncreaseContrast}
+              />
+              {/* Busy, the only inert form: still focusable, still in the tab
+                  order, and it declines its own press. Tab to it and try. */}
+              <SwitchRow label="Pill for captures you start" checked busy onChange={() => {}} />
             </div>
           </Section>
 

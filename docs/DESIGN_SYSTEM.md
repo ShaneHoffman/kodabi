@@ -247,8 +247,16 @@ animation for its opacity-only partner, at the call site, with the `motion-reduc
 | `animate-ring` | `animate-halo-still` |
 | `animate-breathe`, `animate-drift`, `animate-drift-back` | none |
 | `active:scale-97` | no press transform |
+| a switch knob's `translate` | `duration-0` — the same move, arriving at once |
 
 `animate-caret` and `animate-pending` are opacity-only already and are left alone.
+
+**The last row is the exception the rule needs, and it is not a floor by the back door.** Every swap
+above removes a move because the move was *decoration on top of* the information. A switch knob's
+position IS the information — it is what tells you the switch is on, since no track fill quiet enough
+to sit on a card clears 3:1 (§6) — so cancelling it would cancel the state, not the animation. It
+therefore keeps the property and drops only the time. **Gate a duration this way exactly when the end
+state, not the travel, is what the user is reading.** Anywhere else, swap the animation.
 
 `animate-halo-still` is the shape of this whole rule. A duration floor could not have produced it: it
 would have frozen the aura mid-rotation at whatever shape it happened to hold, which is exactly the
@@ -449,7 +457,7 @@ is the bug, not the contrast number.
 
 ### More contrast is a token remap
 
-`.hc` moves exactly two things:
+`.hc` moves exactly three things:
 
 - **`ink-faint` is promoted** — metadata stops whispering. At night that is exactly the `ink-dim`
   value (`#a6b09b`). In day it goes one step *past* dim, to `#4a543f` (6.86 on the ground) rather
@@ -457,6 +465,13 @@ is the bug, not the contrast number.
   would have left day's promotion visibly weaker than night's. The two variants promote to the same
   *perceived* step, not to the same token.
 - **`edge` takes a stronger alpha** (.26 night, .32 day) — structure stops being implied.
+- **`switch-on` takes a stronger alpha** (.30 night, .22 day, from .22 and .14) — a switch's track is
+  the one fill in the system whose job is to report a **state** rather than to be a surface, and a
+  state readout is exactly what more contrast is asked for. It is the addition the rule below
+  licenses: no ratio in the table above justifies it, because a resting track never clears 3:1 at any
+  alpha quiet enough to belong on a card. What clears is the knob — ink on that track, and 18px of
+  travel — which is why the fill is allowed to be a hint and why promoting it is a strengthening of
+  the hint rather than a repair of a signal.
 
 Nothing else moves, because §6's table shows nothing else needs to. That is the test for any future
 addition here: if a token is proposed for the `.hc` block, the ratio that justifies it should be
