@@ -161,6 +161,16 @@
   --color-wash: rgb(255 255 255 / 0.05);
   --color-wash-hover: rgb(255 255 255 / 0.09);
 
+  /* A switch's track once it is on. The only fill in the system whose job
+     is to report a boolean, which is why it is not just `wash-hover` a
+     step deeper: the two tracks sit side by side down a settings card and
+     have to be told apart at a glance, not compared.
+     It is the SUPPORTING cue and never the only one — the knob's 18px of
+     travel is what actually carries the state, and it is ink on the track
+     at ~15:1, because no fill this quiet clears 3:1 against the panel
+     (docs/DESIGN_SYSTEM.md §6). */
+  --color-switch-on: rgb(255 255 255 / 0.22);
+
   /* ---------- type ----------
      Three faces, three jobs, no overlap. UI is the interface's own
      voice; data is anything that lines up in a column (clocks, counts,
@@ -401,6 +411,10 @@
 
   --color-wash: rgb(24 32 16 / 0.06);
   --color-wash-hover: rgb(24 32 16 / 0.09);
+
+  /* Shallower than night's, for the same reason the fills above are: ink
+     over a pale ground carries further than white over a dark one. */
+  --color-switch-on: rgb(24 32 16 / 0.14);
 }
 
 /* More contrast is a promotion, not a palette. Faint ink is promoted to
@@ -410,11 +424,16 @@
 .hc {
   --color-ink-faint: #a6b09b;
   --color-edge: rgb(255 255 255 / 0.26);
+  /* A switch's on-track is a state readout rather than structure, so it
+     takes the promotion too: the knob still carries the state, but the
+     fill it rides on stops being a hint. */
+  --color-switch-on: rgb(255 255 255 / 0.3);
 }
 
 .hc.day {
   --color-ink-faint: #4a543f;
   --color-edge: rgb(24 32 16 / 0.32);
+  --color-switch-on: rgb(24 32 16 / 0.22);
 }
 
 /* ============================================================
