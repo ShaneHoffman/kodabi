@@ -1331,7 +1331,17 @@
      Align Tailwind's numeric grid to the same 4px base as --space-*, and
      expose the named steps as semantic aliases. The named form is the only
      sanctioned spelling (docs/UI_CONVENTIONS.md); eslint fails the numeric
-     one. Per-view geometry is not here — it is Layer 4, read from CSS. */
+     one. Per-view geometry is not here — it is Layer 4, read from CSS.
+
+     TRAP, and it is the reason `max-w-md` is not what you think: v4 resolves
+     `max-w-<name>` against the spacing namespace as well as `--container-*`,
+     and the aliases below shadow the built-in container scale by name. So
+     `max-w-sm` is 16px and `max-w-md` is 24px — not 24rem and 28rem. They
+     collapse a column to nothing rather than capping it, and the failure is
+     silent, exactly like the `--radius-*` collision src/groveTokenNames.test.ts
+     was written for (that guard cannot see this one: these are Tailwind's own
+     names, not Grove's). Until this bridge is deleted, spell a width cap as an
+     arbitrary value — `max-w-[28rem]`, `max-w-[66ch]`. */
   --spacing: 0.25rem;
   --spacing-3xs: var(--space-3xs);
   --spacing-2xs: var(--space-2xs);

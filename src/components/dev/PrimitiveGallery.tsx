@@ -205,7 +205,11 @@ export function PrimitiveGallery() {
           >
             {/* Uncontrolled on purpose: a catalogue page has no business
                 holding the value of every control it displays. */}
-            <div className="flex max-w-sm flex-col gap-5" id="fields">
+            {/* An arbitrary value, not `max-w-sm`: the legacy bridge's named
+                spacing aliases shadow Tailwind's container scale, so `max-w-sm`
+                caps this column at 16px and it collapses (see the note in
+                src/index.css section 4). */}
+            <div className="flex max-w-[24rem] flex-col gap-5" id="fields">
               <Field
                 label="Project name"
                 placeholder="project-name"
@@ -255,7 +259,7 @@ export function PrimitiveGallery() {
             {/* Shown on the row they live on, because a switch's whole job is
                 to sit at the right edge of a settings row and be scanned down
                 a column with its siblings. */}
-            <div className="glass-card flex max-w-md flex-col px-5" id="switches">
+            <div className="glass-card flex max-w-[28rem] flex-col px-5" id="switches">
               <SwitchRow
                 label="Reduce motion"
                 checked={reduceMotion}
