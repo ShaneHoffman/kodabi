@@ -9,9 +9,10 @@ import remarkGfm from "remark-gfm";
  * selectors in a stylesheet, because Grove's rule is that a component carries
  * its own classes (docs/UI_CONVENTIONS.md §6). The pre-Grove view did the
  * opposite — it handed the markdown to react-markdown bare and let
- * `markdownReading.css` reach into the output — which is why that file is
- * SHARED with ChatView and cannot be deleted here. This view simply stops
- * consuming it; the chat's own Grove ticket retires the rest.
+ * `markdownReading.css` reach into the output. That file outlived this view's
+ * ticket only because ChatView still read it; the chat's own Grove ticket
+ * deleted it, and this component is now the single renderer of note prose —
+ * a chat answer included.
  *
  * The GFM class names below (`contains-task-list`, `task-list-item`) are
  * mdast-util-to-hast's, not ours: it stamps them on the list and the item of

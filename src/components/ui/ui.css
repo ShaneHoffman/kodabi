@@ -90,7 +90,7 @@
    `balance` on the display steps only. The serif view titles run to 34 and
    36px inside a capped measure, which is exactly the shape that drops one
    word onto a line of its own; balance evens the ragged edge instead. Body
-   prose uses `pretty` (see .md-reading p, .inbox__snippet), which is the
+   prose uses `pretty` (see NoteMarkdown.tsx's `p`), which is the
    cheaper rule and the right one past a few lines — `balance` is specified to
    give up after four. */
 .ui-balance {

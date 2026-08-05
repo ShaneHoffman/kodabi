@@ -287,7 +287,15 @@ function ChatEntryRow({
       return (
         <p
           className={clsx(
-            "max-w-[55%] self-end whitespace-pre-wrap",
+            // `break-words` is load-bearing next to `pre-wrap`, not tidiness:
+            // pre-wrap keeps the typed line breaks but leaves overflow-wrap at
+            // `normal`, so one unbroken token — a pasted path or URL, which is
+            // exactly what you paste into a chat about your notes — paints
+            // outside the bubble's border and hands the conversation a
+            // horizontal scrollbar (the log's overflow-x computes to `auto`
+            // off its overflow-y). The 55% cap is what puts that within reach
+            // of an ordinary message.
+            "max-w-[55%] self-end whitespace-pre-wrap break-words",
             // A rectangle with one corner drawn in: the tail points back at
             // the composer the message was typed in.
             "rounded-[14px] rounded-br-[4px] border border-edge bg-wash",

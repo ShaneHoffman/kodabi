@@ -103,6 +103,25 @@ describe("ChatView", () => {
     expect(screen.getByText("And one more thing")).toBeInTheDocument();
   });
 
+  it("lets a user message break a token too long for its bubble", async () => {
+    // jsdom has no layout, so what this locks in is the class contract, the
+    // same way the entrance tests below do. It matters because the two classes
+    // are only correct together: `pre-wrap` keeps the typed line breaks and
+    // leaves overflow-wrap at `normal`, so without `break-words` a pasted path
+    // paints outside the bubble's 55% cap and gives the log a horizontal
+    // scrollbar. Measured before the fix: a 63-character path ran 465px wide
+    // in a 383px content box.
+    const PASTED_PATH = "C:\\Users\\example\\repos\\kodabi\\docs\\FOUNDING_DOC.md";
+    onCommand("chat_open", () =>
+      snapshot({ entries: [{ kind: "user", text: PASTED_PATH }] }),
+    );
+    await renderChat();
+
+    const bubble = screen.getByText(PASTED_PATH);
+    expect(bubble).toHaveClass("whitespace-pre-wrap");
+    expect(bubble).toHaveClass("break-words");
+  });
+
   it("hydrates an in-flight turn as stoppable even with nothing streaming", async () => {
     // Mid-turn there may be no streamed text and no pending card (the model
     // thinking, a read tool running): the snapshot's explicit turn_active is
