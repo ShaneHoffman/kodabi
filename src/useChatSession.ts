@@ -129,7 +129,13 @@ function applyEvent(
     case "tool_use":
       return {
         ...state,
-        entries: [...state.entries, { kind: "tool_use", summary: payload.summary }],
+        entries: [
+          ...state.entries,
+          // `note` rides along unread here: which answer cites it is a render-
+          // time question (`citationsFor`), not a reducer one, so the log stays
+          // a flat record of what happened.
+          { kind: "tool_use", summary: payload.summary, note: payload.note },
+        ],
       };
     case "permission_request":
       return {

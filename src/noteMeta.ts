@@ -26,6 +26,22 @@ export function noteMeta(
   );
 }
 
+/**
+ * The meta line a note row carries inside the folder that holds it: the kind
+ * first, then the day.
+ *
+ * Two things differ from `noteMeta`, and both follow from the browse register.
+ * The kind LEADS because the row stacks — title, meta, snippet — so the meta
+ * line is read as a caption under a title rather than scanned down a date
+ * column, and what the eye wants first is what sort of thing this is. And the
+ * tags are DROPPED: inside a project, the shared filing is the thing you
+ * already know, so repeating it on every row is noise the calm register cannot
+ * afford. The day is sliced the same way `noteMeta` slices it.
+ */
+export function projectRowMeta(note: Pick<NoteSummary, "date" | "type">): string {
+  return [noteKind(note.type), note.date.slice(0, 10)].filter((part) => !!part).join(SEPARATOR);
+}
+
 /** The router's confidence in where it filed a note, as a display string. A
  * hand-filed note carries no score, which reads as 0%. */
 export function matchScore(confidence: number | null): string {

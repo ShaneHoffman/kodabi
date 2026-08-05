@@ -262,9 +262,9 @@
      it can't be, because a displacement's identity is 0 and a scale's is 1, so
      zeroing --move must land on 1, not 0. `calc(1 - 0.04 * var(--move))` reads
      as "shrink by 4% only while --move is 1". Opacity keeps its plain
-     --dur-plane on both legs, same as the chat answer's entrance
-     (ChatView.css) — under reduce the menu still fades in over 180ms and
-     simply never scales.
+     --dur-plane on both legs, same as the chat answer's entrance (now Grove
+     `starting:` utilities in ChatView.tsx) — under reduce the menu still fades
+     in over 180ms and simply never scales.
 
      There is deliberately NO exit. The list is conditionally rendered, so
      closing unmounts it — which is what the ARIA wiring, both bridge hooks and

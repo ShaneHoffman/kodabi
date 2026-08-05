@@ -735,17 +735,10 @@
   --lead-footnote: 22px; /* Needs attention: the cards to the reassurance */
   --gap-card: 14px; /* between two pre-lifted cards */
 
-  /* the chat view — a conversation read as prose, so it borrows the doc's
-     measure, and its rhythm is the space between speakers changing hands. */
-  --chat-measure: 660px; /* the doc measure: an answer is read like a note */
-  --chat-gap-turn: 26px; /* between two entries: wider than prose paragraphs
-                            (--space-xs), tighter than a doc section — a turn
-                            is a change of voice, not a new chapter */
-  --chat-lead-composer: 18px; /* the log to the composer's hairline */
-  --chat-composer-min: 44px; /* the composer's floor, like the writing
-                                surfaces under "measures" above: one serif
-                                line plus its inset, before it grows */
-  --chat-composer-max: 200px; /* where growth stops and it scrolls inside */
+  /* the chat view's --chat-* block lived here until its Grove ticket, which
+     deleted ChatView.css and the ViewFrame variant that read the measure. The
+     conversation now fills the panel and only its answer prose caps, in
+     ChatView.tsx. */
 
   /* the list rows — per-view density.
 
@@ -812,7 +805,8 @@
 
      One consumer left: the note editor's Grove ticket moved a note's task list
      onto utilities in NoteMarkdown.tsx, which draws the same skin from Grove
-     tokens and does not read these. Checkbox.css and ChatView still do.
+     tokens and does not read these, and the chat's ticket deleted
+     markdownReading.css outright. Only Checkbox.css still does.
 
      17px rather than 16: at 1rem the box sits a hair small beside the 15px
      sans label it is bound to, and the extra pixel is what makes the two read
