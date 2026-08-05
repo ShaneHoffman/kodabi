@@ -28,8 +28,9 @@ export type OverlaySettings = {
   auto_captures: boolean;
 };
 
-/** Mirrors `Theme` in `crates/kodabi-core/src/settings.rs`. "system" defers to
- * `prefers-color-scheme`, which is what `design/tokens.css` answers on its own. */
+/** Mirrors `Theme` in `crates/kodabi-core/src/settings.rs`. "system" resolves
+ * `prefers-color-scheme` in `src/theme.ts`, which is where the `.day` class is
+ * decided — the Grove tokens carry no media query of their own. */
 export type Theme = "system" | "light" | "dark";
 
 /** Mirrors `AppearanceSettings` in `crates/kodabi-core/src/settings.rs`. */

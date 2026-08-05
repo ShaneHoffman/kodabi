@@ -25,8 +25,10 @@
     `include_image!` requires (it rejects RGB24 and palette PNGs at compile
     time).
 
-    Colors are the design tokens from design/tokens.css, hard-coded here
-    because a PNG cannot read a CSS custom property. Keep them in sync:
+    Colors came from the pre-Grove palette and are hard-coded here because a
+    PNG cannot read a CSS custom property. They are now their own source of
+    truth: the tray sits on the Windows taskbar rather than in the app, so it
+    does not follow the in-app theme and has no Grove token to track.
       #E9E8DE  --k-paper        the ink treatment, inverted
       #3B4636  --k-fern         rim, so the marks also read on a light taskbar
       #86A67E  --k-green-night  the living green (light sibling: --k-green

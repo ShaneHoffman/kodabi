@@ -12,21 +12,12 @@
      1. the Grove theme      — @theme tokens + keyframes (night values)
      2. the variants         — .day and .hc, as token remaps
      3. sanctioned CSS       — the ground glow, global chrome, the mark
-     4. LEGACY               — the pre-Grove bridge, kept alive for the
-                               screens that have not migrated yet
-
-   Section 4 is scaffolding with a demolition date. Every screen ticket
-   deletes its own component stylesheet as it migrates, and a final
-   cleanup ticket removes what is left of design/tokens.css, the
-   `@theme inline` bridge, and the webfonts. Nothing new may consume it.
 
    The doctrine these tokens serve is docs/DESIGN_SYSTEM.md; the
    mechanics of spelling them are docs/UI_CONVENTIONS.md.
    ============================================================ */
 
 @import "tailwindcss";
-/* LEGACY — unmigrated screens only. See section 4. */
-@import "../design/tokens.css";
 
 /* ============================================================
    1. THE GROVE THEME
@@ -56,11 +47,10 @@
    `motion-reduce` also matches the in-app toggle. Reduced motion has two
    sources here — the OS preference and the Settings switch, which sets
    `data-reduce-motion="on"` on the root (src/reduceMotion.ts) — and the
-   built-in variant only sees the first. Without this the toggle would keep
-   working on legacy screens (it remaps `--move` in design/tokens.css) and
-   silently stop working on every Grove primitive. Two `@slot`s means two
-   emitted rules per call site, which is the point: they are two independent
-   conditions, not a duplicate. */
+   built-in variant only sees the first. Without this the Settings switch
+   would be inert on every Grove primitive, which is all of them. Two
+   `@slot`s means two emitted rules per call site, which is the point: they
+   are two independent conditions, not a duplicate. */
 @custom-variant hover {
   @media (hover: hover) and (pointer: fine) {
     &:hover {
@@ -80,10 +70,8 @@
 
 /* Plain `@theme`, not `@theme inline`: v4 emits these on `:root` inside
    `@layer theme` and every utility references the var, so the unlayered
-   `.day` / `.hc` blocks below re-theme the whole app live. (`inline`
-   would bake the night value into each utility and break both variants —
-   it is used in the legacy bridge for the opposite reason: that layer
-   re-themes through a `data-theme` attribute those utilities never see.) */
+   `.day` / `.hc` blocks below re-theme the whole app live. `inline` would
+   bake the night value into each utility and break both variants. */
 @theme {
   /* ---------- the ground ----------
      One plane. Grove has no second "surface" colour: a panel is the
@@ -172,6 +160,34 @@
      (docs/DESIGN_SYSTEM.md §6). */
   --color-switch-on: rgb(255 255 255 / 0.22);
 
+  /* ---------- the terminal's ANSI palette ----------
+     The 16 ANSI colours the embedded terminal renders `claude`'s TUI in.
+     Terminal-only: consumed by nothing but the xterm theme in
+     src/useXterm.ts, which reads them through getComputedStyle so the
+     palette re-themes with the app. Earthy and muted to sit with the rest
+     of the system, not a stock palette.
+
+     Deliberately NO `.hc` pair. A hosted TUI's palette is not ours to
+     promote — xterm's own `minimumContrastRatio` is the right lever there,
+     because it lifts what the program actually drew rather than guessing
+     at it from outside (docs/DESIGN_SYSTEM.md §6). */
+  --color-ansi-black: #3a362a;
+  --color-ansi-red: #d77a68;
+  --color-ansi-green: #86ae6b;
+  --color-ansi-yellow: #d4b36a;
+  --color-ansi-blue: #82a8d6;
+  --color-ansi-magenta: #c79ac0;
+  --color-ansi-cyan: #82bec0;
+  --color-ansi-white: #b3afa1;
+  --color-ansi-bright-black: #7b7768;
+  --color-ansi-bright-red: #e8968a;
+  --color-ansi-bright-green: #a0c888;
+  --color-ansi-bright-yellow: #e4c98a;
+  --color-ansi-bright-blue: #9fc0e8;
+  --color-ansi-bright-magenta: #d8b4d2;
+  --color-ansi-bright-cyan: #9fd4d6;
+  --color-ansi-bright-white: #efede3;
+
   /* ---------- type ----------
      Three faces, three jobs, no overlap. UI is the interface's own
      voice; data is anything that lines up in a column (clocks, counts,
@@ -196,14 +212,13 @@
      the card rung, since it is a list of rows and a rounder corner would
      bow out past the topmost of them.
 
-     A NAME HERE MUST NOT ALSO EXIST IN design/tokens.css, and radii are
-     where the two vocabularies overlap most. `@theme` emits into
-     `@layer theme`; the legacy file is unlayered and therefore WINS every
-     tie, so a shared name does not conflict loudly — it silently hands the
-     Grove utility the legacy value. `rounded-card` shipped at 12px and
-     `rounded-pill` at 11px that way, until the legacy pair was renamed
-     `--radius-*-legacy`. The same trap is open to any new Grove token, so
-     check the name before adding one. */
+     A NAME HERE MUST NOT ALSO BE DECLARED BY AN UNLAYERED STYLESHEET.
+     `@theme` emits into `@layer theme`, and unlayered CSS beats every
+     layer, so a shared name does not conflict loudly — it silently hands
+     the Grove utility the other value. `rounded-card` shipped at 12px and
+     `rounded-pill` at 11px that way against the pre-Grove tokens, which is
+     what the rule is written from. There is one stylesheet now, so the
+     collision has nowhere to come from; keep it that way. */
   --radius-panel: 18px;
   --radius-card: 14px;
   --radius-dialog: 16px;
@@ -416,6 +431,27 @@
   /* Shallower than night's, for the same reason the fills above are: ink
      over a pale ground carries further than white over a dark one. */
   --color-switch-on: rgb(24 32 16 / 0.14);
+
+  /* The ANSI palette, tuned to read on a pale ground rather than darkened
+     mechanically from night's. */
+  --color-ansi-black: #2e2c24;
+  --color-ansi-red: #a23b2c;
+  --color-ansi-green: #4e7a3e;
+  --color-ansi-yellow: #8a6d1a;
+  --color-ansi-blue: #3b6699;
+  --color-ansi-magenta: #86487f;
+  --color-ansi-cyan: #3b7377;
+  /* ANSI 'white' on a light plane reads as mid ink. */
+  --color-ansi-white: #6b685e;
+  --color-ansi-bright-black: #8b8879;
+  --color-ansi-bright-red: #c05038;
+  --color-ansi-bright-green: #5f9147;
+  --color-ansi-bright-yellow: #a6841f;
+  --color-ansi-bright-blue: #4a7bb0;
+  --color-ansi-bright-magenta: #9c5c94;
+  --color-ansi-bright-cyan: #47898d;
+  /* The strongest ink, so 'bright white' text stays legible on light. */
+  --color-ansi-bright-white: #211f17;
 }
 
 /* More contrast is a promotion, not a palette. Faint ink is promoted to
@@ -1017,15 +1053,15 @@
    glued to the trigger regardless. That escape is contingent rather than free —
    any ancestor carrying transform, filter, backdrop-filter, perspective,
    contain, will-change on one of those, or container-type becomes the
-   containing block. That list of seven is the standing grep (§6), and it is not
-   empty today: `.ui-overlay` carries backdrop-filter (Overlay.css) UNLESS the OS
-   asks for reduced transparency, so ConsentNudge's menu is contained by the
-   scrim rather than the viewport in one of those two states and not the other.
-   It does not move the menu, because the scrim is `fixed inset-0` and therefore
-   geometrically identical to the viewport either way — which is why the grep is
-   worth re-running rather than trusted as clean. Note what it demonstrates: an
-   accessibility preference can add or remove a containing block, so "which
-   ancestors carry one of the seven" is not a property of the stylesheet alone.
+   containing block. That list of seven is the standing grep (§6). The case
+   worth remembering is the pre-Grove `.ui-overlay`, whose backdrop-filter made
+   ConsentNudge's scrim a containing block UNLESS the OS asked for reduced
+   transparency — present in one of those two states and not the other. It
+   never moved the menu, because the scrim was `fixed inset-0` and therefore
+   geometrically identical to the viewport either way, but note what it
+   demonstrates: an accessibility preference can add or remove a containing
+   block, so "which ancestors carry one of the seven" is not a property of the
+   stylesheet alone, and the grep is worth re-running rather than trusted.
 
    The two `auto`s release the base branch's own insets, which position-area has
    no say over. The offset turns symmetric with them — margin-block, not
@@ -1287,162 +1323,12 @@
   animation: var(--animate-halo-still);
 }
 
-/* ============================================================
-   4. LEGACY — pre-Grove, deleted screen by screen
-   ============================================================ */
 
-/* Everything below this line is the pre-Grove system: design/tokens.css
-   re-exposed as Tailwind theme variables so the screens that have not
-   migrated yet keep rendering exactly as they did. It is frozen — no new
-   token, no new consumer. Each screen's Grove ticket deletes its own
-   component stylesheet, and the final cleanup ticket deletes this whole
-   section along with design/tokens.css and the webfonts.
-
-   `@theme inline` is the critical keyword: it makes Tailwind emit utilities
-   that REFERENCE var(--bg) at runtime rather than baking the light value in at
-   build time — so :root[data-theme="dark"] keeps re-theming every utility live.
-   Plain `@theme` would freeze the light values and break theme switching.
-   (The Grove block above is deliberately the other kind: its variants are
-   root CLASSES, which utilities see through the cascade without `inline`.) */
-@theme inline {
-  /* ---------- colour — the three planes ---------- */
-  --color-bg: var(--bg);
-  --color-surface: var(--surface);
-  --color-overlay: var(--overlay);
-
-  /* ---------- colour — the ink ladder ---------- */
-  --color-text: var(--text);
-  --color-text-read: var(--text-read);
-  --color-text-soft: var(--text-soft);
-  --color-text-faint: var(--text-faint);
-
-  /* ---------- colour — fills that are not planes ----------
-     A menu row under the pointer, an open control's token, a highlighted
-     search term. All value, no hue. */
-  --color-menu-hover: var(--menu-hover);
-  --color-token-active: var(--token-active);
-  --color-highlight: var(--highlight);
-
-  /* The one reserved green. Bridged so the listening dot, the waveform and
-     the caret can spell it as a utility — and nothing else may. */
-  --color-accent-dot: var(--accent-dot);
-
-  /* ---------- type — families ---------- */
-  --font-sans: var(--sans);
-  --font-serif: var(--serif);
-  --font-mono: var(--mono);
-
-  /* ---------- type — the size scale ----------
-     Fixed px. The window is 960x640 and does not reflow, so a fluid step
-     only made the same role render at two sizes for no reader's benefit. */
-  --text-eyebrow: var(--fs-eyebrow);
-  --text-micro: var(--fs-micro);
-  --text-cap: var(--fs-cap);
-  --text-meta: var(--fs-meta);
-  --text-action: var(--fs-action);
-  --text-label: var(--fs-label);
-  --text-body: var(--fs-body);
-  --text-snippet: var(--fs-snippet);
-  --text-snippet-sm: var(--fs-snippet-sm);
-  --text-lead: var(--fs-lead);
-  --text-input: var(--fs-input);
-  --text-row: var(--fs-row);
-  --text-read: var(--fs-read);
-  --text-h3: var(--fs-h3);
-  --text-capture: var(--fs-capture);
-  --text-wordmark: var(--fs-wordmark);
-
-  /* the big view title — one step per view type, because a config panel and
-     a note must not open at the same size (docs/DESIGN_SYSTEM.md §1). */
-  --text-title-panel: var(--fs-title-panel);
-  --text-title-health: var(--fs-title-health);
-  --text-title-library: var(--fs-title-library);
-  --text-title-doc: var(--fs-title-doc);
-
-  /* ---------- type — weights ---------- */
-  --font-weight-medium: var(--fw-medium);
-  --font-weight-semibold: var(--fw-semibold);
-  --font-weight-bold: var(--fw-bold);
-
-  /* ---------- type — tracking ----------
-     Two ramps, on two different axes. The eyebrows step on DEPTH: three steps,
-     not one, so a view eyebrow opens widest, a section eyebrow inside an
-     overlay sits one step tighter, and the sidebar rail tighter again — nesting
-     reads through the letter-spacing before the size. Never Tailwind's own
-     `tracking-wide` (0.025em) for any of them.
-
-     The titles step on SIZE, which is the other half of the same idea: letters
-     read further apart as they grow, so each title step carries its own
-     negative tracking (docs/DESIGN_SYSTEM.md §1). Every step here pairs with
-     the --leading-title-* of the same name. */
-  --tracking-eyebrow: var(--ls-eyebrow);
-  --tracking-eyebrow-menu: var(--ls-eyebrow-menu);
-  --tracking-rail: var(--ls-rail);
-  --tracking-caps: var(--ls-caps);
-  --tracking-token: var(--ls-token);
-  --tracking-wordmark: var(--ls-wordmark);
-  --tracking-row: var(--ls-row);
-  --tracking-title-panel: var(--ls-title-panel);
-  --tracking-title-health: var(--ls-title-health);
-  --tracking-title-library: var(--ls-title-library);
-  --tracking-title-doc: var(--ls-title-doc);
-
-  /* ---------- type — line-heights ----------
-     The four title steps tighten as they grow, mirroring the tracking above. */
-  --leading-tight: var(--lh-tight);
-  --leading-title-panel: var(--lh-title-panel);
-  --leading-title-health: var(--lh-title-health);
-  --leading-title-library: var(--lh-title-library);
-  --leading-title-doc: var(--lh-title-doc);
-  --leading-heading: var(--lh-heading);
-  --leading-body: var(--lh-body);
-  --leading-snippet: var(--lh-snippet);
-  --leading-list: var(--lh-list);
-  --leading-transcript: var(--lh-transcript);
-  --leading-read: var(--lh-read);
-
-  /* ---------- spacing ----------
-     Align Tailwind's numeric grid to the same 4px base as --space-*, and
-     expose the named steps as semantic aliases. The named form is the only
-     sanctioned spelling (docs/UI_CONVENTIONS.md); eslint fails the numeric
-     one. Per-view geometry is not here — it is Layer 4, read from CSS.
-
-     TRAP, and it is the reason `max-w-md` is not what you think: v4 resolves
-     `max-w-<name>` against the spacing namespace as well as `--container-*`,
-     and the aliases below shadow the built-in container scale by name. So
-     `max-w-sm` is 16px and `max-w-md` is 24px — not 24rem and 28rem. They
-     collapse a column to nothing rather than capping it, and the failure is
-     silent, exactly like the `--radius-*` collision src/groveTokenNames.test.ts
-     was written for (that guard cannot see this one: these are Tailwind's own
-     names, not Grove's). Until this bridge is deleted, spell a width cap as an
-     arbitrary value — `max-w-[28rem]`, `max-w-[66ch]`. */
-  --spacing: 0.25rem;
-  --spacing-3xs: var(--space-3xs);
-  --spacing-2xs: var(--space-2xs);
-  --spacing-xs: var(--space-xs);
-  --spacing-sm: var(--space-sm);
-  --spacing-md: var(--space-md);
-  --spacing-lg: var(--space-lg);
-  --spacing-xl: var(--space-xl);
-  --spacing-2xl: var(--space-2xl);
-  --spacing-3xl: var(--space-3xl);
-
-  /* ---------- radii ----------
-     tokens.css defines --radius-sm / --radius-md at :root (unlayered), so
-     `rounded-sm` / `rounded-md` already resolve to our tokens and must not
-     be re-declared here (it would be a self-cycle). The rest of the ladder
-     is consumed from CSS, where the shapes that need it already live. */
-}
-
-/* The global chrome — scrollbars and selection — used to live here, reading
-   the legacy `--scrollbar-*` and `--selection` tokens. It is now Grove's, in
-   section 3; design/tokens.css keeps declaring those three, and nothing
-   consumes them any more.
-
-   Reduced motion is NOT handled here. There used to be an app-wide floor on
-   `*` that collapsed every duration to 1ms, and it was the wrong shape twice
-   over: it threw away the colour and opacity half, which aids comprehension and
-   causes no vestibular trouble, and a duration floor cannot restore a resting
-   SHAPE, which is how the spirit-mark's aura once froze mid-drift. It is now a
-   token remap on `--move` in design/tokens.css, gating movement alone. See
+/* Reduced motion is NOT handled globally. There used to be an app-wide floor
+   on `*` that collapsed every duration to 1ms, and it was the wrong shape
+   twice over: it threw away the colour and opacity half, which aids
+   comprehension and causes no vestibular trouble, and a duration floor cannot
+   restore a resting SHAPE, which is how the spirit-mark's aura once froze
+   mid-drift. Every motion is paired with its own reduced-motion swap at the
+   call site instead, through the `motion-reduce` variant redefined above. See
    docs/DESIGN_SYSTEM.md §4. */

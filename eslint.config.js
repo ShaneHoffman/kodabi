@@ -6,19 +6,18 @@ import tseslint from "typescript-eslint";
 
 // The Grove guards.
 //
-// They replace the pre-Grove token guard (a `src/designTokens.test.ts` that
-// scanned stylesheets, plus eslint rules banning numeric spacing utilities and
-// arbitrary values). Grove is styled with Tailwind utilities, so the numeric
-// grid and arbitrary values are now the sanctioned spelling and both of those
-// bans are gone. What is left worth enforcing is narrower and sharper:
+// They replaced the pre-Grove token guard (a test that scanned stylesheets,
+// plus eslint rules banning numeric spacing utilities and arbitrary values).
+// Grove is styled with Tailwind utilities, so the numeric grid and arbitrary
+// values are now the sanctioned spelling and both of those bans are gone. What
+// is left worth enforcing is narrower and sharper:
 //
 //   1. Colour comes from the theme. A hex in a className is a value that no
 //      theme block can re-map, which means it survives .day and .hc unchanged
 //      and quietly breaks both variants. This is the one rule where a literal
 //      is not merely untidy but wrong.
-//   2. Styles live in src/index.css. Every other stylesheet is pre-Grove and on
-//      its way out, so a NEW one has to be an argued exception rather than a
-//      quiet reflex.
+//   2. Styles live in src/index.css. It is now the app's only stylesheet, so a
+//      NEW one has to be an argued exception rather than a quiet reflex.
 //
 // Both are `no-restricted-syntax`, hoisted to a const because the bridge-hook
 // override below re-declares that rule to allow useEffect — and a blanket
@@ -46,9 +45,10 @@ const groveGuardSelectors = [
     message: COLOUR_MESSAGE,
   },
   {
-    // Grove has one stylesheet. The exceptions that remain are all pre-Grove
-    // and each carries a disable comment naming the ticket that deletes it —
-    // which is the point: the exceptions stay countable and dated.
+    // Grove has one stylesheet, and there are no exceptions left in the app's
+    // own code — the last pre-Grove sheet went with the legacy layer. The only
+    // surviving disable is a third-party import (xterm's), which is the shape
+    // a future one has to argue itself into.
     selector:
       'ImportDeclaration[source.value=/\\.css$/]:not([source.value="./index.css"])',
     message:

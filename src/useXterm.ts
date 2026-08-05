@@ -93,10 +93,9 @@ function resolveColour(probe: HTMLElement, value: string): string {
 }
 
 /**
- * The current theme's terminal colours, read from the design tokens so xterm
- * matches the app and re-themes with it. xterm's theme is set in JS, so this is
- * where the tokens are consumed — not a `.css` file the token guard would
- * police.
+ * The current theme's terminal colours, read from the Grove theme so xterm
+ * matches the app and re-themes with it. xterm's theme is set in JS, so this
+ * is where the tokens are consumed rather than in a stylesheet.
  *
  * The base planes are Grove's. The background is not a colour at all: the
  * `glass-term` well behind the mount paints it, which is what lets `.day` and
@@ -105,19 +104,14 @@ function resolveColour(probe: HTMLElement, value: string): string {
  * sanctioned uses — DESIGN_SYSTEM §2), and the ground under the block cursor,
  * which inverts with the ground exactly as it should.
  *
- * The 16 ANSI colours are still the legacy `--ansi-*` group in
- * design/tokens.css, which keys off `data-theme` rather than the `.day` class
- * and has night and day values — and deliberately no high-contrast pair, per
- * the paragraph below. It is the last thing in this file on the frozen layer:
- * THE LEGACY-CLEANUP TICKET MUST PORT THE `--ansi-*` BLOCK INTO GROVE'S
- * `@theme` BEFORE DELETING design/tokens.css — nothing else consumes it, so
- * nothing else would notice it going.
+ * The 16 ANSI colours are the `--color-ansi-*` group in the `@theme` block,
+ * remapped by `.day` like every other Grove colour.
  *
  * `probe` is any mounted element, borrowed for one synchronous style read to
  * resolve the selection wash's `color-mix()`. The ANSI palette deliberately
  * stays ungated by the contrast switch (docs/DESIGN_SYSTEM.md §6 — xterm's own
  * `minimumContrastRatio` is the right lever for a hosted TUI, not a palette
- * swap).
+ * swap), which is why it carries no `.hc` pair.
  */
 function readTerminalTheme(styles: CSSStyleDeclaration, probe: HTMLElement): ITheme {
   const token = (name: string) => styles.getPropertyValue(name).trim();
@@ -127,22 +121,22 @@ function readTerminalTheme(styles: CSSStyleDeclaration, probe: HTMLElement): ITh
     cursor: token("--color-kodama"),
     cursorAccent: token("--color-ground"),
     selectionBackground: resolveColour(probe, SELECTION),
-    black: token("--ansi-black"),
-    red: token("--ansi-red"),
-    green: token("--ansi-green"),
-    yellow: token("--ansi-yellow"),
-    blue: token("--ansi-blue"),
-    magenta: token("--ansi-magenta"),
-    cyan: token("--ansi-cyan"),
-    white: token("--ansi-white"),
-    brightBlack: token("--ansi-bright-black"),
-    brightRed: token("--ansi-bright-red"),
-    brightGreen: token("--ansi-bright-green"),
-    brightYellow: token("--ansi-bright-yellow"),
-    brightBlue: token("--ansi-bright-blue"),
-    brightMagenta: token("--ansi-bright-magenta"),
-    brightCyan: token("--ansi-bright-cyan"),
-    brightWhite: token("--ansi-bright-white"),
+    black: token("--color-ansi-black"),
+    red: token("--color-ansi-red"),
+    green: token("--color-ansi-green"),
+    yellow: token("--color-ansi-yellow"),
+    blue: token("--color-ansi-blue"),
+    magenta: token("--color-ansi-magenta"),
+    cyan: token("--color-ansi-cyan"),
+    white: token("--color-ansi-white"),
+    brightBlack: token("--color-ansi-bright-black"),
+    brightRed: token("--color-ansi-bright-red"),
+    brightGreen: token("--color-ansi-bright-green"),
+    brightYellow: token("--color-ansi-bright-yellow"),
+    brightBlue: token("--color-ansi-bright-blue"),
+    brightMagenta: token("--color-ansi-bright-magenta"),
+    brightCyan: token("--color-ansi-bright-cyan"),
+    brightWhite: token("--color-ansi-bright-white"),
   };
 }
 
@@ -248,9 +242,6 @@ export function useXterm(container: RefObject<HTMLDivElement | null>): XtermHand
     // (theme.ts re-applies the class directly, emitting nothing), and the
     // contrast toggle. The last two used to leave the pane stale.
     //
-    // `data-theme` is watched alongside it because the 16 ANSI colours still
-    // come from the legacy layer, which keys off the attribute, not the class.
-    //
     // No rAF: the callback runs after the attribute has landed, and
     // `getComputedStyle` forces the recalc, so the tokens read here are the new
     // ones. (The event listener this replaced needed one — it raced the write.)
@@ -259,7 +250,7 @@ export function useXterm(container: RefObject<HTMLDivElement | null>): XtermHand
     });
     themeObserver.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["class", "data-theme"],
+      attributeFilter: ["class"],
     });
 
     return () => {

@@ -369,14 +369,12 @@ describe("SettingsView appearance", () => {
 
     await user.click(screen.getByRole("switch", { name: "Increase contrast" }));
 
-    // "more", not "on": the attribute mirrors the media feature's own
-    // vocabulary, and this is the literal `:root[data-contrast="more"]` in
-    // design/tokens.css keys off.
-    expect(document.documentElement).toHaveAttribute("data-contrast", "more");
+    // The `.hc` class on :root, which is what the Grove token remap keys off.
+    expect(document.documentElement).toHaveClass("hc");
 
     await user.click(screen.getByRole("switch", { name: "Increase contrast" }));
 
-    expect(document.documentElement).not.toHaveAttribute("data-contrast");
+    expect(document.documentElement).not.toHaveClass("hc");
   });
 
   it("shows a stored display preference without an effect", async () => {
