@@ -76,9 +76,9 @@ impl Default for OverlaySettings {
 /// Which theme the window wears.
 ///
 /// `System` is the default and the honest one: the app has no opinion until the
-/// user states one, and `design/tokens.css` already answers `prefers-color-scheme`
-/// on its own. The other two are an override for a machine whose OS setting
-/// doesn't match where the user actually works.
+/// user states one, and the frontend resolves `prefers-color-scheme` for it
+/// (`src/theme.ts`). The other two are an override for a machine whose OS
+/// setting doesn't match where the user actually works.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Theme {

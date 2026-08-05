@@ -547,9 +547,9 @@ fn tray_icon_kind(event: &CaptureStateEvent) -> TrayIconKind {
 
 /// The 32x32 asset for a mark, embedded at compile time.
 ///
-/// Drawn by `scripts/generate-tray-icons.ps1` from the `design/tokens.css`
-/// values — regenerate there rather than editing the PNGs, and touch this
-/// file afterwards (cargo doesn't track `include_image!` inputs, so a stale
+/// Drawn by `scripts/generate-tray-icons.ps1`, which holds the palette —
+/// regenerate there rather than editing the PNGs, and touch this file
+/// afterwards (cargo doesn't track `include_image!` inputs, so a stale
 /// embedding otherwise survives the rebuild).
 fn tray_icon_image(kind: TrayIconKind) -> Image<'static> {
     match kind {
