@@ -323,6 +323,28 @@ The Inbox row's guess hue is written `border-l-coral hover:border-l-coral` for t
 an edge is the only conflict here: nothing else the recipe sets is a property a card is likely to
 have opinions about.
 
+### The one surface that goes down
+
+`glass-term` is the material inverted: a **well** sunk into a panel rather than a pane raised off the
+ground. It is the terminal's, and it is spelled by inverting the two parts that do the raising.
+
+| Part | A pane | The well |
+| --- | --- | --- |
+| Fill | White (or ink in day) **over** the ground, so it lightens | Black at 35% — the only fill in Grove that darkens what it sits on. Day inverts to ink at 6%, far shallower, because ink over a pale ground carries much further than black over a dark one |
+| Backdrop blur | Its rung's | **None.** What it holds is a live terminal, and blurring the ground behind the densest text on screen buys nothing and costs a compositor pass on every frame the PTY paints |
+| Lit top edge | `--color-edge-lit` | The same. A recess lit from above catches the light on its top lip exactly as a pane does, and without it the well stops reading as a depth in the panel and starts reading as a black rectangle laid on one |
+| Shadow | Deep and soft, beneath | **None.** A recess casts none |
+| Radius | Its rung of the ladder | 12px, off the ladder — the search field's shape, because it is the same kind of thing: a container for what the user types into |
+
+It is **not a tenth thickness**, for the same reason `glass-card-lift` is not: the nine are one
+material at nine depths above the page, and this is the other side of the page. Reach for it when
+something is genuinely *recessed into* a surface. Everything else that sits inside a panel is a card.
+
+It still carries the `prefers-reduced-transparency` branch, because the rule for that branch is a
+translucent fill **or** a `backdrop-filter`, and it has the first. Each solid there is this fill
+composited over `glass-panel`'s own solid, so the well keeps its depth on a machine that does not do
+glass.
+
 ### The ladder
 
 | Layer | Radius | Is |
@@ -353,8 +375,8 @@ The scrim is the one exception, and not an omission: it has no `backdrop-filter`
 made opaque would blank the app rather than reveal it.
 
 Because the swap removes a *property* rather than remapping a value, it cannot live in a token or a
-variant — which is why the nine thickness recipes are `@utility` blocks with the day branch and the
-reduced-transparency branch nested inside each one, emitted together or not at all.
+variant — which is why the nine thickness recipes and `glass-term` are `@utility` blocks with the day
+branch and the reduced-transparency branch nested inside each one, emitted together or not at all.
 
 `glass-card-lift` carries only the day branch, and that is correct rather than an omission: it sets a
 shadow and a border colour, neither of which the reduced-transparency swap touches (it changes fills
@@ -439,6 +461,13 @@ is the bug, not the contrast number.
 Nothing else moves, because §6's table shows nothing else needs to. That is the test for any future
 addition here: if a token is proposed for the `.hc` block, the ratio that justifies it should be
 missing from the table above.
+
+**The hosted terminal's 16 ANSI colours are the one palette outside this, and deliberately.** They
+are not Grove's voice — they are the colours a hosted program asked for, and remapping them would
+change what that program is saying, not how sharply it says it. xterm's own `minimumContrastRatio`
+is the right lever there, since it lifts a foreground against whatever background it actually landed
+on rather than second-guessing the palette. The pane's own chrome is Grove's and takes the promotion
+normally: its edge is `--color-edge`, its foreground is `ink-read`, and its caret is `kodama`.
 
 It reaches the DOM two ways, and it is **additive**: the in-app toggle and the OS
 `prefers-contrast: more` are OR-ed in [`src/contrast.ts`](../src/contrast.ts), so turning the app

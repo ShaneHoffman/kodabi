@@ -462,6 +462,11 @@
    shadow — plus its rung of the radius ladder, so a surface cannot be
    spelled at the wrong roundness.
 
+   Three recipes here are not thicknesses and say so in their own comments:
+   `glass-card-lift` (a card's pointer state), `glass-overlay-tail`, and
+   `glass-term`, which is the material inverted — a well sunk into a panel
+   rather than a pane raised off the ground.
+
    They are `@utility` recipes rather than a stack of utilities at the call
    site for three reasons, in order of weight:
 
@@ -622,6 +627,51 @@
       inset 0 1px 0 rgb(255 255 255 / 0.9),
       0 14px 40px rgb(46 60 36 / 0.16);
     border-color: rgb(24 32 16 / 0.18);
+  }
+}
+
+/* The terminal's well — the one surface in the set that goes DOWN.
+   Everything above is a pane raised off the ground; this is a hole cut into
+   one, and it is spelled by inverting the two parts that do the raising: the
+   fill goes DARKER than the panel it sits in rather than lighter (black at
+   35%, the only fill in Grove that is not white-or-ink over a ground), and
+   there is no drop shadow, because a recess casts none.
+
+   It keeps the lit top edge, and that is not an oversight. A recess lit from
+   above catches the light on its top lip exactly as a pane does; drop it and
+   the well stops reading as a depth in the panel and starts reading as a
+   black rectangle laid on top of one.
+
+   No backdrop blur either: what it holds is a live terminal, and blurring the
+   ground behind text that is already the densest thing on the screen buys
+   nothing and costs a compositor pass on every frame the PTY paints.
+
+   Radius 12 is off the ladder on purpose. This is not a card and not a panel;
+   it is the search field's rung — a container for something the user types
+   into — and the two are deliberately the same shape (SearchView's field). */
+@utility glass-term {
+  background: rgb(0 0 0 / 0.35);
+  border: 1px solid var(--color-edge);
+  border-radius: 12px;
+  box-shadow: inset 0 1px 0 var(--color-edge-lit);
+
+  /* Day inverts with the ground like every control fill does: ink over pale
+     instead of black over dark, and far shallower, because ink over a pale
+     ground carries much further than black over a dark one. */
+  &:where(.day, .day *) {
+    background: rgb(24 32 16 / 0.06);
+  }
+
+  /* A translucent fill is exactly what this branch exists for (DESIGN_SYSTEM
+     §5), even with no backdrop-filter to drop: each solid is this fill
+     composited over `glass-panel`'s own reduced-transparency solid, so the
+     well keeps its depth on a machine that does not do glass. */
+  @media (prefers-reduced-transparency: reduce) {
+    background: #0e130c;
+
+    &:where(.day, .day *) {
+      background: #eaede4;
+    }
   }
 }
 
@@ -866,6 +916,27 @@
   &:where(.day, .day *) {
     background: rgb(46 60 36 / 0.16);
   }
+}
+
+/* ---------- the terminal's viewport ----------
+   The one rule that makes `glass-term` visible at all.
+
+   xterm paints its scroll viewport opaque black from its own stylesheet
+   (`@xterm/xterm/css/xterm.css`, `.xterm-viewport { background-color: #000 }`),
+   and since the scrollable-element rework it no longer writes the theme's
+   background over that inline. So the transparent background `useXterm` hands
+   the theme is honoured by every layer except the one at the back, and the well
+   ends up behind an opaque rectangle — night looking flat, and day rendering a
+   black terminal on a pale panel.
+
+   Utilities cannot reach a class a third party owns, so this is CSS by
+   necessity rather than by choice. Scoped through `.glass-term` rather than
+   written `!important`: that is (0,2,0) against the vendor rule's (0,1,0), so
+   it wins on specificity no matter which stylesheet the bundler emits first —
+   and it says, in the selector, that this applies to OUR terminal and not to
+   any xterm someone drops in later. */
+.glass-term .xterm-viewport {
+  background-color: transparent;
 }
 
 /* ---------- focus ----------
