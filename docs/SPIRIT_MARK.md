@@ -55,7 +55,11 @@ you are changing the mark rather than reasoning about it.
   `RecordingStatus` inside `QuickCapture`) rather than mounting `ListenPill`: a pill is a chip
   sitting *in* a surface, and those two *are* the surface, on glass tuned for the desktop behind
   them. What must not diverge is the meaning — mark's fill, label's value, clock only for the
-  session — so change all three together, or change none.
+  session — so change all three together, or change none. **One carve-out:** the overlay's label
+  holds dim ink even while live, where `ListenPill` and `RecordingStatus` step theirs up to
+  `kodama-ink`, because the resident overlay spends its green on the mark alone
+  ([`DESIGN_SYSTEM.md`](DESIGN_SYSTEM.md) §2). The wording, the mark's fill and the clock still
+  move together across all three.
 
 ---
 
