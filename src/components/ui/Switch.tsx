@@ -78,9 +78,16 @@ export function Switch({ label, checked, onChange, busy = false }: Props) {
       <span
         aria-hidden="true"
         className={clsx(
-          "absolute top-0.5 left-0.5 size-4 rounded-pill",
-          // 18px is the geometry, not a round number: 38 track - 16 knob - 2
-          // insets. `translate`, not `transform`, for the v4 reason above.
+          "absolute top-[3px] left-0.5 size-4 rounded-pill",
+          // 18px is the geometry, not a round number: 38 track - 16 knob - two
+          // 2px insets. `translate`, not `transform`, for the v4 reason above.
+          //
+          // The VERTICAL inset is 3px rather than 2, and the asymmetry is
+          // arithmetic rather than taste: a 16px knob centres in a 22px track
+          // at 3px. At `top-0.5` it sat 2px below the top edge and 4px above
+          // the bottom one — riding visibly high on the one control whose
+          // position is the readout. jsdom applies no stylesheet, so this is a
+          // thing to check on /gallery.html rather than in a test.
           //
           // Only the DURATION is gated. The knob must arrive at the far inset
           // under reduced motion — it is the state — so stillness makes the
