@@ -177,11 +177,14 @@ exist and how much of the state they need already sits in the fixture catalogue.
 The one thing the tier gates beyond that path is the **shipping CSP**, and only
 because it is structurally the only place that can: `pnpm tauri dev` serves the
 frontend from Vite, which sends no CSP header, so the policy is inert in the one
-build mode anyone runs daily and first bites in the build that ships. Two
-scenarios cover it — one asserts the inlined `data:` font face actually loads,
-one asserts neither webview logged a refusal or Tauri's postMessage-fallback
-warning. That is how the `connect-src` omission that silently degraded every
-`invoke()` to the slow bridge was found in the first place.
+build mode anyone runs daily and first bites in the build that ships. One
+scenario covers it: neither webview logged a refusal or Tauri's
+postMessage-fallback warning. That is how the `connect-src` omission that
+silently degraded every `invoke()` to the slow bridge was found in the first
+place. A second scenario used to sit beside it, asserting positively that an
+inlined `data:` webfont loaded under `font-src data:`; the Grove cleanup deleted
+the webfonts, the `data:` grant and that scenario together, since Grove's three
+faces ship with Windows and the app now declares no `@font-face` at all.
 
 `media-src` was the one directive still annotated but unexercised: the app's only
 asset-protocol consumer is the `<audio>` in `SessionPanel`, and the quick-capture
@@ -280,7 +283,12 @@ these was run for this decision:
 | Replace `onClick={submit}` with a no-op in `QuickCapture.tsx` | **only** the slice goes red |
 | Rename `inbox_note_count` in `note_cmds.rs` | **only** the sidebar-count assertion goes red |
 | Drop `connect-src` from the CSP in `src-tauri/tauri.conf.json` | **only** the console-clean scenario goes red |
-| Drop `data:` from the CSP's `font-src` | **both** CSP scenarios go red (the refusal is logged, *and* the face fails to load) |
 | Cap `TranscriptTurns` at 20 segments in `SessionPanel.tsx` | **only** the fifty-turns scenario goes red (the chip's word count is unchanged) |
 | Drop `media-src` from the CSP | **only** source-pairing's console scenario goes red |
 | Drop the asset-scope widening from `lib.rs` setup | **only** the asset-protocol scenario goes red, with `media error code 4` — and the console scenario stays green, because Tauri refuses an out-of-scope asset before the CSP is consulted |
+
+A ninth row was retired rather than left standing: dropping `data:` from the
+CSP's `font-src` used to turn both CSP scenarios red. The Grove cleanup deleted
+the webfonts, so the grant, its consumer and the scenario that proved it all went
+with them — and the mutation as written is now a no-op that stays green, which is
+worse than no row at all.

@@ -70,7 +70,13 @@ export function Checkbox({
             // scale. At 3% on a 17px box the scale is sub-pixel, so the RING
             // still carries the press; the scale is what makes it the same
             // press every other control performs (DESIGN_SYSTEM §2).
-            "not-disabled:active:shadow-[0_0_0_1.4px_var(--color-ink-read)]",
+            //
+            // `not-checked` is load-bearing, not symmetry with the hover above:
+            // a checked box has no ring to firm, and an unguarded press rule
+            // would OUTRANK `checked:shadow-none` below — `:not()` takes its
+            // argument's specificity, so (0,3,0) beats (0,2,0) — and paint a
+            // ring around the ink fill while the box is also scaling down.
+            "not-disabled:not-checked:active:shadow-[0_0_0_1.4px_var(--color-ink-read)]",
             "not-disabled:active:scale-97",
             // The swap repeats the guard on purpose: `:not()` takes its
             // argument's specificity, so an unguarded stillness rule loses the

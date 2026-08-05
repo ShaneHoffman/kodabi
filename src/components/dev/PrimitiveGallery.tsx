@@ -214,10 +214,10 @@ export function PrimitiveGallery() {
           >
             {/* Uncontrolled on purpose: a catalogue page has no business
                 holding the value of every control it displays. */}
-            {/* An arbitrary value, not `max-w-sm`: the legacy bridge's named
-                spacing aliases shadow Tailwind's container scale, so `max-w-sm`
-                caps this column at 16px and it collapses (see the note in
-                src/index.css section 4). */}
+            {/* An arbitrary value rather than `max-w-sm`, which is 24rem and
+                would happen to match: a measure is a reading decision, so it is
+                spelled as the number it is instead of borrowing a container
+                step that can be re-scaled from under it. */}
             <div className="flex max-w-[24rem] flex-col gap-5" id="fields">
               <Field
                 label="Project name"
