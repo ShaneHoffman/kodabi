@@ -174,6 +174,22 @@ impl IndexState {
         })
     }
 
+    /// Title and project for one note id, for the chat's citation chips.
+    ///
+    /// A single indexed row read straight off the shared handle — no round trip
+    /// through the job channel, the same reader-not-second-writer bargain
+    /// [`search_handle`](Self::search_handle) makes. `None` whenever the answer
+    /// can't be had (no index this session, an unknown id, a read error): the
+    /// chip simply doesn't render and the tool line still does, so a citation is
+    /// never load-bearing.
+    ///
+    /// Blocking on the index lock, which a whole-vault scan can hold — call it
+    /// off the IPC thread. The chat pump thread is such a caller.
+    pub fn note_title_project(&self, id: &str) -> Option<(String, Option<String>)> {
+        let row = lock(self.index.as_ref()?).get_note(id).ok().flatten()?;
+        Some((row.title, row.project))
+    }
+
     /// Hands `note` to the background worker to be upserted and (re-)embedded,
     /// returning immediately. Called after a note is written or edited on disk;
     /// the disk write is what mattered, so indexing runs off the command path

@@ -193,7 +193,7 @@ every one of them.
 | `Checkbox` | A box and its label | — |
 | `Select` | A hand-rolled combobox (full listbox, no headless library) | `boxed`, `token` |
 | `Overlay` | The pre-Grove modal shell, for the callers `Dialog` has not taken yet | — |
-| `ViewFrame` | A view's scaffold: gutter, column, header | `queue`, `library`, `panel`, `health`, `doc`, `search`, `terminal`, `chat` |
+| `ViewFrame` | A view's scaffold: gutter, column, header | `queue`, `library`, `panel`, `health`, `doc`, `search`, `terminal` |
 | `StatusMessage` | The one way a view says nothing/failed/working | `empty`, `error`, `status` |
 | `DestructiveConfirmDialog` | The shared shape of a destructive confirmation | — |
 

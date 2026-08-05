@@ -32,10 +32,6 @@ import "./ViewFrame.css";
  *   terminal— the embedded Claude Code terminal. A small masthead over a
  *             full-bleed pane: its body (the xterm mount) grows to fill the
  *             height the gutter leaves, and scrolls inside itself.
- *   chat    — the designed chat over the knowledge base. The terminal's
- *             full-height stance on a document's measure (--chat-measure):
- *             the log scrolls inside itself and the composer stays put, but
- *             what fills the pane is prose, so it caps like a doc.
  *
  * `doc` and `search` render no header of their own: their headers are a
  * genuinely different shape (a back link and its own actions; a query field)
@@ -52,8 +48,7 @@ type Variant =
   | "health"
   | "doc"
   | "search"
-  | "terminal"
-  | "chat";
+  | "terminal";
 
 type BaseProps = {
   /** The small uppercase label above the title. Names the section, not the field. */

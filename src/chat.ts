@@ -6,6 +6,16 @@ import { invoke } from "@tauri-apps/api/core";
  * Rust command names exactly (`.claude/rules/tauri-command-parity.md`).
  */
 
+/** Mirrors `NoteRefDto` in `src-tauri/src/chat_cmds.rs`. A note an answer drew
+ * on, resolved through the index when the call was seen — the title is that
+ * moment's, while the `id` is what opening the note uses. `project` is null for
+ * a note still in the inbox. */
+export type ChatNoteRef = {
+  id: string;
+  title: string;
+  project: string | null;
+};
+
 /** Mirrors `ChatEntryDto` in `src-tauri/src/chat_cmds.rs`. One rendered entry
  * of the conversation log. A `permission` entry's `allowed`/`resolution` are
  * null while the card waits (the live card itself is
@@ -13,7 +23,7 @@ import { invoke } from "@tauri-apps/api/core";
 export type ChatEntry =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string }
-  | { kind: "tool_use"; summary: string }
+  | { kind: "tool_use"; summary: string; note: ChatNoteRef | null }
   | {
       kind: "permission";
       question: string;
@@ -52,7 +62,12 @@ export type PermissionResolution = "user" | "cancelled" | "session_closed";
 export type ChatEventPayload =
   | { type: "delta"; chat_id: string; text: string }
   | { type: "assistant_done"; chat_id: string; text: string }
-  | { type: "tool_use"; chat_id: string; summary: string }
+  | {
+      type: "tool_use";
+      chat_id: string;
+      summary: string;
+      note: ChatNoteRef | null;
+    }
   | {
       type: "permission_request";
       chat_id: string;
