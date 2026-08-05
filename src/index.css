@@ -922,20 +922,24 @@
    The one rule that makes `glass-term` visible at all.
 
    xterm paints its scroll viewport opaque black from its own stylesheet
-   (`@xterm/xterm/css/xterm.css`, `.xterm-viewport { background-color: #000 }`),
-   and since the scrollable-element rework it no longer writes the theme's
-   background over that inline. So the transparent background `useXterm` hands
-   the theme is honoured by every layer except the one at the back, and the well
-   ends up behind an opaque rectangle — night looking flat, and day rendering a
-   black terminal on a pale panel.
+   (`@xterm/xterm/css/xterm.css`, `.xterm .xterm-viewport { background-color:
+   #000 }`), and since the scrollable-element rework it no longer writes the
+   theme's background over that inline. So the transparent background `useXterm`
+   hands the theme is honoured by every layer except the one at the back, and the
+   well ends up behind an opaque rectangle — night looking flat, and day
+   rendering a black terminal on a pale panel.
 
    Utilities cannot reach a class a third party owns, so this is CSS by
-   necessity rather than by choice. Scoped through `.glass-term` rather than
-   written `!important`: that is (0,2,0) against the vendor rule's (0,1,0), so
-   it wins on specificity no matter which stylesheet the bundler emits first —
-   and it says, in the selector, that this applies to OUR terminal and not to
-   any xterm someone drops in later. */
-.glass-term .xterm-viewport {
+   necessity rather than by choice. THE THIRD CLASS IS LOAD-BEARING: the vendor
+   rule is already (0,2,0), so `.glass-term .xterm-viewport` only ties it and
+   loses to whichever sheet the bundler emits last — which in the packaged app is
+   xterm's, because main.tsx imports `./App` (and through it useXterm's vendor
+   stylesheet) before `./index.css`, so the two land in that order in the two
+   <link>s Vite emits. Naming `.xterm` as well makes this (0,3,0), which wins
+   from either position. Scoped through `.glass-term` rather than written
+   `!important` so the selector still says this applies to OUR terminal and not
+   to any xterm someone drops in later. */
+.glass-term .xterm .xterm-viewport {
   background-color: transparent;
 }
 

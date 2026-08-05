@@ -107,10 +107,11 @@ function resolveColour(probe: HTMLElement, value: string): string {
  *
  * The 16 ANSI colours are still the legacy `--ansi-*` group in
  * design/tokens.css, which keys off `data-theme` rather than the `.day` class
- * and has full night/day/hc values. It is the last thing in this file on the
- * frozen layer: THE LEGACY-CLEANUP TICKET MUST PORT THE `--ansi-*` BLOCK INTO
- * GROVE'S `@theme` BEFORE DELETING design/tokens.css — nothing else consumes
- * it, so nothing else would notice it going.
+ * and has night and day values — and deliberately no high-contrast pair, per
+ * the paragraph below. It is the last thing in this file on the frozen layer:
+ * THE LEGACY-CLEANUP TICKET MUST PORT THE `--ansi-*` BLOCK INTO GROVE'S
+ * `@theme` BEFORE DELETING design/tokens.css — nothing else consumes it, so
+ * nothing else would notice it going.
  *
  * `probe` is any mounted element, borrowed for one synchronous style read to
  * resolve the selection wash's `color-mix()`. The ANSI palette deliberately
