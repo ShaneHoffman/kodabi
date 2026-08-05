@@ -68,9 +68,6 @@ const MARKER = `e2e quick capture ${process.pid}-${Date.now()}`;
  *                                     @tauri-apps/api shape rather than a Windows
  *                                     dialect — the same reason `img-src asset:`
  *                                     is already there. Not dead weight.
- *   font-src data:                    six @fontsource faces fall under Vite's
- *                                     4096-byte assetsInlineLimit default and ship
- *                                     as data: URIs inside the built stylesheet.
  *   style-src 'unsafe-inline'         Tailwind's runtime, xterm.js's injected
  *                                     stylesheet, and the transparent-background
  *                                     block inlined in capture.html / overlay.html
@@ -208,45 +205,16 @@ scenario("the note is on disk with the captured title", async () => {
   assert.match(body, new RegExp(`^title: .*${escapeRegExp(MARKER)}`, "m"));
 });
 
-scenario("the inlined font faces load under the CSP", async () => {
-  // Six @fontsource files fall under Vite's 4096-byte inline threshold and ship as
-  // `data:` URIs inside dist/assets/*.css: the woff2 and the woff of all three
-  // weights of Source Code Pro's Greek Extended subset (`unicode-range`
-  // U+1F00-1FFF). Chromium evaluates a `data:` source eagerly rather than
-  // deferring it on the range the way it defers a network fetch, so under a
-  // `font-src` that omits `data:` all six are refused on load — observed, not
-  // inferred: they appear in a webview's buffer with no Greek ever rendered.
-  //
-  // The console scenario below would therefore already catch this. This one
-  // asserts it positively instead, which earns its keep twice over: it names the
-  // actual failure ("the face did not load") rather than a log line, and it does
-  // not depend on Chromium's wording for a refusal.
-  //
-  // U+1FB0 is GREEK SMALL LETTER ALPHA WITH VRACHY. `document.fonts.load` is a
-  // plain expression returning a promise, which `evaluate` awaits: no eval, no
-  // injected <script>, so this stays inside `script-src 'self'` (see lib/cdp.mjs).
-  // A refused face makes it reject outright with a NetworkError.
-  const probe = await main.evaluate(`
-    document.fonts.load('400 12px "Source Code Pro"', "\\u1FB0").then(
-      (faces) => ({
-        ok: faces.length > 0 && faces.every((face) => face.status === "loaded"),
-        detail: faces.map((face) => face.status).join(",") || "no @font-face matched",
-      }),
-      (error) => ({ ok: false, detail: "rejected: " + String(error) }),
-    )
-  `);
-
-  // "no @font-face matched" fails too, and deliberately so: it means the probe
-  // went stale — a @fontsource release restructured its subsets — not that the
-  // policy is fine. Otherwise this gate could quietly decay into a no-op.
-  assert.ok(probe.ok, `the Greek Extended mono face did not load: ${probe.detail}`);
-});
-
 scenario("no webview logged a CSP refusal or a degraded IPC path", async () => {
   // Last on purpose. By now both webviews have completed real invokes
-  // (list_projects, list_notes, quick_capture_submit) and both have loaded every
-  // font face the stylesheet declares, so every request the policy governs has
-  // already been made.
+  // (list_projects, list_notes, quick_capture_submit), so every request the
+  // policy governs has already been made.
+  //
+  // There used to be a positive font probe above this, asserting that six
+  // inlined @fontsource faces loaded under `font-src data:`. Grove's three
+  // faces all ship with Windows, so the app fetches no font and declares no
+  // @font-face: the webfonts, the dependencies and the `data:` grant went
+  // together, and this scenario is the whole CSP gate again.
   //
   // No sleep before reading the buffer: CDP delivers events and command replies
   // over one ordered socket, and a refusal is logged the moment the request is
@@ -254,8 +222,7 @@ scenario("no webview logged a CSP refusal or a degraded IPC path", async () => {
   // anything the scenarios above awaited has already flushed.
   //
   // Two webviews, not three: `capture-overlay` is never attached. All three
-  // enforce the identical policy and all three import src/fonts.ts, so these two
-  // are sufficient evidence.
+  // enforce the identical policy, so these two are sufficient evidence.
   //
   // deepEqual against [] rather than a length check, so a failure prints the
   // offending console lines themselves (bar an elided `data:` payload). That

@@ -4,7 +4,6 @@ import App from "./App";
 import { startContrast } from "./contrast";
 import { startReduceMotion } from "./reduceMotion";
 import { applyTheme, startThemeSync } from "./theme";
-import "./fonts";
 import "./index.css";
 
 // Paint in the OS theme immediately, then correct to the stored preference

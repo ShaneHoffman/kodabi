@@ -12,10 +12,9 @@ import "./index.css";
 // carries it — Vite serves any root-level .html in dev, and only builds the
 // ones the input map names.
 //
-// No `startThemeSync` and no `./fonts`: this window talks to no backend (the
-// sync listens on a Tauri event that does not exist outside the app), and
-// Grove's three faces ship with Windows. The ground starts in the OS theme and
-// the page's own toggles take it from there.
+// No `startThemeSync`: this window talks to no backend, and the sync listens on
+// a Tauri event that does not exist outside the app. The ground starts in the
+// OS theme and the page's own toggles take it from there.
 applyTheme("system");
 startContrast();
 startReduceMotion();
