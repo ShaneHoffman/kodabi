@@ -219,7 +219,8 @@ scenario("the retained recording loads through the asset protocol", async () => 
   // The one assertion that gates the asset-protocol scope, and the only one in
   // the repo that does. `assetProtocol.scope` in tauri.conf.json is static
   // (`$APPDATA/sessions/*.wav`), but `knowledge_base_dir` honours
-  // `KODABI_KB_ROOT` — so before `setup` widened the scope to the resolved
+  // `KODABI_KB_ROOT` (which `KODABI_SANDBOX` sets for this run) — so before
+  // `setup` widened the scope to the resolved
   // vault, this element rendered a transport that would not play, and every
   // other scenario in this file still passed. Tauri refuses an out-of-scope
   // asset before the CSP is consulted, so the console scenario below could not

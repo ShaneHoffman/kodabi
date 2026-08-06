@@ -161,12 +161,17 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   `.claude/rules/utc-timestamps.md`.
 - **Public repo:** no real personal data, emails, or machine paths in committed files, and tests
   write only under temp dirs. See `.claude/rules/no-personal-info.md`.
+- **Agent launches are always sandboxed:** open the app with `pnpm dev:sandbox`, never bare
+  `pnpm tauri dev` — the latter is the user's own real-data workflow and is unchanged. One switch
+  (`KODABI_SANDBOX`) relocates the vault, index, settings and WebView2 profile together, and
+  refuses to start rather than resolving to real data. See `docs/DEV_SANDBOX.md` and
+  `.claude/rules/dev-sandbox.md`.
 
 Topical rules that aren't repo-wide engineering constraints live as modular files under
 `.claude/rules/`: `copy-style` (no em dashes in user-facing copy), `shell-discipline`,
 `docs-stay-in-sync`, `tauri-command-parity`, `no-personal-info`,
 `no-use-effect` (effects only in blessed bridge hooks), `skill-authoring`,
-`typescript-style`, `utc-timestamps`.
+`typescript-style`, `utc-timestamps`, `dev-sandbox` (agent launches never touch real data).
 
 ## Skills & agents
 

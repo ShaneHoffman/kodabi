@@ -24,7 +24,9 @@ default to **quick** for a diff-scoped check.
   state machines, the Inbox re-route, quick capture), not the whole UI, so a green
   run is not a claim that everything is covered.
 - **e2e** — `pnpm e2e:build`, then `pnpm test:e2e`. Drives the real app window over
-  CDP against a temp vault, so it is the only tier that crosses the real IPC bridge.
+  CDP against a temp sandbox (`KODABI_SANDBOX`, the same switch `pnpm dev:sandbox`
+  uses — vault, index, settings and WebView2 profile all throwaway), so it is the
+  only tier that crosses the real IPC bridge.
   Windows-only; **never gates a commit**. Run it after a change to a control's wiring,
   a command's name, or a DTO's shape. `pnpm e2e:build` is not optional — `dist/` is
   embedded at compile time, so `cargo build` alone tests a stale frontend. A slice

@@ -488,6 +488,10 @@ fn lock(index: &Mutex<NoteIndex>) -> MutexGuard<'_, NoteIndex> {
 /// `Job::Reconcile`, so redirecting the vault while the index stayed under the
 /// real app-data dir would converge that index against the foreign vault and
 /// delete every row for the notes it can no longer see.
+///
+/// `KODABI_SANDBOX` exists so that pairing cannot be got wrong: it derives both
+/// paths from one base and writes them here before this resolver runs. Setting
+/// this variable alongside it is refused at startup — see `crate::sandbox`.
 const INDEX_DB_ENV: &str = "KODABI_INDEX_DB";
 
 /// Resolves the index database path — the one place that decides it.

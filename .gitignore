@@ -5,6 +5,10 @@ kangentic.local.json
 .env
 .env.*
 
+# Dev sandbox state: the throwaway vault, index, settings and WebView2 profile
+# a `pnpm dev:sandbox` run keeps its data in (see docs/DEV_SANDBOX.md).
+/.sandbox
+
 # dependencies
 /node_modules
 

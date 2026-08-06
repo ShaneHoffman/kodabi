@@ -109,25 +109,34 @@ does not follow `KODABI_KB_ROOT` leaves the console clean and playback dead.
 
 ## Isolation
 
-Each run gets a throwaway vault and index under the system temp dir, via **two**
-environment variables that must always be set together:
+Each run gets a throwaway everything under a fresh `mkdtemp` directory, via
+**one** environment variable: `KODABI_SANDBOX`, pointed at that directory.
+Rust derives the rest (`kodabi_core::sandbox`) — vault root, index at
+`.index/index.db`, config dir, and the WebView2 profile at `.webview2`. Removed
+on teardown unless `stop({ keepArtifacts: true })`.
 
-- `KODABI_KB_ROOT` — the vault root (`transcribe::knowledge_base_dir`)
-- `KODABI_INDEX_DB` — the full path to the index db (`index_state::open_index`)
+This is the same switch `pnpm dev:sandbox` and the `/preview` skill use; the
+harness has no isolation mechanism of its own. See
+[`docs/DEV_SANDBOX.md`](../docs/DEV_SANDBOX.md).
 
-Setting only the first is destructive: `IndexState::initialize` hands the KB
-root to the watcher and to a startup reconcile job, so an index still living in
-the real app-data dir would be converged against the foreign temp vault and lose
-every row for the notes it could no longer see.
+The lower-level seams the switch drives are still there —  `KODABI_KB_ROOT`
+(`transcribe::knowledge_base_dir`) and `KODABI_INDEX_DB`
+(`index_state::open_index`) — but setting either **alongside** the switch is
+refused at startup, and the harness deletes both from the child's environment so
+a developer's shell cannot trip that refusal. The pairing is why the switch
+exists: setting only the vault root is destructive, because
+`IndexState::initialize` hands that root to the watcher and to a startup
+reconcile job, so an index still living in the real app-data dir would be
+converged against the foreign temp vault and lose every row for the notes it
+could no longer see.
 
-`WEBVIEW2_USER_DATA_FOLDER` is also per-run, so the harness never shares a
-browser process with a developer's already-running instance.
-
-Not isolated: `app_config_dir()` (settings and consent) is still the real one.
-The slices read it and write nothing, and the consent nudge is push-only — it
-opens on a backend event, never on mount — so an un-onboarded machine still
-boots straight to the Inbox. Add a third seam only when something here needs to
-*write* config.
+Config **is** isolated now — `settings.toml`, `device.toml` and the `_claude/`
+wiring resolve through `sandbox::config_dir`, the third seam this section used
+to reserve for "when something here needs to write config". Two consequences
+worth knowing when reading a slice: a run boots consent-unacknowledged (the
+nudge is push-only, opening on a backend event rather than on mount, so it still
+lands straight on the Inbox), and on `RetentionPolicy::KeepAll`, so a
+developer's own retention policy can no longer prune fixtures mid-run.
 
 ## The fixture vault
 

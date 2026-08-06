@@ -23,7 +23,7 @@ It is the authority — the source of truth, mirror, and check procedure for eve
 anchor. Work from it, not from memory; the titles below are only an index so you
 know the full set is covered.
 
-## The seven anchors
+## The eight anchors
 
 Check each against its full entry in the reference file above:
 
@@ -35,6 +35,7 @@ Check each against its full entry in the reference file above:
 5. **Feature legs ↔ Cargo features**
 6. **The Grove theme ↔ docs/DESIGN_SYSTEM.md**
 7. **MCP tool surface ↔ the server's committed schemas**
+8. **Dev sandbox state map ↔ the resolvers**
 
 If the reference lists an anchor not named here (or vice versa), that drift is
 itself a finding — flag it.

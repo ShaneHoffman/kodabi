@@ -12,6 +12,7 @@ mod overlay;
 mod quick_capture;
 mod retention;
 mod routing_env;
+mod sandbox;
 mod session_cmds;
 mod settings_cmds;
 mod terminal_cmds;
@@ -34,6 +35,16 @@ fn device_id(state: tauri::State<'_, DeviceId>) -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // First, before the builder, any plugin, any window, or any thread: the dev
+    // sandbox rewrites this process's environment so every path resolver below
+    // lands in a throwaway directory instead of the user's real vault and app
+    // dirs. A no-op unless `KODABI_SANDBOX` is set. The context is built up
+    // here (rather than inline at `.build()`) only to hand activation the
+    // bundle identifier, which is what Tauri joins onto the platform dirs to
+    // form the very paths the sandbox must avoid. See `sandbox::activate`.
+    let context = tauri::generate_context!();
+    sandbox::activate(&context.config().identifier);
+
     let toggle_shortcut = capture_control::default_toggle_shortcut();
     let quick_capture_shortcut = quick_capture::default_quick_capture_shortcut();
 
@@ -54,7 +65,10 @@ pub fn run() {
         )
         .plugin(tauri_plugin_notification::init())
         .setup(move |app| {
-            let config_dir = app.path().app_config_dir()?;
+            // The config seam, not `app_config_dir()` inline: a sandboxed run
+            // keeps its settings, device identity and `_claude/` wiring beside
+            // its own vault rather than in the user's real config dir.
+            let config_dir = sandbox::config_dir(app.handle())?;
             let device_config = config_dir.join("device.toml");
             // One-time migration for the Kodama → Kodabi rename: the bundle
             // identifier changed (com.kodama.app → com.kodabi.app), which moves
@@ -64,7 +78,11 @@ pub fn run() {
             // dir is the sibling named after the old identifier. Best-effort: a
             // failure here just falls through to `load_or_create` minting a
             // fresh id, exactly as before this migration.
-            if let Some(config_root) = config_dir.parent() {
+            //
+            // Skipped under the sandbox, which is meant to be hermetic: reading
+            // a real install's identity into it would both leak real data in
+            // and make the sandbox's device id depend on the host machine.
+            if let Some(config_root) = config_dir.parent().filter(|_| !sandbox::active()) {
                 let legacy_config = config_root.join(LEGACY_CONFIG_DIR).join("device.toml");
                 if let Err(err) =
                     kodabi_core::device::migrate_legacy_config(&legacy_config, &device_config)
@@ -261,7 +279,7 @@ pub fn run() {
         // kodabi-mcp`) must be reaped on true app exit. `CloseRequested` above
         // only hides to tray, so reaping there would kill the session on every
         // close; the only true-exit path is the tray's Quit item (`app.exit`).
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             if matches!(

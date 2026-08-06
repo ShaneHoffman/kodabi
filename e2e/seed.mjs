@@ -6,15 +6,17 @@
  * harness, so a preview and a slice can never disagree about what
  * `retention/recording-only` means.
  *
- * Most of what this file does is print. That is deliberate: pointing the app at
- * a seeded vault takes TWO environment variables and setting only the first is
- * destructive — `IndexState::initialize` hands the KB root to a startup
- * reconcile job, which would converge the developer's real index against this
- * fixture and delete every row for the notes it could no longer see. The
- * variables are always-on rather than `#[cfg(debug_assertions)]` so the harness
- * exercises the path that ships, which means an environment variable really can
- * relocate someone's notes. This output is the last thing standing between a
- * copy-paste and that.
+ * Most of what this file does is print: which scenarios landed, and the one
+ * variable that points the app at them.
+ *
+ * That variable used to be two, and setting only the first was destructive —
+ * `IndexState::initialize` hands the KB root to a startup reconcile job, which
+ * would converge the developer's real index against this fixture and delete
+ * every row for the notes it could no longer see. `KODABI_SANDBOX` derives both
+ * from one base precisely so that pairing cannot be half-set, and refuses to
+ * launch if the old variables are set alongside it. The seams are still
+ * always-on rather than `#[cfg(debug_assertions)]`, so the harness exercises
+ * the path that ships.
  */
 
 import { resolve } from "node:path";
@@ -99,19 +101,23 @@ function report(manifest) {
   console.log(
     [
       "",
-      "Point the app at it. Set BOTH lines, in the same shell you launch from:",
+      "Point the app at it, in the same shell you launch from:",
       "",
-      `  $env:KODABI_KB_ROOT="${manifest.root}"`,
-      `  $env:KODABI_INDEX_DB="${manifest.indexDb}"`,
+      `  $env:KODABI_SANDBOX="${manifest.root}"`,
       "  pnpm tauri dev",
       "",
-      "Setting only the first is DESTRUCTIVE: the startup reconcile job would",
-      "converge your real index against this fixture and drop every row for the",
-      "notes it can no longer see.",
+      "One variable, not two. It derives the vault, the index, the config dir and",
+      "the WebView2 profile from this base, so the vault and its index can never",
+      "be pointed at different places — which used to be the destructive way to",
+      "get this wrong. KODABI_KB_ROOT or KODABI_INDEX_DB set alongside it are",
+      "refused at startup rather than half-honoured.",
       "",
       "When you are done, or the next preview keeps using the fixture:",
       "",
-      "  Remove-Item Env:KODABI_KB_ROOT, Env:KODABI_INDEX_DB",
+      "  Remove-Item Env:KODABI_SANDBOX",
+      "",
+      "For the default worktree sandbox, skip all of this: `pnpm dev:sandbox`",
+      "seeds .sandbox/ on first run and launches against it.",
       "",
       `Re-seeding this directory is one command — the ${MARKER_FILE} marker makes`,
       "it wipeable. Any other non-empty directory is refused.",

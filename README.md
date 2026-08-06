@@ -76,8 +76,10 @@ vite.config.ts, tsconfig*.json, eslint.config.js   # Frontend build/lint config.
 CLAUDE.md, CONTRIBUTING.md, kangentic.json   # Agent guide, contributor guide, and the
                         # Kangentic board/workflow definition.
 .github/                # CI workflows (GitHub Actions) — the gate matrix run on every PR.
-scripts/                # PowerShell dev/build helpers (tray icons, resource profiling).
+scripts/                # Dev/build helpers — PowerShell (tray icons, resource profiling)
+                        # and the `pnpm dev:sandbox` launcher.
 target/, dist/          # Build output (git-ignored).
+.sandbox/               # Dev sandbox state, when `pnpm dev:sandbox` has run (git-ignored).
 ```
 
 ## Development
@@ -87,7 +89,8 @@ target/, dist/          # Build output (git-ignored).
 
 ```sh
 pnpm install       # install frontend dependencies
-pnpm tauri dev     # run the desktop app in dev mode
+pnpm tauri dev     # run the desktop app in dev mode, against your real vault
+pnpm dev:sandbox   # run it against a throwaway seeded vault instead (see below)
 pnpm tauri:build   # build the installer bundle (real Parakeet engine)
 pnpm dev           # frontend only, in a browser
 pnpm build         # typecheck + Vite build
@@ -97,6 +100,38 @@ pnpm e2e:build     # build the app for the end-to-end harness (must precede test
 pnpm test:e2e      # end-to-end tests against the real app window (Windows only)
 pnpm seed:vault    # write a fixture vault of named scenarios, for previewing
 ```
+
+### Dev sandbox
+
+`pnpm tauri dev` opens the vault, settings and index you actually use — that is
+the point of it, and it is unchanged. But the dev build has no separate profile,
+so an *automated* launch would capture, change settings and run retention sweeps
+against real notes.
+
+`pnpm dev:sandbox` is the same app with one environment variable set. It seeds a
+gitignored, worktree-local `.sandbox/` with the fixture catalogue on first run,
+and keeps the vault, note index, settings, device identity and WebView2 profile
+there. Release builds and the unset case are byte-for-byte unaffected.
+
+```sh
+pnpm dev:sandbox                              # seed on first run, then launch
+pnpm seed:vault .sandbox retention/nothing    # re-seed specific scenarios (app closed)
+```
+
+`pnpm dev:sandbox` always uses the worktree's own `.sandbox/` — it sets the
+variable itself, so exporting your own value does not change where it lands. For
+a different base, set the variable and launch the app the ordinary way (`1`
+selects an app-data `-dev` sibling instead of a path):
+
+```powershell
+$env:KODABI_SANDBOX="C:\some\other\base"
+pnpm tauri dev
+```
+
+Every agent-driven launch uses it — the `/preview` skill, the e2e harness, and
+Kangentic task sessions. A sandboxed run that would resolve to the real vault or
+app dirs refuses to start rather than falling through. Full state map, refusal
+rules and what is deliberately left unsandboxed: [`docs/DEV_SANDBOX.md`](docs/DEV_SANDBOX.md).
 
 ### Speech-to-text engines
 

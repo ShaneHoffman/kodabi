@@ -15,14 +15,17 @@
  * written after launch is not merely late to the index, it is never seen at all.
  *
  * Timestamps are minted at seed time rather than frozen into the catalogue.
- * `retention::start_schedule` runs an immediate prune sweep at launch, and
- * settings are NOT isolated from the developer's real ones (see *Isolation* in
- * e2e/README.md), so on a machine whose retention policy is `keep_days` a
- * fixture dated last month would be deleted out from under the run: every
- * retention scenario would collapse into `retention/nothing` and the slice would
- * go red for something that is not a bug. A session captured ninety minutes ago
- * is past no cutoff anyone can set. Do not "simplify" this back to literal
- * stems.
+ * `retention::start_schedule` runs an immediate prune sweep at launch, so a
+ * fixture dated last month can be deleted out from under the run on any machine
+ * whose retention policy is `keep_days`: every retention scenario would collapse
+ * into `retention/nothing` and the slice would go red for something that is not
+ * a bug. A session captured ninety minutes ago is past no cutoff anyone can set.
+ *
+ * A sandboxed run now gets its own settings too (see *Isolation* in
+ * e2e/README.md), so a fresh sandbox starts on `RetentionPolicy::KeepAll` and
+ * the developer's own policy can no longer reach these files. That removes the
+ * original hazard but not the rule: a long-lived sandbox carries whatever policy
+ * a previous preview set in it. Do not "simplify" this back to literal stems.
  */
 
 import { mkdir, readdir, rm, writeFile } from "node:fs/promises";
@@ -47,6 +50,11 @@ export const MARKER_FILE = ".kodabi-fixture-vault";
  * dot is doing real work: `is_project_segment` rejects it so the vault walk skips
  * the folder, and `watch.rs` takes `.md` files only so SQLite's own writes cannot
  * loop the reconciler.
+ *
+ * Rust encodes the same layout: `INDEX_SUBDIR`/`INDEX_FILE` in
+ * `crates/kodabi-core/src/sandbox.rs` are what `KODABI_SANDBOX` derives, so a
+ * seeded directory and a sandboxed launch agree on where the index is. Change
+ * one and change the other.
  */
 export function indexDbFor(root) {
   return join(root, ".index", "index.db");

@@ -10,38 +10,39 @@ Launch the desktop app from the **current working tree** (usually a Kangentic ta
 `.kangentic/worktrees/<slug>`) and confirm it is healthy before/after a change. Extra focus from
 the caller (may be empty): $ARGUMENTS
 
-## 1. Pick the vault
+## 1. Launch (always sandboxed)
 
-By default the app opens the real vault, whose contents are whatever they happen
-to be. For a change to a note, session or retention surface, seed a throwaway one
-first so every state is reachable:
-
-```powershell
-pnpm seed:vault -- --list                    # the scenario catalogue (pnpm eats bare flags)
-pnpm seed:vault C:\kodabi-fixture            # all of them
-pnpm seed:vault C:\kodabi-fixture retention/recording-only sessions/needs-attention
+```sh
+pnpm install          # worktrees start without node_modules — run on first preview or after package.json changes
+pnpm dev:sandbox      # seeds .sandbox/ on first run, then compiles Rust, starts Vite, opens the window
 ```
 
-**Set both variables it prints, in the shell you launch from.** Setting only
-`KODABI_KB_ROOT` is destructive: the startup reconcile job converges the real
-index against the fixture and drops every row for the notes it can no longer see.
-`Remove-Item Env:KODABI_KB_ROOT, Env:KODABI_INDEX_DB` when done, or the next
-preview silently keeps using the fixture.
+**Never `pnpm tauri dev` from a session.** That is the real-data workflow and it
+opens the user's actual vault, settings and index; a stray capture or retention
+sweep there lands in real notes. `pnpm dev:sandbox` puts every one of those in a
+throwaway `.sandbox/` instead — see [`.claude/rules/dev-sandbox.md`](../../rules/dev-sandbox.md).
+
+First run seeds the whole fixture catalogue, so the app opens onto believable
+data rather than an empty Inbox. Later runs reuse whatever is there. To narrow to
+particular states (the app must be closed):
+
+```powershell
+pnpm seed:vault -- --list                       # the scenario catalogue (pnpm eats bare flags)
+pnpm seed:vault .sandbox                        # all of them again
+pnpm seed:vault .sandbox retention/recording-only sessions/needs-attention
+```
 
 Scenario list, the marker-file rule, and why the seeder writes files rather than
 index rows: [`e2e/README.md`](../../../e2e/README.md).
 
-## 2. Launch
+## 2. Watch the launch
 
-```sh
-pnpm install          # worktrees start without node_modules — run on first preview or after package.json changes
-pnpm tauri dev        # compiles the Rust workspace, starts Vite, opens the app window
-```
-
-Run it in the background and watch the output. First compile in a fresh worktree is slow (full
-Rust build); later runs are incremental. If Vite's port is busy, another checkout (the main repo
-or a sibling worktree) is probably already running — stop that preview first rather than fighting
-over the port.
+Run it in the background and watch the output. It should print
+`kodabi: sandbox mode active` with the `.sandbox` path — if it instead refuses to
+launch, the message says which variable to unset. First compile in a fresh
+worktree is slow (full Rust build); later runs are incremental. If Vite's port is
+busy, another checkout (the main repo or a sibling worktree) is probably already
+running — stop that preview first rather than fighting over the port.
 
 **Frontend-only fallback:** `pnpm dev` serves the React UI in a browser — useful for pure-UI
 changes, but it exercises none of the Rust backend, so it never substitutes for a Tauri preview
@@ -66,5 +67,5 @@ no visible surface, say so explicitly rather than claiming it was verified.
 ## 5. Shut down
 
 Stop the dev process cleanly (Ctrl-C / kill the background task) so the port and lock files are
-released, and clear the vault variables if step 1 set them. Report what was exercised and what was
-observed.
+released. Nothing to unset: `pnpm dev:sandbox` scopes the switch to the child process, and
+`.sandbox/` is gitignored. Report what was exercised and what was observed.
