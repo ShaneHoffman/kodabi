@@ -92,21 +92,29 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   bindgen is needed, but the first build downloads the ONNX Runtime binary (`ort-download-binaries`).
   The model itself is never fetched at runtime — set `KODABI_EMBED_MODEL_DIR` to a local
   bge-small-en-v1.5 directory to exercise the `#[ignore]`d integration tests.
-  `src-tauri` forwards the engine features (`parakeet`, `whisper`) and is likewise never
-  compiled with one by the `--workspace` gates — before committing a change under `src-tauri`
-  **or `crates/`** (CI's two app jobs share a path filter covering both, plus the workspace
-  manifests, since the app compiles the crates it forwards features to), also run
-  `cargo clippy -p kodabi --features parakeet --all-targets --locked -- -D warnings`
-  (CI's `app-dev` job runs that exact leg plus the real-model transcription tests; its `app`
-  sibling runs the release build and the release-guard check in parallel). Don't run the full
-  release build per commit: it's the slowest step, and `/pull-request` pays it once per PR via
-  `pnpm tauri:build --no-bundle`.
-- **Release builds ship a real STT engine.** `pnpm tauri:build` passes `--features parakeet`
-  (the engine locked in by `docs/benchmarks/stt-engine-benchmark.md`). A release-profile build
-  with no engine feature **fails to compile by design** — the `compile_error!` guard in
-  `src-tauri/src/transcribe.rs` — so the `MockEngine` stub can never ship. Debug builds
-  (`pnpm tauri dev`, every cargo gate) still default to the mock, which keeps the gates free of
-  native model dependencies.
+  `src-tauri` forwards the engine features (`parakeet`, `whisper`) and the embedder (`embed`), and
+  is likewise never compiled with one by the `--workspace` gates — before committing a change under
+  `src-tauri` **or `crates/`** (CI's two app jobs share a path filter covering both, plus the
+  workspace manifests, since the app compiles the crates it forwards features to), also run
+  `cargo clippy -p kodabi --features parakeet,embed --all-targets --locked -- -D warnings`
+  (the shipping feature set; CI's `app-dev` job runs that exact leg plus the real-model
+  transcription tests; its `app` sibling runs the release build and the release-guard check in
+  parallel). Don't run the full release build per commit: it's the slowest step, and
+  `/pull-request` pays it once per PR via `pnpm tauri:build --no-bundle`.
+- **Release builds ship a real STT engine and the embedder.** `pnpm tauri:build` passes
+  `--features parakeet,embed` (the engine locked in by
+  `docs/benchmarks/stt-engine-benchmark.md`, plus `kodabi-embed`'s bge backend). A release-profile
+  build with no engine feature **fails to compile by design** — the `compile_error!` guard in
+  `src-tauri/src/transcribe.rs` — so the `MockEngine` stub can never ship. `embed` has no such
+  guard: dropping it still compiles and still indexes for full-text search, but silently writes no
+  vectors, so **this script is the only thing pinning it** and is the canonical definition of what
+  a release compiles. Debug builds (`pnpm tauri dev`, every cargo gate) default to the mock engine
+  and no embedder, which keeps the gates free of native model dependencies.
+- **Releases are built and published by `.github/workflows/release.yml`,** a separate file from
+  `ci.yml` so the main-branch required-checks ruleset is untouched. Pushing a `v*` tag asserts the
+  tag matches `version` in both `package.json` and `src-tauri/tauri.conf.json`, runs
+  `pnpm tauri:build`, and uploads the NSIS installer (`bundle.targets` is `["nsis"]`; MSI/WiX is
+  deliberately not built) to a **draft** GitHub Release for a human to publish.
 - **Core vs shell:** logic lives in `crates/kodabi-core` (pure, UI-agnostic, unit-testable);
   `src-tauri` commands stay thin wrappers around it. If a Tauri command grows a body, the body
   belongs in kodabi-core.

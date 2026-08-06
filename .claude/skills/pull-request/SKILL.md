@@ -52,7 +52,7 @@ CI's `app` job release-builds the desktop app, but only when a Rust surface chan
 confirms it compiles and links on Windows unconditionally, before anything is pushed:
 - `pnpm install --frozen-lockfile` — installs frontend deps (worktrees start without `node_modules`).
 - `pnpm tauri:build --no-bundle` — release compile + link of the desktop app in its shipping
-  configuration (`--features parakeet`; no installer packaging). This one command covers
+  configuration (`--features parakeet,embed`; no NSIS packaging). This one command covers
   everything: it runs `pnpm build` itself (the `beforeBuildCommand` in `tauri.conf.json`,
   generating the `dist/` that `tauri::generate_context!` embeds) and release-compiles the full
   Rust workspace. Use the `tauri:build` script, not a bare `pnpm tauri build`: a release build

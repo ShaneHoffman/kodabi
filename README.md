@@ -5,7 +5,23 @@ searchable, chat-able knowledge base: **transcribe → distill → auto-route �
 
 ## Status
 
-Pre-alpha — early development, no releases yet. See [`ROADMAP.md`](docs/ROADMAP.md) for the phased plan.
+Pre-alpha — early development, with the first installer releases being prepared. See
+[`ROADMAP.md`](docs/ROADMAP.md) for the phased plan.
+
+## Download & install
+
+Windows installers are published on the [Releases](https://github.com/ShaneHoffman/kodabi/releases)
+page as `Kodabi_<version>_x64-setup.exe`. It is an NSIS installer that installs per-user, so it
+needs no administrator rights. Windows x64 only.
+
+- **WebView2** ships with Windows 11. On an older machine without it, the installer downloads and
+  installs it for you.
+- **The chat view and the embedded terminal need the [`claude`
+  CLI](https://docs.claude.com/en/docs/claude-code/overview)** installed and signed in — they drive
+  Claude Code on your own account. Everything else (recording, transcription, search) works without
+  it.
+- **Releases are not yet code-signed**, so SmartScreen shows a "Windows protected your PC" prompt on
+  first run: choose *More info* → *Run anyway*. Signing is planned.
 
 ## Stack
 
@@ -75,7 +91,8 @@ package.json            # Frontend package manifest and scripts.
 vite.config.ts, tsconfig*.json, eslint.config.js   # Frontend build/lint config.
 CLAUDE.md, CONTRIBUTING.md, kangentic.json   # Agent guide, contributor guide, and the
                         # Kangentic board/workflow definition.
-.github/                # CI workflows (GitHub Actions) — the gate matrix run on every PR.
+.github/                # GitHub Actions workflows — ci.yml (the gate matrix run on every PR)
+                        # and release.yml (tag-triggered NSIS build → draft Release).
 scripts/                # Dev/build helpers — PowerShell (tray icons, resource profiling)
                         # and the `pnpm dev:sandbox` launcher.
 target/, dist/          # Build output (git-ignored).
@@ -91,7 +108,7 @@ target/, dist/          # Build output (git-ignored).
 pnpm install       # install frontend dependencies
 pnpm tauri dev     # run the desktop app in dev mode, against your real vault
 pnpm dev:sandbox   # run it against a throwaway seeded vault instead (see below)
-pnpm tauri:build   # build the installer bundle (real Parakeet engine)
+pnpm tauri:build   # build the NSIS installer (real Parakeet engine + embedder)
 pnpm dev           # frontend only, in a browser
 pnpm build         # typecheck + Vite build
 pnpm test          # frontend tests (vitest + Testing Library, jsdom)
@@ -139,8 +156,9 @@ The STT engine is selected at build time by mutually exclusive cargo features
 (`parakeet` or `whisper`), because their sherpa-onnx link modes cannot coexist in one
 binary. Neither is on by default, so `pnpm tauri dev` runs a stub engine that emits
 placeholder text — that keeps the dev loop and the test gates free of native model
-dependencies. `pnpm tauri:build` passes `--features parakeet`, and a release build with
-no engine feature **fails to compile on purpose**, so a stub build can never ship.
+dependencies. `pnpm tauri:build` passes `--features parakeet,embed` (the shipping feature set: the
+real engine plus the local embedder), and a release build with no engine feature **fails to compile
+on purpose**, so a stub build can never ship.
 
 To run the real engine in dev mode, build with the feature and point the five model
 variables at a locally downloaded [`sherpa-onnx-nemo-parakeet-tdt-0.6b-v2`

@@ -49,8 +49,8 @@ struct IconEntry {
 
 /// The known folders Explorer abbreviates a path under, as
 /// (environment variable naming the folder, its `FOLDERID` GUID). Only the two
-/// that can hold an installed Kodabi: the per-machine MSI target lands in
-/// `Program Files`, and a 32-bit install would land in its x86 sibling.
+/// that can hold an installed Kodabi: a per-machine install lands in
+/// `Program Files`, and a 32-bit one would land in its x86 sibling.
 const ABBREVIATED_FOLDERS: [(&str, &str); 2] = [
     ("ProgramFiles", "{6D809377-6AF0-444B-8957-A3773F02200E}"),
     (
@@ -78,10 +78,12 @@ fn abbreviated_folders() -> Vec<(String, &'static str)> {
 /// process was launched with, hence the lowercasing. Less obviously, Explorer
 /// does not always store an absolute path: under a handful of known folders it
 /// writes `{FOLDERID}\rest` instead. Which spelling Kodabi's own entry wears
-/// therefore depends on where it was installed — a per-user install (Tauri's
-/// NSIS default) stays absolute, while the MSI target installs under
-/// `Program Files` and does not. Matching only the absolute form would leave
-/// every MSI install sitting in the overflow forever.
+/// therefore depends on where it was installed — the shipped installer is
+/// per-user (Tauri's NSIS default, and NSIS is the only bundle target), so in
+/// practice the path stays absolute. The known-folder forms are kept for the
+/// installs that don't: a per-machine install under `Program Files`, or a
+/// binary placed there by hand. Matching only the absolute form would leave
+/// those sitting in the overflow forever.
 fn executable_forms(executable: &Path, folders: &[(String, &str)]) -> Vec<String> {
     let absolute = executable.to_string_lossy().to_lowercase();
     let mut forms = vec![absolute.clone()];
@@ -237,9 +239,9 @@ mod tests {
     #[test]
     fn matches_the_known_folder_form_explorer_writes_for_program_files() {
         // Explorer stores a path under Program Files abbreviated to its
-        // FOLDERID, not absolute — so the MSI install (the per-machine one)
-        // would never recognise its own entry if we only compared the path
-        // `current_exe` reports.
+        // FOLDERID, not absolute — so a per-machine install would never
+        // recognise its own entry if we only compared the path `current_exe`
+        // reports.
         let entries = [entry(
             "aaa",
             Some(r"{6D809377-6AF0-444B-8957-A3773F02200E}\Kodabi\Kodabi.exe"),
