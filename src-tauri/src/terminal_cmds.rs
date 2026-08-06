@@ -480,11 +480,18 @@ fn remove_legacy_wiring(config_dir: &Path) {
 /// mcp:build*` builds it into the workspace `target/<profile>/`, beside the app
 /// exe), then the bundled resource dir.
 ///
-/// The resource-dir branch is a forward hook: shipping `kodabi-mcp` inside the
-/// installer needs `bundle.resources` in `tauri.conf.json`, which `tauri-build`
-/// validates at every `src-tauri` compile — so it can't be added until CI's Rust
-/// jobs stage the binary first. That is a Phase 4 (packaged release) follow-up;
-/// through Phase 3 the app runs from source and the sibling branch resolves it.
+/// An installed copy resolves through the last two branches: the installer
+/// carries `kodabi-mcp.exe` at the resource-dir root via `bundle.resources` in
+/// `src-tauri/tauri.bundle.conf.json`, and on Windows that root *is* the install
+/// directory, so the sibling branch above already finds it — the resource branch
+/// is the general case for a layout where the two differ. That overlay is
+/// applied only by the `pnpm tauri:build` script (`--config`), deliberately —
+/// `tauri-build` copies and *validates* every `bundle.resources` path at every
+/// `src-tauri` compile, and the bare cargo gates (`cargo clippy/test
+/// --workspace`, CI's Rust jobs, `pnpm tauri dev`) never build the release
+/// `kodabi-mcp`, so listing it in the base `tauri.conf.json` would fail them all
+/// on a missing file. A bare `tauri build` skips the overlay and ships no
+/// sidecar: build installers with `pnpm tauri:build`.
 fn resolve_mcp_binary(app: &AppHandle) -> Result<PathBuf, String> {
     if let Some(explicit) = std::env::var_os("KODABI_MCP_BINARY") {
         let path = PathBuf::from(explicit);
