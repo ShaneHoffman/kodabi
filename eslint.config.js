@@ -126,6 +126,7 @@ export default tseslint.config(
       "src/useDebouncedValue.ts",
       "src/useDistillState.ts",
       "src/useElapsed.ts",
+      "src/useModelDownload.ts",
       "src/useOutsidePointerDown.ts",
       "src/useRoutePreview.ts",
       "src/useScrollIntoView.ts",

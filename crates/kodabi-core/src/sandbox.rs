@@ -30,6 +30,8 @@
 //! - `.index/index.db` is the note index — dot-prefixed so vault enumeration
 //!   skips it (a plain `index/` folder would show up as a project) and so it
 //!   survives a re-seed of the fixture vault,
+//! - `.models/` holds the models downloaded on first run, dot-prefixed for the
+//!   same reason,
 //! - `.webview2/` is the WebView2 user-data profile, kept out of the vault for
 //!   the same reason.
 //!
@@ -56,6 +58,14 @@ pub const DEV_SUFFIX: &str = "-dev";
 /// `e2e/lib/vault.mjs` — change one and change the other.
 pub const INDEX_SUBDIR: &str = ".index";
 pub const INDEX_FILE: &str = "index.db";
+
+/// Downloaded models under the sandbox base. Dot-prefixed for the same reason
+/// as the index: a plain `models/` folder at the vault root would enumerate as
+/// a project. Sandboxed runs get their own (usually empty) directory rather
+/// than sharing the real one — a debug build transcribes with the mock engine
+/// and needs no models, and reaching into the real app dir is the one thing
+/// this module exists to prevent.
+pub const MODELS_SUBDIR: &str = ".models";
 
 /// WebView2 user-data profile under the sandbox base. Without a distinct
 /// profile a sandboxed instance shares a browser process (and its localStorage)

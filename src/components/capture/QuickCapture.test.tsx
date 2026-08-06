@@ -527,4 +527,77 @@ describe("QuickCapture", () => {
       screen.queryByTestId("quick-capture-route-preview"),
     ).not.toBeInTheDocument();
   });
+
+  describe("while the models are still missing", () => {
+    /** The backend reporting nothing installed yet. */
+    function modelsMissing(downloading = false): void {
+      onCommand("model_status", () => ({
+        ready: false,
+        bytesRequired: 762_000_000,
+        bytesPresent: 0,
+        sets: [],
+        downloading,
+        modelsDir: "C:\\app\\.models",
+      }));
+    }
+
+    async function settle(): Promise<void> {
+      await act(async () => {
+        await Promise.resolve();
+      });
+    }
+
+    it("still records, and says the transcript is what is waiting", async () => {
+      modelsMissing();
+      render(<QuickCapture />);
+      await settle();
+
+      // The record control is untouched: the audio is kept and transcribed on a
+      // later launch, so refusing the capture would lose a real meeting to
+      // protect the user from nothing.
+      expect(screen.getByRole("button", { name: "Record" })).toBeEnabled();
+      expect(screen.getByTestId("quick-capture-models-notice")).toHaveTextContent(
+        "Recording works. Transcripts wait for a one time model download in Settings.",
+      );
+    });
+
+    it("points at the running download instead of Settings while one is going", async () => {
+      modelsMissing(true);
+      render(<QuickCapture />);
+      await settle();
+
+      expect(screen.getByTestId("quick-capture-models-notice")).toHaveTextContent(
+        "Transcripts start when the model download finishes",
+      );
+    });
+
+    it("reassures during the recording itself, which is when it matters most", async () => {
+      modelsMissing();
+      render(<QuickCapture />);
+      await settle();
+      await goLive();
+
+      expect(screen.getByTestId("quick-capture-models-notice")).toHaveTextContent(
+        "This recording is saved. It will be transcribed once the models are ready.",
+      );
+    });
+
+    it("keeps the keyboard hint once the models are installed", async () => {
+      onCommand("model_status", () => ({
+        ready: true,
+        bytesRequired: 0,
+        bytesPresent: 0,
+        sets: [],
+        downloading: false,
+        modelsDir: "C:\\app\\.models",
+      }));
+      render(<QuickCapture />);
+      await settle();
+
+      expect(
+        screen.queryByTestId("quick-capture-models-notice"),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText(/saves and routes it/)).toBeInTheDocument();
+    });
+  });
 });

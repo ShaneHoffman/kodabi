@@ -21,10 +21,12 @@ use crate::validate::{
 
 /// Local model files and tuning knobs for [`ParakeetEngine`].
 ///
-/// All five paths must point at files that already exist on disk — this
-/// ticket only supports pointing at a locally-downloaded model directory.
-/// Download-on-first-run, settings persistence and Tauri wiring are separate,
-/// later tickets.
+/// All five paths must point at files that already exist on disk. This crate
+/// never downloads anything: the app shell resolves the paths and provisions
+/// the files (`src-tauri/src/models.rs` prefers the models directory that the
+/// first-run download populates, with the `PARAKEET_*` variables as an
+/// all-or-nothing developer override). A settings-driven model chooser is still
+/// a later ticket.
 #[derive(Debug, Clone)]
 pub struct ParakeetConfig {
     /// `encoder.onnx` (or `encoder.int8.onnx`) for the Parakeet TDT transducer.

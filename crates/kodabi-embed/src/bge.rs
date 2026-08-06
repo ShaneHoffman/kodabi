@@ -54,6 +54,10 @@ impl BgeConfig {
     /// model directory) and `KODABI_EMBED_THREADS` (thread count, clamped to
     /// `1..=8`, defaulting to `1` when unset or unparseable). Mirrors the
     /// env-based model-path convention `kodabi-transcribe` uses.
+    ///
+    /// An unset directory is left empty rather than guessed at: the app shell
+    /// fills it in from the models directory the first-run download populates,
+    /// and a caller with neither gets the explicit error below.
     pub fn from_env() -> Self {
         let model_dir = std::env::var_os("KODABI_EMBED_MODEL_DIR")
             .map(PathBuf::from)

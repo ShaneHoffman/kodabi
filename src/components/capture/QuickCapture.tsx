@@ -17,6 +17,8 @@ import { useTimeout } from "../../useTimeout";
 import { QUICK_CAPTURE_SHOWN_EVENT } from "../../events";
 import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
+import { isTranscriptionReady } from "../../useModelStatus";
+import { useModelDownload } from "../../useModelDownload";
 import { SpiritMark } from "./SpiritMark";
 
 /** How long the destination flashes before the window dismisses itself. Short
@@ -91,6 +93,17 @@ export function QuickCapture() {
 
   // Where Enter would file this draft, refreshed as it is typed.
   const routeGuess = useRoutePreview(text);
+
+  // This window is its own webview with no providers, so it subscribes
+  // directly — the same reason it calls `useCaptureState` itself.
+  const { state: models } = useModelDownload();
+  const modelsNotice = isTranscriptionReady(models)
+    ? null
+    : engaged
+      ? "This recording is saved. It will be transcribed once the models are ready."
+      : models.status === "downloading"
+        ? "Recording works. Transcripts start when the model download finishes."
+        : "Recording works. Transcripts wait for a one time model download in Settings.";
 
   // Re-show refocuses the box. A prior *error* keeps its message and draft so a
   // blur-dismiss can't silently bury a failed capture — the user sees it on the
@@ -218,6 +231,20 @@ export function QuickCapture() {
             <StatusMessage variant="error" compact>
               Couldn&apos;t reach the recorder: {captureError}
             </StatusMessage>
+          ) : modelsNotice ? (
+            // Recording is never blocked for want of models: the audio is kept
+            // and transcribed on a later launch, so refusing the capture would
+            // lose a real meeting to protect the user from nothing. What must
+            // not happen is the user believing a transcript is coming when it
+            // is not, so the hint slot says so instead. `role="status"`, not
+            // `alert`: nothing has gone wrong.
+            <span
+              role="status"
+              data-testid="quick-capture-models-notice"
+              className="min-w-0 flex-1 font-data text-[10.5px] text-ink-faint"
+            >
+              {modelsNotice}
+            </span>
           ) : (
             <span className="min-w-0 flex-1 truncate font-data text-[10.5px] text-ink-faint">
               {engaged ? (

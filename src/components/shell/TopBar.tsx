@@ -4,6 +4,7 @@ import { isCaptureActive, useCaptureState } from "../../useCaptureState";
 import { PALETTE_SHORTCUT_LABEL } from "../../useCommandPalette";
 import { useDebouncedValue } from "../../useDebouncedValue";
 import { useElapsed } from "../../useElapsed";
+import { useModelStatus, isTranscriptionReady } from "../../useModelStatus";
 import { useNavigation } from "../../useNavigation";
 import { ListenPill } from "./ListenPill";
 
@@ -59,6 +60,12 @@ export function TopBar({ onOpenPalette }: Props) {
   }
   const elapsedSeconds = useElapsed(engagedSince);
 
+  // Transcription is downstream of capture, so its readiness is never a claim
+  // about whether audio is reaching disk — which is why this only ever fills
+  // the detail slot and never touches the mark or the headline.
+  const { state: models } = useModelStatus();
+  const modelsDetail = isTranscriptionReady(models) ? null : "Transcription not ready yet";
+
   return (
     <header className="glass-top flex h-[54px] flex-none items-center gap-6 px-[22px]">
       {/* The document's h1: heading navigation needs a level-1 root. It reads
@@ -83,7 +90,13 @@ export function TopBar({ onOpenPalette }: Props) {
       <ListenPill
         mode={mode}
         label={label.text}
-        detail={label.detail}
+        // A capture failure always outranks it: that is about the recording
+        // itself, this is about what happens afterwards. The models line is a
+        // fallback rather than an addition because the pill shows one detail,
+        // and it only reaches an idle pill anyway — the detail slot is hidden
+        // while live, which is exactly right here. Nothing is wrong during the
+        // recording; it is the transcription afterwards that is waiting.
+        detail={label.detail ?? modelsDetail}
         elapsedSeconds={elapsedSeconds}
       />
 

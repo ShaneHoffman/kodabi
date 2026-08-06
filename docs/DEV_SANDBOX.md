@@ -32,6 +32,7 @@ it.
 | Device identity — `device.toml` | `app_config_dir()` | `sandbox::config_dir` → `kodabi_core::device` | `<base>` |
 | Claude Code wiring — `_claude/kodabi.mcp.json`, `_claude/terminal-settings.json` | `app_config_dir()` | `sandbox::config_dir` → `terminal_cmds` | `<base>/_claude` |
 | WebView2 profile (localStorage, webview state) | derived from the exe name | `WEBVIEW2_USER_DATA_FOLDER` | `<base>/.webview2` |
+| Downloaded models — Parakeet, Silero VAD, bge-small | `app_data_dir()/.models` | `sandbox::models_dir` | `<base>/.models` |
 | Session artifacts — `<stem>.jsonl`, `.wav`, `.dismissed` | `<vault>/sessions/` | follows the vault root | inside `<base>` |
 | In-flight capture spill — `sessions/inflight/<session>/` | `<vault>/sessions/inflight/` | `kodabi_core::inflight` | inside `<base>` |
 | Chat transcripts — `chats/<stem>.jsonl` | `<vault>/chats/` | `kodabi_core::chat` (`CHATS_DIR`) | inside `<base>` |
@@ -64,9 +65,16 @@ sweep, so there is no separate state to isolate.
 Everything else derives from the base, in `kodabi_core::sandbox::resolve`. The
 base is both the vault root and the config dir, which mirrors the shape a real
 Windows install has, so a sandboxed run exercises the code paths that ship. The
-index and WebView2 profile are dot-prefixed subdirectories: vault enumeration
-skips `.`/`_` entries, so neither shows up as a phantom project, and the
-seeder's wipe leaves dot-entries alone so `.index/` survives a re-seed.
+index, models and WebView2 profile are dot-prefixed subdirectories: vault
+enumeration skips `.`/`_` entries, so none shows up as a phantom project, and
+the seeder's wipe leaves dot-entries alone so `.index/` survives a re-seed.
+
+A sandboxed `.models/` is normally empty, and that is correct rather than a gap:
+a debug build transcribes with the mock engine and reads no model at all, so
+borrowing the real directory would mean reaching into the real app dir for
+nothing. A sandboxed run that genuinely needs real models uses the
+`PARAKEET_*` / `KODABI_EMBED_MODEL_DIR` developer override, which is read
+before the models directory and is not part of what the sandbox relocates.
 
 `<base>/.index/index.db` is byte-identical to what `indexDbFor()` in
 `e2e/lib/vault.mjs` computes — a seeded directory and a sandboxed launch agree

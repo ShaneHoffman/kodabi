@@ -30,7 +30,8 @@ checking which convention a given number uses. Computed by
 
 ## How to reproduce
 
-1. Build the engine under test with its models available via env vars:
+1. Build the engine under test with its models available via env vars (the developer
+   override: set all five or none, or the app falls back to its downloaded models):
    ```
    cargo build -p kodabi --features parakeet
    # PARAKEET_ENCODER / PARAKEET_DECODER / PARAKEET_JOINER / PARAKEET_TOKENS / PARAKEET_VAD_MODEL
@@ -85,7 +86,8 @@ breaking the pipeline.
 | VAD min speech duration (s) | 0.25 | `KODABI_VAD_MIN_SPEECH` | Transcription |
 | VAD max speech duration (s) | 20.0 | `KODABI_VAD_MAX_SPEECH` | Transcription |
 | Embedding thread count (bge-small) | 1 | `KODABI_EMBED_THREADS` | Embedding |
-| Embedding model directory | — | `KODABI_EMBED_MODEL_DIR` | Embedding |
+| Embedding model directory | the downloaded `<app-data>/.models/bge-small-en-v1.5` | `KODABI_EMBED_MODEL_DIR` | Embedding |
+| STT model paths (five, all or none) | the downloaded `<app-data>/.models/…` | `PARAKEET_ENCODER` / `_DECODER` / `_JOINER` / `_TOKENS` / `_VAD_MODEL` | Transcription |
 
 "Batch vs. streaming" isn't a runtime knob — it's fixed per engine (Whisper is a batch
 engine; Parakeet is VAD-gated pseudo-streaming). Its tunable proxy is `KODABI_VAD_MAX_SPEECH`,
@@ -99,9 +101,11 @@ transcription: the intra-op thread count defaults to **1** (`KODABI_EMBED_THREAD
 `1..=8`), and inference is serialized behind a mutex so at most one heavyweight model runs at a
 time. Unlike the STT engines, the ~150 MB session is kept resident after first use rather than
 dropped between calls — it is small enough to hold and re-loading per note would cost more than it
-saves. Model files load from `KODABI_EMBED_MODEL_DIR` (no network at runtime — data custody,
-FOUNDING_DOC §2); only the ONNX Runtime *binary* is fetched, once, at build time by
-`ort-download-binaries`. Embedding runs on note write/edit, off the capture path, so it doesn't
+saves. Model files load from `KODABI_EMBED_MODEL_DIR`, or from the models directory the app
+populates on first run when that is unset (`crates/kodabi-core/src/models/`). `kodabi-embed`
+itself still never touches the network: provisioning happens above it, in the app shell, on an
+explicit user action — data custody, FOUNDING_DOC §2. Only the ONNX Runtime *binary* is fetched,
+once, at build time by `ort-download-binaries`. Embedding runs on note write/edit, off the capture path, so it doesn't
 compete with the capture/transcription budgets above.
 
 ## Chosen CPU ceiling

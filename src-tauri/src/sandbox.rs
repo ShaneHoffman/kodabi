@@ -170,3 +170,25 @@ pub(crate) fn config_dir(app: &AppHandle) -> Result<PathBuf, String> {
         .app_config_dir()
         .map_err(|err| format!("failed to resolve the app config directory: {err}"))
 }
+
+/// Where the models downloaded on first run live.
+///
+/// The fourth seam. Dot-prefixed because unsandboxed this sits *inside* the
+/// default vault root (`app_data_dir()` is both), and a plain `models/` folder
+/// there would enumerate as a project — the same reasoning that put the index in
+/// `.index/`. Like the index it is derived, machine-local state: large, rebuilt
+/// by re-downloading, and never something to sync.
+///
+/// Sandboxed runs get their own directory rather than borrowing the real one.
+/// It is normally empty and that is correct: a debug build transcribes with the
+/// mock engine and needs no models at all, so the alternative would be reaching
+/// into the real app dir for nothing.
+pub(crate) fn models_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Some(base) = base() {
+        return Ok(base.join(kodabi_core::sandbox::MODELS_SUBDIR));
+    }
+    app.path()
+        .app_data_dir()
+        .map(|dir| dir.join(kodabi_core::sandbox::MODELS_SUBDIR))
+        .map_err(|err| format!("failed to resolve the models directory: {err}"))
+}

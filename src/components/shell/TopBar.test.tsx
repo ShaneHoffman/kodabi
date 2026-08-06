@@ -2,6 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CapturePipelineProvider } from "../providers/CapturePipelineProvider";
+import { ModelStatusProvider } from "../providers/ModelStatusProvider";
 import { NavigationProvider } from "../providers/NavigationProvider";
 import { MainContent } from "./MainContent";
 import { TopBar } from "./TopBar";
@@ -31,10 +32,12 @@ function serveVault(): void {
 function renderShell(onOpenPalette = () => {}) {
   return render(
     <NavigationProvider>
-      <CapturePipelineProvider>
-        <TopBar onOpenPalette={onOpenPalette} />
-        <MainContent />
-      </CapturePipelineProvider>
+      <ModelStatusProvider>
+        <CapturePipelineProvider>
+          <TopBar onOpenPalette={onOpenPalette} />
+          <MainContent />
+        </CapturePipelineProvider>
+      </ModelStatusProvider>
     </NavigationProvider>,
   );
 }
@@ -136,5 +139,45 @@ describe("TopBar", () => {
       },
       { timeout: 2000 },
     );
+  });
+
+  it("says transcription is not ready yet while the models are still missing", async () => {
+    // The detail slot, not the headline and not the mark: nothing is wrong
+    // with capture itself, and claiming otherwise would be the same kind of
+    // lie in the opposite direction.
+    serveVault();
+    onCommand("model_status", () => ({
+      ready: false,
+      bytesRequired: 762_000_000,
+      bytesPresent: 0,
+      sets: [],
+      downloading: false,
+      modelsDir: "C:\\app\\.models",
+    }));
+    renderShell();
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("Transcription not ready yet");
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("Not listening");
+  });
+
+  it("says nothing about models once they are installed", async () => {
+    serveVault();
+    onCommand("model_status", () => ({
+      ready: true,
+      bytesRequired: 0,
+      bytesPresent: 0,
+      sets: [],
+      downloading: false,
+      modelsDir: "C:\\app\\.models",
+    }));
+    renderShell();
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Not listening");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("status")).not.toHaveTextContent("Transcription not ready");
   });
 });
