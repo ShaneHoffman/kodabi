@@ -14,12 +14,24 @@ Windows installers are published on the [Releases](https://github.com/ShaneHoffm
 page as `Kodabi_<version>_x64-setup.exe`. It is an NSIS installer that installs per-user, so it
 needs no administrator rights. Windows x64 only.
 
+**An installed build is not self-contained yet.** The installer carries the app and the frontend,
+and nothing else — no speech model, no embedding model, no `kodabi-mcp` sidecar. Provisioning those
+for end users is still in flight, so today the installer is for looking around, and the
+[from-source setup](#development) below is the way to run the full pipeline. Concretely:
+
 - **WebView2** ships with Windows 11. On an older machine without it, the installer downloads and
   installs it for you.
-- **The chat view and the embedded terminal need the [`claude`
-  CLI](https://docs.claude.com/en/docs/claude-code/overview)** installed and signed in — they drive
-  Claude Code on your own account. Everything else (recording, transcription, search) works without
-  it.
+- **Recording works; transcription does not, out of the box.** The shipped binary embeds the real
+  Parakeet engine, but it resolves its five model files from the `PARAKEET_*` environment variables
+  (see [Speech-to-text engines](#speech-to-text-engines)), which an installed app has no way to set
+  yet. Ending a capture without them fails with a model-load error instead of writing a note.
+- **Search is full-text only.** Semantic search reads its model directory from
+  `KODABI_EMBED_MODEL_DIR`, unset for the same reason, so notes are indexed for FTS but no vectors
+  are written.
+- **The chat view and the embedded terminal do not run from an installed build.** They need both
+  the [`claude` CLI](https://docs.claude.com/en/docs/claude-code/overview) (installed and signed in
+  — they drive Claude Code on your own account) *and* the `kodabi-mcp` sidecar, which the bundle
+  does not yet include. Bundling it is a Phase 4 item on the [roadmap](docs/ROADMAP.md).
 - **Releases are not yet code-signed**, so SmartScreen shows a "Windows protected your PC" prompt on
   first run: choose *More info* → *Run anyway*. Signing is planned.
 

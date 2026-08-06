@@ -43,9 +43,15 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   only the tagged installer build (see anchor 5 for the feature set it inherits from
   `tauri:build`). Its one assertion is a version check, not a gate: the tag must match
   `version` in **both** `package.json` and `src-tauri/tauri.conf.json`, so confirm those
-  two still agree with each other whenever either is bumped.
+  two still agree with each other whenever either is bumped. Two things in `release.yml`
+  *are* in scope, because it copies them from `ci.yml` rather than deriving them: its
+  toolchain setup (`pnpm/action-setup` version, `actions/setup-node` `node-version`, the
+  `dtolnay/rust-toolchain` channel) must still match `ci.yml`'s, and its own comment says
+  so. Nothing enforces it, and a mismatch surfaces only after a tag is pushed and the
+  hour-long build has already started.
 - **Failure:** a gate CI runs that `CLAUDE.md` omits (or vice versa). The pre-commit
-  gates promise to "mirror CI exactly", so any difference is a gap.
+  gates promise to "mirror CI exactly", so any difference is a gap. Also a failure: a
+  toolchain version that differs between `ci.yml` and `release.yml`.
 
 ## Anchor 3 — Repository layout ↔ tree
 
