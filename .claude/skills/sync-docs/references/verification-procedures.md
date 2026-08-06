@@ -179,6 +179,33 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   — that every read tool is pre-approved. None of them compare against the spec,
   which is what this anchor is for.)
 
+## Anchor 8 — Dev sandbox state map ↔ the resolvers
+
+- **Source of truth:** `crates/kodabi-core/src/sandbox.rs` (the layout constants
+  `INDEX_SUBDIR`/`INDEX_FILE`/`WEBVIEW2_SUBDIR`/`DEV_SUFFIX`, the switch keywords, and
+  the three `SandboxError` variants), `src-tauri/src/sandbox.rs` (which environment
+  variables `install` writes, and `config_dir`), and every `KODABI_*` env-var const in
+  `src-tauri/` and `crates/`.
+- **Mirror:** `docs/DEV_SANDBOX.md` — the state-map table (state → default location →
+  resolver → sandboxed location), the switch's value grammar, and the refusal table's
+  three messages. Also the `pnpm dev:sandbox` line in `README.md`'s script list and its
+  "Dev sandbox" section, and the *Isolation* section of `e2e/README.md`.
+- **Verify:**
+  1. Every path in the state-map table still resolves the way the table says: grep the
+     three `sandbox::config_dir` call sites (`lib.rs` setup, `terminal_cmds`'s
+     `write_mcp_config` and `write_config_files`) and confirm no `app_config_dir()` call
+     has reappeared outside `sandbox.rs` itself.
+  2. The derived subpaths in the doc match the constants (`.index/index.db`,
+     `.webview2`, the `-dev` suffix), and `indexDbFor()` in `e2e/lib/vault.mjs` still
+     computes the same index path as `INDEX_SUBDIR`/`INDEX_FILE` — the two
+     cross-reference each other and are the pair most likely to drift.
+  3. The three refusal messages quoted in the doc match the `#[error(...)]` strings.
+  4. `e2e/lib/app.mjs` still sets `KODABI_SANDBOX` and no second isolation mechanism has
+     grown beside it.
+- **Failure:** a state location the table omits or misattributes, a layout constant the
+  doc contradicts, a refusal message that has been reworded in only one place, or a
+  config-dir call site bypassing the seam.
+
 ---
 
 **Adding an anchor:** add its section here *and* the one-line entry in the

@@ -414,20 +414,22 @@ fn claude_program() -> OsString {
 /// `EBWebView` needs a reserved name for.
 const WIRING_DIR: &str = "_claude";
 
-/// Generates the machine-local `.mcp.json` under [`WIRING_DIR`] in
-/// `app_config_dir()` (it holds absolute machine paths, so it must never sync
-/// with the KB's content) and returns its path. Regenerated on each open so a
-/// moved install is self-healing. Shared with the chat session (`chat_cmds`),
-/// which wires the same server into its headless spawn.
+/// Generates the machine-local `.mcp.json` under [`WIRING_DIR`] in the app's
+/// config dir (it holds absolute machine paths, so it must never sync with the
+/// KB's content) and returns its path. Regenerated on each open so a moved
+/// install is self-healing. Shared with the chat session (`chat_cmds`), which
+/// wires the same server into its headless spawn.
 ///
-/// Both paths come from the app's own resolvers rather than from
-/// `app_data_dir()` inline, so the sidecar is handed the same vault and the same
-/// index this process opened. `KODABI_KB_ROOT` and `KODABI_INDEX_DB` move
-/// together or not at all (see `index_state::index_db_path`); resolving one here
-/// and hard-coding the other would split the sidecar's reads from its writes.
+/// All three paths come from the app's own resolvers rather than from
+/// `app_config_dir()`/`app_data_dir()` inline, so the sidecar is handed the same
+/// vault, the same index and the same config dir this process opened — under the
+/// dev sandbox that means the sidecar lands in the sandbox too (`crate::sandbox`).
+/// `KODABI_KB_ROOT` and `KODABI_INDEX_DB` move together or not at all (see
+/// `index_state::index_db_path`); resolving one here and hard-coding the other
+/// would split the sidecar's reads from its writes.
 pub(crate) fn write_mcp_config(app: &AppHandle) -> Result<PathBuf, String> {
     let mcp_binary = resolve_mcp_binary(app)?;
-    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let config_dir = crate::sandbox::config_dir(app)?;
     let index_db = crate::index_state::index_db_path(app)?;
     let kb_root = crate::transcribe::knowledge_base_dir(app)?;
     remove_legacy_wiring(&config_dir);
@@ -451,7 +453,7 @@ pub(crate) fn write_mcp_config(app: &AppHandle) -> Result<PathBuf, String> {
 /// allow-list as argv instead, so the settings file stays terminal-only).
 fn write_config_files(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
     let mcp_path = write_mcp_config(app)?;
-    let config_dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    let config_dir = crate::sandbox::config_dir(app)?;
 
     let settings_json = terminal::settings_json().map_err(|e| e.to_string())?;
     let settings_path = config_dir.join(WIRING_DIR).join("terminal-settings.json");

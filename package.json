@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:sandbox": "node scripts/dev-sandbox.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "test": "vitest run",

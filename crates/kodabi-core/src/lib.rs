@@ -28,6 +28,7 @@ pub mod reconcile;
 pub mod retention;
 pub mod routing;
 pub mod routing_examples;
+pub mod sandbox;
 pub mod sessions;
 pub mod settings;
 pub mod terminal;

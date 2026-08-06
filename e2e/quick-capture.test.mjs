@@ -153,9 +153,10 @@ scenario("both webviews mount against a fresh vault", async () => {
 
   // A cheap tripwire, not a proof: the row renders `note_count ?? 0` while
   // `list_projects` is still in flight, so a "0" read early says nothing. The
-  // real freshness guarantee is structural — `launchKodabi` points KODABI_KB_ROOT
-  // at a fresh `mkdtemp` dir — and the assertions that would actually catch the
-  // app ignoring it are the exact-list and count-of-1 ones below.
+  // real freshness guarantee is structural — `launchKodabi` points
+  // KODABI_SANDBOX at a fresh `mkdtemp` dir — and the assertions that would
+  // actually catch the app ignoring it are the exact-list and count-of-1 ones
+  // below.
   assert.equal(await textOf(main, "sidebar-inbox-count"), "0", "the temp vault should start empty");
 });
 

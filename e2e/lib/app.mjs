@@ -26,9 +26,37 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { waitForEndpoint } from "./cdp.mjs";
-import { seedVault } from "./vault.mjs";
+import { indexDbFor, seedVault } from "./vault.mjs";
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * The child's environment: one switch, and none of the seams it drives.
+ *
+ * `KODABI_SANDBOX` is the same mechanism `pnpm dev:sandbox` and the `/preview`
+ * skill use — the harness has no isolation of its own any more. Rust derives
+ * the vault root, the index, the config dir and the WebView2 profile from this
+ * base and refuses to launch if any of them would land in the developer's real
+ * app directories (`kodabi_core::sandbox`).
+ *
+ * That is strictly more isolation than this harness used to have: settings and
+ * consent used to come from the real `app_config_dir()`. A sandboxed run now
+ * boots on fresh defaults — consent unacknowledged (the nudge is push-only, so
+ * it still opens straight to the Inbox) and `RetentionPolicy::KeepAll`, which
+ * means a developer's own retention setting can no longer prune fixtures out
+ * from under a run.
+ *
+ * The two vault variables are deleted rather than passed through: they are
+ * refused alongside the switch, so a developer's shell carrying them from an
+ * older manual preview would otherwise fail every slice with a startup error.
+ */
+function sandboxEnv(base) {
+  const env = { ...process.env, KODABI_SANDBOX: base };
+  delete env.KODABI_KB_ROOT;
+  delete env.KODABI_INDEX_DB;
+  delete env.WEBVIEW2_USER_DATA_FOLDER;
+  return env;
+}
 
 /**
  * A one-line snapshot of whether `kodabi.exe` and any `msedgewebview2.exe`
@@ -123,10 +151,11 @@ export async function launchKodabi({ exe, seed = [], startupTimeoutMs = 120_000 
 
   await assertPortFree(CDP_PORT);
 
-  const vaultDir = await mkdtemp(join(tmpdir(), "kodabi-e2e-vault-"));
-  const stateDir = await mkdtemp(join(tmpdir(), "kodabi-e2e-state-"));
-  const indexDb = join(stateDir, "index.db");
-  const userDataDir = join(stateDir, "webview2");
+  // One directory, not two: `KODABI_SANDBOX` derives the vault root, the index
+  // (`.index/index.db`), the config dir and the WebView2 profile from a single
+  // base, so the harness names a base and lets Rust lay it out.
+  const vaultDir = await mkdtemp(join(tmpdir(), "kodabi-e2e-"));
+  const indexDb = indexDbFor(vaultDir);
   const port = CDP_PORT;
 
   // Before the spawn, never after, and the ordering is load-bearing twice over.
@@ -140,28 +169,12 @@ export async function launchKodabi({ exe, seed = [], startupTimeoutMs = 120_000 
       seeded = await seedVault(vaultDir, seed);
     } catch (error) {
       await rm(vaultDir, { recursive: true, force: true }).catch(() => {});
-      await rm(stateDir, { recursive: true, force: true }).catch(() => {});
       throw error;
     }
   }
 
   const proc = spawn(exe, [], {
-    env: {
-      ...process.env,
-      // The vault seam. Both are required together: index_state.rs feeds the KB
-      // root to the startup reconcile job, so redirecting the vault while the
-      // index stays in the real app-data dir would make a harness run converge
-      // the developer's real index against an empty temp vault and delete every
-      // row.
-      KODABI_KB_ROOT: vaultDir,
-      KODABI_INDEX_DB: indexDb,
-      // Not optional. Tauri leaves WebView2's data directory unset, so it is
-      // derived from the exe name — meaning a harness-launched kodabi.exe would
-      // otherwise share a browser process with a developer's already-running
-      // instance, and (on a machine where additionalBrowserArgs is honored at
-      // all) settings like it require distinct data directories per instance.
-      WEBVIEW2_USER_DATA_FOLDER: userDataDir,
-    },
+    env: sandboxEnv(vaultDir),
     stdio: ["ignore", "pipe", "pipe"],
   });
 
@@ -219,7 +232,6 @@ export async function launchKodabi({ exe, seed = [], startupTimeoutMs = 120_000 
         return;
       }
       await rm(vaultDir, { recursive: true, force: true }).catch(() => {});
-      await rm(stateDir, { recursive: true, force: true }).catch(() => {});
     },
   };
 

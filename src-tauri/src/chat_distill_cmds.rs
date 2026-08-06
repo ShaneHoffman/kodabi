@@ -54,6 +54,12 @@ pub const CHAT_DISTILL_STATE_EVENT: &str = "chat-distill:state";
 /// never spends a real headless call on it. Chat text is real in every build, so
 /// without this every ended dev chat would cost a call. Set it to anything
 /// non-empty to skip.
+///
+/// Sandbox mode (`KODABI_SANDBOX`) therefore sets this by default, so an
+/// agent-driven preview never spends live calls distilling fixture
+/// conversation. It only defaults it — an explicitly empty value reads as unset
+/// here, which is how a sandboxed run turns distill back on. See
+/// `crate::sandbox`.
 const DISABLE_ENV: &str = "KODABI_DISABLE_CHAT_DISTILL";
 
 /// How long a chat transcript must sit untouched before the sweep will treat it

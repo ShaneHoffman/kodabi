@@ -316,6 +316,13 @@ fn recover_orphan(app: &AppHandle, orphan: RecoverableOrphan) {
 /// Always-on rather than `#[cfg(debug_assertions)]`, so the end-to-end harness
 /// (`e2e/`) exercises the path that actually ships. Setting it also requires
 /// setting `KODABI_INDEX_DB` — see `index_state::open_index`.
+///
+/// Setting the pair by hand is the low-level form. `KODABI_SANDBOX` is the
+/// high-level one: it derives both (plus the config dir and the WebView2
+/// profile) from a single base and writes them into this process's environment
+/// before anything reads them, so this resolver needs no sandbox branch of its
+/// own. Setting this variable *alongside* `KODABI_SANDBOX` is refused at
+/// startup rather than silently half-honoured — see `crate::sandbox`.
 const KB_ROOT_ENV: &str = "KODABI_KB_ROOT";
 
 /// Resolves the knowledge-base root — the plain, user-syncable folder that

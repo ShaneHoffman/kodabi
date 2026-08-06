@@ -34,6 +34,11 @@ kodabi-transcribe = { path = "../crates/kodabi-transcribe", optional = true }
 kodabi-embed = { path = "../crates/kodabi-embed", optional = true }
 kodabi-llm = { path = "../crates/kodabi-llm" }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# Resolves the real app directories before an `AppHandle` exists, so the dev
+# sandbox (`src/sandbox.rs`) can compute the paths it must stay out of. Tauri
+# derives `app_data_dir()`/`app_config_dir()` from this same crate, so the two
+# agree by construction. Already in the tree via Tauri's stack.
+dirs = "6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Chat session ids: `claude --session-id` requires a valid UUID, and the chat

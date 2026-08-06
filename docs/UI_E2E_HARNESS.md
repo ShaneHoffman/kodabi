@@ -60,10 +60,17 @@ therefore fixed (`CDP_PORT` in `e2e/lib/app.mjs`) rather than chosen per run;
 `launchKodabi` fails fast if that port is already bound rather than silently
 attaching to the wrong process.
 
-Two always-on environment seams point a run at a throwaway vault:
-`KODABI_KB_ROOT` and `KODABI_INDEX_DB`, reusing the exact names `kodabi-mcp`
-already reads and the generated `.mcp.json` already writes. They must be set
-together — see **Caveats**. Details in [`e2e/README.md`](../e2e/README.md).
+One always-on environment switch points a run at a throwaway everything:
+`KODABI_SANDBOX`, set to a fresh `mkdtemp` base. Rust derives the vault root,
+the index, the config dir and the WebView2 profile from it
+(`kodabi_core::sandbox`), so the harness names one directory rather than
+assembling paths itself. It drives the lower-level `KODABI_KB_ROOT` and
+`KODABI_INDEX_DB` seams — the exact names `kodabi-mcp` already reads and the
+generated `.mcp.json` already writes — which must move together; see
+**Caveats**. The same switch backs `pnpm dev:sandbox` and the `/preview` skill,
+so there is one isolation mechanism rather than a harness-only one. Details in
+[`e2e/README.md`](../e2e/README.md) and
+[`DEV_SANDBOX.md`](DEV_SANDBOX.md).
 
 That vault starts empty unless a slice asks for content:
 `launchKodabi({ seed: ["retention/both", …] })` writes named scenarios from the
@@ -208,6 +215,12 @@ always-on rather than `#[cfg(debug_assertions)]` precisely so the tier exercises
 the code path that ships — but that means an environment variable can now
 relocate a user's notes.
 
+`KODABI_SANDBOX` is the fence around that hazard, not a replacement for
+understanding it: it derives both paths from one base so the pair cannot be
+half-set, and **refuses to launch** if either is set alongside it. The seams
+themselves are unchanged and still always-on, so a hand-set pair remains
+possible — and remains as dangerous as it was.
+
 **Driving a hidden webview skips the show path.** Nothing here exercises
 `show_quick_capture`, the hotkey, or the dismiss-on-blur behaviour. Those are
 untested by this tier and must not be assumed covered.
@@ -260,15 +273,17 @@ pnpm test:e2e
 ```
 
 To reach the same states by hand, seed a vault from the catalogue the slices use
-and point a dev build at it (both variables, always together):
+and point a dev build at it:
 
 ```powershell
 pnpm seed:vault -- --list        # the ten scenarios and what each one is for
 pnpm seed:vault C:\kodabi-fixture
-$env:KODABI_KB_ROOT="C:\kodabi-fixture"
-$env:KODABI_INDEX_DB="C:\kodabi-fixture\.index\index.db"
+$env:KODABI_SANDBOX="C:\kodabi-fixture"
 pnpm tauri dev
 ```
+
+Or skip the choice of directory entirely — `pnpm dev:sandbox` seeds the whole
+catalogue into a gitignored `.sandbox/` and launches against it in one command.
 
 Prerequisites: Windows and the WebView2 Evergreen runtime. Node 24+ is the repo
 prerequisite; the harness itself needs only 22+, for the global `WebSocket`. No
