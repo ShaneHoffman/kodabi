@@ -24,9 +24,9 @@ Pre-alpha — early development, no releases yet. See [`ROADMAP.md`](docs/ROADMA
   terminal for power users — both wired to the MCP server
 
 The [Claude Code CLI](https://code.claude.com/docs) is a **user-installed prerequisite**, not
-something Kodabi bundles: every LLM call goes through it — cleanup, distill and routing as well as
-the chat view and the terminal. The MCP server that exposes your knowledge base to it *is* carried
-by the installer.
+something Kodabi bundles: every LLM call goes through it — the glossary cleanup pass and the
+end-of-meeting distill as well as the chat view and the terminal. The MCP server that exposes your
+knowledge base to it *is* carried by the installer.
 
 ## Recording & privacy
 
