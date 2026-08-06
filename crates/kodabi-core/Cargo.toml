@@ -14,10 +14,18 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_yaml_ng = "0.10"
+# Model-file verification (`models::download`). Already in the tree as a
+# build-time dependency of tauri-codegen; this is its first runtime use.
+sha2 = "0.10"
 sqlite-vec = "0.1"
 thiserror = "2"
 toml = "1"
 unicode-normalization = "0.1"
+# First-run model download (`models::download`). Blocking, to match the app's
+# detached-thread style — there is no async runtime here. Default features are
+# off deliberately: `gzip` would transparently decompress bodies and break the
+# byte arithmetic that resuming an interrupted download depends on.
+ureq = { version = "3", default-features = false, features = ["rustls"] }
 
 [dev-dependencies]
 tempfile = "3"

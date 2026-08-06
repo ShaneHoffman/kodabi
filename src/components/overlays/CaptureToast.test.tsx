@@ -2,6 +2,7 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CapturePipelineProvider } from "../providers/CapturePipelineProvider";
+import { ModelStatusProvider } from "../providers/ModelStatusProvider";
 import { CaptureToast } from "./CaptureToast";
 import { DISTILL_STATE_EVENT } from "../../events";
 import { emitFromBackend, onCommand, resetTauriMocks } from "../../test/tauri";
@@ -27,9 +28,11 @@ const LISTENING = {
 async function renderToast() {
   onCommand("capture_phase", () => IDLE);
   const result = render(
-    <CapturePipelineProvider>
-      <CaptureToast />
-    </CapturePipelineProvider>,
+    <ModelStatusProvider>
+      <CapturePipelineProvider>
+        <CaptureToast />
+      </CapturePipelineProvider>
+    </ModelStatusProvider>,
   );
   await act(async () => {
     await Promise.resolve();
@@ -134,6 +137,31 @@ describe("CaptureToast", () => {
     });
 
     expect(screen.getByRole("alert")).toHaveTextContent(/Couldn't transcribe that capture/);
+  });
+
+  it("blames the missing models when that is the actual cause, and says the audio is safe", async () => {
+    // Same failure event, different truth behind it. A transcription that
+    // failed for want of models has not lost the recording: the spill survives
+    // and a later launch retries it, so pointing the user at Needs attention
+    // would send them to fix something that is not broken.
+    onCommand("model_status", () => ({
+      ready: false,
+      bytesRequired: 762_000_000,
+      bytesPresent: 0,
+      sets: [],
+      downloading: false,
+      modelsDir: "C:\\app\\.models",
+    }));
+    await renderToast();
+
+    await act(async () => {
+      emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "error", message: "boom" });
+    });
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(/the models aren't downloaded/);
+    expect(alert).toHaveTextContent(/recording is safe/);
+    expect(alert).not.toHaveTextContent(/Needs attention/);
   });
 
   it("reports a second failure of the same kind after the first was dismissed", async () => {

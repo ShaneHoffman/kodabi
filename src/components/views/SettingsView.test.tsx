@@ -2,9 +2,16 @@ import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsView } from "./SettingsView";
+import { ModelStatusProvider } from "../providers/ModelStatusProvider";
 import type { OverlaySettings, Settings } from "../../useSettings";
 import { INDEX_STATE_EVENT } from "../../events";
-import { emitFromBackend, invoke, onCommand, resetTauriMocks } from "../../test/tauri";
+import {
+  emitFromBackend,
+  invoke,
+  invokedCommands,
+  onCommand,
+  resetTauriMocks,
+} from "../../test/tauri";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
@@ -44,14 +51,18 @@ function settingsWith(overlay: OverlaySettings): Settings {
 /**
  * Render with `get_settings` seeded and wait for the load to land.
  *
- * There is no tab to open any more: the four cards are all on the page at once,
+ * There is no tab to open any more: the cards are all on the page at once,
  * so every control is reachable the moment the settings arrive. The wait is on
  * a card rather than the view's own heading, because the heading renders before
  * `get_settings` resolves and would let an assertion run against an empty page.
  */
 async function renderSeeded(settings: Settings = DEFAULTS) {
   onCommand("get_settings", () => settings);
-  const result = render(<SettingsView />);
+  const result = render(
+    <ModelStatusProvider>
+      <SettingsView />
+    </ModelStatusProvider>,
+  );
   await screen.findByRole("region", { name: "Privacy" });
   return result;
 }
@@ -259,15 +270,15 @@ describe("SettingsView layout", () => {
     resetTauriMocks();
   });
 
-  it("names itself Settings and lays the four concerns out as cards", async () => {
+  it("names itself Settings and lays the concerns out as cards", async () => {
     await renderSeeded();
 
     expect(
       screen.getByRole("heading", { name: "Settings", level: 2 }),
     ).toBeInTheDocument();
-    // Named regions, so the four concerns are landmarks a screen reader can
+    // Named regions, so the concerns are landmarks a screen reader can
     // jump between rather than tabs a pointer has to find.
-    for (const concern of ["Privacy", "Appearance", "Capture", "Maintenance"]) {
+    for (const concern of ["Privacy", "Appearance", "Capture", "Models", "Maintenance"]) {
       expect(screen.getByRole("region", { name: concern })).toBeInTheDocument();
     }
     // The rail is gone with them: it filtered the page, so three quarters of
@@ -514,5 +525,90 @@ describe("SettingsView mic test", () => {
     );
     // The last real result is still what's shown underneath the error.
     expect(screen.getByText(/Headphones detected/)).toBeInTheDocument();
+  });
+
+  describe("the Models card", () => {
+    const MISSING = {
+      ready: false,
+      bytesRequired: 762_000_000,
+      bytesPresent: 0,
+      sets: [],
+      downloading: false,
+      modelsDir: "C:\\app\\.models",
+    };
+
+    function models(): HTMLElement {
+      return card("Models");
+    }
+
+    it("offers the download, quoting what is left to fetch", async () => {
+      onCommand("model_status", () => MISSING);
+      await renderSeeded();
+
+      expect(
+        await within(models()).findByRole("button", { name: "Download 762 MB" }),
+      ).toBeInTheDocument();
+    });
+
+    it("is the permanent path a dismissed first-run nudge leaves behind", async () => {
+      const user = userEvent.setup();
+      onCommand("model_status", () => MISSING);
+      onCommand("download_models", () => null);
+      await renderSeeded();
+
+      await user.click(
+        await within(models()).findByRole("button", { name: "Download 762 MB" }),
+      );
+      expect(invokedCommands()).toContain("download_models");
+    });
+
+    it("states installation as a fact rather than a control, and never on a timer", async () => {
+      onCommand("model_status", () => ({ ...MISSING, ready: true, bytesRequired: 0 }));
+      await renderSeeded();
+
+      expect(await within(models()).findByText("Installed")).toBeInTheDocument();
+      // "You can change this" must not look like "this is how it is".
+      expect(
+        within(models()).queryByRole("button", { name: /Download/ }),
+      ).not.toBeInTheDocument();
+      // Unlike the rebuild confirmation, this reports configuration, not an
+      // event, so it stays put rather than clearing itself.
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      act(() => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(within(models()).getByText("Installed")).toBeInTheDocument();
+      vi.useRealTimers();
+    });
+
+    it("says so plainly when a developer has pointed the app elsewhere", async () => {
+      onCommand("model_status", () => ({
+        ...MISSING,
+        ready: true,
+        bytesRequired: 0,
+        sets: [
+          {
+            id: "parakeet-tdt-0.6b-v2-int8",
+            state: "env_overridden",
+            bytesTotal: 0,
+            bytesPresent: 0,
+            license: "CC-BY-4.0",
+          },
+        ],
+      }));
+      await renderSeeded();
+
+      expect(await within(models()).findByText("Developer override")).toBeInTheDocument();
+    });
+
+    it("carries the CC BY attribution the speech model's licence requires", async () => {
+      onCommand("model_status", () => MISSING);
+      await renderSeeded();
+
+      const attribution = within(models()).getByText(/Parakeet TDT 0\.6b v2 by NVIDIA/);
+      expect(attribution).toHaveTextContent(/CC BY 4\.0/);
+      // The licence obliges us to state that the files were changed.
+      expect(attribution).toHaveTextContent(/quantized to int8/);
+    });
   });
 });

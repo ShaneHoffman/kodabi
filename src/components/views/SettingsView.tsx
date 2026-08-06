@@ -18,8 +18,11 @@ import {
 import { applyContrast, readContrast } from "../../contrast";
 import { applyReduceMotion, readReduceMotion } from "../../reduceMotion";
 import { INDEX_STATE_EVENT } from "../../events";
+import { formatMegabytes } from "../../models";
+import { useModelStatus } from "../../useModelStatus";
 import { useTauriEvent } from "../../useTauriEvent";
 import { useTimeout } from "../../useTimeout";
+import { ModelDownloadProgress } from "../models/ModelDownloadProgress";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
 import { StatusMessage } from "../ui/StatusMessage";
@@ -54,9 +57,9 @@ type RebuildStatus = { status: "idle" } | IndexStateEvent;
 /**
  * One concern, as a card.
  *
- * The four of them stack one per row down the panel, and the card is what
+ * They stack one per row down the panel, and the card is what
  * replaced the tab rail: a rail filtered the page, so three quarters of the
- * settings were somewhere you had to remember to look. Four cards are the same
+ * settings were somewhere you had to remember to look. The cards are the same
  * information with nothing hidden, and the eyebrow does the work the tab did —
  * naming the group — without also being a control.
  *
@@ -216,8 +219,66 @@ function RebuildIndexControl() {
 }
 
 /**
+ * The speech and search models, which are downloaded on first run rather than
+ * shipped in the installer. This is the permanent path to that download: the
+ * first-run nudge is dismissible and session-only, so if it is waved away this
+ * row is where the user finds it again, and where a failed attempt is retried.
+ *
+ * "Installed" carries no timer, unlike the rebuild confirmation above it. That
+ * one reports something that just happened; this one states how the machine is
+ * configured, which stays true.
+ */
+function ModelsControl() {
+  const { state, start, cancel } = useModelStatus();
+
+  return (
+    <Row
+      label="Speech and search models"
+      hint="Transcription and note search run on this device. They need a one time download."
+      foot={
+        <>
+          {state.status === "downloading" && (
+            <ModelDownloadProgress progress={state.progress} />
+          )}
+          {state.status === "error" && (
+            <StatusMessage variant="error" compact>
+              Couldn&apos;t finish the download: {state.message}
+            </StatusMessage>
+          )}
+        </>
+      }
+    >
+      {state.status === "downloading" ? (
+        <div className="flex items-center gap-2.5">
+          <Button variant="quiet" onClick={() => void cancel()}>
+            Cancel
+          </Button>
+          <Button loading loadingLabel="Downloading…">
+            Downloading
+          </Button>
+        </div>
+      ) : state.status === "ready" ? (
+        // Read-only fact, so plain text and no control: "this is how it is"
+        // must never look like "you can change this".
+        <span className="text-[12.5px] text-ink-read">
+          {state.envOverridden ? "Developer override" : "Installed"}
+        </span>
+      ) : state.status === "unknown" ? (
+        <span className="text-[12.5px] text-ink-faint">Checking…</span>
+      ) : (
+        <Button onClick={() => void start()}>
+          {state.status === "missing"
+            ? `Download ${formatMegabytes(state.bytesRequired)}`
+            : "Try again"}
+        </Button>
+      )}
+    </Row>
+  );
+}
+
+/**
  * Settings — the app's CONFIG PANEL, and it announces that before a word is
- * read: four cards stacked one per row, each named by a mono eyebrow, holding
+ * read: cards stacked one per row, each named by a mono eyebrow, holding
  * nothing but label-and-control rows.
  *
  * Every control lands on one right edge for the whole page, so the column is
@@ -606,6 +667,23 @@ export function SettingsView() {
                 Run test
               </Button>
             </Row>
+          </Card>
+
+          <Card title="Models">
+            <ModelsControl />
+            <Row
+              label="Attribution"
+              hint={
+                <>
+                  Speech recognition uses Parakeet TDT 0.6b v2 by NVIDIA,
+                  licensed under CC BY 4.0
+                  (creativecommons.org/licenses/by/4.0). The model files are
+                  converted to ONNX and quantized to int8 by the sherpa-onnx
+                  project. Note search uses bge-small-en-v1.5 by BAAI, MIT
+                  licensed.
+                </>
+              }
+            />
           </Card>
 
           <Card title="Maintenance">

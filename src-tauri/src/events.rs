@@ -14,6 +14,12 @@ pub const VAULT_CHANGED_EVENT: &str = "vault:changed";
 /// `transcription:state` shape.
 pub const INDEX_STATE_EVENT: &str = "index:state";
 
+/// Progress of the first-run model download (`download_models` command), as a
+/// tagged-status payload: `downloading` carries per-file and overall byte
+/// counts, then `verifying` / `retrying`, then one of `ready`, `cancelled` or
+/// `error`. Mirrors the [`INDEX_STATE_EVENT`] shape.
+pub const MODELS_STATE_EVENT: &str = "models:state";
+
 /// Emitted after the retention sweep deleted raw sessions, so any surface
 /// listing sessions refetches instead of offering a retry for a file that is
 /// gone. Distinct from [`VAULT_CHANGED_EVENT`]: a prune touches no note, so

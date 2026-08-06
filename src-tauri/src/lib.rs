@@ -7,6 +7,8 @@ mod distill_cmds;
 mod events;
 mod index_cmds;
 mod index_state;
+mod models;
+mod models_cmds;
 mod note_cmds;
 mod overlay;
 mod quick_capture;
@@ -206,6 +208,7 @@ pub fn run() {
         // The designed chat view's single live headless session (Phase 3),
         // same lifecycle: reaped only on true app exit or explicit restart.
         .manage(chat_cmds::ChatState::default())
+        .manage(models_cmds::ModelsState::default())
         .invoke_handler(tauri::generate_handler![
             device_id,
             audio_cmds::start_capture,
@@ -231,6 +234,9 @@ pub fn run() {
             note_cmds::delete_project,
             index_cmds::rebuild_index,
             index_cmds::search_notes,
+            models_cmds::model_status,
+            models_cmds::download_models,
+            models_cmds::cancel_model_download,
             quick_capture::show_quick_capture,
             quick_capture::hide_quick_capture,
             quick_capture::quick_capture_submit,

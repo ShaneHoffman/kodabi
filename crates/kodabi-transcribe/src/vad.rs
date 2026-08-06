@@ -27,8 +27,8 @@ use crate::validate::{
 /// Silero VAD tuning knobs for [`VadGate`].
 ///
 /// `vad_model` must point at a file that already exists on disk (e.g.
-/// `silero_vad.onnx`). Download-on-first-run, settings persistence and Tauri
-/// wiring are separate, later tickets (mirrors `ParakeetConfig`).
+/// `silero_vad.onnx`); the app shell provisions it and passes the path in
+/// (mirrors `ParakeetConfig`).
 #[derive(Debug, Clone)]
 pub struct VadConfig {
     /// `silero_vad.onnx`, sherpa-onnx's bundled VAD model.

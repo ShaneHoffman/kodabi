@@ -122,7 +122,7 @@ impl IndexState {
             };
         };
         let index = Arc::new(index);
-        let embedder = build_embedder();
+        let embedder = build_embedder(app);
 
         // The vault root the watcher observes and reconcile scans. Best-effort:
         // if it can't be resolved, the worker still serves in-app writes; only
@@ -548,14 +548,25 @@ fn open_index(app: &AppHandle) -> Option<Mutex<NoteIndex>> {
 }
 
 #[cfg(feature = "embed")]
-fn build_embedder() -> Option<Arc<dyn Embedder>> {
+fn build_embedder(app: &AppHandle) -> Option<Arc<dyn Embedder>> {
     use kodabi_embed::{BgeConfig, BgeEmbedder};
+    let mut config = BgeConfig::from_env();
+    if config.model_dir.as_os_str().is_empty() {
+        // `from_env` leaves the directory empty when `KODABI_EMBED_MODEL_DIR` is
+        // unset, which is the normal case for an installed app: fall back to the
+        // models directory the first-run download populates. The environment
+        // still wins where it is set, which is what CI and local benchmarking
+        // rely on.
+        if let Some(dir) = crate::models::resolve_embed_dir(app) {
+            config.model_dir = dir;
+        }
+    }
     // Lazy: the model loads on the first embed, not here, so a missing model
     // directory doesn't delay launch — it surfaces as a logged indexing error.
-    Some(Arc::new(BgeEmbedder::new(BgeConfig::from_env())))
+    Some(Arc::new(BgeEmbedder::new(config)))
 }
 
 #[cfg(not(feature = "embed"))]
-fn build_embedder() -> Option<Arc<dyn Embedder>> {
+fn build_embedder(_app: &AppHandle) -> Option<Arc<dyn Embedder>> {
     None
 }

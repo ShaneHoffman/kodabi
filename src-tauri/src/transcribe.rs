@@ -485,7 +485,10 @@ fn persist(
     let device = app.state::<DeviceId>().inner().clone();
 
     let cleaner = ClaudeRunner::new(ClaudeConfig::cleanup_from_env());
-    let mut make_engine = build_engine;
+    // Resolved once per session rather than per channel: the pipeline builds an
+    // engine for each of You and Them, and both must load the same files.
+    let stt_paths = crate::models::resolve_stt_paths(app);
+    let mut make_engine = || build_engine(&stt_paths);
 
     let outcome = transcribe_and_persist(
         &mut make_engine,
@@ -767,15 +770,17 @@ fn write_metrics_line(timings: &PipelineTimings, target: &str) {
 }
 
 #[cfg(all(feature = "parakeet", not(feature = "whisper")))]
-fn build_engine() -> transcription::Result<Box<dyn TranscriptionEngine>> {
+fn build_engine(
+    paths: &crate::models::ResolvedSttPaths,
+) -> transcription::Result<Box<dyn TranscriptionEngine>> {
     use kodabi_transcribe::{ParakeetConfig, ParakeetEngine};
 
     let config = ParakeetConfig {
-        encoder: env_model_path("PARAKEET_ENCODER"),
-        decoder: env_model_path("PARAKEET_DECODER"),
-        joiner: env_model_path("PARAKEET_JOINER"),
-        tokens: env_model_path("PARAKEET_TOKENS"),
-        vad_model: env_model_path("PARAKEET_VAD_MODEL"),
+        encoder: paths.encoder.clone(),
+        decoder: paths.decoder.clone(),
+        joiner: paths.joiner.clone(),
+        tokens: paths.tokens.clone(),
+        vad_model: paths.vad_model.clone(),
         num_threads: 1,
         provider: Some("cpu".to_owned()),
         vad_threshold: 0.5,
@@ -788,8 +793,13 @@ fn build_engine() -> transcription::Result<Box<dyn TranscriptionEngine>> {
     Ok(Box::new(ParakeetEngine::new(config)?))
 }
 
+// Whisper stays environment-only. It is a local benchmarking feature that no
+// release ships (`pnpm tauri:build` passes `--features parakeet`), so its models
+// are not mirrored on the models release and there is nothing to download.
 #[cfg(all(feature = "whisper", not(feature = "parakeet")))]
-fn build_engine() -> transcription::Result<Box<dyn TranscriptionEngine>> {
+fn build_engine(
+    _paths: &crate::models::ResolvedSttPaths,
+) -> transcription::Result<Box<dyn TranscriptionEngine>> {
     use kodabi_transcribe::{whisper_with_vad, VadConfig, WhisperConfig};
 
     let whisper_config = WhisperConfig {
@@ -832,16 +842,21 @@ compile_error!(
 );
 
 #[cfg(not(any(feature = "parakeet", feature = "whisper")))]
-fn build_engine() -> transcription::Result<Box<dyn TranscriptionEngine>> {
+fn build_engine(
+    _paths: &crate::models::ResolvedSttPaths,
+) -> transcription::Result<Box<dyn TranscriptionEngine>> {
     Ok(Box::new(transcription::MockEngine::new()))
 }
 
-/// Reads a model file path from an environment variable. An unset var
-/// resolves to an empty path, which fails the engine constructor's own
-/// `require_file` check with a clear `TranscriptionError::ModelLoad` rather
-/// than panicking here — model download/settings wiring is a later ticket
-/// (see `ParakeetConfig`'s docs).
-#[cfg(any(feature = "parakeet", feature = "whisper"))]
+/// Reads a model file path from an environment variable. An unset var resolves
+/// to an empty path, which fails the engine constructor's own `require_file`
+/// check with a clear `TranscriptionError::ModelLoad` rather than panicking
+/// here.
+///
+/// Only the whisper leg still reads paths this way. Parakeet resolves through
+/// [`crate::models`], which prefers the downloaded models directory and treats
+/// the `PARAKEET_*` variables as an all-or-nothing developer override.
+#[cfg(all(feature = "whisper", not(feature = "parakeet")))]
 fn env_model_path(var: &str) -> PathBuf {
     std::env::var(var).unwrap_or_default().into()
 }

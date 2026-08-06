@@ -18,6 +18,7 @@ pub mod inflight;
 pub mod llm;
 pub mod meeting;
 pub mod metrics;
+pub mod models;
 pub mod naming;
 pub mod note;
 pub mod overlay;

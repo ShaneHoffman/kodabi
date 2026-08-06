@@ -19,6 +19,12 @@ export const VAULT_CHANGED_EVENT = "vault:changed";
  * `{ status: "error", message }`. Mirrors `events::INDEX_STATE_EVENT`. */
 export const INDEX_STATE_EVENT = "index:state";
 
+/** Progress of the first-run model download (`download_models`), as a
+ * tagged-status payload: `downloading` (per-file and overall bytes),
+ * `verifying`, `retrying`, then one of `ready`, `cancelled`, `error`. Mirrors
+ * `events::MODELS_STATE_EVENT`. */
+export const MODELS_STATE_EVENT = "models:state";
+
 /** The retention sweep deleted expired raw sessions, so any surface listing
  * sessions refetches rather than offering a retry for a file that is gone.
  * Distinct from `vault:changed`: a prune touches no note. Mirrors

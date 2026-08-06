@@ -26,7 +26,8 @@ in `eslint.config.js` fail any non-blessed file at the
   `useDistillState`, `useTranscriptionState`, `useSettings`, `useConsentNudge`,
   `useChatSession` (the chat view's backend session: `chat_open` on mount +
   the `chat:event` stream), `useRoutePreview` (the quick-capture footer's
-  debounced routing-guess call).
+  debounced routing-guess call), `useModelDownload` (first-run model
+  provisioning: `model_status` on mount + the `models:state` stream).
   DOM: `useCommandPalette` (global ⌘K/Ctrl-K keydown),
   `useScrollIntoView` (active-descendant row visibility),
   `useOutsidePointerDown` (dismiss on outside press), `useXterm` (the embedded

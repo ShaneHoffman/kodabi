@@ -1,4 +1,5 @@
 import { MotionConfig } from "motion/react";
+import { useState } from "react";
 import { useCommandPalette } from "../../useCommandPalette";
 import { useConsentNudge } from "../../useConsentNudge";
 import { useNavigation, viewKey } from "../../useNavigation";
@@ -7,9 +8,11 @@ import { useSessionsChangedBridge } from "../../useSessionsChangedBridge";
 import { useVaultChangedBridge } from "../../useVaultChangedBridge";
 import { AppErrorBoundary } from "./AppErrorBoundary";
 import { CapturePipelineProvider } from "../providers/CapturePipelineProvider";
+import { ModelStatusProvider } from "../providers/ModelStatusProvider";
 import { CaptureToast } from "../overlays/CaptureToast";
 import { CommandPalette } from "../overlays/CommandPalette";
 import { ConsentNudge } from "../overlays/ConsentNudge";
+import { ModelDownloadNudge } from "../overlays/ModelDownloadNudge";
 import { Dock } from "./Dock";
 import { MainContent } from "./MainContent";
 import { TopBar } from "./TopBar";
@@ -26,6 +29,11 @@ import { TopBar } from "./TopBar";
 export function AppShell() {
   const { open, openPalette, closePalette } = useCommandPalette();
   const { open: consentOpen, closeNudge } = useConsentNudge();
+  // Session-only, and held here rather than inside the nudge so dismissing it
+  // survives the consent dialog taking the screen in front of it. Readiness is
+  // re-derived from `model_status` every launch, so the ask returns next time
+  // and Settings carries the permanent path.
+  const [modelNudgeDismissed, setModelNudgeDismissed] = useState(false);
   const { view } = useNavigation();
   const reduceMotion = useReduceMotion();
   // Refresh this window's lists when another window (quick capture) writes.
@@ -38,6 +46,7 @@ export function AppShell() {
     // boundary so a crashed routed view doesn't tear it down, and around both
     // the Inbox (which shows the pipeline's progress) and the toast (which
     // now only ever shows its failures).
+    <ModelStatusProvider>
     <CapturePipelineProvider>
       {/* The reduced-motion policy for everything the `motion` package drives,
           set once here so a call site cannot forget it. "always" strips the
@@ -72,8 +81,15 @@ export function AppShell() {
               Behind `open &&` the dissolve would be cut off by the unmount. */}
           <CommandPalette open={open} onClose={closePalette} />
           {consentOpen && <ConsentNudge onClose={closeNudge} />}
+          {/* Consent outranks it: that one is a gate on recording at all, this
+              one is an ask the user can take or leave. The nudge decides for
+              itself whether there is anything worth showing. */}
+          {!consentOpen && !modelNudgeDismissed && (
+            <ModelDownloadNudge onClose={() => setModelNudgeDismissed(true)} />
+          )}
         </div>
       </MotionConfig>
     </CapturePipelineProvider>
+    </ModelStatusProvider>
   );
 }

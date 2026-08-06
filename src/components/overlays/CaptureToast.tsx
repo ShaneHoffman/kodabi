@@ -1,5 +1,7 @@
 import { useState } from "react";
+import type { ModelDownloadState } from "../../models";
 import { useCapturePipeline } from "../../useCapturePipeline";
+import { isTranscriptionReady, useModelStatus } from "../../useModelStatus";
 
 type Notice = {
   /** Identity, not content: it keys the dismissal record, so a second
@@ -22,7 +24,10 @@ type Notice = {
  * placeholder can't announce on its own, because a failed capture never
  * lands a row there — it lands under Needs attention instead.
  */
-function noticeFor(pipeline: ReturnType<typeof useCapturePipeline>): Notice | null {
+function noticeFor(
+  pipeline: ReturnType<typeof useCapturePipeline>,
+  models: ModelDownloadState,
+): Notice | null {
   if (pipeline.distill.status === "error") {
     return {
       id: "distill:error",
@@ -33,6 +38,16 @@ function noticeFor(pipeline: ReturnType<typeof useCapturePipeline>): Notice | nu
     };
   }
   if (pipeline.transcription.status === "error") {
+    // The cause is knowable here and the remedy is different, so say so. A
+    // transcription that failed for want of models is not a lost recording:
+    // the audio is kept and retried on a later launch, and the only thing the
+    // user has to do is finish the download.
+    if (!isTranscriptionReady(models)) {
+      return {
+        id: "transcribe:models",
+        text: "Couldn't transcribe yet: the models aren't downloaded. The recording is safe and will be transcribed later.",
+      };
+    }
     return {
       id: "transcribe:error",
       text: "Couldn't transcribe that capture. It's under Needs attention.",
@@ -59,7 +74,8 @@ function noticeFor(pipeline: ReturnType<typeof useCapturePipeline>): Notice | nu
  */
 export function CaptureToast() {
   const pipeline = useCapturePipeline();
-  const notice = noticeFor(pipeline);
+  const { state: models } = useModelStatus();
+  const notice = noticeFor(pipeline, models);
 
   // Which notice the user has already seen out. Compared during render rather
   // than cleared in an effect: a new notice id is a new thing to say, so the

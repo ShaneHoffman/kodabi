@@ -177,10 +177,11 @@ dependencies. `pnpm tauri:build` passes `--features parakeet,embed` (the shippin
 real engine plus the local embedder), and a release build with no engine feature **fails to compile
 on purpose**, so a stub build can never ship.
 
-To run the real engine in dev mode, build with the feature and point the five model
-variables at a locally downloaded [`sherpa-onnx-nemo-parakeet-tdt-0.6b-v2`
-(int8)](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models) plus
-`silero_vad.onnx`:
+An installed app downloads its own models on first run (below), so these variables are a
+**developer override**. To run the real engine in dev mode, build with the feature and
+point the five model variables at a locally downloaded
+[`sherpa-onnx-nemo-parakeet-tdt-0.6b-v2` (int8)](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models)
+plus `silero_vad.onnx`:
 
 ```sh
 PARAKEET_ENCODER=.../encoder.int8.onnx PARAKEET_DECODER=.../decoder.int8.onnx \
@@ -189,10 +190,37 @@ PARAKEET_VAD_MODEL=.../silero_vad.onnx \
 pnpm tauri dev --features parakeet
 ```
 
-Model download and settings wiring for end users is a later ticket. See
-[`docs/benchmarks/stt-engine-benchmark.md`](docs/benchmarks/stt-engine-benchmark.md) for
+Set **all five or none**: a partial override is ignored with a warning, because filling
+the gaps from the downloaded models would mix two model versions inside one engine. The
+embedding model works the same way through `KODABI_EMBED_MODEL_DIR`.
+
+See [`docs/benchmarks/stt-engine-benchmark.md`](docs/benchmarks/stt-engine-benchmark.md) for
 why Parakeet is the shipping engine and
 [`docs/RESOURCE_BUDGET.md`](docs/RESOURCE_BUDGET.md) for the deferred Whisper fallback.
+
+### Models are downloaded, not bundled
+
+The installer stays small and the app fetches its models on first launch, rather than
+shipping ~760 MB that every update would re-ship. What to fetch is described by a
+versioned manifest compiled into the binary
+([`crates/kodabi-core/src/models/manifest.json`](crates/kodabi-core/src/models/manifest.json)):
+filenames, sizes, SHA-256 digests, and the licence of each set. The assets are mirrored on
+a GitHub release owned by this repo (`models-v1`) rather than hotlinked upstream, so a
+rename elsewhere cannot break every install.
+
+Files land in `<app-data>/.models/`, dot-prefixed for the same reason the index is: that
+directory is also the default vault root, and a plain `models/` folder there would show up
+as a project. Each file downloads to `<name>.part`, is verified against its digest, and is
+renamed only then — so a killed app never leaves a half-model that looks installed. An
+interrupted download resumes with an HTTP range request.
+
+The app never downloads without being asked. The user starts it from the first-run prompt
+or from Settings → Models, which is also where the attribution required by Parakeet's
+CC-BY-4.0 licence appears; a `NOTICE.txt` is written beside the models with the licence of
+every set installed.
+
+Publishing a new model release is [`scripts/upload-models.ps1`](scripts/upload-models.ps1),
+which verifies every local file against the manifest before uploading anything.
 
 Rust tests, lint, and format run from the repo root (the workspace covers all crates). A quick
 local loop before pushing:
