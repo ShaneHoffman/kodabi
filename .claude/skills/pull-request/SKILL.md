@@ -53,11 +53,13 @@ confirms it compiles and links on Windows unconditionally, before anything is pu
 - `pnpm install --frozen-lockfile` — installs frontend deps (worktrees start without `node_modules`).
 - `pnpm tauri:build --no-bundle` — release compile + link of the desktop app in its shipping
   configuration (`--features parakeet`; no installer packaging). This one command covers
-  everything: it runs `pnpm build` itself (the `beforeBuildCommand` in `tauri.conf.json`,
-  generating the `dist/` that `tauri::generate_context!` embeds) and release-compiles the full
-  Rust workspace. Use the `tauri:build` script, not a bare `pnpm tauri build`: a release build
-  without an engine feature is rejected by the `compile_error!` guard in
-  `src-tauri/src/transcribe.rs`.
+  everything: it runs `pnpm mcp:build:release && pnpm build` itself (the `beforeBuildCommand` in
+  `tauri.conf.json`, generating the `dist/` that `tauri::generate_context!` embeds and the
+  `kodabi-mcp` the bundle carries) and release-compiles the full Rust workspace. Use the
+  `tauri:build` script, not a bare `pnpm tauri build`, for two reasons: a release build without an
+  engine feature is rejected by the `compile_error!` guard in `src-tauri/src/transcribe.rs`, and
+  only the script passes `--config src-tauri/tauri.bundle.conf.json`, the overlay that puts
+  `kodabi-mcp.exe` in the installer.
 
 If this fails, STOP — fix the build first. Do not push or open/update a PR for code that
 doesn't build.

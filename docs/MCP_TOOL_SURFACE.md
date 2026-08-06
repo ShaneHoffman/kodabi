@@ -72,6 +72,16 @@ Claude Code MCP reference (`code.claude.com/docs/en/mcp`) and the MCP tool speci
   Both may run at once: two `claude → kodabi-mcp` process pairs over the same index and vault is
   fine (SQLite reads are concurrent, and writes go through the vault paths the file watcher
   reconciles).
+- **Shipping.** The installer carries `kodabi-mcp.exe` at the resource-dir root (on Windows, beside
+  the installed app exe), declared as `bundle.resources` in `src-tauri/tauri.bundle.conf.json` — a
+  config overlay applied only by the `pnpm tauri:build` script, since `tauri-build` validates every
+  resource path at *each* `src-tauri` compile and the bare cargo gates never build the release
+  binary. Build installers with `pnpm tauri:build`; a bare `tauri build` skips the overlay and ships
+  no sidecar. `resolve_mcp_binary` (`src-tauri/src/terminal_cmds.rs`) finds it there after checking
+  `KODABI_MCP_BINARY` and the exe's own directory (which is how a from-source run resolves it).
+- **The `claude` CLI is a user-installed prerequisite, not bundled.** Both consumers spawn Claude
+  Code from `PATH` (`KODABI_CLAUDE_BINARY` overrides for a non-standard install); the installer
+  ships only the MCP server. Bundling the CLI as a sidecar is a later consideration.
 - Keep every tool `description` and the server's own instructions string **under 2 KB** — Claude
   Code truncates both at that size, and truncation would silently drop the "when to use this"
   guidance a tool-search-driven client relies on.

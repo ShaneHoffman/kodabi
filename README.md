@@ -23,6 +23,11 @@ Pre-alpha — early development, no releases yet. See [`ROADMAP.md`](docs/ROADMA
 - Chat over your history: a designed chat view driving Claude Code headless, plus an embedded
   terminal for power users — both wired to the MCP server
 
+The [Claude Code CLI](https://code.claude.com/docs) is a **user-installed prerequisite**, not
+something Kodabi bundles: every LLM call goes through it — the glossary cleanup pass and the
+end-of-meeting distill as well as the chat view and the terminal. The MCP server that exposes your
+knowledge base to it *is* carried by the installer.
+
 ## Recording & privacy
 
 Kodabi records your microphone and system audio, but **only while the listening indicator is green** —
