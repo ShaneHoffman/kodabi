@@ -14,10 +14,11 @@ Windows installers are published on the [Releases](https://github.com/ShaneHoffm
 page as `Kodabi_<version>_x64-setup.exe`. It is an NSIS installer that installs per-user, so it
 needs no administrator rights. Windows x64 only.
 
-**An installed build is not self-contained yet.** The installer carries the app and the frontend,
-and nothing else — no speech model, no embedding model, no `kodabi-mcp` sidecar. Provisioning those
-for end users is still in flight, so today the installer is for looking around, and the
-[from-source setup](#development) below is the way to run the full pipeline. Concretely:
+**An installed build is not self-contained yet.** The installer carries the app, the frontend, and
+the `kodabi-mcp` sidecar, but no speech model and no embedding model. Provisioning those for end
+users is still in flight, so today the installer can chat over an existing knowledge base but
+can't finish transcribing a new one, and the [from-source setup](#development) below is the way to
+run the full pipeline. Concretely:
 
 - **WebView2** ships with Windows 11. On an older machine without it, the installer downloads and
   installs it for you.
@@ -28,10 +29,9 @@ for end users is still in flight, so today the installer is for looking around, 
 - **Search is full-text only.** Semantic search reads its model directory from
   `KODABI_EMBED_MODEL_DIR`, unset for the same reason, so notes are indexed for FTS but no vectors
   are written.
-- **The chat view and the embedded terminal do not run from an installed build.** They need both
-  the [`claude` CLI](https://docs.claude.com/en/docs/claude-code/overview) (installed and signed in
-  — they drive Claude Code on your own account) *and* the `kodabi-mcp` sidecar, which the bundle
-  does not yet include. Bundling it is a Phase 4 item on the [roadmap](docs/ROADMAP.md).
+- **The chat view and the embedded terminal need the [`claude`
+  CLI](https://docs.claude.com/en/docs/claude-code/overview)** installed and signed in — they
+  drive Claude Code on your own account. The `kodabi-mcp` sidecar itself ships in the installer.
 - **Releases are not yet code-signed**, so SmartScreen shows a "Windows protected your PC" prompt on
   first run: choose *More info* → *Run anyway*. Signing is planned.
 
@@ -50,6 +50,11 @@ for end users is still in flight, so today the installer is for looking around, 
 - Hybrid retrieval (full-text + vector, RRF merge) exposed as a `search_notes` MCP tool
 - Chat over your history: a designed chat view driving Claude Code headless, plus an embedded
   terminal for power users — both wired to the MCP server
+
+The [Claude Code CLI](https://code.claude.com/docs) is a **user-installed prerequisite**, not
+something Kodabi bundles: every LLM call goes through it — the glossary cleanup pass and the
+end-of-meeting distill as well as the chat view and the terminal. The MCP server that exposes your
+knowledge base to it *is* carried by the installer.
 
 ## Recording & privacy
 
