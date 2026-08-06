@@ -3,6 +3,19 @@
   "bundle": {
     "resources": {
       "../target/release/kodabi-mcp.exe": "kodabi-mcp.exe"
+    },
+    "windows": {
+      "signCommand": {
+        "cmd": "powershell",
+        "args": [
+          "-NoProfile",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          "../scripts/sign-windows.ps1",
+          "%1"
+        ]
+      }
     }
   }
 }

@@ -50,7 +50,7 @@ post-pass pulled forward into Phase 1.
 - [ ] Design pass on every screen against the locked system; the distill-and-route transition
 - [ ] Onboarding: first project, glossary seeding, hotkey setup, consent nudge
 - [ ] README with screenshots, architecture doc (trimmed founding doc), contribution guide
-- [ ] Windows installer / signing — includes code-signing **certificate procurement** (long lead time: start this early in the phase); crash-reporting decision (opt-in only)
+- [ ] Windows installer / signing — the pipeline is wired (#159): `.github/workflows/release.yml` signs every shipped binary through Azure Artifact Signing, authenticating with a secretless GitHub OIDC federated credential, so there is no certificate to procure and no long lead time left. What remains is the Azure side (subscription, signing account, individual identity validation, certificate profile, federated credential) plus the repository variables that switch it on, and the crash-reporting decision (opt-in only)
 - [ ] Launch: GitHub, relevant communities
 
 ## Phase 5 — Parking Lot (growth candidates)
