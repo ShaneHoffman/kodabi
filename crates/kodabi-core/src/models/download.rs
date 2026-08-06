@@ -118,6 +118,13 @@ pub enum Progress<'a> {
         count: usize,
         resumed_from: u64,
         total: u64,
+        /// The run-level counts, carried here as well as on [`Progress::Bytes`].
+        /// Without them a consumer rendering overall progress has nothing true
+        /// to draw between one file finishing and the next file's first chunk
+        /// arriving — which is a whole connection setup, and the entire verify
+        /// pass for a file that was already complete on disk.
+        overall_received: u64,
+        overall_total: u64,
     },
     Bytes {
         file: &'a str,
@@ -335,6 +342,8 @@ fn fetch_once(
         count: context.count,
         resumed_from: present,
         total: file.size,
+        overall_received: context.completed_bytes + present,
+        overall_total: context.overall_total,
     });
 
     if present < file.size {
@@ -965,6 +974,77 @@ mod tests {
         .expect("should succeed");
 
         assert_eq!(overall.last().copied(), Some(600), "ends at the true total");
+        assert!(
+            overall.windows(2).all(|pair| pair[1] >= pair[0]),
+            "overall progress must never go backwards: {overall:?}"
+        );
+    }
+
+    #[test]
+    fn every_report_carries_the_run_totals_so_a_bar_never_blanks_between_files() {
+        // The gap this covers is the start of a file: the previous one has
+        // finished and the next has not sent a byte yet. A `FileStarted` that
+        // reported no run totals would leave the only consumer of these events
+        // with nothing to draw for a whole connection setup, and for the entire
+        // verify pass of a file that was already complete on disk.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let content = payload();
+        let sha = sha_of(&content);
+        let files: Vec<PlannedFile> = ["a.onnx", "b.onnx"]
+            .iter()
+            .map(|name| PlannedFile {
+                display: format!("stt/{name}"),
+                url: format!("https://example/{name}"),
+                target: dir.path().join("stt").join(name),
+                size: content.len() as u64,
+                sha256: sha.clone(),
+            })
+            .collect();
+        let plan = DownloadPlan {
+            bytes_total: content.len() as u64 * 2,
+            files,
+        };
+        // The second file resumes, so its start reports a non-zero offset that
+        // has to land in the run total rather than restarting it.
+        let part = part_path(&plan.files[1].target);
+        std::fs::create_dir_all(part.parent().expect("parent")).expect("mkdir");
+        std::fs::write(&part, &content[..90]).expect("seed the partial");
+
+        let fetcher = FakeFetcher::always(content.clone());
+        let cancel = AtomicBool::new(false);
+        let mut overall = Vec::new();
+        download(
+            &plan,
+            &fetcher,
+            &fast_options(),
+            &cancel,
+            &mut |progress| match progress {
+                Progress::FileStarted {
+                    overall_received,
+                    overall_total,
+                    ..
+                }
+                | Progress::Bytes {
+                    overall_received,
+                    overall_total,
+                    ..
+                } => {
+                    assert_eq!(overall_total, 600, "every report knows the run total");
+                    overall.push(overall_received);
+                }
+                _ => {}
+            },
+        )
+        .expect("should succeed");
+
+        assert_eq!(overall.first().copied(), Some(0));
+        // The second file's start, which is the moment this test exists for.
+        assert!(
+            overall.contains(&390),
+            "the resumed file's start must count the finished file plus its own \
+             partial: {overall:?}"
+        );
+        assert_eq!(overall.last().copied(), Some(600));
         assert!(
             overall.windows(2).all(|pair| pair[1] >= pair[0]),
             "overall progress must never go backwards: {overall:?}"

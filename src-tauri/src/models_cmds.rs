@@ -172,16 +172,16 @@ fn event_for(progress: Progress<'_>) -> ModelsStateEvent {
             count,
             resumed_from,
             total,
+            overall_received,
+            overall_total,
         } => ModelsStateEvent::Downloading {
             file: file.to_string(),
             file_index: index,
             file_count: count,
             file_received: resumed_from,
             file_total: total,
-            // Overall counts arrive with the first byte report; until then the
-            // per-file numbers carry the display.
-            overall_received: 0,
-            overall_total: 0,
+            overall_received,
+            overall_total,
         },
         Progress::Bytes {
             file,
