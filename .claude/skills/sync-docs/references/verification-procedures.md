@@ -36,11 +36,22 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   changes under `crates/kodabi-embed` **or** `crates/kodabi-core`, and the shipping
   configuration is covered by **two** parallel jobs sharing one identical path filter:
   `app-dev` runs the `--test parakeet_real --ignored` real-model run and
-  `cargo clippy -p kodabi --features parakeet …`, while `app` runs the
-  `--release --features parakeet` build and the release-guard check. Only the clippy
+  `cargo clippy -p kodabi --features parakeet,embed …`, while `app` runs the
+  `--release --features parakeet,embed` build and the release-guard check. Only the clippy
   leg is a per-commit gate in `CLAUDE.md`; the release build is `/pull-request`'s.
+  `release.yml` is mostly out of scope for this anchor — it runs no *pre-commit* gate,
+  only the tagged installer build (see anchor 5 for the feature set it inherits from
+  `tauri:build`). Its one assertion is a version check, not a gate: the tag must match
+  `version` in **both** `package.json` and `src-tauri/tauri.conf.json`, so confirm those
+  two still agree with each other whenever either is bumped. Two things in `release.yml`
+  *are* in scope, because it copies them from `ci.yml` rather than deriving them: its
+  toolchain setup (`pnpm/action-setup` version, `actions/setup-node` `node-version`, the
+  `dtolnay/rust-toolchain` channel) must still match `ci.yml`'s, and its own comment says
+  so. Nothing enforces it, and a mismatch surfaces only after a tag is pushed and the
+  hour-long build has already started.
 - **Failure:** a gate CI runs that `CLAUDE.md` omits (or vice versa). The pre-commit
-  gates promise to "mirror CI exactly", so any difference is a gap.
+  gates promise to "mirror CI exactly", so any difference is a gap. Also a failure: a
+  toolchain version that differs between `ci.yml` and `release.yml`.
 
 ## Anchor 3 — Repository layout ↔ tree
 
@@ -104,10 +115,14 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   `cargo clippy --features …` legs before commit).
 - **Verify:** confirm every off-by-default feature that CI clippy-checks is named in
   `CLAUDE.md`'s pre-commit instructions, with the same build-environment notes
-  (whisper needs MSVC + `LIBCLANG_PATH`). Also confirm the feature release builds ship
-  with (`parakeet`, via `package.json`'s `tauri:build` script) matches what `CLAUDE.md`
-  and `README.md` claim, and that the `compile_error!` guard in
-  `src-tauri/src/transcribe.rs` still names it.
+  (whisper needs MSVC + `LIBCLANG_PATH`). Also confirm the feature set release builds ship
+  with (`parakeet,embed`, via `package.json`'s `tauri:build` script — the canonical
+  definition, which `.github/workflows/release.yml` invokes rather than restating) matches
+  what `CLAUDE.md`, `README.md` and the two app jobs in `ci.yml` claim, and that the
+  `compile_error!` guard in `src-tauri/src/transcribe.rs` still names an engine.
+  `embed` has **no** guard of its own, so the script is the only thing pinning it: a
+  `tauri:build` that lost `embed` would ship an exe with no semantic search and nothing
+  would fail.
 - **Failure:** a feature CI checks that `CLAUDE.md`'s commit instructions don't
   mention.
 

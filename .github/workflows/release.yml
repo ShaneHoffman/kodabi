@@ -1,0 +1,120 @@
+name: Release
+
+# Deliberately a separate file from ci.yml rather than another job in it. Every
+# job `name:` in ci.yml doubles as a *required status check context* in the
+# repo's "main protection" ruleset, and that ruleset lives outside the tree — a
+# job added there would either sit unrequired (fine but confusing) or, once
+# required, permanently block every PR to main on a check that only ever runs
+# for tags. Tag-triggered work lives here, where the ruleset never looks.
+on:
+  push:
+    tags: ['v*']
+
+# Tags are pushed by hand and each one is a distinct artifact; a re-pushed tag
+# should re-run rather than cancel, so there is no `concurrency` block here.
+
+permissions:
+  # Needed to create the draft release and upload the installer to it. Every
+  # other workflow in this repo is contents: read.
+  contents: write
+
+jobs:
+  release:
+    name: Windows installer (NSIS)
+    runs-on: windows-latest
+    # The release compile is the slowest thing in the repo: a from-scratch build
+    # of the whole workspace plus sherpa-onnx and ONNX Runtime, then NSIS
+    # packaging. CI's `app` job budgets 40 minutes for the compile alone on a
+    # warm rust-cache; this one may start cold.
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      # First, before any toolchain setup: a tag whose version does not match
+      # the tree is a mistake worth catching in seconds rather than after an
+      # hour of compiling. `version` is duplicated in package.json and
+      # tauri.conf.json (tauri reads the latter; the former names the npm
+      # package), so both are checked. node is preinstalled on the runner
+      # image, so this runs before setup-node.
+      - name: Assert the tag matches the version in the tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME#v}"
+          pkg="$(node -p "require('./package.json').version")"
+          conf="$(node -p "require('./src-tauri/tauri.conf.json').version")"
+          echo "tag=$tag package.json=$pkg tauri.conf.json=$conf"
+          fail=0
+          if [ "$tag" != "$pkg" ]; then
+            echo "FAIL: tag $GITHUB_REF_NAME implies version $tag, but package.json says $pkg"
+            fail=1
+          fi
+          if [ "$tag" != "$conf" ]; then
+            echo "FAIL: tag $GITHUB_REF_NAME implies version $tag, but src-tauri/tauri.conf.json says $conf"
+            fail=1
+          fi
+          if [ "$fail" = 1 ]; then
+            echo "Bump both versions (or delete and re-push the tag) so a stale version cannot ship."
+            exit 1
+          fi
+
+      # Toolchain setup mirrors ci.yml: same pnpm major, same node, same Rust
+      # action and cache. Keep the versions in lockstep with that file.
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - run: pnpm install --frozen-lockfile
+
+      # `pnpm tauri:build` is the canonical definition of what a release
+      # compiles (`--features parakeet,embed`) — deliberately invoked as the
+      # script rather than spelling the features out again here, so this file
+      # can never drift from package.json. It runs the config's
+      # beforeBuildCommand first (`pnpm mcp:build:release && pnpm build`),
+      # which release-builds kodabi-mcp and produces the dist/ that
+      # tauri::generate_context! embeds, then bundles the NSIS installer into
+      # target/release/bundle/nsis/.
+      #
+      # Code signing (#159) hooks in around this step: an Azure Artifact
+      # Signing `bundle.windows.signCommand` in tauri.conf.json plus whatever
+      # credentials it needs in this step's `env:`. Nothing here needs
+      # restructuring for that.
+      - name: Build the NSIS installer (the shipping configuration)
+        run: pnpm tauri:build
+
+      # Upload to a *draft* release: a human reviews the assets and the
+      # generated notes, then publishes. Split create-or-upload so a re-run
+      # after a failed upload tops up the existing draft instead of erroring on
+      # a duplicate release.
+      #
+      # The updater work (#160) adds its artifacts (the signed .zip/.sig and
+      # latest.json) to the file lists below — no other change to this step.
+      - name: Upload the installer to a draft release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          assets=(target/release/bundle/nsis/*-setup.exe)
+          if [ ! -e "${assets[0]}" ]; then
+            echo "FAIL: no NSIS installer found under target/release/bundle/nsis/"
+            ls -la target/release/bundle/nsis/ || true
+            exit 1
+          fi
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --verify-tag \
+              --title "Kodabi $GITHUB_REF_NAME" \
+              --generate-notes \
+              "${assets[@]}"
+          fi
+          echo "Draft release $GITHUB_REF_NAME is ready to review and publish."

@@ -324,7 +324,7 @@ What this decision changes, so the state stops being ambient:
 
 - Release builds now hard-require a real engine. The `compile_error!` guard in
   `src-tauri/src/transcribe.rs` rejects a release-profile build with neither engine feature,
-  and `pnpm tauri:build` passes `--features parakeet`, so the `MockEngine` stub cannot ship.
+  and `pnpm tauri:build` passes `--features parakeet,embed`, so the `MockEngine` stub cannot ship.
 - CI's `app` job release-builds that shipping configuration, and its `app-dev` sibling runs the
   real-model Parakeet transcription tests, so the engine we actually ship is compiled and
   exercised on every Rust-touching change (previously nothing built the app with any real

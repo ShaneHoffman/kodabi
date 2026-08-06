@@ -92,8 +92,9 @@ jobs:
   # the `dist` job rather than rebuilt.
   #
   # These two jobs build the app with default features, i.e. the stub
-  # MockEngine — the shipping configuration (`--features parakeet`) is built
-  # and exercised by the `app-dev` and `app` jobs at the bottom of this file,
+  # MockEngine and no embedder — the shipping configuration
+  # (`--features parakeet,embed`, as `pnpm tauri:build` passes) is built and
+  # exercised by the `app-dev` and `app` jobs at the bottom of this file,
   # path-filtered so the slow release compile only runs when a Rust surface
   # changes. The /pull-request skill still release-builds the app
   # unconditionally before a PR is opened or updated (see
@@ -282,8 +283,9 @@ jobs:
   #   1. the real-model integration tests run against the committed speech
   #      fixture, so CI proves audio actually transcribes with Parakeet rather
   #      than merely compiling;
-  #   2. clippy lints src-tauri's `parakeet`-gated code (build_engine and
-  #      friends), which the default `--workspace` legs cfg out.
+  #   2. clippy lints src-tauri's `parakeet`- and `embed`-gated code
+  #      (build_engine, the IndexState embedder wiring and friends), which the
+  #      default `--workspace` legs cfg out.
   #
   # This is a separate job from `app` below, not two more steps in it, because
   # the two halves compile on different cargo profiles and so share essentially
@@ -374,9 +376,9 @@ jobs:
           PARAKEET_TOKENS: ${{ github.workspace }}/.ci-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/tokens.txt
           PARAKEET_VAD_MODEL: ${{ github.workspace }}/.ci-models/silero_vad.onnx
         run: cargo test -p kodabi-transcribe --features parakeet --locked --test parakeet_real -- --ignored --nocapture
-      - name: Clippy (app with parakeet — strict, warnings fail)
+      - name: Clippy (app with parakeet + embed — strict, warnings fail)
         if: steps.changed.outputs.run == 'true'
-        run: cargo clippy -p kodabi --features parakeet --all-targets --locked -- -D warnings
+        run: cargo clippy -p kodabi --features parakeet,embed --all-targets --locked -- -D warnings
 
   # The release-profile half: the app built exactly as it ships, plus the
   # assertion that the release guard still fires, so a featureless release build
@@ -426,7 +428,7 @@ jobs:
           path: dist
       - name: Release build (the shipping configuration)
         if: steps.changed.outputs.run == 'true'
-        run: cargo build -p kodabi --release --locked --features parakeet
+        run: cargo build -p kodabi --release --locked --features parakeet,embed
       - name: Guard check (a featureless release build must not compile)
         if: steps.changed.outputs.run == 'true'
         shell: bash

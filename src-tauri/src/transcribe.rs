@@ -11,8 +11,9 @@
 //!
 //! Release builds are different: the `compile_error!` guard below refuses to
 //! compile a release binary that picked no engine, so a mock build can never
-//! ship. Release builds pass `--features parakeet` (`pnpm tauri:build`), the
-//! engine locked in by `docs/benchmarks/stt-engine-benchmark.md`.
+//! ship. Release builds pass `--features parakeet,embed` (`pnpm tauri:build`) —
+//! the engine locked in by `docs/benchmarks/stt-engine-benchmark.md`, plus the
+//! embedder, which has no guard of its own and is pinned only by that script.
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -826,7 +827,8 @@ fn build_engine() -> transcription::Result<Box<dyn TranscriptionEngine>> {
 ))]
 compile_error!(
     "release builds must ship a real STT engine: build with `--features parakeet` \
-     (canonical: `pnpm tauri:build`); the MockEngine fallback is debug-only"
+     (canonical: `pnpm tauri:build`, which passes `--features parakeet,embed`); \
+     the MockEngine fallback is debug-only"
 );
 
 #[cfg(not(any(feature = "parakeet", feature = "whisper")))]

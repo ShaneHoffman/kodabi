@@ -18,7 +18,7 @@
     "mcp:build": "cargo build -p kodabi-mcp",
     "mcp:build:release": "cargo build -p kodabi-mcp --release",
     "tauri": "tauri",
-    "tauri:build": "tauri build --features parakeet --config src-tauri/tauri.bundle.conf.json"
+    "tauri:build": "tauri build --features parakeet,embed --config src-tauri/tauri.bundle.conf.json"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

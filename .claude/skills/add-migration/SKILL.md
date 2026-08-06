@@ -57,7 +57,7 @@ only release-builds, which is `/pull-request`'s job, and `UI (E2E, quick
 capture)` is non-required and never gates a commit):
 
 - `cargo clippy -p kodabi-embed --features bge --all-targets --locked -- -D warnings`
-- `cargo clippy -p kodabi --features parakeet --all-targets --locked -- -D warnings`
+- `cargo clippy -p kodabi --features parakeet,embed --all-targets --locked -- -D warnings`
 
 ## 7. Verify
 
