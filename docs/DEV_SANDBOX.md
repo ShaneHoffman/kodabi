@@ -90,11 +90,14 @@ over.
 |---|---|
 | `KODABI_KB_ROOT` or `KODABI_INDEX_DB` set alongside the switch | `<var> is set alongside KODABI_SANDBOX, which derives the vault and index itself. Unset <var>, or drop KODABI_SANDBOX to use it directly.` |
 | A relative base | ``KODABI_SANDBOX must be `1`, `true`, or an absolute path; got the relative path …`` |
-| A base that equals, contains, or sits inside a real app dir | `sandbox base … overlaps the real app directory …. Refusing to touch real data in sandbox mode; choose a base outside it.` |
+| A base that equals, contains, sits inside, or walks (`..`) into a real app dir | `sandbox base … overlaps the real app directory …. Refusing to touch real data in sandbox mode; choose a base outside it.` |
 
 Paths are compared component-wise and case-insensitively. Component-wise
 matters: a string-prefix test would call `com.kodabi.app-dev` a child of
-`com.kodabi.app` and refuse the default base.
+`com.kodabi.app` and refuse the default base. Nothing is canonicalised (the base
+usually does not exist yet), so a `..` component anywhere in the base takes the
+same refusal rather than being walked: `…\com.kodabi.app-dev\..\com.kodabi.app`
+compares unequal component-wise but resolves to the real app dir.
 
 Once activation succeeds, resolving to real data is structurally impossible
 rather than merely checked — `sandbox::activate` overwrites `KODABI_KB_ROOT` and

@@ -116,7 +116,16 @@ there. Release builds and the unset case are byte-for-byte unaffected.
 ```sh
 pnpm dev:sandbox                              # seed on first run, then launch
 pnpm seed:vault .sandbox retention/nothing    # re-seed specific scenarios (app closed)
-$env:KODABI_SANDBOX="C:\some\other\base"      # any absolute base; `1` uses an app-data sibling
+```
+
+`pnpm dev:sandbox` always uses the worktree's own `.sandbox/` — it sets the
+variable itself, so exporting your own value does not change where it lands. For
+a different base, set the variable and launch the app the ordinary way (`1`
+selects an app-data `-dev` sibling instead of a path):
+
+```powershell
+$env:KODABI_SANDBOX="C:\some\other\base"
+pnpm tauri dev
 ```
 
 Every agent-driven launch uses it — the `/preview` skill, the e2e harness, and

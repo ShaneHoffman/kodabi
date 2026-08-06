@@ -38,7 +38,7 @@
 //! cross-referenced in both directions.
 
 use std::ffi::{OsStr, OsString};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 /// The one switch. Unset or empty means "no sandbox": the app resolves every
 /// path exactly as it always has.
@@ -223,9 +223,24 @@ fn default_base(real_app_dir: &Path) -> PathBuf {
 /// ever make two components look *equal* — erring toward refusing a launch, the
 /// safe direction. Symlinks and junctions are out of scope: nothing is
 /// canonicalised, so a link that points into the real app dir is not detected.
+///
+/// A `..` anywhere in either path reports overlap outright. `Path::components`
+/// drops `.` but keeps `..`, so a base that walks out of a sibling and back in
+/// (`…\com.kodabi.app-dev\..\com.kodabi.app`) compares *unequal* component-wise
+/// while the OS resolves it to the real app dir — the pairwise walk cannot see
+/// that without canonicalising a path that usually does not exist yet. So a
+/// parent-dir component is treated as unanalysable and refused, in the same
+/// safe direction as the lossy comparison above.
 fn overlaps(left: &Path, right: &Path) -> bool {
     let left: Vec<_> = left.components().collect();
     let right: Vec<_> = right.components().collect();
+    if left
+        .iter()
+        .chain(right.iter())
+        .any(|component| matches!(component, Component::ParentDir))
+    {
+        return true;
+    }
     left.iter()
         .zip(right.iter())
         .all(|(a, b)| component_eq(a.as_os_str(), b.as_os_str()))
@@ -401,6 +416,22 @@ mod tests {
             }
             other => panic!("expected an overlap refusal, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_base_that_climbs_back_into_the_real_app_dir_is_refused() {
+        // `Path::components` normalises `.` away but keeps `..`, so a base that
+        // walks out of a sibling and back in compares unequal component-wise
+        // while the OS resolves it to the real app directory itself.
+        let err = resolve(
+            &env(r"C:\Users\dev\AppData\Roaming\com.kodabi.app-dev\..\com.kodabi.app"),
+            &real(),
+        )
+        .expect_err("should refuse");
+        assert!(
+            matches!(err, SandboxError::OverlapsRealAppDir { .. }),
+            "{err:?}"
+        );
     }
 
     #[test]
