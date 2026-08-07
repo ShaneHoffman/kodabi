@@ -1,12 +1,27 @@
-# Kodabi
+<p align="center">
+  <img src="assets/brand/social-preview.png" alt="Kodabi" width="600">
+</p>
 
-A self-organizing personal knowledge base. Kodabi turns meeting transcripts and quick notes into a
-searchable, chat-able knowledge base: **transcribe → distill → auto-route → search & chat**.
+<p align="center">
+  <strong>A self-organizing personal knowledge base.</strong><br>
+  Kodabi turns meeting transcripts and quick notes into a searchable knowledge base. Recordings are
+  transcribed on your device, distilled into Markdown notes, and routed into your vault
+  automatically: <strong>transcribe → distill → auto-route → search &amp; chat</strong>.
+</p>
 
-## Status
+<p align="center">
+  <a href="https://github.com/ShaneHoffman/kodabi/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/ShaneHoffman/kodabi?label=download&amp;color=3B4636"></a>
+  <img alt="Platform: Windows x64" src="https://img.shields.io/badge/platform-Windows%20x64-3B4636">
+  <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-3B4636"></a>
+</p>
 
-Pre-alpha — early development, with the first installer releases being prepared. See
-[`ROADMAP.md`](docs/ROADMAP.md) for the phased plan.
+<p align="center">
+  <img src="docs/screenshots/note.png" width="900"
+       alt="A distilled meeting note in Kodabi: summary, decisions and action items on the left, with the project it was filed into, its tags, and the source audio and transcript in a details rail on the right.">
+</p>
+
+**Status:** pre-alpha. The pipeline works end to end, but interfaces are still moving and rough edges
+are expected. See [`ROADMAP.md`](docs/ROADMAP.md) for the phased plan.
 
 ## Download & install
 
@@ -14,51 +29,62 @@ Windows installers are published on the [Releases](https://github.com/ShaneHoffm
 page as `Kodabi_<version>_x64-setup.exe`. It is an NSIS installer that installs per-user, so it
 needs no administrator rights. Windows x64 only.
 
-**An installed build is not self-contained yet.** The installer carries the app, the frontend, and
-the `kodabi-mcp` sidecar, but no speech model and no embedding model. Provisioning those for end
-users is still in flight, so today the installer can chat over an existing knowledge base but
-can't finish transcribing a new one, and the [from-source setup](#development) below is the way to
-run the full pipeline. Concretely:
+**WebView2** ships with Windows 11. On an older machine without it, the installer downloads and
+installs it for you.
 
-- **WebView2** ships with Windows 11. On an older machine without it, the installer downloads and
-  installs it for you.
-- **Recording works; transcription does not, out of the box.** The shipped binary embeds the real
-  Parakeet engine, but it resolves its five model files from the `PARAKEET_*` environment variables
-  (see [Speech-to-text engines](#speech-to-text-engines)), which an installed app has no way to set
-  yet. Ending a capture without them fails with a model-load error instead of writing a note.
-- **Search is full-text only.** Semantic search reads its model directory from
-  `KODABI_EMBED_MODEL_DIR`, unset for the same reason, so notes are indexed for FTS but no vectors
-  are written.
-- **The chat view and the embedded terminal need the [`claude`
-  CLI](https://docs.claude.com/en/docs/claude-code/overview)** installed and signed in — they
-  drive Claude Code on your own account. The `kodabi-mcp` sidecar itself ships in the installer.
-- **SmartScreen may still warn on first run.** Releases are code-signed with Azure Artifact
-  Signing, but SmartScreen trusts a certificate's *reputation*, which accrues with downloads
-  rather than arriving with the certificate. Until it does — and on any build cut before signing
-  was switched on — Windows shows a "Windows protected your PC" prompt: choose *More info* →
-  *Run anyway*. The installer's Properties → Digital Signatures tab is the way to check the
-  publisher before running it.
+### First run: the models
 
-## Stack
+The installer stays small. Rather than shipping ~800 MB that every update would re-ship, the app
+fetches its speech and search models on first launch — and only when you ask it to, from the
+first-run prompt or from Settings → Models:
 
-- **Tauri** (Rust) — Windows-first desktop shell
-- **React + Tailwind** — frontend
-- **SQLite** (FTS5 + `sqlite-vec`) — hybrid full-text + vector search
-- **MCP server** — exposes the knowledge base to Claude Code for chat over real history
+| Model | Job | Size | Licence |
+| --- | --- | --- | --- |
+| Parakeet TDT 0.6b v2 (int8) | Speech to text | 661 MB | CC BY 4.0 (NVIDIA) |
+| Silero VAD | Speech detection | 0.6 MB | MIT |
+| bge-small-en-v1.5 | Semantic search | 134 MB | MIT |
 
-## Features (v1 planned)
+About 796 MB in total, served from this repository's own `models-v1` release rather than hotlinked
+upstream. Each file is verified against a SHA-256 digest before it is used, and an interrupted
+download resumes where it stopped rather than starting over. The attribution Parakeet's CC BY 4.0
+licence requires appears in the first-run prompt and in Settings → Models, and a `NOTICE.txt` listing
+every installed model's licence is written beside the files.
 
-- End-of-meeting pipeline: summary → action-item / decision extraction, with glossary cleanup
-- Confidence-split routing into projects, with an Inbox and one-click re-route correction loop
-- Quick-capture window (global hotkey → text box → same routing pipeline)
-- Hybrid retrieval (full-text + vector, RRF merge) exposed as a `search_notes` MCP tool
-- Chat over your history: a designed chat view driving Claude Code headless, plus an embedded
-  terminal for power users — both wired to the MCP server
+**Recording works before the models arrive.** A capture made while they are still downloading is
+kept on disk rather than discarded, and transcribed on the next launch once the models are in place.
 
-The [Claude Code CLI](https://code.claude.com/docs) is a **user-installed prerequisite**, not
-something Kodabi bundles: every LLM call goes through it — the glossary cleanup pass and the
-end-of-meeting distill as well as the chat view and the terminal. The MCP server that exposes your
-knowledge base to it *is* carried by the installer.
+### The `claude` CLI
+
+Every LLM call — the end-of-meeting distill, the glossary cleanup pass, the chat view and the
+embedded terminal — runs through [Claude Code](https://docs.claude.com/en/docs/claude-code/overview)
+on your own account. The `claude` CLI is a **user-installed prerequisite**, not something Kodabi
+bundles: install it and sign in once. The `kodabi-mcp` server that exposes your knowledge base to it
+*is* carried by the installer.
+
+### SmartScreen
+
+Releases are code-signed with Azure Artifact Signing, but SmartScreen trusts a certificate's
+*reputation*, which accrues with downloads rather than arriving with the certificate. Until it does —
+and on any build cut before signing was switched on — Windows shows a "Windows protected your PC"
+prompt: choose *More info* → *Run anyway*. The installer's Properties → Digital Signatures tab is
+the way to check the publisher before running it.
+
+## What it does
+
+- **Records and transcribes on your device.** System audio and your microphone, captured together,
+  with echo cancellation on the mic channel. Transcription runs locally through Parakeet.
+- **Distills each meeting into a note.** A summary, the decisions, and the action items, over a
+  transcript a glossary pass has already cleaned up.
+- **Files notes for you.** Confident matches go straight into the right project; the rest wait in an
+  Inbox. Re-routing one is a click, and the correction is remembered — it measurably changes where
+  the next note lands.
+- **Quick capture.** A global hotkey opens a text box that goes through the same routing pipeline.
+- **Hybrid search.** Full-text (SQLite FTS5) and vector search over the whole vault, merged with
+  reciprocal rank fusion, exposed to Claude Code as a `search_notes` MCP tool.
+- **Chat over your history.** A designed chat view driving Claude Code, plus an embedded terminal for
+  power users — both wired to the MCP server.
+- **Plain Markdown on disk.** Every note is a file with YAML frontmatter that you can read, edit,
+  grep, or sync yourself.
 
 ## Recording & privacy
 
@@ -75,10 +101,18 @@ number of days, or discard each transcript as soon as it has been distilled into
 security relies on your OS disk encryption (e.g. BitLocker) plus this retention policy; app-level
 encryption is a later consideration.
 
+## Stack
+
+- **Tauri** (Rust) — Windows-first desktop shell
+- **React + Tailwind** — frontend
+- **SQLite** (FTS5 + `sqlite-vec`) — hybrid full-text + vector search
+- **MCP server** — exposes the knowledge base to Claude Code for chat over real history
+
 ## Repository layout
 
 ```
 docs/                   # Strategy & spec docs — roadmap, aesthetic direction, founding doc.
+                        # docs/screenshots/ holds the images this README embeds.
 design/                 # Historical Phase-0 artefacts — the moodboard and spirit-mark
                         # pages. No build reads them; the live design system is the
                         # Grove theme in src/index.css.
@@ -145,6 +179,21 @@ pnpm test:e2e      # end-to-end tests against the real app window (Windows only)
 pnpm seed:vault    # write a fixture vault of named scenarios, for previewing
 ```
 
+Rust tests, lint, and format run from the repo root (the workspace covers all crates). A quick
+local loop before pushing:
+
+```sh
+# Quick local loop (frontend + Rust):
+pnpm test && pnpm lint
+cargo test --workspace
+cargo clippy --workspace --all-targets
+cargo fmt --all --check
+```
+
+The full CI gates are stricter (`--locked`, `-D warnings`, `eslint --max-warnings=0`, and
+per-crate feature legs for `parakeet` / `whisper` / `vad` / `bge`). See
+[`CLAUDE.md`](CLAUDE.md) for the complete matrix.
+
 ### Dev sandbox
 
 `pnpm tauri dev` opens the vault, settings and index you actually use — that is
@@ -154,8 +203,8 @@ against real notes.
 
 `pnpm dev:sandbox` is the same app with one environment variable set. It seeds a
 gitignored, worktree-local `.sandbox/` with the fixture catalogue on first run,
-and keeps the vault, note index, settings, device identity and WebView2 profile
-there. Release builds and the unset case are byte-for-byte unaffected.
+and keeps the vault, note index, settings, device identity, downloaded models and
+WebView2 profile there. Release builds and the unset case are byte-for-byte unaffected.
 
 ```sh
 pnpm dev:sandbox                              # seed on first run, then launch
@@ -187,7 +236,7 @@ dependencies. `pnpm tauri:build` passes `--features parakeet,embed` (the shippin
 real engine plus the local embedder), and a release build with no engine feature **fails to compile
 on purpose**, so a stub build can never ship.
 
-An installed app downloads its own models on first run (below), so these variables are a
+An installed app downloads its own models on first run (above), so these variables are a
 **developer override**. To run the real engine in dev mode, build with the feature and
 point the five model variables at a locally downloaded
 [`sherpa-onnx-nemo-parakeet-tdt-0.6b-v2` (int8)](https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models)
@@ -210,13 +259,11 @@ why Parakeet is the shipping engine and
 
 ### Models are downloaded, not bundled
 
-The installer stays small and the app fetches its models on first launch, rather than
-shipping ~760 MB that every update would re-ship. What to fetch is described by a
-versioned manifest compiled into the binary
+What the app fetches on first run is described by a versioned manifest compiled into the binary
 ([`crates/kodabi-core/src/models/manifest.json`](crates/kodabi-core/src/models/manifest.json)):
-filenames, sizes, SHA-256 digests, and the licence of each set. The assets are mirrored on
-a GitHub release owned by this repo (`models-v1`) rather than hotlinked upstream, so a
-rename elsewhere cannot break every install.
+filenames, sizes, SHA-256 digests, and the licence of each set. The assets are mirrored on a GitHub
+release owned by this repo (`models-v1`) rather than hotlinked upstream, so a rename elsewhere
+cannot break every install.
 
 Files land in `<app-data>/.models/`, dot-prefixed for the same reason the index is: that
 directory is also the default vault root, and a plain `models/` folder there would show up
@@ -224,28 +271,8 @@ as a project. Each file downloads to `<name>.part`, is verified against its dige
 renamed only then — so a killed app never leaves a half-model that looks installed. An
 interrupted download resumes with an HTTP range request.
 
-The app never downloads without being asked. The user starts it from the first-run prompt
-or from Settings → Models, which is also where the attribution required by Parakeet's
-CC-BY-4.0 licence appears; a `NOTICE.txt` is written beside the models with the licence of
-every set installed.
-
 Publishing a new model release is [`scripts/upload-models.ps1`](scripts/upload-models.ps1),
 which verifies every local file against the manifest before uploading anything.
-
-Rust tests, lint, and format run from the repo root (the workspace covers all crates). A quick
-local loop before pushing:
-
-```sh
-# Quick local loop (frontend + Rust):
-pnpm test && pnpm lint
-cargo test --workspace
-cargo clippy --workspace --all-targets
-cargo fmt --all --check
-```
-
-The full CI gates are stricter (`--locked`, `-D warnings`, and per-crate feature legs for
-`parakeet` / `whisper` / `vad` / `bge`). See [`CLAUDE.md`](CLAUDE.md) and
-[`CONTRIBUTING.md`](CONTRIBUTING.md) for the complete matrix.
 
 ## Contributing
 
