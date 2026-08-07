@@ -149,9 +149,11 @@ async function waitForRemoval(find: () => HTMLElement | null): Promise<void> {
  * there anyway on `shouldAdvanceTime`'s real-interval ticks, since those are
  * native and each is followed by a natural drain. Under full-suite load those
  * arrive late and sparse, and the menu misses its window: every `findBy*` here
- * is budgeted on the *fake* clock (Testing Library only detects Jest's fake
- * timers, and this suite runs `globals: false`), and user-event's own advances
- * spend that budget without the menu ever mounting.
+ * is budgeted on the *fake* clock (Testing Library detects fake timers only
+ * through a `jest` global, which vitest never defines whatever `globals` is set
+ * to, so its waits fall through to the global `setTimeout` — the faked one),
+ * and user-event's own advances spend that budget without the menu ever
+ * mounting.
  *
  * The async advance drains microtasks between the timers it fires, so the
  * popup mounts inside those advances rather than in the gaps between them.
