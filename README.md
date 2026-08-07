@@ -190,9 +190,9 @@ cargo clippy --workspace --all-targets
 cargo fmt --all --check
 ```
 
-The full CI gates are stricter (`--locked`, `-D warnings`, and per-crate feature legs for
-`parakeet` / `whisper` / `vad` / `bge`). See [`CLAUDE.md`](CLAUDE.md) and
-[`CONTRIBUTING.md`](CONTRIBUTING.md) for the complete matrix.
+The full CI gates are stricter (`--locked`, `-D warnings`, `eslint --max-warnings=0`, and
+per-crate feature legs for `parakeet` / `whisper` / `vad` / `bge`). See
+[`CLAUDE.md`](CLAUDE.md) for the complete matrix.
 
 ### Dev sandbox
 
