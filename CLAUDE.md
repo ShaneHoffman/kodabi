@@ -115,6 +115,23 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   tag matches `version` in both `package.json` and `src-tauri/tauri.conf.json`, runs
   `pnpm tauri:build`, and uploads the NSIS installer (`bundle.targets` is `["nsis"]`; MSI/WiX is
   deliberately not built) to a **draft** GitHub Release for a human to publish.
+- **Release builds are code-signed with Azure Artifact Signing, and the build runs in two
+  phases because of it.** `bundle.windows.signCommand` lives in the
+  `src-tauri/tauri.bundle.conf.json` overlay — the same one that adds the `kodabi-mcp.exe`
+  resource, so `pnpm tauri dev` and a bare `tauri build` never touch signing — and points at
+  `scripts/sign-windows.ps1`, which the bundler runs once per signable file (the main exe, the
+  NSIS plugin DLLs, the bundled `kodabi-mcp.exe`, `uninstall.exe`, the installer). Its path is
+  written relative to `src-tauri`, the bundler's working directory. The script signs via
+  `signtool` plus the Artifact Signing dlib, always with an RFC 3161 timestamp (the certs live
+  three days). **With the `AZURE_SIGNING_*` environment unset it prints a skip line and exits 0,**
+  so a local `pnpm tauri:build` needs no Azure account; set only *some* of them and it fails,
+  rather than shipping unsigned through a green run. CI authenticates with a **secretless OIDC**
+  federated credential (`azure/login`, `permissions: id-token: write`, and the job's `release`
+  environment, which exists only to give the token a stable subject) — hence the split: those
+  credentials expire in about an hour, so the long compile runs first as
+  `pnpm tauri:build --no-bundle` and the bundle-and-sign pass follows the login. All six settings
+  come from repository **variables**, never committed and never secrets. A repo without them
+  ships an unsigned release exactly as before.
 - **Core vs shell:** logic lives in `crates/kodabi-core` (pure, UI-agnostic, unit-testable);
   `src-tauri` commands stay thin wrappers around it. If a Tauri command grows a body, the body
   belongs in kodabi-core.
@@ -188,6 +205,8 @@ Task-shaped workflows live under `.claude/skills/`:
 - `frontmatter-validator` — validate a note's YAML frontmatter against the schema.
 - `preview` — launch Tauri dev and smoke-test the app.
 - `pull-request` — open a PR against main (Open PR board column; never merges).
+- `release` — cut a tagged release: bump both version fields, land them, tag main, watch the
+  signed build (human-invoked; never publishes the draft Release).
 - `add-tauri-command` — scaffold a command across all layers, then audit parity.
 - `add-migration` — append a note-index migration safely, then audit.
 - `commit` — run the gates for the changed surface, then commit (never pushes).

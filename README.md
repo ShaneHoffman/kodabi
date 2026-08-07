@@ -32,8 +32,12 @@ run the full pipeline. Concretely:
 - **The chat view and the embedded terminal need the [`claude`
   CLI](https://docs.claude.com/en/docs/claude-code/overview)** installed and signed in — they
   drive Claude Code on your own account. The `kodabi-mcp` sidecar itself ships in the installer.
-- **Releases are not yet code-signed**, so SmartScreen shows a "Windows protected your PC" prompt on
-  first run: choose *More info* → *Run anyway*. Signing is planned.
+- **SmartScreen may still warn on first run.** Releases are code-signed with Azure Artifact
+  Signing, but SmartScreen trusts a certificate's *reputation*, which accrues with downloads
+  rather than arriving with the certificate. Until it does — and on any build cut before signing
+  was switched on — Windows shows a "Windows protected your PC" prompt: choose *More info* →
+  *Run anyway*. The installer's Properties → Digital Signatures tab is the way to check the
+  publisher before running it.
 
 ## Stack
 
@@ -110,8 +114,8 @@ CLAUDE.md, CONTRIBUTING.md, kangentic.json   # Agent guide, contributor guide, a
                         # Kangentic board/workflow definition.
 .github/                # GitHub Actions workflows — ci.yml (the gate matrix run on every PR)
                         # and release.yml (tag-triggered NSIS build → draft Release).
-scripts/                # Dev/build helpers — PowerShell (tray icons, resource profiling)
-                        # and the `pnpm dev:sandbox` launcher.
+scripts/                # Dev/build helpers — PowerShell (tray icons, resource profiling,
+                        # release code signing) and the `pnpm dev:sandbox` launcher.
 target/, dist/          # Build output (git-ignored).
 .sandbox/               # Dev sandbox state, when `pnpm dev:sandbox` has run (git-ignored).
 ```

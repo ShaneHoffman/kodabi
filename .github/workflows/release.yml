@@ -14,14 +14,24 @@ on:
 # should re-run rather than cancel, so there is no `concurrency` block here.
 
 permissions:
-  # Needed to create the draft release and upload the installer to it. Every
-  # other workflow in this repo is contents: read.
+  # contents: needed to create the draft release and upload the installer to it.
+  # Every other workflow in this repo is contents: read.
+  # id-token: lets azure/login mint an OIDC token for code signing. Harmless
+  # when the signing variables are unset and the login step is skipped.
   contents: write
+  id-token: write
 
 jobs:
   release:
     name: Windows installer (NSIS)
     runs-on: windows-latest
+    # The `release` environment exists for exactly one reason: it makes this
+    # job's OIDC subject the stable `repo:<owner>/kodabi:environment:release`.
+    # Azure federated credentials cannot wildcard a ref, and a tag push claims
+    # `repo:<owner>/kodabi:ref:refs/tags/v0.1.0` — a different subject for every
+    # release, none of which can be registered in advance. It carries no
+    # protection rules and gates nothing; renaming it breaks signing.
+    environment: release
     # The release compile is the slowest thing in the repo: a from-scratch build
     # of the whole workspace plus sherpa-onnx and ONNX Runtime, then NSIS
     # packaging. CI's `app` job budgets 40 minutes for the compile alone on a
@@ -81,12 +91,116 @@ jobs:
       # tauri::generate_context! embeds, then bundles the NSIS installer into
       # target/release/bundle/nsis/.
       #
-      # Code signing (#159) hooks in around this step: an Azure Artifact
-      # Signing `bundle.windows.signCommand` in tauri.conf.json plus whatever
-      # credentials it needs in this step's `env:`. Nothing here needs
-      # restructuring for that.
-      - name: Build the NSIS installer (the shipping configuration)
+      # It is split in two here, and the split is load-bearing. Signing runs at
+      # the *end* of the bundle, on credentials `azure/login` mints from a
+      # single-use OIDC assertion: an access token that lives roughly an hour
+      # and cannot be refreshed. A cold compile alone can outlast that. So the
+      # slow part runs first with no credentials in play, and the second
+      # invocation — an incremental recompile plus NSIS packaging, minutes on a
+      # warm target/ — happens right after the login. `--no-bundle` is the same
+      # leg /pull-request already pays once per PR.
+      - name: Compile the release (no bundling yet)
+        run: pnpm tauri:build --no-bundle
+
+      # Code signing (#159) — Azure Artifact Signing, secretless.
+      #
+      # Everything below is gated on vars.AZURE_CLIENT_ID: with no signing
+      # configuration these steps skip, scripts/sign-windows.ps1 finds no
+      # AZURE_SIGNING_* environment and no-ops per file, and the release ships
+      # unsigned exactly as it did before. Configuration is six repository
+      # *variables* (never secrets, never committed — the account and profile
+      # names carry the validated legal publisher identity): AZURE_CLIENT_ID,
+      # AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, AZURE_SIGNING_ENDPOINT,
+      # AZURE_SIGNING_ACCOUNT, AZURE_SIGNING_CERT_PROFILE. No client secret
+      # exists anywhere: the Azure federated credential trusts this repo's OIDC
+      # token for the `release` environment above.
+      - name: Azure login (OIDC, secretless)
+        if: vars.AZURE_CLIENT_ID != ''
+        uses: azure/login@v3
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      # signtool signs through this dlib rather than a certificate in a store;
+      # it authenticates via DefaultAzureCredential, which picks up the az
+      # session the step above established. The version is pinned so a surprise
+      # release cannot break a tag build — bump it deliberately.
+      #
+      # A .nupkg is a zip, so it is fetched and expanded directly rather than
+      # through nuget.exe. That is one less tool to be present on the image, and
+      # this step runs *after* the long compile: anything that fails here has
+      # already cost the build an hour. x64 to match signtool's bitness.
+      - name: Fetch the Artifact Signing dlib
+        if: vars.AZURE_CLIENT_ID != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $package = "$env:RUNNER_TEMP\artifact-signing-client.zip"
+          $extracted = "$env:RUNNER_TEMP\artifact-signing"
+          Invoke-WebRequest -Uri 'https://www.nuget.org/api/v2/package/Microsoft.ArtifactSigning.Client/1.0.128' -OutFile $package
+          Expand-Archive -LiteralPath $package -DestinationPath $extracted -Force
+          $dlib = Join-Path $extracted 'bin\x64\Azure.CodeSigning.Dlib.dll'
+          if (-not (Test-Path -LiteralPath $dlib)) {
+            Write-Host "FAIL: dlib not found at $dlib"
+            Get-ChildItem -Path $extracted -Recurse -Filter *.dll | ForEach-Object { $_.FullName }
+            exit 1
+          }
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "AZURE_SIGNING_DLIB=$dlib"
+
+      # The bundle proper. bundle.windows.signCommand — set in the same overlay
+      # config that adds the kodabi-mcp.exe resource, so a bare `tauri build`
+      # and `pnpm tauri dev` never touch signing — runs
+      # scripts/sign-windows.ps1 once per signable file: kodabi.exe, the NSIS
+      # plugin DLLs, the bundled kodabi-mcp.exe, uninstall.exe, and the
+      # installer itself.
+      - name: Bundle and sign the NSIS installer (the shipping configuration)
+        env:
+          AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
+          AZURE_SIGNING_CERT_PROFILE: ${{ vars.AZURE_SIGNING_CERT_PROFILE }}
+          # AZURE_SIGNING_DLIB arrives from the step above via GITHUB_ENV.
         run: pnpm tauri:build
+
+      # Prove the signatures landed, on the artifact a user actually receives.
+      # Worth its minute above all for uninstall.exe, which exists only once the
+      # installer has run and whose signing rides an NSIS !uninstfinalize hook
+      # invoked from a different working directory — the easiest link in the
+      # chain to break silently. Installing on the runner beats unpacking the
+      # installer, which depends on NSIS's compression staying legible to 7z.
+      - name: Verify Authenticode signatures end to end
+        if: vars.AZURE_CLIENT_ID != ''
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Get-ChildItem -Path target/release/bundle/nsis/*-setup.exe | Select-Object -First 1
+          Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait
+          # NSIS per-user install mode; productName is the directory name.
+          $installDir = Join-Path $env:LOCALAPPDATA 'Kodabi'
+          if (-not (Test-Path -LiteralPath $installDir)) {
+            Write-Host "FAIL: install directory not found at $installDir"
+            exit 1
+          }
+          # Every PE the install laid down, whatever it is named — the main
+          # binary's exact filename is the bundler's business, not this step's.
+          $binaries = @(Get-ChildItem -Path $installDir -Recurse -Include *.exe, *.dll)
+          foreach ($required in 'uninstall.exe', 'kodabi-mcp.exe') {
+            if (-not ($binaries | Where-Object { $_.Name -eq $required })) {
+              Write-Host "FAIL: expected $required under $installDir"
+              exit 1
+            }
+          }
+          $unsigned = 0
+          foreach ($binary in @($installer) + $binaries) {
+            $signature = Get-AuthenticodeSignature -LiteralPath $binary.FullName
+            '{0,-12} {1}' -f $signature.Status, $binary.FullName
+            if ($signature.Status -ne 'Valid') { $unsigned++ }
+          }
+          if ($unsigned -gt 0) {
+            Write-Host "FAIL: $unsigned file(s) have no valid Authenticode signature"
+            exit 1
+          }
+          Write-Host 'Every shipped binary carries a valid signature.'
 
       # Upload to a *draft* release: a human reviews the assets and the
       # generated notes, then publishes. Split create-or-upload so a re-run
