@@ -67,12 +67,23 @@
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "publisher": "Shane Hoffman",
+    "copyright": "Copyright © 2026 Shane Hoffman",
+    "shortDescription": "A self-organizing personal knowledge base.",
+    "longDescription": "Kodabi turns meeting transcripts and quick notes into a searchable knowledge base. Recordings are transcribed on your device, distilled into Markdown notes, and routed into your vault automatically.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "headerImage": "icons/nsis/header.bmp",
+        "sidebarImage": "icons/nsis/sidebar.bmp"
+      }
+    }
   }
 }
