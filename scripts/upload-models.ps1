@@ -130,7 +130,14 @@ install, and the ``license`` block of each set in
 Referenced by manifest schema $($manifest.schema_version). Assets here are immutable:
 a model change ships as a new ``models-v?`` release and a manifest edit together.
 "@
-    gh release create $manifest.release_tag --title "Models $($manifest.release_tag)" --notes $notes
+    # --latest=false is load-bearing, not tidiness. The auto-updater's endpoint
+    # is `releases/latest/download/latest.json`, and GitHub hands "latest" to
+    # whichever release is newest by default. A models release taking that slot
+    # would 404 the manifest for every installed app until the next app
+    # release, and the failure is silent on both sides: the app just quietly
+    # stops finding updates. Model releases are a side channel and must never
+    # claim to be the app's current version.
+    gh release create $manifest.release_tag --title "Models $($manifest.release_tag)" --notes $notes --latest=false
     if ($LASTEXITCODE -ne 0) { throw 'gh release create failed' }
 } else {
     Write-Host "Release $($manifest.release_tag) already exists; uploading into it."

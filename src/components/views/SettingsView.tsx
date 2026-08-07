@@ -20,6 +20,7 @@ import { applyReduceMotion, readReduceMotion } from "../../reduceMotion";
 import { INDEX_STATE_EVENT } from "../../events";
 import { formatMegabytes } from "../../models";
 import { useModelStatus } from "../../useModelStatus";
+import { useUpdaterStatus } from "../../useUpdaterStatus";
 import { useTauriEvent } from "../../useTauriEvent";
 import { useTimeout } from "../../useTimeout";
 import { ModelDownloadProgress } from "../models/ModelDownloadProgress";
@@ -277,6 +278,102 @@ function ModelsControl() {
 }
 
 /**
+ * The permanent path to an update, and the one that reports its failures.
+ *
+ * The corner notice is dismissible and session-only, so this is where a user
+ * who waved it away finds the update again — and it is the only surface that
+ * shows a *check* failing. A check the app ran unasked at launch stays quiet
+ * (`useUpdater`); a check someone clicked has to answer.
+ *
+ * Every state here is one click from the last: check, download, restart. There
+ * is no path through this row that updates anything without being told to.
+ */
+function UpdateControl() {
+  const { state, check, download, install } = useUpdaterStatus();
+  const { phase } = state;
+
+  // Same split as the rebuild row above: "you are on the latest version" is a
+  // report of something that just happened and clears itself, while a failure
+  // stays until it has been read (docs/DESIGN_SYSTEM.md §3).
+  //
+  // Keyed to the CHECK, not to the phase, and that distinction is the whole
+  // reason this is three pieces of state rather than a boolean. `upToDate` is
+  // where the flow parks: unlike the index rebuild's `ready`, nothing ever
+  // moves it along. A boolean cleared by the timer would be set straight back
+  // to true by the next render, since the phase saying "up to date" is still
+  // true — the confirmation would never go away. So each arrival at `upToDate`
+  // is numbered, and the timer retires that number. Checking again numbers a
+  // new one, which is what makes the second click say so as loudly as the
+  // first. Adjusted during render, not in an effect
+  // (.claude/rules/no-use-effect.md), the same shape as `CaptureToast`'s
+  // dismissal record.
+  const [checkEpisode, setCheckEpisode] = useState(0);
+  const [retiredEpisode, setRetiredEpisode] = useState(0);
+  const [wasUpToDate, setWasUpToDate] = useState(false);
+  const isUpToDate = phase.status === "upToDate";
+  if (isUpToDate !== wasUpToDate) {
+    setWasUpToDate(isUpToDate);
+    if (isUpToDate) setCheckEpisode((episode) => episode + 1);
+  }
+  const confirmed = isUpToDate && checkEpisode > retiredEpisode;
+  useTimeout(
+    () => setRetiredEpisode(checkEpisode),
+    confirmed ? CONFIRMATION_MS : null,
+    checkEpisode,
+  );
+
+  const busy =
+    phase.status === "checking" ||
+    phase.status === "downloading" ||
+    phase.status === "installing";
+
+  return (
+    <Row
+      label="Updates"
+      hint="Kodabi checks for a new version at startup. Nothing downloads or installs until you say so."
+      foot={
+        <>
+          {confirmed && <ConfirmLine>You are on the latest version.</ConfirmLine>}
+          {phase.status === "error" && (
+            <StatusMessage variant="error" compact>
+              {phase.step === "check"
+                ? `Couldn't check for updates: ${phase.message}`
+                : phase.step === "download"
+                  ? `Couldn't download the update: ${phase.message}`
+                  : `Couldn't install the update: ${phase.message}`}
+            </StatusMessage>
+          )}
+        </>
+      }
+    >
+      {phase.status === "available" || phase.status === "downloading" ? (
+        <Button
+          onClick={() => void download()}
+          loading={phase.status === "downloading"}
+          loadingLabel="Downloading…"
+        >
+          Download {phase.version}
+        </Button>
+      ) : phase.status === "readyToInstall" || phase.status === "installing" ? (
+        <Button
+          onClick={() => void install()}
+          loading={phase.status === "installing"}
+          loadingLabel="Installing…"
+        >
+          Restart and update
+        </Button>
+      ) : (
+        <Button onClick={() => void check()} loading={busy} loadingLabel="Checking…">
+          {phase.status === "error" && phase.step !== "check"
+            ? "Try again"
+            : "Check for updates"}
+        </Button>
+      )}
+    </Row>
+  );
+}
+
+/**
  * Settings — the app's CONFIG PANEL, and it announces that before a word is
  * read: cards stacked one per row, each named by a mono eyebrow, holding
  * nothing but label-and-control rows.
@@ -293,6 +390,9 @@ function ModelsControl() {
  */
 export function SettingsView() {
   const { settings, error, setSettings } = useSettings();
+  const {
+    state: { appVersion },
+  } = useUpdaterStatus();
 
   // Raw input string so the field can be cleared mid-edit rather than snapping
   // to 0; `buildRetentionPolicy` parses and clamps it on apply.
@@ -688,6 +788,21 @@ export function SettingsView() {
 
           <Card title="Maintenance">
             <RebuildIndexControl />
+          </Card>
+
+          <Card title="About">
+            <Row
+              label="Version"
+              hint="The build you are running right now."
+            >
+              {/* Mono and plain, no control: a read-only fact must never look
+                  like something you can change. Same recipe as the capture
+                  shortcut above. */}
+              <span className="font-data text-[12.5px] text-ink-read">
+                {appVersion ?? "Checking…"}
+              </span>
+            </Row>
+            <UpdateControl />
           </Card>
         </div>
       )}

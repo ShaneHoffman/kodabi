@@ -9,10 +9,12 @@ import { useVaultChangedBridge } from "../../useVaultChangedBridge";
 import { AppErrorBoundary } from "./AppErrorBoundary";
 import { CapturePipelineProvider } from "../providers/CapturePipelineProvider";
 import { ModelStatusProvider } from "../providers/ModelStatusProvider";
+import { UpdaterProvider } from "../providers/UpdaterProvider";
 import { CaptureToast } from "../overlays/CaptureToast";
 import { CommandPalette } from "../overlays/CommandPalette";
 import { ConsentNudge } from "../overlays/ConsentNudge";
 import { ModelDownloadNudge } from "../overlays/ModelDownloadNudge";
+import { UpdateNotice } from "../overlays/UpdateNotice";
 import { Dock } from "./Dock";
 import { MainContent } from "./MainContent";
 import { TopBar } from "./TopBar";
@@ -34,6 +36,9 @@ export function AppShell() {
   // re-derived from `model_status` every launch, so the ask returns next time
   // and Settings carries the permanent path.
   const [modelNudgeDismissed, setModelNudgeDismissed] = useState(false);
+  // Same bargain for the update notice: dismissing it is for this session only,
+  // the check runs again next launch, and Settings carries the permanent path.
+  const [updateNoticeDismissed, setUpdateNoticeDismissed] = useState(false);
   const { view } = useNavigation();
   const reduceMotion = useReduceMotion();
   // Refresh this window's lists when another window (quick capture) writes.
@@ -46,6 +51,7 @@ export function AppShell() {
     // boundary so a crashed routed view doesn't tear it down, and around both
     // the Inbox (which shows the pipeline's progress) and the toast (which
     // now only ever shows its failures).
+    <UpdaterProvider>
     <ModelStatusProvider>
     <CapturePipelineProvider>
       {/* The reduced-motion policy for everything the `motion` package drives,
@@ -72,9 +78,24 @@ export function AppShell() {
               </AppErrorBoundary>
             </main>
           </div>
-          {/* Outside the error boundary and outside the routed view: a failure
-              reaches you whatever screen you are on. */}
-          <CaptureToast />
+          {/* The notice corner. Bottom right because it is the emptiest corner
+              of every view: content is pinned left or centred on a measure, and
+              the dock owns the left edge outright.
+              Outside the error boundary and outside the routed view, so a
+              failure reaches you whatever screen you are on.
+              One stack rather than two independently-positioned overlays: both
+              of these are rare, but "rare" is not "never simultaneous", and two
+              things pinned to the same corner is a collision waiting for the
+              one session that has a failed capture and a waiting release. The
+              container is empty and zero-size when neither has anything to say,
+              so it never eats a click. */}
+          <div className="fixed right-6 bottom-6 z-50 flex flex-col items-end gap-3">
+            {/* Furthest from the corner: it is the least urgent thing here. */}
+            {!consentOpen && !modelNudgeDismissed && !updateNoticeDismissed && (
+              <UpdateNotice onClose={() => setUpdateNoticeDismissed(true)} />
+            )}
+            <CaptureToast />
+          </div>
           {/* Mounted whether or not it is open, unlike the nudge below: the
               palette owns its own exit animation, and base-ui only keeps a popup
               alive through that animation if the element is still rendered.
@@ -91,5 +112,6 @@ export function AppShell() {
       </MotionConfig>
     </CapturePipelineProvider>
     </ModelStatusProvider>
+    </UpdaterProvider>
   );
 }

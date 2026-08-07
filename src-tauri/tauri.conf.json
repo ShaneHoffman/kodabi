@@ -74,5 +74,16 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIyRTRFQzY0OTQ3RThFMDcKUldRSGpuNlVaT3prSWx4Wko5OEJvYlB1Z0IvRFhqVDFUZmYyRlN1b0xGZmtmaEpZNWFVMDFoV0sK",
+      "endpoints": [
+        "https://github.com/ShaneHoffman/kodabi/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

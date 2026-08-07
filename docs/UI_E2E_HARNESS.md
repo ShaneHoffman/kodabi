@@ -60,6 +60,16 @@ therefore fixed (`CDP_PORT` in `e2e/lib/app.mjs`) rather than chosen per run;
 `launchKodabi` fails fast if that port is already bound rather than silently
 attaching to the wrong process.
 
+That same overlay also points the **updater** at a dead local address. The
+harness builds the frontend with `vite build`, so `import.meta.env.DEV` is
+false and `UpdaterProvider` runs its startup check exactly as a shipped build
+would — which would otherwise mean every e2e run reaching out to GitHub, and,
+once a newer release exists, an update notice appearing over whatever the test
+is asserting against. Aiming `plugins.updater.endpoints` at `127.0.0.1:1`
+fails the check in microseconds; `useUpdater` swallows a startup-check failure,
+so the app settles in `idle` with nothing on screen. The tier stays offline and
+deterministic without a second suppression switch to keep in sync.
+
 One always-on environment switch points a run at a throwaway everything:
 `KODABI_SANDBOX`, set to a fresh `mkdtemp` base. Rust derives the vault root,
 the index, the config dir and the WebView2 profile from it

@@ -90,7 +90,11 @@ it now also refuses a tag that already exists.
 `gh run view <id> --log-failed` on failure). Expect 40–90 minutes; the compile dominates.
 
 Signing is configured through six repository variables and gated on `AZURE_CLIENT_ID` — see the
-release-signing bullet in [`CLAUDE.md`](../../../CLAUDE.md). Three failures map to one cause each:
+release-signing bullet in [`CLAUDE.md`](../../../CLAUDE.md). Four failures map to one cause each:
+- **`Assert the updater signing configuration is real` fails** — the two `TAURI_SIGNING_*`
+  secrets are missing, or the committed pubkey is still a placeholder. This one fires in the
+  first seconds, deliberately: unlike Azure signing it is not allowed to skip, because a release
+  without `latest.json` is invisible to every installed copy.
 - **403 at `Azure login`** — the Azure federated credential's subject no longer matches
   `repo:<owner>/kodabi:environment:release`. Renaming the `release` environment does this.
 - **403 during signing** — `AZURE_SIGNING_ENDPOINT`'s region does not match the signing account's,
@@ -103,7 +107,11 @@ re-push the tag.
 
 ## 7. Verify what shipped
 
-- `gh release view v<version>` — the draft exists and carries `Kodabi_<version>_x64-setup.exe`.
+- `gh release view v<version>` — the draft exists and carries all three assets:
+  `Kodabi_<version>_x64-setup.exe`, its `.sig`, and `latest.json`. A draft missing the last two
+  would publish an update nobody in the field can see.
+- `latest.json`'s `version` matches the tag without the `v`, and its `url` points at this tag's
+  installer.
 - Confirm the run's verification step reported `Valid` for the installer and every installed
   binary. If signing was skipped (no variables configured), say so plainly — an unsigned release
   is a legitimate outcome, but never a silent one.
@@ -112,6 +120,10 @@ re-push the tag.
 
 Report the draft Release URL, the tag, and whether the build was signed. **Do not publish it** —
 a human reviews the notes and assets and clicks publish.
+
+Say plainly in that report that **publishing is what ships the update to everyone already running
+Kodabi**: the updater reads `releases/latest/download/latest.json`, which ignores drafts, so the
+publish click is the rollout, not just a listing.
 
 Model releases are a separate path with their own tag series: `scripts/upload-models.ps1` publishes
 to a `models-v*` release, driven by `crates/kodabi-core/src/models/manifest.json`. This skill does

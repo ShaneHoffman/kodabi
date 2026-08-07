@@ -27,6 +27,15 @@ tauri-plugin-global-shortcut = "2"
 # The capture-start toast (FOUNDING_DOC §3.7): fired from the Rust shell, not a
 # webview, so it still appears when the window is hidden to the tray.
 tauri-plugin-notification = "2"
+# Auto-updates: the release check, the download and the NSIS handoff. Trust is
+# minisign over the `plugins.updater.pubkey` in tauri.conf.json, which is a
+# separate signature from the Authenticode one `scripts/sign-windows.ps1`
+# applies — the bundler produces both, in that order.
+tauri-plugin-updater = "2"
+# Paired with the updater purely for `relaunch()`. Windows never reaches it (the
+# installer restarts the app itself), but it is the cross-platform tail of the
+# documented install flow and costs one small crate.
+tauri-plugin-process = "2"
 kodabi-core = { path = "../crates/kodabi-core" }
 kodabi-audio = { path = "../crates/kodabi-audio" }
 kodabi-aec = { path = "../crates/kodabi-aec" }
