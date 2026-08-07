@@ -1,5 +1,5 @@
 import { act, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CaptureOverlayPill } from "./CaptureOverlayPill";
 import type { CaptureStateEvent } from "../../useCaptureState";
 import { emitFromBackend, onCommand, resetTauriMocks } from "../../test/tauri";
@@ -52,6 +52,10 @@ describe("CaptureOverlayPill", () => {
     // The label is debounced, so tests drive time explicitly rather than
     // waiting on it.
     vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("shows the listening state when seeded mid-capture", async () => {

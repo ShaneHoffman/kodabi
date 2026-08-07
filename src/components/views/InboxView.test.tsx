@@ -138,6 +138,28 @@ async function waitForRemoval(find: () => HTMLElement | null): Promise<void> {
   expect(find()).toBeNull();
 }
 
+/**
+ * The clock every `userEvent.setup` in this file hands to user-event. Async on
+ * purpose.
+ *
+ * `advanceTimersByTime` fires timer and rAF callbacks back to back without
+ * draining microtasks between them, so base-ui's menu-open sequence — a portal
+ * mount, then floating-ui positioning, each waiting on a promise the next tick
+ * resolves — cannot make progress inside one of user-event's advances. It got
+ * there anyway on `shouldAdvanceTime`'s real-interval ticks, since those are
+ * native and each is followed by a natural drain. Under full-suite load those
+ * arrive late and sparse, and the menu misses its window: every `findBy*` here
+ * is budgeted on the *fake* clock (Testing Library only detects Jest's fake
+ * timers, and this suite runs `globals: false`), and user-event's own advances
+ * spend that budget without the menu ever mounting.
+ *
+ * The async advance drains microtasks between the timers it fires, so the
+ * popup mounts inside those advances rather than in the gaps between them.
+ */
+async function advanceTimersForUserEvent(delay: number): Promise<void> {
+  await vi.advanceTimersByTimeAsync(delay);
+}
+
 /** A row's File trigger — the whole rail hangs off it. `aria-label` carries
  * the note title, so one exact string identifies one card. */
 function fileTrigger(title: string): HTMLElement {
@@ -317,7 +339,7 @@ describe("InboxView", () => {
     });
 
     it("offers the guess first in the File menu, with the key that fires it", async () => {
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
       serveVault(
         [
           makeNote({
@@ -346,7 +368,7 @@ describe("InboxView", () => {
       // The hint is a claim about the keyboard, so it is worth a keyboard
       // test: a ↵ beside a row that Enter does not reach would be a lie
       // drawn in the one colour reserved for the system's suggestions.
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
       serveVault(
         [
           makeNote({
@@ -409,7 +431,7 @@ describe("InboxView", () => {
   });
 
   it("opens the note when the card body is clicked", async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
     serveVault([
       makeNote({
         id: "n_a1b2c3",
@@ -435,7 +457,7 @@ describe("InboxView", () => {
   });
 
   it("opens the note from the keyboard: the card is one real button", async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
     serveVault([PLANNING]);
     const navigate = renderInboxWithNavigateSpy();
     await screen.findByText("Quarterly planning");
@@ -458,7 +480,7 @@ describe("InboxView", () => {
   });
 
   it("files without navigating: the picker sits over the card, not inside it", async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
     serveVault([PLANNING]);
     onCommand("file_note_to_project", () => ({
       note: { ...PLANNING, project: "briarwood-golf", path: "Projects/briarwood-golf/planning.md" },
@@ -477,7 +499,7 @@ describe("InboxView", () => {
   });
 
   it("re-routes a note to the chosen project and drops the row once the vault refetches", async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
     serveVault([PLANNING, VENDOR]);
     onCommand("file_note_to_project", () => ({
       note: { ...PLANNING, project: "briarwood-golf", path: "Projects/briarwood-golf/planning.md" },
@@ -510,7 +532,7 @@ describe("InboxView", () => {
   });
 
   it("keeps the row and surfaces the message when the re-route fails", async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
     serveVault([PLANNING]);
     onCommand("file_note_to_project", () => {
       throw "no such project: briarwood-golf";
@@ -531,7 +553,7 @@ describe("InboxView", () => {
   });
 
   it("still offers filing in a project-less vault, because the menu can make one", async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
     serveVault([PLANNING], []);
 
     renderInbox();
@@ -548,7 +570,7 @@ describe("InboxView", () => {
   });
 
   it("creates a project from the menu's foot and files the note into it", async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
     serveVault([PLANNING], []);
     onCommand("create_project", () => makeProject("riverbend-deck"));
     onCommand("file_note_to_project", () => ({
@@ -604,7 +626,7 @@ describe("InboxView", () => {
   });
 
   it("counts a filed note into the session tally and lights the meter", async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
     serveVault([PLANNING, VENDOR]);
     onCommand("file_note_to_project", () => ({
       note: { ...PLANNING, project: "briarwood-golf" },
@@ -691,7 +713,7 @@ describe("InboxView", () => {
     });
 
     it("cancels without deleting", async () => {
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
       serveVault([PLANNING]);
       renderInbox();
       await screen.findByText("Quarterly planning");
@@ -706,7 +728,7 @@ describe("InboxView", () => {
     });
 
     it("deletes by id, and the row leaves once the vault refetches", async () => {
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
       serveVault([PLANNING, VENDOR]);
       onCommand("delete_note", () => ({
         id: "n_a1b2c3",
@@ -741,7 +763,7 @@ describe("InboxView", () => {
     });
 
     it("warns that a session-backed note's recording is deleted too", async () => {
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
       const DISTILLED = makeNote({
         id: "n_s1s2s3",
         title: "Team sync",
@@ -760,7 +782,7 @@ describe("InboxView", () => {
     });
 
     it("keeps the row and shows the error when the delete fails", async () => {
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
       serveVault([PLANNING]);
       onCommand("delete_note", () => {
         throw "the vault is read-only";
@@ -1065,7 +1087,7 @@ describe("InboxView", () => {
     });
 
     it("pauses the toast's dwell while hovered, and resumes it on unhover", async () => {
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
       serveVault([]);
       renderInbox();
       await screen.findByText(/Nothing waiting/);
@@ -1097,7 +1119,7 @@ describe("InboxView", () => {
     });
 
     it("opens the filed note when the toast is clicked", async () => {
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
       onCommand("list_projects", () => ({
         inbox_note_count: 0,
         projects: [makeProject("briarwood-golf")],
@@ -1134,7 +1156,7 @@ describe("InboxView", () => {
     });
 
     it("falls back to the project view when the filed note can't be found", async () => {
-      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
       onCommand("list_projects", () => ({
         inbox_note_count: 0,
         projects: [makeProject("briarwood-golf")],
