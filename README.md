@@ -82,6 +82,10 @@ docs/                   # Strategy & spec docs — roadmap, aesthetic direction,
 design/                 # Historical Phase-0 artefacts — the moodboard and spirit-mark
                         # pages. No build reads them; the live design system is the
                         # Grove theme in src/index.css.
+assets/brand/           # Committed brand assets — the 1024px app-icon master (the
+                        # source `pnpm tauri icon` derives src-tauri/icons from) and
+                        # the GitHub social-preview banner, both drawn by their
+                        # scripts/generate-*.ps1 generators.
 src/                    # React + TypeScript frontend. src/index.css is the only
                         # stylesheet the repo owns: the Grove theme (Tailwind v4
                         # @theme tokens, keyframes, the .day/.hc variants) and the
@@ -114,8 +118,10 @@ CLAUDE.md, CONTRIBUTING.md, kangentic.json   # Agent guide, contributor guide, a
                         # Kangentic board/workflow definition.
 .github/                # GitHub Actions workflows — ci.yml (the gate matrix run on every PR)
                         # and release.yml (tag-triggered NSIS build → draft Release).
-scripts/                # Dev/build helpers — PowerShell (tray icons, resource profiling,
-                        # release code signing) and the `pnpm dev:sandbox` launcher.
+scripts/                # Dev/build helpers — PowerShell (tray icons, the app icon and
+                        # NSIS wizard art, the social-preview banner, resource profiling,
+                        # release code signing, model-release publishing) and the
+                        # `pnpm dev:sandbox` launcher.
 target/, dist/          # Build output (git-ignored).
 .sandbox/               # Dev sandbox state, when `pnpm dev:sandbox` has run (git-ignored).
 ```
