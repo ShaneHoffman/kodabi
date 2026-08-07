@@ -29,10 +29,11 @@ model nudge. The download, verify and resume code paths are byte-identical to sh
 
 Each launch set `KODABI_SANDBOX` to a throwaway base, so `<base>/.models` started genuinely
 empty. The harness **deletes** `PARAKEET_ENCODER/DECODER/JOINER/TOKENS/VAD_MODEL` and
-`KODABI_EMBED_MODEL_DIR` from the child environment: with any of those set the corresponding set
-reports `env_overridden`, the app is `ready`, and the whole verification would have "passed"
-without fetching a byte. The preflight asserts no set is `env_overridden` before anything else
-happens.
+`KODABI_EMBED_MODEL_DIR` from the child environment: with all five parakeet variables set (a
+partial override is deliberately ignored — `stt_env_paths` wants all five or none), or with
+`KODABI_EMBED_MODEL_DIR` set, the corresponding set reports `env_overridden`, the app is `ready`,
+and the whole verification would have "passed" without fetching a byte. The preflight asserts no
+set is `env_overridden` before anything else happens.
 
 ## Baseline (clean sandbox, before any download)
 
@@ -80,9 +81,10 @@ clean run — both hashing clean.
 
 The app was killed with `taskkill /T /F` mid-transfer of the 652 MB encoder, then relaunched.
 
-- Killed with the `.part` at ~357 MB; **377,421,824 bytes** survived on disk.
+- Killed with the `.part` at ~377 MB; **377,421,824 bytes** survived on disk.
 - On relaunch, `model_status` reported the parakeet set `partial` with `bytesPresent`
-  `377421824`, and the nudge offered **"Download 418 MB"** (796 − 378).
+  `377421824`, and the nudge offered **"Download 418 MB"** (795,640,427 − 377,421,824 =
+  418,218,603 bytes, which `formatMegabytes` renders as 418 MB).
 - The first `downloading` event after the restart carried
   `file_received: 377421824` — the resume began exactly at the surviving byte count rather than
   at zero. This is the 206 range request working against the real GitHub CDN, which had never
@@ -168,8 +170,9 @@ consistent with the clean run — resuming cost nothing beyond the bytes already
 
 - **The size is 796 MB, not 760.** The manifest sums to 795,640,427 bytes; `formatMegabytes` is
   decimal, so the UI renders "796 MB". "759 MB" and "~760 MB" are the same quantity in MiB.
-  `README.md` currently says "~760 MB" and `ModelDownloadNudge.tsx`'s doc comment says "760 MB",
-  neither matching what the app displays. Worth reconciling on the README install pass so a user
+  Four places still carry the stale figure, none matching what the app displays: `README.md`
+  ("~760 MB"), and the doc comments in `ModelDownloadNudge.tsx`, `useModelDownload.ts` and
+  `useUpdater.ts` ("760 MB"). Worth reconciling all four on the README install pass so a user
   reading the page and a user reading the dialog see one number.
 - **`src-tauri/tauri.e2e.conf.json` cannot be used with a release build.** Its updater endpoint is
   `http://`, which Tauri accepts in debug but rejects in release
@@ -181,6 +184,6 @@ consistent with the clean run — resuming cost nothing beyond the bytes already
   later succeeded. Unrelated to model provisioning, and it did not recur, but it is a real
   startup race rather than harness noise.
 - Nothing here is automated. There is no test that touches the real network, deliberately — this
-  document is the record, and the check to repeat is the one at the top of
-  `scripts/upload-models.ps1`: verify a fresh install downloads and passes verification before
+  document is the record, and the check to repeat is the one `scripts/upload-models.ps1` prints as
+  its closing line: verify a fresh install downloads and passes verification before
   announcing a build.
