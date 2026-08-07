@@ -152,8 +152,11 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   `.exe.sig`, `latest.json`) — in v2 mode the installer `.exe` *is* the update payload, there is
   no `.zip` — and **publishing the draft is what rolls the update out**, since
   `releases/latest/download/` ignores drafts. For the same reason `scripts/upload-models.ps1`
-  passes `--latest=false`: a `models-v*` release capturing the "latest" slot would 404 the
-  manifest for every install.
+  passes **`--prerelease`**: a `models-v*` release capturing the "latest" slot would 404 the
+  manifest for every install. It has to be that flag and not `--latest=false`, which buys
+  nothing — `/releases/latest` falls back to the most recent non-draft, non-prerelease release
+  whenever nothing is explicitly marked latest, and GitHub excludes prereleases from that
+  computation outright.
 - **Core vs shell:** logic lives in `crates/kodabi-core` (pure, UI-agnostic, unit-testable);
   `src-tauri` commands stay thin wrappers around it. If a Tauri command grows a body, the body
   belongs in kodabi-core.
