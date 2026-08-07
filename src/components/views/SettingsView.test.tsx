@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsView } from "./SettingsView";
 import { ModelStatusProvider } from "../providers/ModelStatusProvider";
+import { UpdaterProvider } from "../providers/UpdaterProvider";
 import type { OverlaySettings, Settings } from "../../useSettings";
 import { INDEX_STATE_EVENT } from "../../events";
 import {
@@ -12,9 +13,18 @@ import {
   onCommand,
   resetTauriMocks,
 } from "../../test/tauri";
+import {
+  failCheck,
+  resetUpdaterMocks,
+  setAppVersion,
+  setAvailableUpdate,
+} from "../../test/updater";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
+vi.mock("@tauri-apps/plugin-updater", () => import("../../test/updater"));
+vi.mock("@tauri-apps/plugin-process", () => import("../../test/updater"));
+vi.mock("@tauri-apps/api/app", () => import("../../test/updater"));
 
 /**
  * The two display preferences write to localStorage and to <html>, and neither
@@ -25,6 +35,14 @@ vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
  * it reads. The reduce-motion test below stayed honest only by ending clean;
  * this makes that a property of the file rather than of each test.
  */
+/** The updater mocks are a per-file singleton like the Tauri ones, and every
+ * render mounts `UpdaterProvider`. Reset here rather than in each describe's
+ * own `beforeEach`, since a staged update leaking into an unrelated capture
+ * test would put a live notice on the page it is asserting against. */
+beforeEach(() => {
+  resetUpdaterMocks();
+});
+
 afterEach(() => {
   const root = document.documentElement;
   for (const key of ["kodabi:reduce-motion", "kodabi:contrast"]) {
@@ -59,9 +77,11 @@ function settingsWith(overlay: OverlaySettings): Settings {
 async function renderSeeded(settings: Settings = DEFAULTS) {
   onCommand("get_settings", () => settings);
   const result = render(
-    <ModelStatusProvider>
-      <SettingsView />
-    </ModelStatusProvider>,
+    <UpdaterProvider>
+      <ModelStatusProvider>
+        <SettingsView />
+      </ModelStatusProvider>
+    </UpdaterProvider>,
   );
   await screen.findByRole("region", { name: "Privacy" });
   return result;
@@ -610,5 +630,71 @@ describe("SettingsView mic test", () => {
       // The licence obliges us to state that the files were changed.
       expect(attribution).toHaveTextContent(/quantized to int8/);
     });
+  });
+});
+
+describe("SettingsView About card", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  function about(): HTMLElement {
+    return card("About");
+  }
+
+  it("answers 'am I updated' with the running version", async () => {
+    setAppVersion("1.4.2");
+    await renderSeeded();
+
+    expect(await within(about()).findByText("1.4.2")).toBeInTheDocument();
+  });
+
+  it("confirms an up-to-date result, then clears it, because it is news and not a label", async () => {
+    // Fake timers before the render, not after the click: the confirmation's
+    // setTimeout is scheduled during that click, and a clock installed
+    // afterwards cannot advance a timer that is already on the real one.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      await renderSeeded();
+
+      await user.click(within(about()).getByRole("button", { name: "Check for updates" }));
+      expect(
+        await within(about()).findByText("You are on the latest version."),
+      ).toBeInTheDocument();
+
+      act(() => {
+        vi.advanceTimersByTime(10_000);
+      });
+      expect(
+        within(about()).queryByText("You are on the latest version."),
+      ).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("offers the download when a manual check finds one", async () => {
+    setAvailableUpdate({
+      version: "0.2.0",
+      download: async () => {},
+      install: async () => {},
+    });
+    const user = userEvent.setup();
+    await renderSeeded();
+
+    await user.click(within(about()).getByRole("button", { name: "Check for updates" }));
+    expect(await within(about()).findByRole("button", { name: "Download 0.2.0" })).toBeInTheDocument();
+  });
+
+  it("reports a failed manual check here, which is the one place that does", async () => {
+    // The corner notice deliberately stays quiet about check failures; a check
+    // someone clicked has to answer for itself.
+    failCheck("no route to host");
+    const user = userEvent.setup();
+    await renderSeeded();
+
+    await user.click(within(about()).getByRole("button", { name: "Check for updates" }));
+    expect(await within(about()).findByText(/no route to host/)).toBeInTheDocument();
   });
 });

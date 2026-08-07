@@ -134,6 +134,7 @@ export default tseslint.config(
       "src/useTauriEvent.ts",
       "src/useTimeout.ts",
       "src/useTranscriptionState.ts",
+      "src/useUpdater.ts",
       "src/useVaultQuery.ts",
       "src/useXterm.ts",
     ],

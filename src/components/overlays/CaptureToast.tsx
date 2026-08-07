@@ -94,15 +94,15 @@ export function CaptureToast() {
   if (!showing) return null;
 
   return (
-    // Bottom right because that is the emptiest corner of every view in the
-    // app: content is pinned left or centred on a measure, and the sidebar
-    // owns the left edge outright.
+    // Unpositioned: the bottom-right corner is owned by the notice stack in
+    // `AppShell`, which is what keeps this and the update notice from landing
+    // on top of each other when both have something to say.
     //
     // No entrance animation, and nothing for reduced motion to disable:
     // showing the surface IS the transition (FOUNDING_DOC §4). A toast that
     // slides in arrives after the thing it is reporting.
     <div
-      className="glass-overlay fixed right-6 bottom-6 z-50 flex max-w-[236px] items-center gap-3 px-4 py-3"
+      className="glass-overlay flex max-w-[236px] items-center gap-3 px-4 py-3"
       role="alert"
       data-testid="capture-toast"
     >

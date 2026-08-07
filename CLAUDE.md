@@ -132,6 +132,31 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   `pnpm tauri:build --no-bundle` and the bundle-and-sign pass follows the login. All six settings
   come from repository **variables**, never committed and never secrets. A repo without them
   ships an unsigned release exactly as before.
+- **The app updates itself, and that adds a *second* signature with opposite failure rules.**
+  `tauri-plugin-updater` (+ `tauri-plugin-process`) checks
+  `releases/latest/download/latest.json` on startup and offers the update; nothing downloads or
+  installs without a click. Trust is **minisign**, separate from Authenticode: the public key is
+  `plugins.updater.pubkey` in `tauri.conf.json` and the private half lives only in the
+  `TAURI_SIGNING_PRIVATE_KEY` / `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` repository **secrets** (the
+  only secrets this repo has beyond `GITHUB_TOKEN`). **Losing that key orphans every installed
+  copy** — they can never verify another update — so it is backed up offline and never rotated
+  casually.
+  Where Azure signing skips politely when unconfigured, updater signing **fails the release
+  build**: a release without its `.sig` and `latest.json` is invisible to every app in the field,
+  silently, which is far worse than a red build. `release.yml` asserts both secrets and a
+  non-placeholder pubkey in the first seconds, before the hour-long compile.
+  `bundle.createUpdaterArtifacts` therefore lives in its own **CI-only** overlay,
+  `src-tauri/tauri.updater.conf.json`, passed as a second `--config` beside the bundle overlay:
+  the flag makes the CLI demand the private key, so putting it in either of the other two configs
+  would break every local `pnpm tauri:build`. The release uploads three assets (installer,
+  `.exe.sig`, `latest.json`) — in v2 mode the installer `.exe` *is* the update payload, there is
+  no `.zip` — and **publishing the draft is what rolls the update out**, since
+  `releases/latest/download/` ignores drafts. For the same reason `scripts/upload-models.ps1`
+  passes **`--prerelease`**: a `models-v*` release capturing the "latest" slot would 404 the
+  manifest for every install. It has to be that flag and not `--latest=false`, which buys
+  nothing — `/releases/latest` falls back to the most recent non-draft, non-prerelease release
+  whenever nothing is explicitly marked latest, and GitHub excludes prereleases from that
+  computation outright.
 - **Core vs shell:** logic lives in `crates/kodabi-core` (pure, UI-agnostic, unit-testable);
   `src-tauri` commands stay thin wrappers around it. If a Tauri command grows a body, the body
   belongs in kodabi-core.

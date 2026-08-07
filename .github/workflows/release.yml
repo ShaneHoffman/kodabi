@@ -68,6 +68,51 @@ jobs:
             exit 1
           fi
 
+      # Beside the version assertion, and for the same reason: fail in seconds,
+      # not after an hour. Unlike the Azure signing below — which is optional
+      # and skips cleanly — updater signing is not allowed to be absent. Every
+      # installed copy verifies the next update against the pubkey baked into
+      # tauri.conf.json, so a release that shipped without its .sig and
+      # latest.json is not merely unsigned: it is invisible to every app in the
+      # field, silently, until someone thinks to look. A red build is the
+      # cheaper failure by a wide margin.
+      #
+      # The pubkey is checked here too. It is committed, so the danger is not
+      # that it goes missing but that a placeholder ships and produces installs
+      # that can never verify anything again.
+      - name: Assert the updater signing configuration is real
+        shell: bash
+        env:
+          HAS_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
+          HAS_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD != '' }}
+        run: |
+          set -euo pipefail
+          fail=0
+          if [ "$HAS_KEY" != "true" ] || [ "$HAS_PASSWORD" != "true" ]; then
+            echo "FAIL: TAURI_SIGNING_PRIVATE_KEY / TAURI_SIGNING_PRIVATE_KEY_PASSWORD are not both set."
+            echo "Generate with 'pnpm tauri signer generate' and set both as repository secrets."
+            fail=1
+          fi
+          pubkey="$(node -p "require('./src-tauri/tauri.conf.json').plugins.updater.pubkey")"
+          # A real minisign public key is base64 that decodes to the "untrusted
+          # comment" header plus the key; anything short or placeholder-shaped
+          # is not one.
+          case "$pubkey" in
+            REPLACE_WITH_*|"")
+              echo "FAIL: plugins.updater.pubkey in src-tauri/tauri.conf.json is still a placeholder."
+              fail=1
+              ;;
+          esac
+          if [ "${#pubkey}" -lt 40 ]; then
+            echo "FAIL: plugins.updater.pubkey is too short to be a minisign public key."
+            fail=1
+          fi
+          if [ "$fail" = 1 ]; then
+            echo "Updates are verified against this key. Shipping a wrong one strands every install."
+            exit 1
+          fi
+          echo 'Updater signing key and pubkey are present.'
+
       # Toolchain setup mirrors ci.yml: same pnpm major, same node, same Rust
       # action and cache. Keep the versions in lockstep with that file.
       - uses: pnpm/action-setup@v4
@@ -154,13 +199,27 @@ jobs:
       # scripts/sign-windows.ps1 once per signable file: kodabi.exe, the NSIS
       # plugin DLLs, the bundled kodabi-mcp.exe, uninstall.exe, and the
       # installer itself.
+      #
+      # The extra --config is the updater overlay, and it is CI-only on purpose.
+      # `createUpdaterArtifacts` makes the CLI sign the finished installer with
+      # minisign, and it *fails the build* when TAURI_SIGNING_PRIVATE_KEY is
+      # unset rather than skipping the way the Azure signing does. Putting it in
+      # tauri.conf.json or tauri.bundle.conf.json would therefore break every
+      # local `pnpm tauri:build` for want of a private key nobody should have on
+      # their machine. The CLI merges --config flags in order, so this composes
+      # with the bundle overlay the script already passes.
+      #
+      # Both signatures land on the same file, in the right order without being
+      # asked: Authenticode during the bundle (signCommand), minisign after it.
       - name: Bundle and sign the NSIS installer (the shipping configuration)
         env:
           AZURE_SIGNING_ENDPOINT: ${{ vars.AZURE_SIGNING_ENDPOINT }}
           AZURE_SIGNING_ACCOUNT: ${{ vars.AZURE_SIGNING_ACCOUNT }}
           AZURE_SIGNING_CERT_PROFILE: ${{ vars.AZURE_SIGNING_CERT_PROFILE }}
           # AZURE_SIGNING_DLIB arrives from the step above via GITHUB_ENV.
-        run: pnpm tauri:build
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: pnpm tauri:build --config src-tauri/tauri.updater.conf.json
 
       # Prove the signatures landed, on the artifact a user actually receives.
       # Worth its minute above all for uninstall.exe, which exists only once the
@@ -202,25 +261,76 @@ jobs:
           }
           Write-Host 'Every shipped binary carries a valid signature.'
 
+      # The update manifest. tauri-plugin-updater fetches exactly this file from
+      # the endpoint in tauri.conf.json and compares its `version` against the
+      # running build; `signature` is the *content* of the .sig the bundler just
+      # produced, not a link to it, and the app verifies the downloaded
+      # installer against it with the committed pubkey before running anything.
+      #
+      # Hand-rolled because this workflow is: tauri-action would generate it,
+      # but adopting the action here would mean giving up the two-phase
+      # compile-then-sign split that the OIDC token's lifetime forces.
+      #
+      # In v2 mode the installer .exe *is* the update payload — there is no
+      # .zip. (An earlier note in this file said otherwise; that was the v1
+      # `v1Compatible` shape, which we do not use.)
+      - name: Generate latest.json for the updater
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          dir=target/release/bundle/nsis
+          installer="$(basename "$(ls "$dir"/*-setup.exe)")"
+          if [ ! -f "$dir/$installer.sig" ]; then
+            echo "FAIL: no updater signature at $dir/$installer.sig"
+            echo "The bundle step should have produced it via createUpdaterArtifacts."
+            ls -la "$dir" || true
+            exit 1
+          fi
+          node -e '
+            const fs = require("fs");
+            const [version, dir, installer] = process.argv.slice(1);
+            const signature = fs.readFileSync(`${dir}/${installer}.sig`, "utf8").trim();
+            if (!signature) throw new Error("the updater signature file is empty");
+            const url = `https://github.com/${process.env.GITHUB_REPOSITORY}/releases/download/${process.env.GITHUB_REF_NAME}/${encodeURIComponent(installer)}`;
+            const manifest = {
+              version,
+              // UTC, seconds precision, per .claude/rules/utc-timestamps.md.
+              pub_date: new Date().toISOString().replace(/\.\d{3}Z$/, "Z"),
+              platforms: { "windows-x86_64": { url, signature } },
+            };
+            fs.writeFileSync(`${dir}/latest.json`, JSON.stringify(manifest, null, 2) + "\n");
+          ' "$version" "$dir" "$installer"
+          echo "--- latest.json ---"
+          cat "$dir/latest.json"
+
       # Upload to a *draft* release: a human reviews the assets and the
       # generated notes, then publishes. Split create-or-upload so a re-run
       # after a failed upload tops up the existing draft instead of erroring on
       # a duplicate release.
       #
-      # The updater work (#160) adds its artifacts (the signed .zip/.sig and
-      # latest.json) to the file lists below — no other change to this step.
+      # Publishing that draft is also the moment the update goes live for
+      # everyone already running Kodabi: the updater endpoint resolves through
+      # `releases/latest/download/`, which ignores drafts entirely. So the
+      # human review gate on the release doubles, exactly, as the rollout gate.
       - name: Upload the installer to a draft release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          assets=(target/release/bundle/nsis/*-setup.exe)
-          if [ ! -e "${assets[0]}" ]; then
-            echo "FAIL: no NSIS installer found under target/release/bundle/nsis/"
-            ls -la target/release/bundle/nsis/ || true
-            exit 1
-          fi
+          assets=(
+            target/release/bundle/nsis/*-setup.exe
+            target/release/bundle/nsis/*-setup.exe.sig
+            target/release/bundle/nsis/latest.json
+          )
+          for asset in "${assets[@]}"; do
+            if [ ! -e "$asset" ]; then
+              echo "FAIL: expected release asset missing: $asset"
+              ls -la target/release/bundle/nsis/ || true
+              exit 1
+            fi
+          done
           if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
           else

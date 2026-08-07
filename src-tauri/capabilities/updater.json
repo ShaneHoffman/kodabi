@@ -1,0 +1,10 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "updater",
+  "description": "Capability for the update flow: check, download, install and relaunch. Scoped to the main window alone, which is the only one that mounts <UpdaterProvider> — quick capture and the capture pill have no providers and no business restarting the app.",
+  "windows": ["main"],
+  "permissions": [
+    "updater:default",
+    "process:default"
+  ]
+}

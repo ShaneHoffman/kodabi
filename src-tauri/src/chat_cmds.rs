@@ -589,6 +589,10 @@ pub fn chat_restart(app: AppHandle, state: State<'_, ChatState>) -> Result<ChatS
 /// Reaps the live session on true app exit. Called from the `RunEvent` hook in
 /// `lib.rs` beside the terminal's reap — NOT from `CloseRequested`, which only
 /// hides to tray.
+///
+/// Second caller: `updater_cmds::updater_prepare_install`, because the updater
+/// exits the process from inside `Update::install()` and never reaches that
+/// hook. Idempotent, so the two paths cannot double-reap.
 pub fn reap(app: &AppHandle) {
     if let Some(state) = app.try_state::<ChatState>() {
         if let Ok(mut guard) = state.0.lock() {

@@ -4,12 +4,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CapturePipelineProvider } from "../providers/CapturePipelineProvider";
 import { ModelStatusProvider } from "../providers/ModelStatusProvider";
 import { NavigationProvider } from "../providers/NavigationProvider";
+import { UpdaterProvider } from "../providers/UpdaterProvider";
 import { MainContent } from "./MainContent";
 import { TopBar } from "./TopBar";
 import { emitFromBackend, onCommand, resetTauriMocks } from "../../test/tauri";
+import { resetUpdaterMocks } from "../../test/updater";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
+vi.mock("@tauri-apps/plugin-updater", () => import("../../test/updater"));
+vi.mock("@tauri-apps/plugin-process", () => import("../../test/updater"));
+vi.mock("@tauri-apps/api/app", () => import("../../test/updater"));
 
 /** Private to useCaptureState.ts, so the other capture tests spell it here
  * too rather than exporting it just for them. */
@@ -32,12 +37,14 @@ function serveVault(): void {
 function renderShell(onOpenPalette = () => {}) {
   return render(
     <NavigationProvider>
-      <ModelStatusProvider>
-        <CapturePipelineProvider>
-          <TopBar onOpenPalette={onOpenPalette} />
-          <MainContent />
-        </CapturePipelineProvider>
-      </ModelStatusProvider>
+      <UpdaterProvider>
+        <ModelStatusProvider>
+          <CapturePipelineProvider>
+            <TopBar onOpenPalette={onOpenPalette} />
+            <MainContent />
+          </CapturePipelineProvider>
+        </ModelStatusProvider>
+      </UpdaterProvider>
     </NavigationProvider>,
   );
 }
@@ -45,6 +52,7 @@ function renderShell(onOpenPalette = () => {}) {
 describe("TopBar", () => {
   beforeEach(() => {
     resetTauriMocks();
+    resetUpdaterMocks();
   });
 
   it("opens the command palette and names its shortcut", async () => {

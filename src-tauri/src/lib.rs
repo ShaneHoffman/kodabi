@@ -20,6 +20,7 @@ mod settings_cmds;
 mod terminal_cmds;
 mod transcribe;
 mod tray_promotion;
+mod updater_cmds;
 
 use kodabi_core::device::DeviceId;
 use tauri::Manager;
@@ -66,6 +67,12 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
+        // The update check, download and NSIS handoff. Both plugins are driven
+        // entirely from the frontend (`src/useUpdater.ts`); the only Rust of our
+        // own in the flow is `updater_cmds`, which reaps what the plugin's exit
+        // path would otherwise orphan.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(move |app| {
             // The config seam, not `app_config_dir()` inline: a sandboxed run
             // keeps its settings, device identity and `_claude/` wiring beside
@@ -255,6 +262,7 @@ pub fn run() {
             chat_cmds::chat_cancel,
             chat_cmds::chat_permission_respond,
             chat_cmds::chat_restart,
+            updater_cmds::updater_prepare_install,
         ])
         .on_window_event(|window, event| match event {
             // Hide instead of exit: the tray + global hotkey must stay

@@ -41,9 +41,11 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   leg is a per-commit gate in `CLAUDE.md`; the release build is `/pull-request`'s.
   `release.yml` is mostly out of scope for this anchor — it runs no *pre-commit* gate,
   only the tagged installer build (see anchor 5 for the feature set it inherits from
-  `tauri:build`). Its one assertion is a version check, not a gate: the tag must match
+  `tauri:build`). It carries two assertions, neither a pre-commit gate: the tag must match
   `version` in **both** `package.json` and `src-tauri/tauri.conf.json`, so confirm those
-  two still agree with each other whenever either is bumped. Two things in `release.yml`
+  two still agree with each other whenever either is bumped; and the updater signing check,
+  which requires the two `TAURI_SIGNING_*` secrets plus a non-placeholder
+  `plugins.updater.pubkey`. Two things in `release.yml`
   *are* in scope, because it copies them from `ci.yml` rather than deriving them: its
   toolchain setup (`pnpm/action-setup` version, `actions/setup-node` `node-version`, the
   `dtolnay/rust-toolchain` channel) must still match `ci.yml`'s, and its own comment says
@@ -122,7 +124,11 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   `compile_error!` guard in `src-tauri/src/transcribe.rs` still names an engine.
   `embed` has **no** guard of its own, so the script is the only thing pinning it: a
   `tauri:build` that lost `embed` would ship an exe with no semantic search and nothing
-  would fail.
+  would fail. The release's bundle step adds one flag the script does not carry,
+  `--config src-tauri/tauri.updater.conf.json`; that overlay is CI-only on purpose
+  (`createUpdaterArtifacts` makes the CLI demand `TAURI_SIGNING_PRIVATE_KEY`), so confirm
+  it has not migrated into `tauri.conf.json` or `tauri.bundle.conf.json`, which would
+  break every local `pnpm tauri:build`.
 - **Failure:** a feature CI checks that `CLAUDE.md`'s commit instructions don't
   mention.
 
