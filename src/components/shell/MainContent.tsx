@@ -1,5 +1,6 @@
 import { useNavigation } from "../../useNavigation";
 import { ChatView } from "../views/ChatView";
+import { GlossaryView } from "../views/GlossaryView";
 import { InboxView } from "../views/InboxView";
 import { NeedsAttentionView } from "../views/NeedsAttentionView";
 import { NoteEditorView } from "../views/NoteEditorView";
@@ -31,6 +32,11 @@ export function MainContent() {
           origin={view.origin}
         />
       );
+    case "glossary":
+      // Keyed for the same reason as noteEditor: the view holds dialog and
+      // per-row state for one glossary, and a vault↔project jump is a
+      // different glossary entirely.
+      return <GlossaryView key={view.slug ?? "vault"} slug={view.slug} />;
     case "search":
       // Keyed for the same reason as noteEditor: SearchView seeds its editable
       // draft from this prop once, so a second search (the palette's

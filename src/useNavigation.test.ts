@@ -31,6 +31,19 @@ describe("viewKey", () => {
     expect(viewKey(filed)).not.toBe(viewKey(unfiled));
   });
 
+  it("separates two glossaries, and the vault one from any project's", () => {
+    const growth: View = { kind: "glossary", slug: "growth" };
+    const briarwood: View = { kind: "glossary", slug: "briarwood-golf" };
+    // `null` is the vault-wide glossary, a different file from any project's
+    // and the only one that biases transcription.
+    const vault: View = { kind: "glossary", slug: null };
+
+    expect(viewKey(growth)).not.toBe(viewKey(briarwood));
+    expect(viewKey(vault)).not.toBe(viewKey(growth));
+    // And it is not confusable with a project literally named "vault".
+    expect(viewKey(vault)).not.toBe(viewKey({ kind: "project", slug: "vault" }));
+  });
+
   it("separates two searches", () => {
     const first: View = { kind: "search", query: "golf" };
     const second: View = { kind: "search", query: "invoice" };

@@ -15,6 +15,7 @@ import {
   type RetentionKind,
   type Theme,
 } from "../../useSettings";
+import { useNavigation } from "../../useNavigation";
 import { applyContrast, readContrast } from "../../contrast";
 import { applyReduceMotion, readReduceMotion } from "../../reduceMotion";
 import { INDEX_STATE_EVENT } from "../../events";
@@ -210,6 +211,30 @@ function micCheckSummary(result: MicCheckResult): string {
     case "mic_silent":
       return "No signal from your microphone. Check that it is connected and not muted.";
   }
+}
+
+/**
+ * The way into the vault-wide glossary, which has no other home: every project
+ * glossary is reachable from its own project, but the vault one belongs to no
+ * folder — and it is the one that matters most, since transcription biases
+ * against it for every capture (a session is transcribed before routing has
+ * picked a project).
+ *
+ * A link, not an editor. Settings rows are label-left / control-right and hold
+ * one value each; a list you add to and delete from is a view, so this row
+ * hands off to one rather than growing a second layout inside the card.
+ */
+function GlossaryControl() {
+  const { navigate } = useNavigation();
+
+  return (
+    <Row
+      label="Vault glossary"
+      hint="Terms that bias transcription for every capture, like product names and coworkers. Each project keeps its own glossary for routing, edited from that project."
+    >
+      <Button onClick={() => navigate({ kind: "glossary", slug: null })}>Manage</Button>
+    </Row>
+  );
 }
 
 /**
@@ -822,6 +847,10 @@ export function SettingsView() {
                 Run test
               </Button>
             </Row>
+          </Card>
+
+          <Card title="Glossary">
+            <GlossaryControl />
           </Card>
 
           <Card title="Models">

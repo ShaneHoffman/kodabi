@@ -802,6 +802,11 @@ Out of scope for this spec, listed so Phase 3+ doesn't rediscover the gap from s
   unreliable in practice.
 - **Glossary `list` / `remove` / `update`-beyond-add** — reads are already covered by
   `get_project_context`'s `glossary` section; standalone edit/delete tools are minor and deferred.
+  These now exist at the vault/Tauri layer (`vault::list_glossary_terms`,
+  `vault::update_glossary_term`, `vault::remove_glossary_term`, and the matching commands behind the
+  desktop app's glossary editor), which also reaches a scope this surface does not: the
+  **vault-wide** `_glossary.yml` at the knowledge-base root, the one transcription biases against.
+  Exposing any of it over MCP is still deferred; `add_glossary_term` remains the only write here.
 - **`delete_note`** (remove a note and everything derived from it) — now exists at the vault/Tauri
   layer (`vault::delete_note`, the `delete_note` command): it deletes the `.md` file, its index
   rows, and any paired session artifacts. An `mcp__kodabi__delete_note` tool would be the surface's

@@ -24,6 +24,15 @@ export type View =
        * remount the editor for a difference the document cannot see. */
       origin?: View;
     }
+  | {
+      kind: "glossary";
+      /** Which glossary to edit. `null` is the VAULT-WIDE one at the
+       * knowledge-base root — the glossary that biases transcription for every
+       * capture, since a session is transcribed before routing picks a
+       * project. A slug is that project's own glossary, which feeds routing
+       * signals and project context. */
+      slug: string | null;
+    }
   | { kind: "search"; query: string }
   | { kind: "settings" }
   | { kind: "terminal" }
@@ -47,6 +56,8 @@ export function viewKey(view: View): string {
       return `project:${view.slug}`;
     case "noteEditor":
       return `noteEditor:${view.noteId ?? "new"}:${view.project ?? ""}`;
+    case "glossary":
+      return `glossary:${view.slug ?? "vault"}`;
     case "search":
       return `search:${view.query}`;
     default:
