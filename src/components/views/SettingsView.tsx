@@ -78,6 +78,14 @@ type RebuildStatus = { status: "idle" } | IndexStateEvent;
  * its own query, and `mt-6` rides on the wrapper because `@container` brings
  * layout containment with it.
  *
+ * It also sits above two `Select`s, whose menus go `position: fixed` to escape a
+ * clipping ancestor, and `container-type` is on the list of properties that can
+ * capture a fixed descendant and defeat that escape. Measured before this
+ * landed: it does not. A fixed probe inside an `inline-size` container still
+ * lands at the viewport's corner, and both menus place identically, flip and
+ * all, with the container present and absent
+ * (docs/decisions/popover-primitive.md §6, which records the numbers).
+ *
  * 66rem = 1056px, which is two 520px tracks before they grow to the 660 cap.
  * 520 is where the tightest row still holds: Retention under `keep_days` puts
  * 284px of controls (the policy Select beside its day field) against a 480px
