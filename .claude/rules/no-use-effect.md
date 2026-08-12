@@ -29,7 +29,10 @@ in `eslint.config.js` fail any non-blessed file at the
   debounced routing-guess call), `useModelDownload` (first-run model
   provisioning: `model_status` on mount + the `models:state` stream),
   `useUpdater` (the release check on startup plus the download/install
-  lifecycle of `@tauri-apps/plugin-updater`, and this build's own version).
+  lifecycle of `@tauri-apps/plugin-updater`, and this build's own version),
+  `useWindowMaximized` (the undecorated main window's maximize state, for the
+  TopBar's caption glyph: an `isMaximized()` seed plus an `onResized`
+  subscription that re-reads it).
   DOM: `useCommandPalette` (global ⌘K/Ctrl-K keydown),
   `useScrollIntoView` (active-descendant row visibility),
   `useOutsidePointerDown` (dismiss on outside press), `useXterm` (the embedded
