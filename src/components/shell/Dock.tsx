@@ -204,8 +204,14 @@ export function Dock() {
           // variant="empty", not "status": the variant fixes the ARIA role, and
           // this is first-run copy rather than progress — role="status" would
           // make a static sentence a live region (§3).
-          <StatusMessage variant="empty" compact>
-            No projects yet. Use the New button to create one.
+          // One short line, and no second sentence naming the New button: it
+          // sits in the header row directly above, and §3's empty state trusts
+          // the affordance rather than narrating it. The indent is here rather
+          // than in StatusMessage because the view-level empty states are
+          // left-aligned prose on a measure cap and the rail is the odd context
+          // — px-2.5 is what lands this line on the eyebrow's grid.
+          <StatusMessage variant="empty" compact className="px-2.5">
+            No projects yet.
           </StatusMessage>
         )}
         <ul aria-label="Folders" className="flex flex-col gap-0.5">
