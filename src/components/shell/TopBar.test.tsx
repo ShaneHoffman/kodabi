@@ -74,8 +74,10 @@ describe("TopBar", () => {
 
     const commands = screen.getByRole("button", { name: /Commands/ });
     // The hint is part of the control's own name, so a screen reader hears the
-    // key without having to find a separate node.
-    expect(commands).toHaveTextContent("Ctrl K");
+    // key without having to find a separate node. The control is icon-only, so
+    // the name is the only place left that carries it — which is exactly why
+    // this asserts the accessible name and not the text content.
+    expect(commands).toHaveAccessibleName("Commands (Ctrl K)");
 
     await user.click(commands);
 

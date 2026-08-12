@@ -10,32 +10,75 @@ import { useWindowMaximized } from "../../useWindowMaximized";
 import { closeWindow, minimizeWindow, toggleMaximizeWindow } from "../../windowControls";
 import { ListenPill } from "./ListenPill";
 
-/** The two chrome links, which are the same control with different content.
- * Not the Button primitive: those are rectangles that carry weight, and these
- * are the quietest thing in the window — chrome you reach for, not actions the
- * view is about. */
-const TOPLINK_CLASS =
-  "focus-ring inline-flex items-center gap-2 rounded-[8px] px-2.5 py-1.5 text-[12.5px] " +
-  "text-ink-dim transition-colors duration-140 ease-out-strong hover:bg-wash hover:text-ink";
+/** Every control in the bar's right cluster — the two chrome links and the
+ * three caption buttons alike. Not the Button primitive: those are rectangles
+ * that carry weight, and these are the quietest thing in the window, chrome you
+ * reach for rather than actions the view is about.
+ *
+ * Icon-only, and square: the bar is the window's title bar now, so every word
+ * in it is width the wordmark and the listening pill do not get. The names
+ * survive as `aria-label` (unchanged for screen readers) plus `title`, which is
+ * where the palette's shortcut went too.
+ *
+ * One shape for both kinds, deliberately. The caption buttons started as
+ * full-height flat targets in the Windows idiom, flush to the top and right
+ * edges so Close landed in the screen corner when maximized; sitting beside two
+ * inset rounded squares, that made five controls in a row wearing two different
+ * uniforms, and the seam read as an accident rather than a category. The corner
+ * is the price, and the divider does the separating instead. */
+const CHROME_BUTTON_BASE =
+  "focus-ring inline-flex size-9 flex-none items-center justify-center rounded-[8px] " +
+  "text-ink-dim transition-colors duration-140 ease-out-strong";
 
-/** The window's caption buttons. Quieter cousins of the chrome links above and
- * for the same reason, but a different shape: full-height flat targets in the
- * Windows caption idiom, flush to the top and right edges so the close button
- * sits in the screen corner when the window is maximized. TOPLINK's inset
- * rounded pill cannot reach a corner. `focus-ring-inset` because an outward
- * ring would be clipped by the window edge. */
-const CAPTION_CLASS =
-  "focus-ring-inset inline-flex h-full w-[46px] flex-none items-center justify-center " +
-  "text-ink-dim transition-colors duration-140 ease-out-strong hover:bg-wash hover:text-ink";
+const CHROME_BUTTON_CLASS = `${CHROME_BUTTON_BASE} hover:bg-wash hover:text-ink`;
 
-/** The four caption glyphs, drawn rather than typed. A hairline stroke, one
- * step under the Select chevron's 1.25: these are the quietest marks in the
- * window. Drawn as a set — a font's × would drift from its stroked neighbours
- * in weight and baseline, however carefully it were sized. */
+/** Close, which is the one control here that hover treats differently: red, as
+ * every Windows title bar has taught every Windows user to expect. The tokens
+ * are the destructive-confirmation pair, so it lands as Grove's red rather than
+ * the OS hex, and it flips with the ground like everything else.
+ *
+ * It reads as a stronger claim than the button makes — closing hides to the
+ * tray (`lib.rs` prevents the close and hides), so nothing is destroyed, and
+ * DESIGN_SYSTEM.md §2 otherwise keeps red for the confirm control inside a
+ * confirmation. The convention wins anyway: a title bar's rightmost button is
+ * read by muscle memory long before anyone reads its colour, and being the one
+ * button that answers differently is what makes it findable at a glance. */
+const CLOSE_BUTTON_CLASS = `${CHROME_BUTTON_BASE} hover:bg-danger-bg-hover hover:text-danger`;
+
+/** The chrome marks: 16px, one hairline weight up from the caption glyphs
+ * below, matching the Select chevron's 1.25. Same reason those are drawn rather
+ * than typed — this app carries no icon font and no icon package, and two marks
+ * do not justify a seventh dependency (`.claude/rules/typescript-style.md`). */
+function ChromeIcon({ children }: { children: ReactNode }) {
+  return (
+    <svg
+      className="size-4"
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.25"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {children}
+    </svg>
+  );
+}
+
+/** The four caption glyphs, drawn rather than typed. Drawn as a set — a font's
+ * × would drift from its stroked neighbours in weight and baseline, however
+ * carefully it were sized.
+ *
+ * 12px on a 10-unit grid, so the 1-wide stroke lands at 1.2 on screen: a
+ * hair under the 1.25 the chrome marks are drawn at, which is as close to one
+ * weight as two grids get. Bare glyph shapes read larger than a detailed mark
+ * at the same size, so they stay a step smaller than their 16px neighbours to
+ * end up looking the same size. */
 function CaptionGlyph({ children }: { children: ReactNode }) {
   return (
     <svg
-      className="size-[10px]"
+      className="size-[12px]"
       viewBox="0 0 10 10"
       fill="none"
       stroke="currentColor"
@@ -107,11 +150,13 @@ export function TopBar({ onOpenPalette }: Props) {
     // window while every child — wordmark, pill, links, caption buttons —
     // keeps its own pointer behaviour. Double-click-to-maximize comes with it.
     //
-    // No right padding: the caption buttons run to the window edge, so that
-    // Close is in the screen corner when maximized.
+    // Less padding on the right than the left, and the two edges still look
+    // even: a 16px mark centred in a 36px button carries 10px of its own inset,
+    // so 12px here puts the × the same 22px from the window edge that the
+    // wordmark sits from it on the other side.
     <header
       data-tauri-drag-region
-      className="glass-top flex h-[54px] flex-none items-center gap-6 pl-[22px]"
+      className="glass-top flex h-[54px] flex-none items-center gap-6 pr-3 pl-[22px]"
     >
       {/* The document's h1: heading navigation needs a level-1 root. It reads
           quietly by design (preflight strips h1 sizing) and doubles as the way
@@ -145,78 +190,119 @@ export function TopBar({ onOpenPalette }: Props) {
         elapsedSeconds={elapsedSeconds}
       />
 
-      <nav aria-label="App" className="ml-auto flex items-center gap-1.5">
-        <button
-          type="button"
-          aria-haspopup="dialog"
-          onClick={onOpenPalette}
-          className={TOPLINK_CLASS}
-        >
-          Commands
-          {/* A real <kbd>: it is a key the user presses, which is exactly what
-              the element means. Faint because it is metadata about the control
-              beside it, not a second label. */}
-          <kbd className="rounded-[4px] border border-edge px-1.5 py-0.5 font-data text-[11px] font-normal text-ink-faint">
-            {PALETTE_SHORTCUT_LABEL}
-          </kbd>
-        </button>
-        <button
-          type="button"
-          aria-current={view.kind === "settings" ? "page" : undefined}
-          onClick={() => navigate({ kind: "settings" })}
-          className={TOPLINK_CLASS}
-        >
-          Settings
-        </button>
-      </nav>
+      {/* One cluster, two groups, a rule between them: the shape no longer says
+          which controls belong to the app and which to the window, so the rule
+          has to. It is the whole separation, which is why the gap either side of
+          it is tighter than the header's own. */}
+      <div className="ml-auto flex items-center gap-2">
+        <nav aria-label="App" className="flex items-center gap-1.5">
+          {/* The shortcut is part of the control's own name rather than a <kbd>
+              beside it: a screen reader hears the key without hunting for a
+              second node, and a mouse user gets it from the tooltip. That is
+              what makes dropping the visible keycap a tightening, not a loss. */}
+          <button
+            type="button"
+            aria-haspopup="dialog"
+            aria-label={`Commands (${PALETTE_SHORTCUT_LABEL})`}
+            title={`Commands (${PALETTE_SHORTCUT_LABEL})`}
+            onClick={onOpenPalette}
+            className={CHROME_BUTTON_CLASS}
+          >
+            {/* The overflow ellipsis, unframed: this is the window's drawer of
+                everything you can do, which is what those three dots mean in a
+                Windows title bar. The frame it started with was the problem,
+                not the dots — every enclosing shape this app could draw is
+                already spoken for. A magnifier is the dock's Search, a prompt
+                caret its Terminal, dots inside a bubble its Chat, a rule across
+                a sheet is a bank card, and a stack of rules is the sliders next
+                door. */}
+            <ChromeIcon>
+              {/* Filled, and a touch fatter than a hairline outline would be:
+                  three 1.25-wide rings at this size are three grey smudges, and
+                  the mark has to carry the same weight as the sliders beside it
+                  or it reads as disabled. */}
+              <circle cx="3.9" cy="8" r="1.1" fill="currentColor" stroke="none" />
+              <circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none" />
+              <circle cx="12.1" cy="8" r="1.1" fill="currentColor" stroke="none" />
+            </ChromeIcon>
+          </button>
+          <button
+            type="button"
+            aria-current={view.kind === "settings" ? "page" : undefined}
+            aria-label="Settings"
+            title="Settings"
+            onClick={() => navigate({ kind: "settings" })}
+            className={CHROME_BUTTON_CLASS}
+          >
+            {/* Sliders, not a gear: a gear's teeth turn to mush at 16px under a
+                hairline stroke, and this is the same two-rail mark the settings
+                screen is actually made of. Each rail breaks either side of its
+                knob rather than running under it — two hairlines crossing at
+                this size read as a smudge, not as a control on a track. */}
+            <ChromeIcon>
+              <path d="M2.5 5.5h1.75M7.75 5.5h5.75" />
+              <circle cx="6" cy="5.5" r="1.75" />
+              <path d="M2.5 10.5h5.75M11.75 10.5h1.75" />
+              <circle cx="10" cy="10.5" r="1.75" />
+            </ChromeIcon>
+          </button>
+        </nav>
 
-      {/* Outside the nav: these belong to the window, not to the app — the
-          header's gap is the whole separation, since the shape change from
-          rounded pill to full-height flat target already reads as a different
-          category of control. */}
-      <div className="flex h-full items-stretch">
-        <button
-          type="button"
-          aria-label="Minimize"
-          onClick={minimizeWindow}
-          className={CAPTION_CLASS}
-        >
-          <CaptionGlyph>
-            <path d="M0.5 5h9" />
-          </CaptionGlyph>
-        </button>
-        <button
-          type="button"
-          aria-label={maximized ? "Restore" : "Maximize"}
-          onClick={toggleMaximizeWindow}
-          className={CAPTION_CLASS}
-        >
-          {maximized ? (
-            <CaptionGlyph>
-              {/* The back pane, showing as an arc behind the front one. */}
-              <path d="M3 0.5h4.5a2 2 0 0 1 2 2V7" />
-              <rect x="0.5" y="2.5" width="7" height="7" rx="1.5" />
-            </CaptionGlyph>
-          ) : (
-            <CaptionGlyph>
-              <rect x="0.5" y="0.5" width="9" height="9" rx="1.5" />
-            </CaptionGlyph>
-          )}
-        </button>
-        {/* Close hides to the tray (`lib.rs` prevents the close and hides), so
-            it gets the same quiet hover as its neighbours rather than the
-            Windows red: nothing here is destroyed, and DESIGN_SYSTEM.md keeps
-            danger for the confirm control inside a confirmation.
+        {/* Short, not full-height: it separates two rows of controls, so it is
+            drawn to their height and not to the bar's. Decorative, hence no
+            role and nothing for a screen reader to stop on — the `nav` landmark
+            already tells that story to anyone not looking at it. */}
+        <span aria-hidden="true" className="h-4 w-px flex-none bg-edge" />
 
-            Known loss: hovering a *native* maximize button opens the Windows 11
-            Snap Layouts flyout, and an undecorated window cannot offer it —
-            that flyout is native caption hit-testing. Accepted for v1; Win+Z,
-            Win+arrow and the edge-drag snaps all still work. */}
-        <button type="button" aria-label="Close" onClick={closeWindow} className={CAPTION_CLASS}>
-          <CaptionGlyph>
-            <path d="M1 1l8 8M9 1l-8 8" />
-          </CaptionGlyph>
-        </button>
+        {/* Outside the nav: these belong to the window, not to the app. */}
+        <div className="flex items-center gap-1.5">
+          <button
+            type="button"
+            aria-label="Minimize"
+            title="Minimize"
+            onClick={minimizeWindow}
+            className={CHROME_BUTTON_CLASS}
+          >
+            <CaptionGlyph>
+              <path d="M0.5 5h9" />
+            </CaptionGlyph>
+          </button>
+          <button
+            type="button"
+            aria-label={maximized ? "Restore" : "Maximize"}
+            title={maximized ? "Restore" : "Maximize"}
+            onClick={toggleMaximizeWindow}
+            className={CHROME_BUTTON_CLASS}
+          >
+            {maximized ? (
+              <CaptionGlyph>
+                {/* The back pane, showing as an arc behind the front one. */}
+                <path d="M3 0.5h4.5a2 2 0 0 1 2 2V7" />
+                <rect x="0.5" y="2.5" width="7" height="7" rx="1.5" />
+              </CaptionGlyph>
+            ) : (
+              <CaptionGlyph>
+                <rect x="0.5" y="0.5" width="9" height="9" rx="1.5" />
+              </CaptionGlyph>
+            )}
+          </button>
+          {/* Known loss on the button above: hovering a *native* maximize
+              button opens the Windows 11 Snap Layouts flyout, and an
+              undecorated window cannot offer it — that flyout is native caption
+              hit-testing. Accepted for v1; Win+Z, Win+arrow and the edge-drag
+              snaps all still work. */}
+          <button
+            type="button"
+            aria-label="Close"
+            title="Close"
+            onClick={closeWindow}
+            className={CLOSE_BUTTON_CLASS}
+          >
+            <CaptionGlyph>
+              <path d="M1 1l8 8M9 1l-8 8" />
+            </CaptionGlyph>
+          </button>
+        </div>
       </div>
     </header>
   );
