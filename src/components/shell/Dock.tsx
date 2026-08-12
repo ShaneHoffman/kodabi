@@ -204,12 +204,15 @@ export function Dock() {
           // variant="empty", not "status": the variant fixes the ARIA role, and
           // this is first-run copy rather than progress — role="status" would
           // make a static sentence a live region (§3).
-          // One short line, and no second sentence naming the New button: it
-          // sits in the header row directly above, and §3's empty state trusts
-          // the affordance rather than narrating it. The indent is here rather
-          // than in StatusMessage because the view-level empty states are
-          // left-aligned prose on a measure cap and the rail is the odd context
-          // — px-2.5 is what lands this line on the eyebrow's grid.
+          // One short line, and no second sentence naming the New button.
+          // §3's two-line empty state — what belongs here, then how it gets
+          // here — is written for a VIEW; this is chrome, and the New button
+          // is unconditionally visible in the header row directly above, so
+          // the second line would narrate an affordance already on screen.
+          // The indent is here rather than in StatusMessage because the
+          // view-level empty states are left-aligned prose on a measure cap
+          // and the rail is the odd context — px-2.5 is what lands this line
+          // on the eyebrow's grid.
           <StatusMessage variant="empty" compact className="px-2.5">
             No projects yet.
           </StatusMessage>
