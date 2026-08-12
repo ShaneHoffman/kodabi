@@ -56,10 +56,56 @@ type IndexStateEvent =
 type RebuildStatus = { status: "idle" } | IndexStateEvent;
 
 /**
+ * Where the cards sit: one column at the panel's usual width, two once there is
+ * room for two.
+ *
+ * THE MEASURE BELONGS TO THE CARD, NOT TO THE STACK. A settings row is
+ * label-left / control-right, so a card that runs a wide panel's full width
+ * puts a label a monitor away from the control it names — 660px is earned, and
+ * it stays. Capping the *stack* at one card was the part that wasn't: it left
+ * half a wide panel empty, when a card is structure and structure fills the
+ * space it is given (docs/DESIGN_SYSTEM.md §1). The leftover width becomes a
+ * second column of cards rather than a wider one, the way the note editor's
+ * leftover becomes a rail.
+ *
+ * Nothing centres, and the left edge does not move: the grid fills from the
+ * frame's gutter outward, so navigating between views still finds the content
+ * in the same place (`ViewFrame`'s stance comments).
+ *
+ * `@container`, not a media query: what decides whether a second column fits is
+ * the width of the main panel, which the dock's presence changes without the
+ * window resizing at all. It takes a wrapper because an element cannot answer
+ * its own query, and `mt-6` rides on the wrapper because `@container` brings
+ * layout containment with it.
+ *
+ * 66rem = 1056px, which is two 520px tracks before they grow to the 660 cap.
+ * 520 is where the tightest row still holds: Retention under `keep_days` puts
+ * 284px of controls (the policy Select beside its day field) against a 480px
+ * card interior, leaving 176px for the label and its 46ch hint — measured, not
+ * estimated. A second column before then would be taking its width out of the
+ * rows, which is what the cap on a card exists to prevent.
+ */
+function CardGrid({ children }: { children: ReactNode }) {
+  return (
+    <div className="@container mt-6">
+      {/* Row-major and in DOM order, so reading order and tab order stay the
+          one order. `items-start` because a card ends at its last row: a short
+          card stretched to its partner's height would show empty glass below
+          its final hairline, and a card that resizes because its NEIGHBOUR did
+          (Models, while a download runs) is the page moving on its own. */}
+      <div className="grid grid-cols-[minmax(0,660px)] items-start gap-4 @[66rem]:grid-cols-[repeat(2,minmax(0,660px))]">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/**
  * One concern, as a card.
  *
- * They stack one per row down the panel, and the card is what
- * replaced the tab rail: a rail filtered the page, so three quarters of the
+ * They fill the panel one per row, or two abreast where `CardGrid` has the
+ * width for it, and the card is what replaced the tab rail: a rail filtered the
+ * page, so three quarters of the
  * settings were somewhere you had to remember to look. The cards are the same
  * information with nothing hidden, and the eyebrow does the work the tab did —
  * naming the group — without also being a control.
@@ -84,9 +130,10 @@ function Card({ title, children }: { title: string; children: ReactNode }) {
 
 /**
  * One setting: its name and its one line of explanation stacked on the left,
- * its control flush right. Every control on the page lands on the same right
+ * its control flush right. Every control in a column lands on the same right
  * edge, which is what makes the column scannable — the eye runs down the
- * controls, not the prose.
+ * controls, not the prose. A column, not the page: at a wide panel there are
+ * two of them, and each one is read on its own.
  *
  * THERE IS NO INDENT, and nothing on this screen needs one. A dependent control
  * sits inline beside the control it depends on (the day field beside the
@@ -375,10 +422,10 @@ function UpdateControl() {
 
 /**
  * Settings — the app's CONFIG PANEL, and it announces that before a word is
- * read: cards stacked one per row, each named by a mono eyebrow, holding
- * nothing but label-and-control rows.
+ * read: cards laid out one or two abreast, each named by a mono eyebrow,
+ * holding nothing but label-and-control rows.
  *
- * Every control lands on one right edge for the whole page, so the column is
+ * Every control lands on its column's one right edge, so a column is
  * scannable end to end. Controls are glass; read-only values stay plain text or
  * mono and take no chevron, so "you can change this" and "this is how it is"
  * are told apart by shape rather than by being greyed out.
@@ -534,7 +581,7 @@ export function SettingsView() {
       )}
 
       {settings && (
-        <div className="mt-6 flex max-w-[660px] flex-col gap-4">
+        <CardGrid>
           <Card title="Privacy">
             <Row label="Recording consent">
               {/* Read-only, so it stays plain text with a check glyph — no
@@ -804,7 +851,7 @@ export function SettingsView() {
             </Row>
             <UpdateControl />
           </Card>
-        </div>
+        </CardGrid>
       )}
     </ViewFrame>
   );
