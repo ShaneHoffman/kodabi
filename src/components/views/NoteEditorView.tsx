@@ -365,7 +365,7 @@ function DetailsPanel({
     <section className="glass-card px-4 py-3.5">
       <p className={PANEL_EYEBROW}>Details</p>
       <dl className="mt-1">
-        <Row label="Filed in">
+        <Row label="Filed in" wrap>
           {unfiled ? (
             "Inbox"
           ) : (
@@ -374,7 +374,7 @@ function DetailsPanel({
                 aria-hidden="true"
                 className={clsx("size-2 flex-none rounded-[2px]", HUE_DOT[folderHue(project)])}
               />
-              <span className="truncate">{project}</span>
+              <span className="min-w-0 break-words">{project}</span>
             </>
           )}
         </Row>
@@ -389,8 +389,14 @@ function DetailsPanel({
           <span className="font-data text-[11px]">{note.id}</span>
         </Row>
         {showTags && note.tags.length > 0 && (
-          <Row label="Tags">
-            <span className="truncate font-data text-[11px]">{note.tags.join(" · ")}</span>
+          <Row label="Tags" wrap>
+            {/* Wraps rather than truncating: read mode's row is the ONLY full
+                listing of a note's tags, since compose mode drops it in favour
+                of the editable chips. A clipped list here is data with nowhere
+                else to be seen. */}
+            <span className="min-w-0 break-words font-data text-[11px]">
+              {note.tags.join(" · ")}
+            </span>
           </Row>
         )}
       </dl>
@@ -399,12 +405,36 @@ function DetailsPanel({
 }
 
 /** One hairline key/value row. The rule goes on top and the first row drops it,
- * so the panel's eyebrow is not underlined by its own first fact. */
-function Row({ label, children }: { label: string; children: ReactNode }) {
+ * so the panel's eyebrow is not underlined by its own first fact.
+ *
+ * `wrap` is for the rows whose value is open-ended — a tag list, a nested filing
+ * path — which used to truncate at the rail's width and so hid the very data the
+ * row exists to show. Baseline rather than start alignment: the label is 12px UI
+ * text and a wrapping value may be 11px `font-data`, and baseline puts the label
+ * on the value's first line without a magic padding nudge. */
+function Row({
+  label,
+  wrap = false,
+  children,
+}: {
+  label: string;
+  wrap?: boolean;
+  children: ReactNode;
+}) {
   return (
-    <div className="flex items-center justify-between gap-3 border-t border-edge py-2 first:border-t-0">
+    <div
+      className={clsx(
+        "flex justify-between gap-3 border-t border-edge py-2 first:border-t-0",
+        wrap ? "items-baseline" : "items-center",
+      )}
+    >
       <dt className="flex-none text-[12px] text-ink-faint">{label}</dt>
-      <dd className="flex min-w-0 items-center gap-[7px] text-right text-[12px] text-ink-dim">
+      <dd
+        className={clsx(
+          "flex min-w-0 gap-[7px] text-right text-[12px] text-ink-dim",
+          wrap ? "items-baseline" : "items-center",
+        )}
+      >
         {children}
       </dd>
     </div>
