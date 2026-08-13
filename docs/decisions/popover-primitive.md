@@ -369,11 +369,15 @@ Three things the prototype does **not** do, and one prediction it falsified.
   both menus placed identically, flip and all, with the container present and absent, in both
   transparency states.
 
-  That container is **no longer in the tree** — Settings ships a plain full-width card stack, and
-  the shipping layout puts nothing from the list above the two `Select`s. The measurement is kept
-  because it is the answer, not because the code still depends on it: the list stays the grep to
-  run, and `container-type` is the one entry whose hit is not automatically a finding — measure it,
-  don't assume it. Trigger 4 is answered rather than open.
+  That container is **no longer in the tree** — Settings ships a plain full-width card stack, so
+  no `container-type` sits above those two triggers any more. The list above is not empty over them
+  even so: `main` wears `glass-panel`, whose `backdrop-filter: blur(28px)` (`src/index.css` §3,
+  applied at `src/components/shell/AppShell.tsx`) is the containing block every view's menus
+  already resolve against, in the transparency state that keeps it. That one predates the ticket
+  and is unchanged by it. The measurement is kept because it is the answer, not because the code
+  still depends on it: the list stays the grep to run, and `container-type` is the one entry whose
+  hit is not automatically a finding — measure it, don't assume it. Trigger 4 is answered rather
+  than open.
 
 - **The anchored menu is ~10px right and ~5px down of today's.** Measured: today's stance gives
   `dxRight −10, dyTop 3`; anchored gives `dxRight 0, dyTop 8`. The cause is real and arguably a fix

@@ -58,10 +58,9 @@ type RebuildStatus = { status: "idle" } | IndexStateEvent;
 /**
  * One concern, as a card.
  *
- * They stack one per row down the panel, and the card is what
- * replaced the tab rail: a rail filtered the
- * page, so three quarters of the
- * settings were somewhere you had to remember to look. The cards are the same
+ * They stack one per row down the panel, and the card is what replaced the tab
+ * rail: a rail filtered the page, so three quarters of the settings were
+ * somewhere you had to remember to look. The cards are the same
  * information with nothing hidden, and the eyebrow does the work the tab did —
  * naming the group — without also being a control.
  *
