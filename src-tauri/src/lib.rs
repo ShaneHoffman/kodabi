@@ -240,6 +240,7 @@ pub fn run() {
             note_cmds::list_projects,
             note_cmds::create_project,
             note_cmds::delete_project,
+            note_cmds::rename_project,
             glossary_cmds::list_glossary_terms,
             glossary_cmds::add_glossary_term,
             glossary_cmds::update_glossary_term,

@@ -195,6 +195,27 @@ describe("ProjectView glossary entry", () => {
   });
 });
 
+describe("ProjectView rename affordance", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  it("opens a prefilled dialog from the Project menu", async () => {
+    // Rename is a project-scoped verb like Glossary and Delete project, so it
+    // lives in the same menu rather than a fourth button contending with
+    // ViewFrame's single header action. The rename flow itself is covered by
+    // RenameProjectDialog.test.tsx; this pins the wiring.
+    const user = userEvent.setup();
+    await openGrowthMenu(user);
+
+    await user.click(await screen.findByRole("menuitem", { name: "Rename…" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Rename project" });
+    expect(within(dialog).getByLabelText("Project name")).toHaveValue("Growth");
+    expect(invokedCommands()).not.toContain("rename_project");
+  });
+});
+
 describe("ProjectView index rows", () => {
   beforeEach(() => {
     resetTauriMocks();
