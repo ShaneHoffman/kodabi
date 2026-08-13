@@ -115,8 +115,8 @@ export default tseslint.config(
   //
   // These files are exempt from the EFFECT selector only. `no-restricted-syntax`
   // is a single rule, so the exemption has to re-declare everything that stays
-  // on — a blanket "off" here would take the Grove guards down with it in
-  // sixteen files, silently and without a diff to notice.
+  // on — a blanket "off" here would take the Grove guards down with it in every
+  // file listed below, silently and without a diff to notice.
   {
     files: [
       "src/useCaptureState.ts",
@@ -136,6 +136,7 @@ export default tseslint.config(
       "src/useTranscriptionState.ts",
       "src/useUpdater.ts",
       "src/useVaultQuery.ts",
+      "src/useWindowMaximized.ts",
       "src/useXterm.ts",
     ],
     rules: {

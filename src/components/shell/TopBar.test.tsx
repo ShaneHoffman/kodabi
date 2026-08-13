@@ -9,12 +9,21 @@ import { MainContent } from "./MainContent";
 import { TopBar } from "./TopBar";
 import { emitFromBackend, onCommand, resetTauriMocks } from "../../test/tauri";
 import { resetUpdaterMocks } from "../../test/updater";
+import {
+  close,
+  minimize,
+  resetWindowMocks,
+  resizeListenerCount,
+  setMaximized,
+  toggleMaximize,
+} from "../../test/window";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/plugin-updater", () => import("../../test/updater"));
 vi.mock("@tauri-apps/plugin-process", () => import("../../test/updater"));
 vi.mock("@tauri-apps/api/app", () => import("../../test/updater"));
+vi.mock("@tauri-apps/api/window", () => import("../../test/window"));
 
 /** Private to useCaptureState.ts, so the other capture tests spell it here
  * too rather than exporting it just for them. */
@@ -53,6 +62,7 @@ describe("TopBar", () => {
   beforeEach(() => {
     resetTauriMocks();
     resetUpdaterMocks();
+    resetWindowMocks();
   });
 
   it("opens the command palette and names its shortcut", async () => {
@@ -64,8 +74,10 @@ describe("TopBar", () => {
 
     const commands = screen.getByRole("button", { name: /Commands/ });
     // The hint is part of the control's own name, so a screen reader hears the
-    // key without having to find a separate node.
-    expect(commands).toHaveTextContent("Ctrl K");
+    // key without having to find a separate node. The control is icon-only, so
+    // the name is the only place left that carries it — which is exactly why
+    // this asserts the accessible name and not the text content.
+    expect(commands).toHaveAccessibleName("Commands (Ctrl K)");
 
     await user.click(commands);
 
@@ -187,5 +199,90 @@ describe("TopBar", () => {
       await Promise.resolve();
     });
     expect(screen.getByRole("status")).not.toHaveTextContent("Transcription not ready");
+  });
+
+  it("minimizes, and closes to the tray", async () => {
+    const user = userEvent.setup();
+    serveVault();
+    renderShell();
+
+    await user.click(screen.getByRole("button", { name: "Minimize" }));
+    expect(minimize).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
+
+    // Close is hide-to-tray: lib.rs prevents the close and hides the window, so
+    // this button ends up exactly where the native one did.
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("toggles maximize and shows Restore once the window is maximized", async () => {
+    const user = userEvent.setup();
+    serveVault();
+    renderShell();
+
+    const maximize = await screen.findByRole("button", { name: "Maximize" });
+    expect(screen.queryByRole("button", { name: "Restore" })).not.toBeInTheDocument();
+
+    await user.click(maximize);
+    expect(toggleMaximize).toHaveBeenCalledTimes(1);
+
+    // The glyph does not follow the click, it follows the window: this is the
+    // resize path, which is also how Win+Up and a drag to the top edge arrive.
+    act(() => {
+      setMaximized(true);
+    });
+    expect(await screen.findByRole("button", { name: "Restore" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Maximize" })).not.toBeInTheDocument();
+
+    act(() => {
+      setMaximized(false);
+    });
+    expect(await screen.findByRole("button", { name: "Maximize" })).toBeInTheDocument();
+  });
+
+  it("reads a window that was already maximized on mount", async () => {
+    // The seed, not the subscription: nothing is listening yet when this runs,
+    // so only the mount-time read can produce a Restore button.
+    serveVault();
+    setMaximized(true);
+
+    renderShell();
+
+    expect(await screen.findByRole("button", { name: "Restore" })).toBeInTheDocument();
+  });
+
+  it("drags by the bar itself, never by a control on it", async () => {
+    serveVault();
+    renderShell();
+
+    // The view behind the bar renders a header of its own, so this reaches the
+    // bar through something only the bar has.
+    const bar = screen.getByRole("button", { name: "kodabi" }).closest("header");
+    expect(bar).toHaveAttribute("data-tauri-drag-region");
+    // Bare, not `deep`: `deep` would drag from anywhere in the subtree, which
+    // is every button in the bar.
+    expect(bar).not.toHaveAttribute("data-tauri-drag-region", "deep");
+
+    for (const name of ["kodabi", "Commands", "Settings", "Minimize", "Maximize", "Close"]) {
+      expect(screen.getByRole("button", { name: new RegExp(`^${name}`) })).not.toHaveAttribute(
+        "data-tauri-drag-region",
+      );
+    }
+    expect(screen.getByRole("navigation", { name: "App" })).not.toHaveAttribute(
+      "data-tauri-drag-region",
+    );
+  });
+
+  it("stops listening for resizes when it goes away", async () => {
+    serveVault();
+    const { unmount } = renderShell();
+    await waitFor(() => {
+      expect(resizeListenerCount()).toBe(1);
+    });
+
+    unmount();
+
+    expect(resizeListenerCount()).toBe(0);
   });
 });
