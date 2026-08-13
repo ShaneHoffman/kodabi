@@ -309,7 +309,8 @@ pale ground reads as dirt.
 ### The material comes in nine thicknesses
 
 Each is a named recipe in `src/index.css` §3, carrying all four parts plus its rung of the ladder
-below. Reach for the one that matches the job; do not assemble a tenth by hand.
+below — bar the two deliberate drops argued for underneath the table (a card's blur, the pill's
+shadow). Reach for the one that matches the job; do not assemble a tenth by hand.
 
 | Recipe | Is | Blur |
 | --- | --- | --- |
@@ -330,6 +331,13 @@ to be doing — so its fill is its own dark tint and its night border is a liter
 token's 0.11. They still hand the border back to `--color-edge` under `.hc`, on **both** grounds
 rather than only `.hc.day`, since a literal night border would otherwise swallow the night half of
 the contrast promotion.
+
+**For `glass-pill` it changes a third: it is the one rung with no shadow at all.** The pill fills
+its window edge to edge — deliberately, because a transparent webview window is not click-through,
+so a margin the user cannot see would still take the mouse. Flush to those bounds a shadow has
+nowhere to fade: it clips flat and composites over the application behind it as a dark rounded
+wall, which is the opposite of depth. The border and the inset lit edge separate it alone.
+`glass-sheet` keeps its shadow because its window does give it room (`p-10` of it).
 
 **The palette is the thickest rung, and that is the rule rather than an exception to it.** A bigger
 pane has more of the app behind it to push back, so it has to read as a thicker material or it reads

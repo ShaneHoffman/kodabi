@@ -893,22 +893,26 @@
    contrast promotion too. */
 
 /* The capture overlay pill: the always-on-top status window. Pill rung of the
-   radius ladder, because it is one. */
+   radius ladder, because it is one.
+
+   The one rung with no drop shadow, and that is the point rather than an
+   oversight. The pill fills its transparent window edge to edge, so a shadow
+   has no room to fade: it clips flat at the window bounds and composites over
+   whatever application is behind it as a dark rounded wall, not depth. The
+   border and the inset lit edge do the separating alone. Giving it the room
+   back is not the fix either — that room is window, and a transparent webview
+   window is not click-through, so every pixel of it takes the mouse. */
 @utility glass-pill {
   background: rgb(16 22 13 / 0.72);
   backdrop-filter: blur(28px) saturate(160%);
   border: 1px solid rgb(255 255 255 / 0.16);
   border-radius: var(--radius-pill);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.12),
-    0 16px 48px rgb(0 0 0 / 0.55);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.12);
 
   &:where(.day, .day *) {
     background: rgb(250 252 246 / 0.8);
     border-color: rgb(24 32 16 / 0.16);
-    box-shadow:
-      inset 0 1px 0 var(--color-edge-lit),
-      0 16px 48px rgb(46 60 36 / 0.28);
+    box-shadow: inset 0 1px 0 var(--color-edge-lit);
   }
 
   &:where(.hc, .hc *) {

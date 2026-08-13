@@ -167,20 +167,26 @@ describe("CaptureOverlayPill", () => {
     await renderSeeded(LISTENING);
 
     // `deep`, not the bare attribute: bare drags only on a press landing
-    // exactly on the root, so the pill inside it would be a dead zone.
-    expect(screen.getByTestId("capture-overlay-root")).toHaveAttribute(
+    // exactly on this element, so the mark, the label and the clock inside it
+    // would each be a dead zone.
+    expect(screen.getByTestId("capture-overlay-pill")).toHaveAttribute(
       "data-tauri-drag-region",
       "deep",
     );
   });
 
-  it("keeps the pill inset from the window edge so its shadow can fade out", async () => {
-    await renderSeeded(LISTENING);
+  it("fills its window edge to edge, with no frame around it", async () => {
+    const { container } = await renderSeeded(LISTENING);
 
-    // The pill carries a drop shadow. Flush to the window bounds that shadow is
-    // clipped flat and reads as a rectangle around a rounded pill, which is
-    // exactly what the transparent window is meant to avoid. The padded frame
-    // is the fade-out room, and the window is sized for it.
-    expect(screen.getByTestId("capture-overlay-root")).toHaveClass("p-3");
+    // The pill is the whole window. A transparent webview window is not
+    // click-through, so any margin around the pill would still show the grab
+    // cursor and swallow clicks meant for the application underneath — an
+    // invisible thing taking the mouse. Flush bounds keep what you see and what
+    // you can grab the same shape, and are why `glass-pill` carries no drop
+    // shadow: with nowhere to fade, it would clip into a dark wall instead.
+    const pill = screen.getByTestId("capture-overlay-pill");
+    expect(pill.parentElement).toBe(container);
+    expect(pill).toHaveClass("h-screen", "w-screen");
+    expect(pill).not.toHaveClass("p-3");
   });
 });

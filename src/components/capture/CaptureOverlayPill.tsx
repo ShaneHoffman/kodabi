@@ -39,42 +39,48 @@ export function CaptureOverlayPill() {
   if (!engaged) return null;
 
   return (
-    // The window is deliberately larger than the pill: the pill's drop shadow
-    // needs transparent room to fade into, or it is clipped flat at the window
-    // bounds and reads as a rectangle around a rounded pill. This padded frame
-    // is that room.
+    // The pill *is* the window: it fills it edge to edge, and the window is
+    // sized to the pill. There is no frame around it, because a transparent
+    // webview window is not click-through — every pixel of it takes the mouse,
+    // so a margin the user cannot see would still show the grab cursor and eat
+    // clicks meant for the application underneath. Flush bounds make the thing
+    // you can see and the thing you can grab the same shape. That is also why
+    // `glass-pill` carries no drop shadow: with no room to fade into, a shadow
+    // clips flat and reads as a dark wall over whatever is behind it.
     //
-    // `deep` (not the bare attribute) so a press anywhere — pill or the
-    // transparent frame, which swallows clicks regardless — drags the window.
+    // `deep` (not the bare attribute) so a press on the mark, the label or the
+    // clock drags the window too, rather than only one landing on this element.
+    //
+    // The contents are centred rather than spread, because the window is a
+    // fixed size and the label is not: it is sized in tauri.conf.json to hold
+    // the widest state this can report ("System audio only" beside an
+    // hours-long clock), so every shorter state would otherwise leave a gap
+    // between the label and the clock wide enough to read as two things rather
+    // than one line. Centred, the slack becomes padding.
     <div
       data-tauri-drag-region="deep"
-      data-testid="capture-overlay-root"
-      className="flex h-screen w-screen cursor-grab items-center justify-center p-3 select-none active:cursor-grabbing"
+      data-testid="capture-overlay-pill"
+      className="glass-pill flex h-screen w-screen cursor-grab items-center justify-center gap-2.5 px-5 select-none active:cursor-grabbing"
     >
-      <div
-        data-testid="capture-overlay-pill"
-        className="glass-pill flex max-w-full min-w-0 items-center gap-2.5 px-5 py-3"
-      >
-        <SpiritMark mode={markMode(captureState)} size="13px" halo="10px" />
-        {/* The live region is the label alone. Wrapping the clock in it too
-            would announce a new time every second, forever.
+      <SpiritMark mode={markMode(captureState)} size="13px" halo="10px" />
+      {/* The live region is the label alone. Wrapping the clock in it too
+          would announce a new time every second, forever.
 
-            Faint ink in every state, unlike the in-app ListenPill, whose label
-            does step up to `kodama-ink` while live. That divergence is the
-            point: this window floats over other people's applications, and on
-            the desktop the mark is the only green thing while audio is being
-            captured (DESIGN_SYSTEM §2). A pill that is half green reads as an
-            alert; the signal here is calm and always on. */}
-        <span
-          role="status"
-          className="min-w-0 grow truncate font-ui text-[11px] font-semibold tracking-[0.12em] text-ink-dim uppercase"
-        >
-          {label.text}
-        </span>
-        <span className="flex-none font-data text-[13px] text-ink tabular-nums">
-          {formatElapsed(elapsedSeconds)}
-        </span>
-      </div>
+          Faint ink in every state, unlike the in-app ListenPill, whose label
+          does step up to `kodama-ink` while live. That divergence is the
+          point: this window floats over other people's applications, and on
+          the desktop the mark is the only green thing while audio is being
+          captured (DESIGN_SYSTEM §2). A pill that is half green reads as an
+          alert; the signal here is calm and always on. */}
+      <span
+        role="status"
+        className="min-w-0 truncate font-ui text-[11px] font-semibold tracking-[0.12em] text-ink-dim uppercase"
+      >
+        {label.text}
+      </span>
+      <span className="flex-none font-data text-[13px] text-ink tabular-nums">
+        {formatElapsed(elapsedSeconds)}
+      </span>
     </div>
   );
 }

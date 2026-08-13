@@ -6,11 +6,11 @@
     <title>Capture overlay</title>
     <style>
       /* This window is `transparent: true` (src-tauri/tauri.conf.json): the page
-         itself must never paint, so only the pill and its shadow land on the
-         desktop. Inline here rather than in src/index.css for two reasons: it
-         has to hold from the very first frame, before the bundle loads, or the
-         window flashes an opaque rectangle every time a capture starts; and
-         index.css is shared with the main window, which must keep its ground. */
+         itself must never paint, so only the pill lands on the desktop. Inline
+         here rather than in src/index.css for two reasons: it has to hold from
+         the very first frame, before the bundle loads, or the window flashes an
+         opaque rectangle every time a capture starts; and index.css is shared
+         with the main window, which must keep its ground. */
       html,
       body,
       #root {
