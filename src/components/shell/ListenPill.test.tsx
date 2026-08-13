@@ -97,6 +97,18 @@ describe("ListenPill", () => {
     expect(screen.queryByText("System audio unavailable")).not.toBeInTheDocument();
   });
 
+  it("holds the label clear of the mark's aura", () => {
+    const { container } = render(
+      <ListenPill mode="listening" label="Listening" elapsedSeconds={154} />,
+    );
+
+    // Optical, not decorative: the mark's box is its core, the aura reaches
+    // past it, and the gap against the clock has no such filler. Matches the
+    // clearance CaptureOverlayPill gives its own mark, so the two pills read
+    // the same. A static margin, so nothing shifts when the clock is hidden.
+    expect(mark(container)).toHaveClass("mr-1");
+  });
+
   it("morphs rather than snaps between the two tones", () => {
     const { container } = render(<ListenPill mode="idle" label="Not listening" />);
 
