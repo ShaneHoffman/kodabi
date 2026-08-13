@@ -1102,19 +1102,32 @@
 
    The thumb is a pill inset 3px from its track by a transparent border with
    `background-clip: padding-box`, so it reads as a floating bar rather than
-   a filled gutter. Firefox takes the two standard properties; Chromium — and
-   so WebView2, which is what actually ships — takes the pseudo-elements.
-   Both are stated because both are cheap.
+   a filled gutter. Chromium — and so WebView2, which is what actually ships —
+   draws that from the pseudo-elements; Firefox has no pseudo-elements and
+   takes the two standard properties instead.
+
+   The `@supports` gate is load-bearing, not tidiness. Since Chromium 121 the
+   two spellings are mutually exclusive by resolution of the CSSWG: when
+   `scrollbar-width` or `scrollbar-color` is anything but its initial value,
+   every `::-webkit-scrollbar*` rule on that element is IGNORED. Stated
+   unconditionally (as they were) the standard properties silently killed the
+   pill everywhere and left Edge's own Fluent bar in its place — the one with
+   stepper arrows at each end, which on the main panel land inside the 18px
+   corner radius and read as sitting outside the card. So the standard
+   properties are fenced behind "no webkit pseudo-elements here", which is
+   Firefox and nothing the app ships on.
 
    `background-color`, never the `background` shorthand: the shorthand resets
    `background-clip` to border-box, which would fill the inset on hover. */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: rgb(255 255 255 / 0.14) transparent;
-}
-.day,
-.day * {
-  scrollbar-color: rgb(24 32 16 / 0.22) transparent;
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgb(255 255 255 / 0.14) transparent;
+  }
+  .day,
+  .day * {
+    scrollbar-color: rgb(24 32 16 / 0.22) transparent;
+  }
 }
 
 ::-webkit-scrollbar {
@@ -1123,6 +1136,13 @@
 }
 ::-webkit-scrollbar-track {
   background: transparent;
+}
+/* The stepper arrows, stated rather than assumed. Chromium collapses an
+   unstyled button to zero once any `::-webkit-scrollbar` rule is in play, so
+   the gate above already removes them — but Edge is the engine that grew
+   steppers in the first place, and this is the thing being claimed. */
+::-webkit-scrollbar-button {
+  display: none;
 }
 ::-webkit-scrollbar-corner {
   background: transparent;
