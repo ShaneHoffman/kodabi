@@ -204,6 +204,74 @@ impl Glossary {
         Ok(true)
     }
 
+    /// Removes the entry whose *primary term* matches `term` (trimmed,
+    /// case-insensitive), returning it. `None` when nothing matched.
+    ///
+    /// Aliases deliberately do not match here, even though [`get`] resolves
+    /// them: an alias is a spelling that points at an entry, and deleting "the
+    /// thing I typed" when what you typed was one of its alternate spellings
+    /// would remove a term the caller never named.
+    ///
+    /// [`get`]: Glossary::get
+    pub fn remove(&mut self, term: &str) -> Option<GlossaryTerm> {
+        let key = normalize(term);
+        let index = self
+            .terms
+            .iter()
+            .position(|t| normalized_eq(&t.term, &key))?;
+        Some(self.terms.remove(index))
+    }
+
+    /// Replaces the entry whose primary term matches `original_term` with
+    /// `replacement`, **preserving its position in the file** so an edit does
+    /// not reshuffle the list under the user.
+    ///
+    /// Identity is the primary term text only, matching [`upsert`] and
+    /// [`remove`]. Returns `Ok(None)` when no entry matched `original_term`,
+    /// so the caller can tell "nothing to edit" from a storage failure.
+    ///
+    /// Renaming (a `replacement.term` that normalizes differently from
+    /// `original_term`) is allowed, but only onto a free key: renaming an entry
+    /// onto another entry's term is [`GlossaryError::Conflict`], because the
+    /// merge it implies is a different intent than the rename that was asked
+    /// for. Re-casing an entry's own term is not a rename onto anything and
+    /// stays legal.
+    ///
+    /// [`upsert`]: Glossary::upsert
+    /// [`remove`]: Glossary::remove
+    pub fn update(
+        &mut self,
+        original_term: &str,
+        replacement: GlossaryTerm,
+    ) -> Result<Option<GlossaryTerm>, GlossaryError> {
+        let replacement = replacement.normalized();
+        let original_key = normalize(original_term);
+        let Some(index) = self
+            .terms
+            .iter()
+            .position(|t| normalized_eq(&t.term, &original_key))
+        else {
+            return Ok(None);
+        };
+
+        let new_key = normalize(&replacement.term);
+        if new_key != original_key
+            && self
+                .terms
+                .iter()
+                .enumerate()
+                .any(|(i, t)| i != index && normalized_eq(&t.term, &new_key))
+        {
+            return Err(GlossaryError::Conflict {
+                term: replacement.term,
+            });
+        }
+
+        let stored = replacement.clone();
+        self.terms[index] = replacement;
+        Ok(Some(stored))
+    }
+
     /// Looks up a term by case-insensitive, trimmed match against its term text
     /// or any of its aliases.
     pub fn get(&self, term: &str) -> Option<&GlossaryTerm> {
@@ -460,6 +528,164 @@ terms:
         let result = Glossary::load(dir.path());
 
         assert!(matches!(result, Err(GlossaryError::Duplicate { term, .. }) if term == "meridian"));
+    }
+
+    #[test]
+    fn remove_matches_primary_term_case_insensitively() {
+        let mut glossary = Glossary::default();
+        glossary
+            .upsert(term("MERIDIAN", "First.", &[]), OnConflict::Error)
+            .unwrap();
+        glossary
+            .upsert(term("TeeTrack", "Second.", &[]), OnConflict::Error)
+            .unwrap();
+
+        let removed = glossary.remove("  meridian ").unwrap();
+
+        assert_eq!(removed.term, "MERIDIAN");
+        assert_eq!(glossary.terms().len(), 1);
+        assert_eq!(glossary.terms()[0].term, "TeeTrack");
+    }
+
+    #[test]
+    fn remove_does_not_match_aliases() {
+        let mut glossary = Glossary::default();
+        glossary
+            .upsert(
+                term("TeeTrack", "Tee-sheet / POS vendor.", &["t-track"]),
+                OnConflict::Error,
+            )
+            .unwrap();
+
+        // `get` resolves the alias, but `remove` names the entry itself: an
+        // alias must not delete the term it merely points at.
+        assert!(glossary.get("t-track").is_some());
+        assert!(glossary.remove("t-track").is_none());
+        assert_eq!(glossary.terms().len(), 1);
+    }
+
+    #[test]
+    fn remove_missing_returns_none() {
+        let mut glossary = Glossary::default();
+        glossary
+            .upsert(term("MERIDIAN", "First.", &[]), OnConflict::Error)
+            .unwrap();
+
+        assert!(glossary.remove("nonexistent").is_none());
+        assert_eq!(glossary.terms().len(), 1);
+    }
+
+    #[test]
+    fn update_in_place_preserves_position() {
+        let mut glossary = Glossary::default();
+        for (name, definition) in [("Alpha", "One."), ("Beta", "Two."), ("Gamma", "Three.")] {
+            glossary
+                .upsert(term(name, definition, &[]), OnConflict::Error)
+                .unwrap();
+        }
+
+        let stored = glossary
+            .update("beta", term("Beta", "Rewritten.", &["b"]))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(stored.definition, "Rewritten.");
+        // The edited entry stays in the middle rather than jumping to the end.
+        let order: Vec<&str> = glossary.terms().iter().map(|t| t.term.as_str()).collect();
+        assert_eq!(order, vec!["Alpha", "Beta", "Gamma"]);
+        assert_eq!(glossary.terms()[1].definition, "Rewritten.");
+        assert_eq!(glossary.terms()[1].aliases, vec!["b".to_string()]);
+    }
+
+    #[test]
+    fn update_renames_a_term_onto_a_free_key() {
+        let mut glossary = Glossary::default();
+        glossary
+            .upsert(
+                term("Meridan", "Misspelled on creation.", &[]),
+                OnConflict::Error,
+            )
+            .unwrap();
+
+        glossary
+            .update("Meridan", term("MERIDIAN", "Fixed.", &[]))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(glossary.terms().len(), 1);
+        assert_eq!(glossary.terms()[0].term, "MERIDIAN");
+        assert!(glossary.get("meridan").is_none());
+    }
+
+    #[test]
+    fn update_rename_conflicts_with_other_entry() {
+        let mut glossary = Glossary::default();
+        glossary
+            .upsert(term("MERIDIAN", "First.", &[]), OnConflict::Error)
+            .unwrap();
+        glossary
+            .upsert(term("TeeTrack", "Second.", &[]), OnConflict::Error)
+            .unwrap();
+
+        let result = glossary.update("TeeTrack", term("meridian", "Merged?", &[]));
+
+        assert!(matches!(result, Err(GlossaryError::Conflict { term }) if term == "meridian"));
+        // Nothing moved: the rejected rename leaves both entries untouched.
+        assert_eq!(glossary.terms().len(), 2);
+        assert_eq!(glossary.get("TeeTrack").unwrap().definition, "Second.");
+        assert_eq!(glossary.get("MERIDIAN").unwrap().definition, "First.");
+    }
+
+    #[test]
+    fn update_recase_of_same_term_is_not_a_conflict() {
+        let mut glossary = Glossary::default();
+        glossary
+            .upsert(term("meridian", "First.", &[]), OnConflict::Error)
+            .unwrap();
+
+        let stored = glossary
+            .update("meridian", term("MERIDIAN", "Recased.", &[]))
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(stored.term, "MERIDIAN");
+        assert_eq!(glossary.terms().len(), 1);
+        assert_eq!(glossary.terms()[0].term, "MERIDIAN");
+    }
+
+    #[test]
+    fn update_missing_original_returns_ok_none() {
+        let mut glossary = Glossary::default();
+        glossary
+            .upsert(term("MERIDIAN", "First.", &[]), OnConflict::Error)
+            .unwrap();
+
+        let updated = glossary
+            .update("nonexistent", term("Whatever", "Body.", &[]))
+            .unwrap();
+
+        assert!(updated.is_none());
+        assert_eq!(glossary.terms().len(), 1);
+    }
+
+    #[test]
+    fn update_trims_the_replacement() {
+        let mut glossary = Glossary::default();
+        glossary
+            .upsert(term("MERIDIAN", "First.", &[]), OnConflict::Error)
+            .unwrap();
+
+        glossary
+            .update(
+                "MERIDIAN",
+                term("  MERIDIAN  ", "Trimmed.", &["  mer ", "", "  "]),
+            )
+            .unwrap()
+            .unwrap();
+
+        let stored = &glossary.terms()[0];
+        assert_eq!(stored.term, "MERIDIAN");
+        assert_eq!(stored.aliases, vec!["mer".to_string()]);
     }
 
     #[test]
