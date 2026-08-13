@@ -551,6 +551,46 @@ mod tests {
     }
 
     #[test]
+    fn a_renamed_project_reconciles_rows_in_place_and_keeps_chunks() {
+        let dir = tempdir().unwrap();
+        let vault = dir.path();
+        write(vault, "n_top001", "Growth", "top body", &[]);
+        write(vault, "n_kid001", "Growth/Q3", "kid body", &[]);
+
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        reconcile(vault, &mut index).unwrap();
+        for id in ["n_top001", "n_kid001"] {
+            index
+                .set_note_chunks(
+                    id,
+                    &[EmbeddedChunk {
+                        text: "seeded".to_string(),
+                        embedding: vec![0.0; crate::index::EMBEDDING_DIM],
+                    }],
+                )
+                .unwrap();
+        }
+
+        crate::vault::rename_project(vault, "Growth", "Acme").unwrap();
+        let report = reconcile(vault, &mut index).unwrap();
+
+        // A rename is an update, never a delete-and-reinsert: the ids are the
+        // key, so both rows follow their notes with `path` and `project`
+        // rewritten and their vectors intact (title and body never changed).
+        assert_eq!(report.deleted, 0);
+        assert_eq!(ids(&index), vec!["n_kid001", "n_top001"]);
+        let top = index.get_note("n_top001").unwrap().unwrap();
+        assert_eq!(top.project.as_deref(), Some("Acme"));
+        assert_eq!(top.path, "Acme/n_top001.md");
+        let kid = index.get_note("n_kid001").unwrap().unwrap();
+        assert_eq!(kid.project.as_deref(), Some("Acme/Q3"));
+        assert_eq!(kid.path, "Acme/Q3/n_kid001.md");
+        assert!(index.note_has_chunks("n_top001").unwrap());
+        assert!(index.note_has_chunks("n_kid001").unwrap());
+        assert!(index.note_ids_missing_embeddings().unwrap().is_empty());
+    }
+
+    #[test]
     fn a_deleted_file_deletes_its_row() {
         let dir = tempdir().unwrap();
         let vault = dir.path();

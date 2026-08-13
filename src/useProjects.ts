@@ -118,6 +118,23 @@ export function deleteProject(project: string): Promise<DeletedProject> {
 }
 
 /**
+ * Renames a project: the folder moves and every contained note (including
+ * notes in child projects) is re-filed under the new slug. A nested target
+ * re-parents. Echoes the canonical (casing-adopted) project row (`ProjectDto`
+ * in src-tauri/src/note_cmds.rs), which the caller must navigate to: the slug
+ * it typed may not be the slug on disk, and any view still pointing at the old
+ * one now points at nothing.
+ *
+ * The backend broadcasts `vault:changed` and queues an index reconcile, so
+ * every list refreshes without caller wiring. The folder's dot changes colour:
+ * `folderHue` is a pure function of the slug, so a renamed project is a
+ * differently-coloured one.
+ */
+export function renameProject(project: string, newProject: string): Promise<Project> {
+  return invoke<Project>("rename_project", { project, newProject });
+}
+
+/**
  * The sidebar's world, straight from disk: Inbox pinned first, projects in
  * backend slug order. Fetched (and response-sequenced) via `useVaultQuery`,
  * refetched on every vault change, so a note created into a brand-new project

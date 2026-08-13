@@ -792,8 +792,283 @@ pub fn delete_project(vault_root: &Path, project: &str) -> Result<DeletedProject
     })
 }
 
-/// One project tree classified for [`delete_project`]. `dirs` is in pre-order
-/// (parent before child), so reverse iteration removes children first.
+/// The outcome of a project rename: the renamed project as [`list_projects`]
+/// now reports it, every contained note at its new path (whether or not its
+/// frontmatter needed rewriting), and the paths whose rewrite failed after the
+/// folder had already moved.
+#[derive(Debug)]
+pub struct RenamedProject {
+    pub info: ProjectInfo,
+    pub renamed_notes: Vec<ListedNote>,
+    /// Notes that moved with the folder but whose `project:` could not be
+    /// rewritten. Empty in every ordinary run; non-empty means some notes still
+    /// name the old project (see the failure contract below).
+    pub failed_rewrites: Vec<PathBuf>,
+}
+
+/// Renames a project: the folder moves, and every contained note — direct and
+/// in child projects — has its frontmatter `project:` re-filed under the new
+/// slug. The slug *is* a project's identity (it is the folder path, the handle
+/// MCP tools accept, and the `project:` every note stores), so this rewrites all
+/// three rather than storing a display name beside them.
+///
+/// A nested target re-parents (`Growth/Q3` → `Archive/Q3`), creating missing
+/// parents. Both slugs are validated and adopt on-disk casing
+/// ([`canonicalize_project`]); a case-only change to the project's own segment
+/// (`Ops` → `ops`, `Growth/Q3` → `Growth/q3`) is honoured, since on a
+/// case-insensitive filesystem canonicalization would otherwise fold it back
+/// into a no-op. A case-only change to a *parent* segment is not: renaming a
+/// parent is that project's own rename, and the folder move here cannot spell
+/// it. Rejected: the Inbox sentinel on either
+/// side, the name the project already has, an existing target in any casing
+/// ([`NoteError::ProjectExists`]), and a target inside the project's own
+/// subtree.
+///
+/// **Unmanaged items ride along.** Unlike [`delete_project`], an attachment or
+/// an unparseable `.md` is not a blocker: a rename destroys nothing, and
+/// `fs::rename` carries the whole tree over untouched. `_glossary.yml` and
+/// `_routing_examples.yml` move with the folder and need no rewrite — neither
+/// names its own project. `previous_project` strings in *other* projects' logs
+/// keep naming the old slug, the same historical provenance
+/// [`delete_project`] leaves behind.
+///
+/// **Failure consistency:** the directory move runs before any frontmatter is
+/// touched, because it is the step most likely to fail (an open handle anywhere
+/// in the tree). A failure there is a clean no-op. Once the folder has moved a
+/// per-note rewrite failure is *collected, not fatal* — aborting would strand
+/// more notes, and unlike a delete a retry cannot converge, since the old slug
+/// no longer exists. The residue is the state an external folder move already
+/// produces: notes physically under the new folder whose frontmatter names the
+/// old one. Reconcile keeps the index truthful throughout (it re-keys on the
+/// note id, updating `path` and leaving `project` to the frontmatter, and never
+/// deletes a row whose file is present), and each stale note converges the next
+/// time it is edited or re-routed.
+pub fn rename_project(
+    vault_root: &Path,
+    project: &str,
+    new_project: &str,
+) -> Result<RenamedProject> {
+    // The exact sentinel slips past `validate_project`; every other casing is
+    // rejected inside `canonicalize_project` (mirrors `delete_project` ①).
+    if project == INBOX {
+        return Err(NoteError::InvalidField {
+            field: "project",
+            detail: "the Inbox is built in and cannot be renamed".to_string(),
+        });
+    }
+    if new_project == INBOX {
+        return Err(NoteError::InvalidField {
+            field: "new_project",
+            detail: "the Inbox is built in; no project can be renamed to it".to_string(),
+        });
+    }
+    let canonical_old = canonicalize_project(vault_root, project)?;
+    let old_dir = note::project_dir(vault_root, &canonical_old);
+    if !old_dir.is_dir() {
+        return Err(NoteError::MissingProject {
+            project: canonical_old,
+        });
+    }
+    // Validates the new slug (reserved, hidden and illegal names included) and
+    // adopts the casing of any parent segment already on disk.
+    let canonical_new = canonicalize_project(vault_root, new_project)?;
+
+    let final_new = if canonical_new == canonical_old {
+        // Canonicalization folded the new slug onto the existing folder, so the
+        // caller either re-typed the current name or changed only its casing.
+        //
+        // Only the LAST segment can actually be re-cased, and the typed casing
+        // is honoured for that segment alone. `fs::rename` renames the leaf; the
+        // parent segments of the destination path resolve to the directories
+        // already on disk, so a rename to `growth/Q3` under an on-disk `Growth/`
+        // moves nothing and leaves the parent spelled `Growth`. Taking the typed
+        // slug verbatim would then re-file every note under `growth/Q3` — a slug
+        // no directory carries, which `list_projects` never reports and the
+        // index's case-sensitive `notes.project = ?` scope never matches.
+        let (parent, old_leaf) = match canonical_old.rsplit_once('/') {
+            Some((parent, leaf)) => (Some(parent), leaf),
+            None => (None, canonical_old.as_str()),
+        };
+        // Same segment count as `canonical_old`, since canonicalization maps
+        // segment-wise and the two canonical forms are equal.
+        let typed_leaf = new_project.rsplit('/').next().unwrap_or(new_project);
+        if typed_leaf == old_leaf {
+            // Nothing this rename can change: either the name was re-typed as
+            // it stands, or only a parent's casing differs — and a parent is
+            // renamed by renaming *that* project, not this one.
+            return Err(NoteError::InvalidField {
+                field: "new_project",
+                detail: format!("{canonical_old:?} is already this project's name"),
+            });
+        }
+        // A case-only rename: keep the on-disk parent, take the typed leaf, and
+        // skip the exists check below, since on a case-insensitive filesystem
+        // the destination *is* the source.
+        match parent {
+            Some(parent) => format!("{parent}/{typed_leaf}"),
+            None => typed_leaf.to_string(),
+        }
+    } else {
+        if is_within_project(&canonical_new, &canonical_old) {
+            return Err(NoteError::InvalidField {
+                field: "new_project",
+                detail: format!("cannot move project {canonical_old:?} inside itself"),
+            });
+        }
+        if note::project_dir(vault_root, &canonical_new).exists() {
+            return Err(NoteError::ProjectExists {
+                project: canonical_new,
+            });
+        }
+        canonical_new
+    };
+
+    // ① Pre-flight: parse the tree before touching disk, so the frontmatter
+    // rewrite works from a snapshot and an unreadable entry fails up front.
+    // Unmanaged items are recorded by the walk and deliberately ignored.
+    let mut scan = TreeScan::default();
+    walk_project_tree(&old_dir, &mut scan)?;
+
+    // ② Create any parent the target needs, remembering what we made so a
+    // failed move leaves no orphaned empty folder behind.
+    let new_dir = note::project_dir(vault_root, &final_new);
+    let created_parent = match new_dir.parent() {
+        Some(parent) if !parent.exists() => {
+            fs::create_dir_all(parent).map_err(|source| NoteError::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+            Some(parent.to_path_buf())
+        }
+        _ => None,
+    };
+
+    // ③ The move. Everything above this line is reversible by doing nothing;
+    // everything below it assumes the folder is already at its new path.
+    if let Err(source) = rename_dir(&old_dir, &new_dir) {
+        if let Some(parent) = created_parent {
+            prune_empty_dirs(&parent, vault_root);
+        }
+        return Err(NoteError::Io {
+            path: new_dir,
+            source,
+        });
+    }
+
+    // ④ Re-file every parsed note. Only notes actually filed under the old slug
+    // are rewritten: one naming a different project is external-move residue
+    // that predates this rename, and its filing is not ours to change.
+    let mut renamed_notes = Vec::with_capacity(scan.notes.len());
+    let mut failed_rewrites = Vec::new();
+    for (old_path, mut note) in scan.notes {
+        let Ok(relative) = old_path.strip_prefix(&old_dir) else {
+            // Unreachable: every path here came from walking `old_dir`.
+            failed_rewrites.push(old_path);
+            continue;
+        };
+        let new_path = new_dir.join(relative);
+        if let Some(refiled) = reproject(note.routing.project(), &canonical_old, &final_new) {
+            // Mutating `routing` in place preserves every other field verbatim.
+            // Rebuilding through `Note::new` would drop the stored `title`.
+            let routing = match &note.routing {
+                Routing::Routed { confidence, .. } => Routing::Routed {
+                    project: refiled,
+                    confidence: *confidence,
+                },
+                Routing::Manual { .. } => Routing::Manual { project: refiled },
+            };
+            note.routing = routing;
+            if note::save_note_at(&new_path, &note).is_err() {
+                failed_rewrites.push(new_path.clone());
+            }
+        }
+        renamed_notes.push(ListedNote {
+            title: effective_title(&note, &new_path),
+            path: new_path,
+            note,
+        });
+    }
+
+    // ⑤ Re-scan the moved folder so the counts read exactly as `list_projects`
+    // would report them.
+    let mut scanned = Vec::new();
+    collect_project(&new_dir, final_new.clone(), &mut scanned);
+    let info = scanned
+        .into_iter()
+        .find(|candidate| candidate.slug == final_new)
+        .unwrap_or(ProjectInfo {
+            slug: final_new,
+            note_count: 0,
+            meeting_count: 0,
+            last_activity: None,
+        });
+
+    Ok(RenamedProject {
+        info,
+        renamed_notes,
+        failed_rewrites,
+    })
+}
+
+/// Whether `slug` is `ancestor` itself or a project nested inside it, compared
+/// segment-wise and ASCII-case-insensitively: `Growth` contains `Growth/Q3` but
+/// never `Growthx`. The same anchoring rule [`crate::index::scope`] uses for a
+/// subtree query, so a rename re-files exactly the notes a subtree search finds.
+fn is_within_project(slug: &str, ancestor: &str) -> bool {
+    slug.get(..ancestor.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(ancestor))
+        && matches!(slug.as_bytes().get(ancestor.len()), None | Some(b'/'))
+}
+
+/// A note's new `project:` value when it was filed under `old` — the project
+/// itself or a descendant — else `None`. Only the ancestor prefix is swapped,
+/// so a note in `Growth/Q3` follows a `Growth` → `Acme` rename to `Acme/Q3`.
+fn reproject(filed_under: &str, old: &str, new: &str) -> Option<String> {
+    is_within_project(filed_under, old).then(|| format!("{new}{}", &filed_under[old.len()..]))
+}
+
+/// Moves a project directory, falling back to a two-hop move through a hidden
+/// sibling scratch name when the direct rename fails. A case-only rename
+/// (`Ops` → `ops`) is what needs it: NTFS and APFS accept one directly, but a
+/// filesystem that compares names case-insensitively on *rename* sees the
+/// destination as the source and refuses. A failed second hop rolls the first
+/// one back, so a failure here leaves the project where it started.
+fn rename_dir(old_dir: &Path, new_dir: &Path) -> io::Result<()> {
+    let Err(direct) = fs::rename(old_dir, new_dir) else {
+        return Ok(());
+    };
+    let Some(parent) = old_dir.parent() else {
+        return Err(direct);
+    };
+    let scratch = parent.join(format!(".rename.{}.tmp", std::process::id()));
+    if scratch.exists() {
+        return Err(direct);
+    }
+    fs::rename(old_dir, &scratch)?;
+    if let Err(second) = fs::rename(&scratch, new_dir) {
+        let _ = fs::rename(&scratch, old_dir);
+        return Err(second);
+    }
+    Ok(())
+}
+
+/// Removes `dir` and each now-empty ancestor below `stop`, ignoring failures —
+/// undoing a parent folder created for a re-parenting rename that then failed.
+/// `remove_dir` is non-recursive, so a directory holding anything stops the walk
+/// rather than deleting it.
+fn prune_empty_dirs(dir: &Path, stop: &Path) {
+    let mut current = dir;
+    while current != stop && current.starts_with(stop) && fs::remove_dir(current).is_ok() {
+        let Some(parent) = current.parent() else {
+            return;
+        };
+        current = parent;
+    }
+}
+
+/// One project tree classified for [`delete_project`] and [`rename_project`].
+/// `dirs` is in pre-order (parent before child), so reverse iteration removes
+/// children first.
 #[derive(Debug, Default)]
 struct TreeScan {
     notes: Vec<(PathBuf, Note)>,
@@ -808,6 +1083,10 @@ struct TreeScan {
 /// non-file-non-dir entry — is unmanaged and blocks deletion. Unlike
 /// enumeration's tolerant walks, an unreadable entry here is an error:
 /// deletion must account for every item it is about to disturb.
+///
+/// [`rename_project`] shares the walk for its note snapshot but ignores
+/// `unmanaged`: it destroys nothing, so an item it does not understand is
+/// carried along by the folder move rather than blocking it.
 fn walk_project_tree(dir: &Path, scan: &mut TreeScan) -> Result<()> {
     scan.dirs.push(dir.to_path_buf());
     let entries = fs::read_dir(dir).map_err(|source| NoteError::Io {
@@ -2393,6 +2672,454 @@ mod tests {
             delete_project(vault.path(), "Nope"),
             Err(NoteError::MissingProject { project }) if project == "Nope"
         ));
+    }
+
+    // --- rename_project -----------------------------------------------------
+
+    /// A routing-scored note (the `write` helper files everything `Manual`), so
+    /// the rewrite's confidence preservation is observable.
+    fn routed_note(project: &str, id: &str, confidence: f64) -> Note {
+        Note::new(
+            NoteId::parse(id).unwrap(),
+            NoteType::Meeting,
+            Routing::Routed {
+                project: project.to_string(),
+                confidence,
+            },
+            "2026-07-12",
+            vec![Tag::parse("fixture").unwrap()],
+            Source::parse("manual").unwrap(),
+            "Body.",
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn rename_project_moves_the_folder_and_refiles_its_notes() {
+        let vault = tempdir().unwrap();
+        write(
+            vault.path(),
+            "Growth",
+            "n_aaaaaa",
+            "2026-07-10",
+            Some("plan"),
+        );
+
+        let renamed = rename_project(vault.path(), "Growth", "Acme").unwrap();
+
+        assert_eq!(renamed.info.slug, "Acme");
+        assert_eq!(renamed.info.note_count, 1);
+        assert!(renamed.failed_rewrites.is_empty());
+        assert!(!vault.path().join("Growth").exists());
+
+        let moved = vault.path().join("Acme").join("plan.md");
+        let note = read_note_at(&moved);
+        assert_eq!(note.routing.project(), "Acme");
+        // Everything but the filing survives verbatim, the stem included.
+        assert_eq!(note.id.as_str(), "n_aaaaaa");
+        assert_eq!(note.date, "2026-07-10");
+        assert_eq!(note.body, "Body.");
+        assert_eq!(note.source, Source::parse("manual").unwrap());
+        assert_eq!(renamed.renamed_notes.len(), 1);
+        assert_eq!(renamed.renamed_notes[0].path, moved);
+
+        let slugs: Vec<String> = list_projects(vault.path())
+            .unwrap()
+            .into_iter()
+            .map(|p| p.slug)
+            .collect();
+        assert_eq!(slugs, ["Acme"]);
+    }
+
+    #[test]
+    fn rename_project_refiles_child_project_notes_under_the_new_parent() {
+        let vault = tempdir().unwrap();
+        write(
+            vault.path(),
+            "Growth",
+            "n_aaaaaa",
+            "2026-07-10",
+            Some("plan"),
+        );
+        write(
+            vault.path(),
+            "Growth/Q3",
+            "n_bbbbbb",
+            "2026-07-11",
+            Some("kickoff"),
+        );
+
+        rename_project(vault.path(), "Growth", "Acme").unwrap();
+
+        // Only the ancestor prefix is swapped — the child keeps its own segment.
+        let child = read_note_at(&vault.path().join("Acme").join("Q3").join("kickoff.md"));
+        assert_eq!(child.routing.project(), "Acme/Q3");
+        let parent = read_note_at(&vault.path().join("Acme").join("plan.md"));
+        assert_eq!(parent.routing.project(), "Acme");
+
+        let slugs: Vec<String> = list_projects(vault.path())
+            .unwrap()
+            .into_iter()
+            .map(|p| p.slug)
+            .collect();
+        assert_eq!(slugs, ["Acme", "Acme/Q3"]);
+    }
+
+    #[test]
+    fn rename_project_preserves_title_confidence_and_manual_filing() {
+        let vault = tempdir().unwrap();
+        let scored = routed_note("Growth", "n_aaaaaa", 0.87).with_title(Some("Q3 review".into()));
+        note::write_note(vault.path(), &scored, Some("q3-review")).unwrap();
+        write(
+            vault.path(),
+            "Growth",
+            "n_bbbbbb",
+            "2026-07-10",
+            Some("hand"),
+        );
+
+        rename_project(vault.path(), "Growth", "Acme").unwrap();
+
+        // A rebuild through `Note::new` would silently drop the stored title.
+        let moved = read_note_at(&vault.path().join("Acme").join("q3-review.md"));
+        assert_eq!(moved.title.as_deref(), Some("Q3 review"));
+        assert_eq!(
+            moved.routing,
+            Routing::Routed {
+                project: "Acme".to_string(),
+                confidence: 0.87,
+            }
+        );
+        // A hand-filed note stays hand-filed; a rename is not a routing event.
+        let manual = read_note_at(&vault.path().join("Acme").join("hand.md"));
+        assert_eq!(
+            manual.routing,
+            Routing::Manual {
+                project: "Acme".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn rename_project_accepts_a_case_only_change() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Ops", "n_aaaaaa", "2026-07-10", Some("plan"));
+
+        // Canonicalization would fold `ops` back onto the existing `Ops/`; the
+        // case-only branch keeps the typed casing instead of no-op'ing.
+        let renamed = rename_project(vault.path(), "Ops", "ops").unwrap();
+        assert_eq!(renamed.info.slug, "ops");
+
+        let slugs: Vec<String> = list_projects(vault.path())
+            .unwrap()
+            .into_iter()
+            .map(|p| p.slug)
+            .collect();
+        assert_eq!(slugs, ["ops"]);
+        let note = read_note_at(&vault.path().join("ops").join("plan.md"));
+        assert_eq!(note.routing.project(), "ops");
+    }
+
+    #[test]
+    fn rename_project_recases_a_nested_projects_own_segment_only() {
+        let vault = tempdir().unwrap();
+        write(
+            vault.path(),
+            "Growth/Q3",
+            "n_aaaaaa",
+            "2026-07-10",
+            Some("plan"),
+        );
+
+        // The leaf is this project's to re-case, and the parent keeps the
+        // casing it has on disk even though the caller typed it lowercase.
+        let renamed = rename_project(vault.path(), "Growth/Q3", "growth/q3").unwrap();
+        assert_eq!(renamed.info.slug, "Growth/q3");
+
+        let slugs: Vec<String> = list_projects(vault.path())
+            .unwrap()
+            .into_iter()
+            .map(|p| p.slug)
+            .collect();
+        // The echoed slug is one `list_projects` actually reports: the index's
+        // `notes.project = ?` scope is case-sensitive, so frontmatter naming a
+        // parent casing no directory carries would hide every note here.
+        assert!(slugs.contains(&"Growth/q3".to_string()), "{slugs:?}");
+        let moved = read_note_at(&vault.path().join("Growth").join("q3").join("plan.md"));
+        assert_eq!(moved.routing.project(), "Growth/q3");
+    }
+
+    #[test]
+    fn rename_project_rejects_a_parent_only_case_change() {
+        let vault = tempdir().unwrap();
+        write(
+            vault.path(),
+            "Growth/Q3",
+            "n_aaaaaa",
+            "2026-07-10",
+            Some("plan"),
+        );
+
+        // `fs::rename` renames the leaf, so the destination's parent resolves to
+        // the `Growth/` already on disk and nothing moves. Honouring the typed
+        // casing would re-file the notes under a slug that does not exist.
+        assert!(matches!(
+            rename_project(vault.path(), "Growth/Q3", "growth/Q3"),
+            Err(NoteError::InvalidField { .. })
+        ));
+        let untouched = read_note_at(&vault.path().join("Growth").join("Q3").join("plan.md"));
+        assert_eq!(untouched.routing.project(), "Growth/Q3");
+    }
+
+    #[test]
+    fn rename_project_rejects_the_name_it_already_has() {
+        let vault = tempdir().unwrap();
+        create_project(vault.path(), "Ops").unwrap();
+
+        assert!(matches!(
+            rename_project(vault.path(), "Ops", "Ops"),
+            Err(NoteError::InvalidField { .. })
+        ));
+        // Reached through a differently-cased source too: both canonicalize to
+        // the folder on disk, so this is still "no change".
+        assert!(matches!(
+            rename_project(vault.path(), "ops", "Ops"),
+            Err(NoteError::InvalidField { .. })
+        ));
+        assert!(vault.path().join("Ops").is_dir());
+    }
+
+    #[test]
+    fn rename_project_rejects_an_existing_target_in_any_casing() {
+        let vault = tempdir().unwrap();
+        write(
+            vault.path(),
+            "Growth",
+            "n_aaaaaa",
+            "2026-07-10",
+            Some("plan"),
+        );
+        create_project(vault.path(), "Acme").unwrap();
+
+        assert!(matches!(
+            rename_project(vault.path(), "Growth", "Acme"),
+            Err(NoteError::ProjectExists { project }) if project == "Acme"
+        ));
+        // A differently-cased collision reports the canonical on-disk slug.
+        assert!(matches!(
+            rename_project(vault.path(), "Growth", "acme"),
+            Err(NoteError::ProjectExists { project }) if project == "Acme"
+        ));
+        // Nothing moved.
+        assert!(vault.path().join("Growth").join("plan.md").is_file());
+    }
+
+    #[test]
+    fn rename_project_rejects_a_missing_source() {
+        let vault = tempdir().unwrap();
+        assert!(matches!(
+            rename_project(vault.path(), "Nope", "Acme"),
+            Err(NoteError::MissingProject { project }) if project == "Nope"
+        ));
+    }
+
+    #[test]
+    fn rename_project_rejects_reserved_hidden_and_invalid_targets() {
+        let vault = tempdir().unwrap();
+        write(
+            vault.path(),
+            "Growth",
+            "n_aaaaaa",
+            "2026-07-10",
+            Some("plan"),
+        );
+
+        for name in [
+            "Inbox",
+            "inbox",
+            "sessions",
+            "raw",
+            "chats",
+            "EBWebView",
+            "_x",
+            ".x",
+            "con",
+            "a:b",
+            "Acme/",
+            "",
+            "a//b",
+        ] {
+            assert!(
+                matches!(
+                    rename_project(vault.path(), "Growth", name),
+                    Err(NoteError::InvalidField { .. })
+                ),
+                "{name:?} should be rejected as a rename target"
+            );
+        }
+        // Every rejection happened before the move.
+        assert!(vault.path().join("Growth").join("plan.md").is_file());
+    }
+
+    #[test]
+    fn rename_project_rejects_moving_a_project_inside_itself() {
+        let vault = tempdir().unwrap();
+        write(
+            vault.path(),
+            "Growth",
+            "n_aaaaaa",
+            "2026-07-10",
+            Some("plan"),
+        );
+
+        assert!(matches!(
+            rename_project(vault.path(), "Growth", "Growth/Sub"),
+            Err(NoteError::InvalidField { .. })
+        ));
+        // The `/`-anchored check must not catch a merely similar sibling name.
+        rename_project(vault.path(), "Growth", "Growthx").unwrap();
+        assert!(vault.path().join("Growthx").is_dir());
+    }
+
+    #[test]
+    fn rename_project_rejects_the_inbox_on_either_side() {
+        let vault = tempdir().unwrap();
+        write_inbox(vault.path(), "n_aaaaaa", "unfiled");
+        write(
+            vault.path(),
+            "Growth",
+            "n_bbbbbb",
+            "2026-07-10",
+            Some("plan"),
+        );
+
+        for (from, to) in [
+            (INBOX, "Acme"),
+            ("inbox", "Acme"),
+            ("Growth", INBOX),
+            ("Growth", "inbox"),
+        ] {
+            assert!(
+                matches!(
+                    rename_project(vault.path(), from, to),
+                    Err(NoteError::InvalidField { .. })
+                ),
+                "{from:?} -> {to:?} should be rejected"
+            );
+        }
+        assert!(vault.path().join(INBOX).join("unfiled.md").is_file());
+        assert!(vault.path().join("Growth").join("plan.md").is_file());
+    }
+
+    #[test]
+    fn rename_project_reparents_and_creates_the_missing_parent() {
+        let vault = tempdir().unwrap();
+        write(
+            vault.path(),
+            "Growth/Q3",
+            "n_aaaaaa",
+            "2026-07-10",
+            Some("plan"),
+        );
+
+        let renamed = rename_project(vault.path(), "Growth/Q3", "Archive/Q3").unwrap();
+        assert_eq!(renamed.info.slug, "Archive/Q3");
+
+        let moved = read_note_at(&vault.path().join("Archive").join("Q3").join("plan.md"));
+        assert_eq!(moved.routing.project(), "Archive/Q3");
+        // The emptied source project survives the move of its child.
+        assert!(vault.path().join("Growth").is_dir());
+    }
+
+    #[test]
+    fn rename_project_adopts_an_existing_parents_casing() {
+        let vault = tempdir().unwrap();
+        create_project(vault.path(), "Archive").unwrap();
+        write(
+            vault.path(),
+            "Growth",
+            "n_aaaaaa",
+            "2026-07-10",
+            Some("plan"),
+        );
+
+        let renamed = rename_project(vault.path(), "Growth", "archive/2026").unwrap();
+        assert_eq!(renamed.info.slug, "Archive/2026");
+        assert!(vault.path().join("Archive").join("2026").is_dir());
+        let moved = read_note_at(&vault.path().join("Archive").join("2026").join("plan.md"));
+        assert_eq!(moved.routing.project(), "Archive/2026");
+    }
+
+    #[test]
+    fn rename_project_carries_infra_and_unmanaged_files_untouched() {
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Ops", "n_aaaaaa", "2026-07-10", Some("real"));
+        let dir = vault.path().join("Ops");
+        fs::write(dir.join(glossary::GLOSSARY_FILE), "terms: []\n").unwrap();
+        fs::write(
+            dir.join(routing_examples::ROUTING_EXAMPLES_FILE),
+            "examples: []\n",
+        )
+        .unwrap();
+        fs::write(dir.join("photo.png"), [1u8, 2, 3, 4]).unwrap();
+        fs::write(dir.join("broken.md"), "no frontmatter here").unwrap();
+        fs::create_dir(dir.join(".obsidian")).unwrap();
+
+        // Unlike a delete, an unmanaged item is carried rather than a blocker.
+        let renamed = rename_project(vault.path(), "Ops", "Operations").unwrap();
+        assert!(renamed.failed_rewrites.is_empty());
+
+        let moved = vault.path().join("Operations");
+        assert!(!dir.exists());
+        assert_eq!(
+            fs::read_to_string(moved.join(glossary::GLOSSARY_FILE)).unwrap(),
+            "terms: []\n"
+        );
+        assert_eq!(
+            fs::read_to_string(moved.join(routing_examples::ROUTING_EXAMPLES_FILE)).unwrap(),
+            "examples: []\n"
+        );
+        assert_eq!(fs::read(moved.join("photo.png")).unwrap(), [1u8, 2, 3, 4]);
+        assert!(moved.join(".obsidian").is_dir());
+        // The unparseable note rode along byte-identical; only parsed notes are
+        // rewritten, and it is not one.
+        assert_eq!(
+            fs::read_to_string(moved.join("broken.md")).unwrap(),
+            "no frontmatter here"
+        );
+        assert_eq!(renamed.renamed_notes.len(), 1);
+    }
+
+    #[test]
+    fn rename_project_leaves_a_foreign_filed_note_alone() {
+        let vault = tempdir().unwrap();
+        // External-move residue: the file sits in `Growth/` but claims another
+        // project. It moves with the folder; its filing is not ours to rewrite.
+        let stray = note_in("Elsewhere", "n_aaaaaa", "2026-07-10", NoteType::Note);
+        let dir = vault.path().join("Growth");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("stray.md"), stray.to_markdown()).unwrap();
+
+        rename_project(vault.path(), "Growth", "Acme").unwrap();
+
+        let moved = read_note_at(&vault.path().join("Acme").join("stray.md"));
+        assert_eq!(moved.routing.project(), "Elsewhere");
+    }
+
+    #[test]
+    fn rename_project_heals_frontmatter_that_case_differs_from_the_folder() {
+        let vault = tempdir().unwrap();
+        // A hand-edited note whose `project:` casing drifted from its folder is
+        // still filed here, so it follows the rename.
+        let drifted = note_in("growth/q3", "n_aaaaaa", "2026-07-10", NoteType::Note);
+        let dir = vault.path().join("Growth").join("Q3");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("drift.md"), drifted.to_markdown()).unwrap();
+
+        rename_project(vault.path(), "Growth", "Acme").unwrap();
+
+        let moved = read_note_at(&vault.path().join("Acme").join("Q3").join("drift.md"));
+        assert_eq!(moved.routing.project(), "Acme/q3");
     }
 
     // --- delete_note --------------------------------------------------------

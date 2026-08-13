@@ -161,6 +161,32 @@ describe("ProjectView delete flow", () => {
   });
 });
 
+describe("ProjectView rename affordance", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  it("offers rename beside the other header actions, opening a prefilled dialog", async () => {
+    // The header is where the folder's identity lives (hue, name, slug), so
+    // editing that identity belongs here too. The rename flow itself is
+    // covered by RenameProjectDialog.test.tsx; this pins the wiring.
+    const user = userEvent.setup();
+    await openGrowth(user);
+
+    const rename = screen.getByRole("button", { name: "Rename" });
+    expect(rename).toHaveAttribute("aria-haspopup", "dialog");
+    // Creation leads, the destructive action sits last.
+    expect(screen.getByRole("button", { name: "New note" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete project" })).toBeInTheDocument();
+
+    await user.click(rename);
+
+    const dialog = screen.getByRole("dialog", { name: "Rename project" });
+    expect(within(dialog).getByLabelText("Project name")).toHaveValue("Growth");
+    expect(invokedCommands()).not.toContain("rename_project");
+  });
+});
+
 describe("ProjectView index rows", () => {
   beforeEach(() => {
     resetTauriMocks();

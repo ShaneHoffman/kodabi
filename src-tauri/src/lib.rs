@@ -239,6 +239,7 @@ pub fn run() {
             note_cmds::list_projects,
             note_cmds::create_project,
             note_cmds::delete_project,
+            note_cmds::rename_project,
             index_cmds::rebuild_index,
             index_cmds::search_notes,
             models_cmds::model_status,

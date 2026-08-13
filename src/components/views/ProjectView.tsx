@@ -5,6 +5,7 @@ import { projectRowMeta } from "../../noteMeta";
 import { todayIsoDate, useProjectNotes } from "../../useNotes";
 import { folderHue, useProjects, type FolderHue } from "../../useProjects";
 import { DeleteProjectDialog } from "../dialogs/DeleteProjectDialog";
+import { RenameProjectDialog } from "../dialogs/RenameProjectDialog";
 import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
@@ -79,6 +80,7 @@ export function ProjectView({ slug }: Props) {
   const { notes, loading, error } = useProjectNotes(slug);
   const { entries } = useProjects();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [renaming, setRenaming] = useState(false);
 
   // What deleting this project would take with it, from the sidebar listing
   // the shell already holds: the project's own notes plus everything under
@@ -124,16 +126,22 @@ export function ProjectView({ slug }: Props) {
             slug
       }
       action={
-        // Ink, not the reserved green: the two verbs on a reading screen earn
-        // their place by being quiet text, not by being a colour. Creation
-        // leads; the destructive one sits behind a confirmation
-        // (DeleteProjectDialog) and so needs no weight of its own here.
+        // Ink, not the reserved green: the verbs on a reading screen earn their
+        // place by being quiet text, not by being a colour. Creation leads and
+        // the destructive one sits last; both it and the rename sit behind a
+        // dialog, so neither needs weight of its own here. Three actions
+        // stretches `ViewFrame`'s single-action slot further than its doc
+        // describes — a knowing bend, since editing the folder's identity
+        // belongs beside the identity, which is what this header is.
         <div className="flex items-center gap-2">
           <Button
             variant="quiet"
             onClick={() => navigate({ kind: "noteEditor", noteId: null, project: slug })}
           >
             New note
+          </Button>
+          <Button variant="quiet" aria-haspopup="dialog" onClick={() => setRenaming(true)}>
+            Rename
           </Button>
           <Button
             variant="quiet"
@@ -214,6 +222,8 @@ export function ProjectView({ slug }: Props) {
           ))}
         </div>
       )}
+
+      {renaming && <RenameProjectDialog slug={slug} onClose={() => setRenaming(false)} />}
 
       {confirmingDelete && (
         <DeleteProjectDialog
