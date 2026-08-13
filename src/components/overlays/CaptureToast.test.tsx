@@ -74,7 +74,16 @@ describe("CaptureToast", () => {
     await renderToast();
 
     await act(async () => {
-      emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "transcribing" });
+      emitFromBackend(TRANSCRIPTION_STATE_EVENT, {
+        status: "transcribing",
+        seconds_processed: 12,
+        total_seconds: 60,
+      });
+    });
+    expect(screen.queryByTestId("capture-toast")).not.toBeInTheDocument();
+
+    await act(async () => {
+      emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "queued" });
     });
     expect(screen.queryByTestId("capture-toast")).not.toBeInTheDocument();
 

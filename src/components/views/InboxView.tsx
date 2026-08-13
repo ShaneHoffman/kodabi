@@ -5,9 +5,11 @@ import {
   pipelineStage,
   savedDestination,
   savedPathMatchesNote,
+  transcribeBeat,
   useCapturePipeline,
   type CapturePipeline,
   type PipelineStage,
+  type TranscribeBeat,
 } from "../../useCapturePipeline";
 import { useNavigation } from "../../useNavigation";
 import { matchScore, noteKind } from "../../noteMeta";
@@ -482,14 +484,20 @@ function resolvePlaceholderStage(
 
 /** What the placeholder row shows right now: which status line is lit,
  * whether it is mid-vanish (routed to a project — traveling left and out),
- * and how long this run has been going — the real transcribe phase spans a
- * model load, the ASR pass, and a headless Claude cleanup call, so "still
- * transcribing" can hold for several real seconds with nothing else to show
- * for it. The ticking clock is the honest substitute: proof the run is
- * still alive without claiming to know which of those it's in right now. */
+ * what the transcribing phase has to say for itself, and how long this run
+ * has been going.
+ *
+ * The transcribe phase spans a model load, the ASR pass, and a headless
+ * Claude cleanup call. The ASR pass is the long one and now reports its real
+ * position in the recording (`transcribing.fraction`), which is what the bar
+ * and the "12:30 of 58:04" figures draw on; the stages either side of it have
+ * no fraction and say so in words instead. The clock stays regardless: it is
+ * the one signal that keeps proving the run is alive across all three, and it
+ * never has to claim which one it is in. */
 type PlaceholderPresence = {
   phase: "transcribing" | "distilling";
   vanishing: boolean;
+  transcribing: TranscribeBeat;
   elapsedSeconds: number;
 };
 
@@ -636,6 +644,7 @@ function usePipelinePresence(
       ? {
           phase: resolved.kind === "transcribing" ? "transcribing" : "distilling",
           vanishing,
+          transcribing: transcribeBeat(pipeline.transcription),
           elapsedSeconds,
         }
       : null;
@@ -658,13 +667,19 @@ function usePipelinePresence(
  * capture has already stopped (docs/UI_CONVENTIONS.md).
  *
  * The status and meta lines are two texts stacked in place, crossfading as
- * `phase` advances, rather than one line rewriting its content — so the box
- * never reflows. Both texts existing at once (and the once-a-second clock)
- * is a visual trick, though, so the whole visual layer is `aria-hidden` and
- * the `role="status"` region announces through one sr-only line that
- * genuinely rewrites as the stage advances (docs/DESIGN_SYSTEM.md §6) — a
- * class flip alone would announce nothing, and a live clock would announce
- * every second.
+ * `phase` advances rather than the line swapping out from under itself — so
+ * the box never reflows. Within the transcribing half, the meta text does
+ * rewrite (the clock every second, the progress figures every chunk), which
+ * costs nothing: it is one grid cell of `tabular-nums`, so digits change
+ * without moving. The progress bar likewise takes no space of its own, riding
+ * the card's bottom edge and mounted the whole time.
+ *
+ * Both texts existing at once (and the once-a-second clock) is a visual trick,
+ * though, so the whole visual layer is `aria-hidden` and the `role="status"`
+ * region announces through one sr-only line that genuinely rewrites as the
+ * stage advances (docs/DESIGN_SYSTEM.md §6) — a class flip alone would
+ * announce nothing, and a live clock or a live fraction would announce
+ * forever.
  */
 function PipelinePlaceholder({
   presence,
@@ -698,7 +713,7 @@ function PipelinePlaceholder({
             is a fill-in and not a reflow. It does not lift: it is not
             actionable yet, and a card that offers a press it cannot honour is
             worse than a still one. */}
-        <div className="glass-card flex items-center gap-6 border-l-[3px] border-l-ink-faint py-4 pr-5 pl-5">
+        <div className="glass-card relative flex items-center gap-6 overflow-hidden border-l-[3px] border-l-ink-faint py-4 pr-5 pl-5">
           <div role="status" className="min-w-0 flex-1">
             <p
               aria-hidden="true"
@@ -715,18 +730,28 @@ function PipelinePlaceholder({
               />
             </p>
             <p className="mt-1.5 flex items-center gap-1 font-data text-[10.5px] text-ink-faint tabular-nums">
+              {/* The transcribing half names what is actually happening —
+                  "queued" is kept for the one run that genuinely is, parked
+                  behind another on `TRANSCRIBE_LOCK` (see `transcribeBeat`).
+                  Still one string, so the crossfade below fires on the phase
+                  change alone; the figures inside it rewrite in place, exactly
+                  as the clock does. */}
               <PhaseStack
                 phase={presence.phase}
-                transcribing="just stopped · queued"
+                transcribing={
+                  presence.transcribing.figures
+                    ? `${presence.transcribing.copy} · ${presence.transcribing.figures}`
+                    : presence.transcribing.copy
+                }
                 distilling="reading transcript · routing"
               />
-              {/* A running clock, not a phase label: the real transcribe
-                  phase alone can hold "Transcribing the capture" for several
-                  seconds (model load, ASR, a headless Claude cleanup call),
-                  and a ticking number is the honest way to show the run is
-                  still alive without claiming to know which of those it's
-                  in right now. Inside the aria-hidden layer on purpose: a
-                  clock in a live region would announce every second. */}
+              {/* A running clock, not a phase label: the transcribe phase
+                  spans a model load, the ASR pass and a headless Claude
+                  cleanup call, and only the middle one has a fraction to
+                  report — a ticking number is what keeps proving the run is
+                  alive across all three without claiming to know which it is
+                  in. Inside the aria-hidden layer on purpose: a clock in a
+                  live region would announce every second. */}
               <span aria-hidden="true"> · {formatElapsed(presence.elapsedSeconds)}</span>
             </p>
             {/* The announcement itself: one line whose text genuinely
@@ -738,6 +763,46 @@ function PipelinePlaceholder({
                 ? "Transcribing the capture"
                 : "Distilling the meeting"}
             </span>
+          </div>
+          {/* The ASR pass's real position in the recording. Ink, never green,
+              for the same reason the dot above is (docs/DESIGN_SYSTEM.md §2),
+              and continuous rather than segmented because audio seconds are a
+              genuinely continuous quantity — the reasoning
+              `ModelDownloadProgress` sets out at length, one screen over.
+              No `role="progressbar"`: the figures are already stated in the
+              meta line, and this card's live region carries phase words only
+              (§6, one region per concern) — a fraction announcing itself every
+              chunk would make it unusable.
+
+              It rides the card's bottom edge rather than taking a row of its
+              own, and it is mounted for the placeholder's whole life with only
+              its opacity changing. Both are the same promise: this card wears
+              a real row's exact silhouette, so resolving into the real note
+              stays a fill-in and neither the first progress event nor the
+              distilling crossfade can reflow it.
+
+              Local rather than a `src/components/ui/` primitive: the two divs
+              are all it shares with `ModelDownloadProgress` — the height, the
+              reserved space, the absence of a zero-state and of a header row
+              all differ — so extraction stays deferred (UI_CONVENTIONS §4). */}
+          <div
+            aria-hidden="true"
+            className={clsx(
+              "absolute inset-x-0 bottom-0 h-[3px] bg-wash",
+              "transition-opacity duration-200 ease-out-strong motion-reduce:transition-none",
+              presence.phase === "transcribing" && presence.transcribing.fraction !== null
+                ? "opacity-100"
+                : "opacity-0",
+            )}
+          >
+            <div
+              data-testid="placeholder-progress-fill"
+              className={clsx(
+                "h-full bg-ink/50",
+                "transition-[width] duration-200 ease-out-strong motion-reduce:transition-none",
+              )}
+              style={{ width: `${(presence.transcribing.fraction ?? 0) * 100}%` }}
+            />
           </div>
         </div>
       </motion.div>

@@ -31,6 +31,12 @@ export const MODELS_STATE_EVENT = "models:state";
  * `events::SESSIONS_CHANGED_EVENT`. */
 export const SESSIONS_CHANGED_EVENT = "sessions:changed";
 
+/** Post-capture transcription progress, as a tagged-status payload: `queued`
+ * (parked behind another run's `TRANSCRIBE_LOCK`), `transcribing` (carrying
+ * recording-normalized seconds, re-emitted per audio chunk), then `saved` or
+ * `error`. Mirrors `transcribe::TRANSCRIPTION_STATE_EVENT`. */
+export const TRANSCRIPTION_STATE_EVENT = "transcription:state";
+
 /** End-of-meeting distill progress, as a tagged-status payload: `distilling`,
  * `routing_fallback`, `saved`, `skipped`, or `error`. Mirrors
  * `distill_cmds::DISTILL_STATE_EVENT`. */

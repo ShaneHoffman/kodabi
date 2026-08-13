@@ -43,6 +43,21 @@ pub struct PipelineOutcome {
     pub timings: PipelineTimings,
 }
 
+/// How far [`transcribe_and_persist`] has got, reported as it works.
+///
+/// Deliberately not a fraction: this module knows how much audio it has fed
+/// the engines, but not how much there is in total — the caller holds the
+/// recording's duration and supplies its own denominator.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PipelineProgress {
+    /// Cumulative seconds of audio fed to the engines, across all channels.
+    Transcribing { seconds: f64 },
+    /// Every channel is transcribed; the cleanup pass has begun. The stages
+    /// after this one (a headless Claude call, then the write) have no
+    /// measurable fraction, so this is the last thing reported.
+    Cleaning,
+}
+
 /// Transcribes each channel's audio through a freshly built engine, merges
 /// the results into one you/them transcript, runs the glossary cleanup
 /// post-pass, and persists it.
@@ -60,6 +75,12 @@ pub struct PipelineOutcome {
 /// [`PipelineOutcome::timings`] regardless of whether the caller looks at
 /// them — see `src-tauri/src/transcribe.rs`'s `KODABI_METRICS` gate for the
 /// only place that does.
+///
+/// `on_progress` is called once per audio chunk fed to an engine (chunks are
+/// ~10 audio-seconds, so a long meeting reports steadily rather than in a
+/// burst) and once more with [`PipelineProgress::Cleaning`] when the last
+/// channel is done. It is the shell's hook for a progress bar; a caller with
+/// nothing to report to can pass `&mut |_| {}`.
 #[allow(clippy::too_many_arguments)]
 pub fn transcribe_and_persist(
     make_engine: &mut dyn FnMut() -> transcription::Result<Box<dyn TranscriptionEngine>>,
@@ -71,6 +92,7 @@ pub fn transcribe_and_persist(
     captured_at: DateTime<Utc>,
     device: &DeviceId,
     slug: Option<&str>,
+    on_progress: &mut dyn FnMut(PipelineProgress),
 ) -> Result<PipelineOutcome, PipelineError> {
     let total_start = Instant::now();
     let bias_terms = glossary_bias_terms(glossary);
@@ -79,6 +101,10 @@ pub fn transcribe_and_persist(
     let mut engine_build_ms: u64 = 0;
     let mut transcribe_ms = Vec::with_capacity(channels.len());
     let mut audio_secs = 0.0f64;
+    // Cumulative across every channel, not per-channel: channels are
+    // transcribed one after another, so progress that reset at each boundary
+    // would read as the run going backwards.
+    let mut fed_samples: u64 = 0;
     for (channel, source) in channels.iter_mut() {
         let build_start = Instant::now();
         let mut engine = make_engine()?;
@@ -92,10 +118,14 @@ pub fn transcribe_and_persist(
         let mut channel_samples: u64 = 0;
         while let Some(chunk) = source.next_chunk()? {
             channel_samples += chunk.len() as u64;
+            fed_samples += chunk.len() as u64;
             segments.extend(engine.accept(AudioChunk {
                 samples: chunk,
                 sample_rate,
             })?);
+            on_progress(PipelineProgress::Transcribing {
+                seconds: fed_samples as f64 / sample_rate.max(1) as f64,
+            });
         }
         segments.extend(engine.finish()?);
         transcribe_ms.push(transcribe_start.elapsed().as_millis() as u64);
@@ -103,6 +133,12 @@ pub fn transcribe_and_persist(
         audio_secs += channel_samples as f64 / sample_rate.max(1) as f64;
         per_channel.push((*channel, segments));
     }
+
+    // Every channel is through the engines. Assembling is microseconds, but
+    // the cleanup call it fronts is a headless Claude subprocess that can take
+    // seconds — reported here so a caller's bar can say so rather than sitting
+    // at a fraction that has stopped moving.
+    on_progress(PipelineProgress::Cleaning);
 
     let assemble_start = Instant::now();
     let assembled = raw_session::assemble(per_channel);
@@ -186,6 +222,7 @@ mod tests {
             instant(),
             &device(),
             None,
+            &mut |_| {},
         )
         .expect("pipeline should succeed");
 
@@ -221,6 +258,7 @@ mod tests {
             instant(),
             &device(),
             None,
+            &mut |_| {},
         )
         .expect("pipeline should succeed");
 
@@ -231,6 +269,48 @@ mod tests {
         assert_eq!(segments[3].end_ms, 1_000);
         // Audio duration is summed across chunks, not lost to chunking.
         assert_eq!(outcome.timings.audio_secs, 1.0);
+    }
+
+    #[test]
+    fn reports_cumulative_progress_across_channels_then_cleaning() {
+        let dir = tempdir().unwrap();
+        let you = silence(16_000); // 1000 ms, fed as two 500 ms chunks
+        let them = silence(8_000); // 500 ms, one chunk
+        let mut you_source = SliceSource::new(&you, 8_000);
+        let mut them_source = SliceSource::new(&them, 8_000);
+        let mut channels: [(Channel, &mut dyn AudioSource); 2] = [
+            (Channel::You, &mut you_source),
+            (Channel::Them, &mut them_source),
+        ];
+        let mut make_engine = mock_engine_factory();
+        let mut reported = Vec::new();
+
+        transcribe_and_persist(
+            &mut make_engine,
+            &NoopRunner,
+            &Glossary::default(),
+            &mut channels,
+            16_000,
+            dir.path(),
+            instant(),
+            &device(),
+            None,
+            &mut |progress| reported.push(progress),
+        )
+        .expect("pipeline should succeed");
+
+        // Seconds keep climbing across the channel boundary — the second
+        // channel resumes at 1.0, it does not restart at 0.5 — and `Cleaning`
+        // lands exactly once, after the last chunk.
+        assert_eq!(
+            reported,
+            vec![
+                PipelineProgress::Transcribing { seconds: 0.5 },
+                PipelineProgress::Transcribing { seconds: 1.0 },
+                PipelineProgress::Transcribing { seconds: 1.5 },
+                PipelineProgress::Cleaning,
+            ]
+        );
     }
 
     #[test]
@@ -248,6 +328,7 @@ mod tests {
             instant(),
             &device(),
             None,
+            &mut |_| {},
         )
         .expect("pipeline should succeed with no channels");
 
@@ -279,6 +360,7 @@ mod tests {
             instant(),
             &device(),
             None,
+            &mut |_| {},
         )
         .unwrap_err();
 
@@ -311,6 +393,7 @@ mod tests {
             instant(),
             &device(),
             None,
+            &mut |_| {},
         )
         .unwrap_err();
 
@@ -336,6 +419,7 @@ mod tests {
             instant(),
             &device(),
             None,
+            &mut |_| {},
         )
         .unwrap_err();
 
