@@ -55,7 +55,27 @@ export function CaptureOverlayPill() {
         data-testid="capture-overlay-pill"
         className="glass-pill flex max-w-full min-w-0 items-center gap-2.5 px-5 py-3"
       >
-        <SpiritMark mode={markMode(captureState)} size="13px" halo="10px" />
+        {/* The margin is optical, not decorative. `.spirit-mark`'s layout box
+            is the core alone (`--mark-size`), while the listening aura
+            overflows it by `--halo-spread` in every direction — so the flex
+            gap left of the label is filled by glow while the gap right of it,
+            against the clock, stays empty, and the label reads glued to the
+            mark.
+
+            4px, and the value is measured rather than taste: differencing an
+            aura-on against an aura-off render puts the glow's optical mass
+            ~3.8px past the core's edge (it fades out entirely by ~10px). So
+            4px of clearance lands the *perceived* space either side of the
+            label at 10px each, matching the gap-2.5 on the clock's side.
+            Static rather than listening-only, because the aura is the one
+            state that wants it and a conditional margin would jolt the label
+            sideways on every transition into and out of it. */}
+        <SpiritMark
+          mode={markMode(captureState)}
+          size="13px"
+          halo="10px"
+          className="mr-1"
+        />
         {/* The live region is the label alone. Wrapping the clock in it too
             would announce a new time every second, forever.
 
@@ -67,7 +87,7 @@ export function CaptureOverlayPill() {
             alert; the signal here is calm and always on. */}
         <span
           role="status"
-          className="min-w-0 grow truncate font-ui text-[11px] font-semibold tracking-[0.12em] text-ink-dim uppercase"
+          className="min-w-0 grow truncate text-center font-ui text-[11px] font-semibold tracking-[0.12em] text-ink-dim uppercase"
         >
           {label.text}
         </span>

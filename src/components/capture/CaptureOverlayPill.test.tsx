@@ -174,6 +174,22 @@ describe("CaptureOverlayPill", () => {
     );
   });
 
+  it("holds the label clear of the mark's aura, and centred in any slack", async () => {
+    const { container } = await renderSeeded(LISTENING);
+
+    // The mark's layout box is its core; the listening aura overflows it by
+    // `--halo-spread`, so the flex gap on the label's left is filled with glow
+    // while the gap on its right, against the clock, is empty. The margin is
+    // that difference. `text-center` is the other half: inert while the pill
+    // hugs its content, load-bearing the moment anything gives it width.
+    expect(container.querySelector(".spirit-mark")).toHaveClass("mr-1");
+    const label = screen.getByRole("status");
+    expect(label).toHaveClass("text-center");
+    // Centring must not cost the degraded labels their truncation — this is
+    // a 320px window and "System audio only" is the long case.
+    expect(label).toHaveClass("truncate");
+  });
+
   it("keeps the pill inset from the window edge so its shadow can fade out", async () => {
     await renderSeeded(LISTENING);
 

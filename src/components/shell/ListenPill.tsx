@@ -88,7 +88,13 @@ export function ListenPill({
         className,
       )}
     >
-      <SpiritMark mode={mode} size="14px" halo="11px" />
+      {/* Clearance for the aura, the same call CaptureOverlayPill makes, at the
+          same measured 4px and for the same reason: the mark's layout box is
+          its core, the listening glow reaches past it, and the gap against the
+          clock has no such filler, so without this the label reads glued to
+          the mark. Static, not live-only — a conditional margin would shift
+          the label sideways at exactly the moment the clock appears. */}
+      <SpiritMark mode={mode} size="14px" halo="11px" className="mr-1" />
       {/* The live region is the label and its detail. The clock stays OUT of
           it: a time announced every second is the whole content of the region
           changing once a second, forever. The detail is the opposite case —
