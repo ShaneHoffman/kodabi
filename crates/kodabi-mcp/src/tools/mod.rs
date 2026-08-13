@@ -25,7 +25,7 @@ use kodabi_core::index::{ActionItemRow, ActionItemStatus, IndexError, NoteRow, N
 use kodabi_core::note::NoteError;
 use kodabi_core::project_context::ProjectContextError;
 use kodabi_core::sessions::SessionsError;
-use kodabi_core::vault::{AddGlossaryTermError, ListedNote};
+use kodabi_core::vault::{GlossaryOpError, ListedNote};
 
 use crate::envelope;
 use crate::protocol::RpcError;
@@ -120,18 +120,23 @@ fn map_file_note_error(error: NoteError) -> Result<Value, RpcError> {
     }
 }
 
-/// Routes an [`AddGlossaryTermError`] to the right channel: an invalid slug or
+/// Routes a [`GlossaryOpError`] to the right channel: an invalid slug or
 /// field is `invalid_params`; a missing project or an `on_conflict: "error"` hit
 /// are business faults (`isError`); a storage failure is internal.
-fn map_add_glossary_term_error(error: AddGlossaryTermError) -> Result<Value, RpcError> {
+fn map_add_glossary_term_error(error: GlossaryOpError) -> Result<Value, RpcError> {
     match error {
-        AddGlossaryTermError::InvalidProject(_) | AddGlossaryTermError::InvalidInput { .. } => {
+        GlossaryOpError::InvalidProject(_) | GlossaryOpError::InvalidInput { .. } => {
             Err(RpcError::invalid_params(error.to_string()))
         }
-        AddGlossaryTermError::MissingProject { .. } | AddGlossaryTermError::Conflict { .. } => {
+        GlossaryOpError::MissingProject { .. } | GlossaryOpError::Conflict { .. } => {
             Ok(envelope::business_error(error.to_string()))
         }
-        AddGlossaryTermError::Storage(_) => Err(RpcError::internal(error.to_string())),
+        // `NotFound` belongs to the update/remove operations, which this
+        // add-only tool surface never calls: unreachable here, but the arm
+        // keeps the match exhaustive rather than swallowing it into a catch-all.
+        GlossaryOpError::NotFound { .. } | GlossaryOpError::Storage(_) => {
+            Err(RpcError::internal(error.to_string()))
+        }
     }
 }
 

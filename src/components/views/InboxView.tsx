@@ -363,9 +363,17 @@ export function InboxView() {
           {remaining === 0 && !placeholder ? (
             !loading && <EmptyInbox />
           ) : (
+            // `mt-[26px]` is the body's own header gap: `ViewFrame`'s head
+            // carries no bottom margin, so each view opens its body at this
+            // step (ChatView and NeedsAttentionView both do). The meter used to
+            // supply it here by accident, and it only renders above zero — so
+            // with nothing unfiled and a placeholder showing, the card sat
+            // flush under the title. In the populated state this collapses with
+            // `Progress`'s `mb-6` rather than adding to it.
+            //
             // No flex `gap`: the 14px is an animated margin on each slot, so
             // it collapses with the row that owns it (see `ROW_GAP`).
-            <ul data-testid="inbox-list" className="flex flex-col">
+            <ul data-testid="inbox-list" className="mt-[26px] flex flex-col">
               {placeholder && <PipelinePlaceholder presence={placeholder} reduce={reduce} />}
               {notes.map((note) => (
                 // Keyed by path, not id: two files can carry the same id (an

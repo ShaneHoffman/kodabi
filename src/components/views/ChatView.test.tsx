@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -163,6 +163,24 @@ describe("ChatView", () => {
     expect(invoke).toHaveBeenCalledWith("chat_send", {
       text: "line one\nline two",
     });
+  });
+
+  it("pressing the composer's padding puts the caret in the field", async () => {
+    await renderChat();
+    const composer = screen.getByRole("textbox", { name: "Message Claude" });
+    const bar = composer.closest("form");
+    if (!bar) throw new Error("the composer is not in a form");
+
+    // The bar is taller than the field it holds, so the padding around it has
+    // to lead somewhere: a press on the bar itself lands in the field.
+    fireEvent.pointerDown(bar);
+    expect(composer).toHaveFocus();
+
+    // A press on a control inside it is already going where it should — the
+    // field must not snatch the focus back.
+    composer.blur();
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Send" }));
+    expect(composer).not.toHaveFocus();
   });
 
   it("grows streamed deltas into prose and settles on the completed block", async () => {

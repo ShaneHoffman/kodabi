@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "Window controls for the undecorated main window, whose title bar is the app's own TopBar. `core:default` already grants the getters (`is-maximized`) and `internal-toggle-maximize`, which is what makes double-click on the drag region maximize; it does not grant the four below. Scoped to `main` alone so they reach only the window whose chrome needs them.",
+  "windows": ["main"],
+  "permissions": [
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging"
+  ]
+}

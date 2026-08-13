@@ -1,4 +1,5 @@
 import {
+  useRef,
   useState,
   type FormEvent,
   type KeyboardEvent,
@@ -71,6 +72,8 @@ export function ChatView() {
   const chat = useChatSession();
   const { navigate } = useNavigation();
   const [draft, setDraft] = useState("");
+  // The composer field, so a press on the bar's padding can hand it the caret.
+  const composerRef = useRef<HTMLTextAreaElement>(null);
   // Whether the reader is at the live end of the log. Scrolling up into the
   // backlog unpins; scrolling back down (or sending a message) repins.
   const [pinnedToEnd, setPinnedToEnd] = useState(true);
@@ -214,8 +217,18 @@ export function ChatView() {
       {!chat.exited && (
         <form
           onSubmit={submit}
+          // The bar's padding is part of the field: a press on it puts the
+          // caret in the textarea rather than dying in a dead strip. Only the
+          // form's own box qualifies — a press on the textarea or the button is
+          // already going where it should. preventDefault first, or the press
+          // hands focus to the form and takes it straight back.
+          onPointerDown={(event) => {
+            if (event.target !== event.currentTarget) return;
+            event.preventDefault();
+            composerRef.current?.focus();
+          }}
           className={clsx(
-            "mt-[30px] flex flex-none items-end gap-3 rounded-card border border-edge bg-wash p-1 pl-4",
+            "mt-[30px] flex flex-none items-end gap-3 rounded-card border border-edge bg-wash p-2 pl-4",
             "shadow-[inset_0_1px_0_var(--color-edge-lit)]",
             // The border step and the green caret are the focus signal, as in
             // the search field — a ring around a bar this wide would be noise.
@@ -223,9 +236,15 @@ export function ChatView() {
           )}
         >
           <textarea
+            ref={composerRef}
             aria-label="Message Claude"
             className={clsx(
-              "min-w-0 flex-1 resize-none bg-transparent py-2.5",
+              // The vertical padding is the button's, not the field's: at one
+              // line the textarea and the button are the same height, so
+              // `items-end` above IS centred, and the bar's breathing room is
+              // the form's `p-2`. Grow the textarea and the button stays
+              // bottom-pinned at that same inset (docs/DESIGN_SYSTEM.md §2).
+              "min-w-0 flex-1 resize-none bg-transparent py-1",
               // Grows with what you type, then scrolls rather than eating the
               // conversation.
               "[field-sizing:content] max-h-[200px] overflow-y-auto",

@@ -6,6 +6,7 @@ import { todayIsoDate, useProjectNotes } from "../../useNotes";
 import { folderHue, useProjects, type FolderHue } from "../../useProjects";
 import { DeleteProjectDialog } from "../dialogs/DeleteProjectDialog";
 import { Button } from "../ui/Button";
+import { Menu } from "../ui/Menu";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
 
@@ -124,10 +125,16 @@ export function ProjectView({ slug }: Props) {
             slug
       }
       action={
-        // Ink, not the reserved green: the two verbs on a reading screen earn
+        // Ink, not the reserved green: the verbs on a reading screen earn
         // their place by being quiet text, not by being a colour. Creation
-        // leads; the destructive one sits behind a confirmation
-        // (DeleteProjectDialog) and so needs no weight of its own here.
+        // leads and stays a button, because it is the thing you came here to
+        // do.
+        //
+        // EVERYTHING ELSE THIS FOLDER CAN DO GOES IN THE MENU. The header slot
+        // holds one action, and the glossary made three — so rather than grow
+        // a toolbar the frame's doc forbids, the project's other verbs collapse
+        // behind one trigger. That also gives the next project-scoped verb a
+        // home instead of another argument about the ceiling.
         <div className="flex items-center gap-2">
           <Button
             variant="quiet"
@@ -135,13 +142,28 @@ export function ProjectView({ slug }: Props) {
           >
             New note
           </Button>
-          <Button
-            variant="quiet"
-            aria-haspopup="dialog"
-            onClick={() => setConfirmingDelete(true)}
-          >
-            Delete project
-          </Button>
+          <Menu.Root>
+            <Menu.Trigger
+              render={
+                <Button variant="quiet" aria-label={`${displayName} project actions`}>
+                  Project
+                  <span aria-hidden="true" className="text-[10px] text-ink-faint">
+                    ▾
+                  </span>
+                </Button>
+              }
+            />
+            {/* `end`: the trigger sits at the right edge of the header, so the
+                menu hangs back over the view rather than off the panel. */}
+            <Menu.Content align="end">
+              <Menu.Item onClick={() => navigate({ kind: "glossary", slug })}>
+                Glossary
+              </Menu.Item>
+              {/* The destructive one sits behind a confirmation
+                  (DeleteProjectDialog), which the ellipsis promises. */}
+              <Menu.Item onClick={() => setConfirmingDelete(true)}>Delete project…</Menu.Item>
+            </Menu.Content>
+          </Menu.Root>
         </div>
       }
     >
