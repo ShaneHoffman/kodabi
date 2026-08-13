@@ -30,10 +30,10 @@ import type { ReactNode } from "react";
  *   queue   — work to get through. Its summary is a workload sentence rather
  *             than a count. Caps no column.
  *   library — a place to browse. Caps no column: its rows are rows, not prose.
- *   panel   — configuration. No column cap: Settings caps its own card grid's
- *             tracks, so the cap sits on the thing that needs one — a card,
- *             whose rows are label-left / control-right. A wide panel gets a
- *             second column of cards, not wider ones.
+ *   panel   — configuration. Caps no column, and neither does Settings: its
+ *             cards are structure and run the panel's full width, one per row.
+ *             The only measures on that screen are the prose inside a row (a
+ *             setting's hint stops at 46ch), which is where a measure belongs.
  *   health  — system state to recover from. A short list of pre-lifted cards.
  *             Caps no column.
  *   doc     — a note, on the measure it was written to (660px). No consumer
