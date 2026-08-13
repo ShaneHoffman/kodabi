@@ -57,6 +57,11 @@ export function CaptureOverlayPill() {
     // hours-long clock), so every shorter state would otherwise leave a gap
     // between the label and the clock wide enough to read as two things rather
     // than one line. Centred, the slack becomes padding.
+    //
+    // 248px is that widest state measured, not estimated: 13 mark + 125 label
+    // + 46 clock + 20 of gaps + 40 of padding + 2 of border, with a couple of
+    // px spare. Sizing it any wider buys nothing and costs the common
+    // "Listening" state — 66px of label — a visibly slack pill.
     <div
       data-tauri-drag-region="deep"
       data-testid="capture-overlay-pill"

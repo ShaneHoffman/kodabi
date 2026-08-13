@@ -37,7 +37,7 @@
         "label": "capture-overlay",
         "title": "Capture overlay",
         "url": "overlay.html",
-        "width": 280,
+        "width": 248,
         "height": 46,
         "resizable": false,
         "maximizable": false,
