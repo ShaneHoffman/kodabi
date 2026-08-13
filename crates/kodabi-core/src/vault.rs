@@ -284,6 +284,10 @@ pub fn canonicalize_project(vault_root: &Path, project: &str) -> Result<String> 
 /// atomically rewrite the file in place. `Ok(None)` when no note carries the
 /// id. Every shell — the Tauri `save_note` command, the coming MCP
 /// `edit_note` — should call this rather than re-implementing the sequence.
+///
+/// The returned [`ListedNote`] carries the *post-edit* effective title, so a
+/// caller that indexes or echoes it reflects a retitled note. The filename is
+/// untouched: it keeps its creation slug however the title changes.
 pub fn save_note_edit(
     vault_root: &Path,
     project: &str,
@@ -295,10 +299,14 @@ pub fn save_note_edit(
     };
     let merged = listed.note.with_edits(edit)?;
     note::save_note_at(&listed.path, &merged)?;
+    // Recomputed from the merged note, never carried over from `listed`: an
+    // edit may replace the title, and the stale value would flow straight into
+    // the index and the caller's echo while the file on disk said otherwise.
+    let title = effective_title(&merged, &listed.path);
     Ok(Some(ListedNote {
         note: merged,
         path: listed.path,
-        title: listed.title,
+        title,
     }))
 }
 
@@ -1687,6 +1695,7 @@ mod tests {
 
         let edit = NoteEdit {
             note_type: NoteType::Meeting,
+            title: None,
             date: "2026-07-12".to_string(),
             tags: vec![Tag::parse("follow-up").unwrap()],
             body: "Rewritten.".to_string(),
@@ -1708,6 +1717,7 @@ mod tests {
             &NoteId::parse("n_zzzzzz").unwrap(),
             NoteEdit {
                 note_type: NoteType::Note,
+                title: None,
                 date: "2026-07-12".to_string(),
                 tags: vec![],
                 body: String::new(),
@@ -1715,6 +1725,91 @@ mod tests {
         )
         .unwrap();
         assert!(missing.is_none());
+    }
+
+    #[test]
+    fn save_note_edit_retitles_and_echoes_the_new_effective_title() {
+        let vault = tempdir().unwrap();
+        let path = write(vault.path(), "Ops", "n_aaaaaa", "2026-07-10", Some("keep"));
+        let id = NoteId::parse("n_aaaaaa").unwrap();
+
+        let saved = save_note_edit(
+            vault.path(),
+            "Ops",
+            &id,
+            NoteEdit {
+                note_type: NoteType::Note,
+                title: Some("Renamed Meeting".to_string()),
+                date: "2026-07-10".to_string(),
+                tags: vec![Tag::parse("fixture").unwrap()],
+                body: "Body.".to_string(),
+            },
+        )
+        .unwrap()
+        .expect("note exists");
+
+        // The regression this pins: the echoed title used to be the pre-edit
+        // one, so the index and the UI disagreed with the file on disk.
+        assert_eq!(saved.title, "Renamed Meeting");
+        assert_eq!(saved.note.title.as_deref(), Some("Renamed Meeting"));
+
+        // The filename does not follow the title.
+        assert_eq!(saved.path, path);
+        assert_eq!(path.file_name().unwrap(), "keep.md");
+        let reread = find_note(vault.path(), "Ops", &id).unwrap().unwrap();
+        assert_eq!(reread.note.title.as_deref(), Some("Renamed Meeting"));
+        assert_eq!(reread.title, "Renamed Meeting");
+    }
+
+    #[test]
+    fn save_note_edit_adds_the_title_key_to_a_note_that_lacked_one() {
+        // The fixture writer names the file but never writes a `title` key, so
+        // this note displays its de-slugged stem — the edge case the editor has
+        // to handle.
+        let vault = tempdir().unwrap();
+        write(
+            vault.path(),
+            "Ops",
+            "n_aaaaaa",
+            "2026-07-10",
+            Some("weekly sync"),
+        );
+        let id = NoteId::parse("n_aaaaaa").unwrap();
+
+        let untouched = save_note_edit(
+            vault.path(),
+            "Ops",
+            &id,
+            NoteEdit {
+                note_type: NoteType::Note,
+                title: None,
+                date: "2026-07-10".to_string(),
+                tags: vec![Tag::parse("fixture").unwrap()],
+                body: "Body.".to_string(),
+            },
+        )
+        .unwrap()
+        .expect("note exists");
+        // No title sent: the key stays absent and display still de-slugs.
+        assert_eq!(untouched.note.title, None);
+        assert_eq!(untouched.title, "weekly sync");
+
+        let retitled = save_note_edit(
+            vault.path(),
+            "Ops",
+            &id,
+            NoteEdit {
+                note_type: NoteType::Note,
+                title: Some("Weekly Sync".to_string()),
+                date: "2026-07-10".to_string(),
+                tags: vec![Tag::parse("fixture").unwrap()],
+                body: "Body.".to_string(),
+            },
+        )
+        .unwrap()
+        .expect("note exists");
+        assert_eq!(retitled.note.title.as_deref(), Some("Weekly Sync"));
+        assert_eq!(retitled.title, "Weekly Sync");
     }
 
     // --- file_note_to_project (re-route) -----------------------------------

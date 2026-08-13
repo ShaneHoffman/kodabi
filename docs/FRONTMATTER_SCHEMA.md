@@ -54,8 +54,11 @@ Canonical key order the writer emits: **`id, type, title, project, date, tags, s
   — a hand-written note, or any note created before this field existed — has its display title
   de-slugged from the filename stem (`weekly-sync` → `weekly sync`) exactly as before, so nothing
   regresses. The writers that have a real title (distill, the create-note command, and quick
-  capture, whose title is its first body line) emit the key; the title is set once at creation and
-  preserved verbatim across edits, like the filename.
+  capture, whose title is its first body line) emit the key. **The title is editable afterward:**
+  the note editor's `save_note` rewrites the value in place, adding the key to a note that never
+  had one. The *filename* is what is set once at creation — it keeps its original slug however the
+  title changes, because renaming the file would break the note↔source pairing (a distilled note
+  finds its recording and transcript by filename stem) and every link pointing at the old path.
 - **`project`** — `Inbox` is not a real project; it is the sentinel value confidence-split routing
   uses when a note's score is too low to auto-file. The Inbox UI's one-click re-route corrects
   `project` and re-scores `confidence` for the chosen project, in place. Because a project maps to
