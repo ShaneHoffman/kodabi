@@ -80,10 +80,8 @@ The single most important typographic rule in Grove, and the one a full-width la
 - **Structure fills the space it is given.** Lists, rows, cards, tables, and the dock all stretch to
   the panel width. A row that stops short of the edge looks broken.
 - **Prose stops at its measure.** Note bodies at `66ch`, a chat answer at `78ch`, a settings hint at
-  `46ch`. When the panel is wider than the measure, the leftover width becomes something else — the
-  note editor's details rail, a second column of settings cards — never longer lines. A measure caps
-  the thing that has one; it never caps the container, which would strand the leftover instead of
-  spending it.
+  `46ch`. When the panel is wider than the measure, the leftover width becomes a details rail — not
+  longer lines.
 
 `text-note` carries the reading size and its leading together (15px / 1.75) so a note can never open
 at two different sizes on two different screens.

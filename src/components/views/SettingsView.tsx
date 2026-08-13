@@ -56,63 +56,10 @@ type IndexStateEvent =
 type RebuildStatus = { status: "idle" } | IndexStateEvent;
 
 /**
- * Where the cards sit: one column at the panel's usual width, two once there is
- * room for two.
- *
- * THE MEASURE BELONGS TO THE CARD, NOT TO THE STACK. A settings row is
- * label-left / control-right, so a card that runs a wide panel's full width
- * puts a label a monitor away from the control it names — 660px is earned, and
- * it stays. Capping the *stack* at one card was the part that wasn't: it left
- * half a wide panel empty, when a card is structure and structure fills the
- * space it is given (docs/DESIGN_SYSTEM.md §1). The leftover width becomes a
- * second column of cards rather than a wider one, the way the note editor's
- * leftover becomes a rail.
- *
- * Nothing centres, and the left edge does not move: the grid fills from the
- * frame's gutter outward, so navigating between views still finds the content
- * in the same place (`ViewFrame`'s stance comments).
- *
- * `@container`, not a media query: what decides whether a second column fits is
- * the width of the main panel, which the dock's presence changes without the
- * window resizing at all. It takes a wrapper because an element cannot answer
- * its own query, and `mt-6` rides on the wrapper because `@container` brings
- * layout containment with it.
- *
- * It also sits above two `Select`s, whose menus go `position: fixed` to escape a
- * clipping ancestor, and `container-type` is on the list of properties that can
- * capture a fixed descendant and defeat that escape. Measured before this
- * landed: it does not. A fixed probe inside an `inline-size` container still
- * lands at the viewport's corner, and both menus place identically, flip and
- * all, with the container present and absent
- * (docs/decisions/popover-primitive.md §6, which records the numbers).
- *
- * 66rem = 1056px, which is two 520px tracks before they grow to the 660 cap.
- * 520 is where the tightest row still holds: Retention under `keep_days` puts
- * 284px of controls (the policy Select beside its day field) against a 480px
- * card interior, leaving 176px for the label and its 46ch hint — measured, not
- * estimated. A second column before then would be taking its width out of the
- * rows, which is what the cap on a card exists to prevent.
- */
-function CardGrid({ children }: { children: ReactNode }) {
-  return (
-    <div className="@container mt-6">
-      {/* Row-major and in DOM order, so reading order and tab order stay the
-          one order. `items-start` because a card ends at its last row: a short
-          card stretched to its partner's height would show empty glass below
-          its final hairline, and a card that resizes because its NEIGHBOUR did
-          (Models, while a download runs) is the page moving on its own. */}
-      <div className="grid grid-cols-[minmax(0,660px)] items-start gap-4 @[66rem]:grid-cols-[repeat(2,minmax(0,660px))]">
-        {children}
-      </div>
-    </div>
-  );
-}
-
-/**
  * One concern, as a card.
  *
- * They fill the panel one per row, or two abreast where `CardGrid` has the
- * width for it, and the card is what replaced the tab rail: a rail filtered the
+ * They stack one per row down the panel, and the card is what
+ * replaced the tab rail: a rail filtered the
  * page, so three quarters of the
  * settings were somewhere you had to remember to look. The cards are the same
  * information with nothing hidden, and the eyebrow does the work the tab did —
@@ -138,10 +85,11 @@ function Card({ title, children }: { title: string; children: ReactNode }) {
 
 /**
  * One setting: its name and its one line of explanation stacked on the left,
- * its control flush right. Every control in a column lands on the same right
+ * its control flush right. Every control on the page lands on the same right
  * edge, which is what makes the column scannable — the eye runs down the
- * controls, not the prose. A column, not the page: at a wide panel there are
- * two of them, and each one is read on its own.
+ * controls, not the prose. The card runs the panel's full width, so that edge
+ * is the panel's; what keeps the row readable at any width is the hint's own
+ * measure on the left, not a cap on the card.
  *
  * THERE IS NO INDENT, and nothing on this screen needs one. A dependent control
  * sits inline beside the control it depends on (the day field beside the
@@ -430,10 +378,10 @@ function UpdateControl() {
 
 /**
  * Settings — the app's CONFIG PANEL, and it announces that before a word is
- * read: cards laid out one or two abreast, each named by a mono eyebrow,
- * holding nothing but label-and-control rows.
+ * read: cards stacked one per row at the panel's full width, each named by a
+ * mono eyebrow, holding nothing but label-and-control rows.
  *
- * Every control lands on its column's one right edge, so a column is
+ * Every control lands on one right edge for the whole page, so the column is
  * scannable end to end. Controls are glass; read-only values stay plain text or
  * mono and take no chevron, so "you can change this" and "this is how it is"
  * are told apart by shape rather than by being greyed out.
@@ -589,7 +537,13 @@ export function SettingsView() {
       )}
 
       {settings && (
-        <CardGrid>
+        // FULL WIDTH, ONE CARD PER ROW, and no cap on the stack. A card is
+        // structure, and structure fills the space it is given
+        // (docs/DESIGN_SYSTEM.md §1) — the measures on this screen belong to
+        // the prose inside a row (a hint stops at 46ch), not to the card
+        // holding it. The row recipe puts every control flush right, so at any
+        // panel width they all land on one right edge.
+        <div className="mt-6 flex flex-col gap-4">
           <Card title="Privacy">
             <Row label="Recording consent">
               {/* Read-only, so it stays plain text with a check glyph — no
@@ -859,7 +813,7 @@ export function SettingsView() {
             </Row>
             <UpdateControl />
           </Card>
-        </CardGrid>
+        </div>
       )}
     </ViewFrame>
   );
