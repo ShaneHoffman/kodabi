@@ -74,7 +74,8 @@ export type CreateNoteInput = {
 };
 
 /** An edit to an existing note. `id` and `project` only locate the file; the
- * backend preserves `id`, `source`, and routing verbatim. */
+ * backend preserves `id`, `source`, and routing verbatim. Mirrors
+ * `SaveNoteInput` in `src-tauri/src/note_cmds.rs`. */
 export type SaveNoteInput = {
   id: string;
   project: string;
@@ -82,6 +83,12 @@ export type SaveNoteInput = {
   date: string;
   tags: string[];
   body: string;
+  /** The new display title, or `null` to preserve the stored one. Send `null`
+   * whenever the user did not edit it: `NoteSummary.title` is the *effective*
+   * title, which for a note with no frontmatter `title` key is its de-slugged
+   * filename, so echoing it back verbatim would materialize that fallback into
+   * the file. The filename never follows the title. */
+  title: string | null;
 };
 
 /** The `file_note_to_project` outcome, mirroring the MCP tool's output: the

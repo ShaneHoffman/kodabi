@@ -273,6 +273,14 @@ pub struct SaveNoteInput {
     project: String,
     #[serde(rename = "type")]
     note_type: String,
+    /// The new display title, or `null`/absent to preserve the stored one.
+    /// Callers send `null` when the user did not touch the title: the title
+    /// they were shown may be the *effective* one (a de-slugged filename for a
+    /// note with no `title` key), and echoing that back would materialize it
+    /// into frontmatter. A blank string clears the key, restoring that
+    /// fallback. Normalization is `Note::with_title`'s, not this layer's.
+    #[serde(default)]
+    title: Option<String>,
     date: String,
     #[serde(default)]
     tags: Vec<String>,
@@ -353,8 +361,9 @@ pub async fn read_note(
 }
 
 /// Saves an edit to an existing note in place: the file is re-located by
-/// `(project, id)`, only the editable fields (body, tags, date, type) are
-/// replaced, and the filename never changes. The locate-merge-rewrite sequence
+/// `(project, id)`, only the editable fields (title, body, tags, date, type)
+/// are replaced, and the filename never changes — it keeps its creation slug
+/// however the title changes. The locate-merge-rewrite sequence
 /// (and its id/source/routing preservation contract) lives in
 /// `vault::save_note_edit`; this command only parses the wire strings.
 #[tauri::command]
@@ -610,6 +619,9 @@ fn parse_note_id(id: &str) -> Result<NoteId, String> {
 fn note_edit_from_input(input: &SaveNoteInput) -> Result<NoteEdit, String> {
     Ok(NoteEdit {
         note_type: NoteType::parse(&input.note_type).map_err(|err| err.to_string())?,
+        // Verbatim: `Note::with_title` is the one authority on title
+        // normalization, so every entry point folds identically.
+        title: input.title.clone(),
         date: input.date.clone(),
         tags: parse_tags(&input.tags)?,
         body: input.body.clone(),
@@ -782,12 +794,15 @@ mod tests {
         assert_eq!(input.note_type, "note");
         assert!(input.tags.is_empty());
         assert_eq!(input.body, "");
+        // An absent title means "preserve", not "clear".
+        assert_eq!(input.title, None);
+        assert_eq!(note_edit_from_input(&input).unwrap().title, None);
     }
 
     #[test]
     fn note_edit_parses_the_wire_strings_and_folds_tag_case() {
         let input = save_input(
-            r#"{"id":"n_a1b2c3","project":"Ops","type":"note",
+            r#"{"id":"n_a1b2c3","project":"Ops","type":"note","title":"  Renamed ",
                 "date":"2026-07-12","tags":["Follow-Up"],"body":"Rewritten."}"#,
         );
         let edit = note_edit_from_input(&input).unwrap();
@@ -795,6 +810,18 @@ mod tests {
         assert_eq!(edit.tags, vec![Tag::parse("follow-up").unwrap()]);
         assert_eq!(edit.date, "2026-07-12");
         assert_eq!(edit.body, "Rewritten.");
+        // Passed through untrimmed: normalizing here would duplicate
+        // `Note::with_title`, which does it on the way into the note.
+        assert_eq!(edit.title.as_deref(), Some("  Renamed "));
+    }
+
+    #[test]
+    fn note_edit_passes_an_explicit_null_title_through_as_preserve() {
+        let input = save_input(
+            r#"{"id":"n_a1b2c3","project":"Ops","type":"note","title":null,
+                "date":"2026-07-12","body":"Rewritten."}"#,
+        );
+        assert_eq!(note_edit_from_input(&input).unwrap().title, None);
     }
 
     #[test]

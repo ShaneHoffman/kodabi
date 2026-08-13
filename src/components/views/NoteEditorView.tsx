@@ -495,7 +495,7 @@ function EditNote({
   project: string;
   onDone: (saved: NoteDetail | null) => void;
 }) {
-  const [title] = useState(note.title);
+  const [title, setTitle] = useState(note.title);
   const [body, setBody] = useState(note.body_markdown);
   const [tags, setTags] = useState<string[]>(note.tags);
   const [addingTag, setAddingTag] = useState(false);
@@ -513,10 +513,18 @@ function EditNote({
     setAnchor(textarea ? selectionAnchor(textarea) : null);
   };
 
+  // Blank reads as absence, not as a value: the placeholder says "Untitled",
+  // and clearing the field would otherwise strip the frontmatter key and snap
+  // the display to a lowercased de-slugged filename. So an empty box means
+  // "unchanged", and only a real edit is sent.
+  const trimmedTitle = title.trim();
+  const titleDirty = trimmedTitle !== "" && trimmedTitle !== note.title;
+
   // Derived, never tracked. A `saved` flag could only ever be false here — a
   // successful save unmounts this component — so the line it fed claimed
   // "Unsaved changes" over a note nobody had touched yet.
   const dirty =
+    titleDirty ||
     body !== note.body_markdown ||
     tags.length !== note.tags.length ||
     tags.some((tag, index) => tag !== note.tags[index]);
@@ -562,6 +570,7 @@ function EditNote({
       date: note.date,
       tags,
       body,
+      title: titleDirty ? trimmedTitle : null,
     })
       .then((result) => onDone(result))
       .catch((err: unknown) => {
@@ -598,14 +607,28 @@ function EditNote({
           </div>
         </header>
 
-        {/* Read-only: the filename never changes on edit, and moving a note is
-            the filing flow, not an edit. The caret still sits beside it,
-            because it marks where composing is happening. */}
+        {/* The title edits in place; the filename does not. Renaming the file
+            would break the note↔source pairing (a distilled note finds its
+            recording and transcript by filename stem) and every link pointing
+            at the old path — the slug rules apply once, at creation, and
+            frontmatter `title` carries the full editable string from then on.
+            Sent only when actually changed: `note.title` is the *effective*
+            title (the de-slugged filename when the key is absent), so echoing
+            it back verbatim would materialize that fallback into the file. */}
         {/* <header>, matching read mode. Compose and read draw the same
             region of the same document and used to disagree about what it
             was: read mode said <header>, edit and create said <div>. */}
         <header className="mt-3.5 flex items-center">
-          <h2 className={NOTE_TITLE}>{title}</h2>
+          <input
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Untitled"
+            aria-label="Title"
+            className={clsx(
+              NOTE_TITLE,
+              "focus-ring w-full border-none bg-transparent p-0 caret-kodama placeholder:text-ink-faint",
+            )}
+          />
         </header>
 
         {/* The date sits OUTSIDE the tags list: it is not a tag, and folding
