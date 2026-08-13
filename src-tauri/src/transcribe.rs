@@ -27,7 +27,7 @@ use kodabi_core::device::DeviceId;
 use kodabi_core::glossary::Glossary;
 use kodabi_core::inflight::{self, InflightSession, OrphanKind, RecoverableOrphan};
 use kodabi_core::metrics::PipelineTimings;
-use kodabi_core::pipeline::{transcribe_and_persist, PipelineProgress};
+use kodabi_core::pipeline::{transcribe_and_persist, PipelineProgress, ProgressScale};
 use kodabi_core::transcription::{self, AudioSource, Channel, SliceSource, TranscriptionEngine};
 use kodabi_llm::{ClaudeConfig, ClaudeRunner};
 use tauri::{AppHandle, Emitter, Manager};
@@ -39,6 +39,13 @@ const ENGINE_SAMPLE_RATE_HZ: u32 = 16_000;
 /// seconds at 16 kHz — matches the streamed-from-disk cadence so both paths
 /// exercise the engine the same way.
 const IN_MEMORY_CHUNK_SAMPLES: usize = ENGINE_SAMPLE_RATE_HZ as usize * 10;
+
+/// Channels every path transcribes: You (the mic) and Them (the system
+/// loopback). Both `run_spilled` and `run_in_memory` build exactly this pair.
+/// A session the combiner finalized has both padded to the recording's own
+/// length, which is what makes [`ProgressScale::even`] the right scale for a
+/// live stop — and what a crash-recovered spill cannot promise.
+const TRANSCRIBED_CHANNELS: usize = 2;
 
 /// How long an un-recoverable in-flight directory (corrupt, lone-channel, a
 /// mis-tap) is kept before [`kodabi_core::inflight::sweep_stale`] deletes it.
@@ -69,11 +76,11 @@ enum TranscriptionStateEvent {
     /// Genuinely waiting, which is the one case the UI may call "queued".
     Queued,
     /// Progress through the ASR pass, recording-normalized: `seconds_processed`
-    /// is the audio fed to the engines divided by the channel count and
-    /// clamped to `total_seconds`, which is the recording's own duration. The
+    /// is the audio fed to the engines read back onto the recording's own
+    /// length by [`ProgressScale`], and `total_seconds` is that length. The
     /// channels are transcribed one after the other, so the raw fed total runs
-    /// to twice the meeting's length — a figure the user has no way to read
-    /// against the meeting they remember.
+    /// to roughly twice the meeting's length — a figure the user has no way to
+    /// read against the meeting they remember.
     Transcribing {
         seconds_processed: f64,
         total_seconds: f64,
@@ -137,7 +144,9 @@ pub fn spawn_transcription(
             Utc::now() - chrono::Duration::milliseconds(duration.as_millis() as i64)
         });
 
-    let total_seconds = duration.as_secs_f64();
+    // A live stop always finalizes, so both channels are the recording's own
+    // length and the run feeds exactly two of them.
+    let scale = ProgressScale::even(duration.as_secs_f64(), TRANSCRIBED_CHANNELS);
 
     std::thread::spawn(move || {
         // Hold the lock across the whole pipeline so only one engine is ever
@@ -153,10 +162,10 @@ pub fn spawn_transcription(
             TRANSCRIPTION_STATE_EVENT,
             TranscriptionStateEvent::Transcribing {
                 seconds_processed: 0.0,
-                total_seconds,
+                total_seconds: scale.total_seconds,
             },
         );
-        match run(&app, combined, captured_at, total_seconds) {
+        match run(&app, combined, captured_at, scale) {
             Ok(path) => {
                 let _ = app.emit(
                     TRANSCRIPTION_STATE_EVENT,
@@ -306,17 +315,26 @@ fn recover_orphan(app: &AppHandle, orphan: RecoverableOrphan) {
     }
 
     // The in-flight metadata records when capture started but not how much of
-    // it reached the disk, so the denominator comes from the spill files
+    // it reached the disk, so both denominators come from the spill files
     // themselves. The longer channel is the session's length, matching what
-    // `AlignedSession::duration` would have reported for a normal stop.
-    let total_seconds = spill_seconds(&orphan.mic_pcm, orphan.meta.sample_rate)
-        .max(spill_seconds(&orphan.system_pcm, orphan.meta.sample_rate));
+    // `AlignedSession::duration` would have reported for a normal stop; the
+    // sum is what the engines will actually be fed. This is the one path where
+    // those two can disagree by more than the channel count: a crash never
+    // finalizes, so a source that died mid-meeting leaves a short channel
+    // beside a full one, and `ProgressScale::even` would peg the bar near half
+    // for the whole run.
+    let mic_seconds = spill_seconds(&orphan.mic_pcm, orphan.meta.sample_rate);
+    let system_seconds = spill_seconds(&orphan.system_pcm, orphan.meta.sample_rate);
+    let scale = ProgressScale {
+        total_seconds: mic_seconds.max(system_seconds),
+        fed_total_seconds: mic_seconds + system_seconds,
+    };
 
     let _ = app.emit(
         TRANSCRIPTION_STATE_EVENT,
         TranscriptionStateEvent::Transcribing {
             seconds_processed: 0.0,
-            total_seconds,
+            total_seconds: scale.total_seconds,
         },
     );
     match run_spilled(
@@ -325,7 +343,7 @@ fn recover_orphan(app: &AppHandle, orphan: RecoverableOrphan) {
         &orphan.system_pcm,
         orphan.meta.sample_rate,
         captured_at,
-        total_seconds,
+        scale,
     ) {
         Ok(path) => {
             let _ = app.emit(
@@ -422,13 +440,13 @@ pub(crate) fn knowledge_base_dir(app: &AppHandle) -> Result<PathBuf, String> {
 /// message string — the same convention `audio_cmds` uses for IPC results —
 /// since the only consumer here is the `transcription:state` event.
 ///
-/// `total_seconds` is the recording's own length, carried down solely as the
-/// denominator for the progress this pipeline emits.
+/// `scale` carries the recording's own length and the audio this run will
+/// feed the engines, the pair the progress events are reported against.
 fn run(
     app: &AppHandle,
     combined: CombinedSession,
     captured_at: DateTime<Utc>,
-    total_seconds: f64,
+    scale: ProgressScale,
 ) -> Result<PathBuf, String> {
     match combined {
         CombinedSession::Spilled(spilled) => run_spilled(
@@ -437,11 +455,9 @@ fn run(
             &spilled.system_path,
             spilled.sample_rate,
             captured_at,
-            total_seconds,
+            scale,
         ),
-        CombinedSession::InMemory(session) => {
-            run_in_memory(app, &session, captured_at, total_seconds)
-        }
+        CombinedSession::InMemory(session) => run_in_memory(app, &session, captured_at, scale),
     }
 }
 
@@ -454,7 +470,7 @@ fn run_spilled(
     system_path: &Path,
     source_rate: u32,
     captured_at: DateTime<Utc>,
-    total_seconds: f64,
+    scale: ProgressScale,
 ) -> Result<PathBuf, String> {
     let mut mic =
         Resampling16kSource::open(mic_path, source_rate).map_err(|err| err.to_string())?;
@@ -474,7 +490,7 @@ fn run_spilled(
         (Channel::You, &mut cleaned_mic),
         (Channel::Them, &mut system),
     ];
-    let path = persist(app, &mut channels, captured_at, total_seconds)?;
+    let path = persist(app, &mut channels, captured_at, scale)?;
     // Retain the recording now, while the spill files still exist — the
     // callers remove the in-flight directory only after this returns. The
     // staging temp lives inside that directory, so a crash mid-write leaves
@@ -501,7 +517,7 @@ fn run_in_memory(
     app: &AppHandle,
     session: &AlignedSession,
     captured_at: DateTime<Utc>,
-    total_seconds: f64,
+    scale: ProgressScale,
 ) -> Result<PathBuf, String> {
     let mic_pcm = session
         .channel_resampled(SessionChannel::Mic, ENGINE_SAMPLE_RATE_HZ)
@@ -520,7 +536,7 @@ fn run_in_memory(
         (Channel::You, &mut cleaned_mic),
         (Channel::Them, &mut system),
     ];
-    let path = persist(app, &mut channels, captured_at, total_seconds)?;
+    let path = persist(app, &mut channels, captured_at, scale)?;
     // Retain the recording from the resident 48 kHz channels (`channel`, not
     // `channel_resampled` — the WAV keeps capture fidelity). The staging temp
     // is a `.tmp` sibling in the sessions directory, invisible to both the
@@ -556,13 +572,13 @@ fn retain_audio(result: io::Result<()>, session_path: &Path) {
 
 /// Load the glossary and device identity and run the core transcribe → clean →
 /// persist pipeline over `channels` (each already yielding 16 kHz mono `f32`),
-/// republishing the pipeline's progress as `transcription:state` events against
-/// `total_seconds` as the denominator.
+/// republishing the pipeline's progress as `transcription:state` events read
+/// through `scale`.
 fn persist(
     app: &AppHandle,
     channels: &mut [(Channel, &mut dyn AudioSource)],
     captured_at: DateTime<Utc>,
-    total_seconds: f64,
+    scale: ProgressScale,
 ) -> Result<PathBuf, String> {
     let kb_dir = knowledge_base_dir(app)?;
     let glossary = Glossary::load(&kb_dir).map_err(|err| err.to_string())?;
@@ -574,25 +590,17 @@ fn persist(
     let stt_paths = crate::models::resolve_stt_paths(app);
     let mut make_engine = || build_engine(&stt_paths);
 
-    // The core counts every second it feeds an engine; the channels are
-    // transcribed one after the other, so dividing by their count turns that
-    // back into a position within the recording. The clamp covers the rounding
-    // either side of the resampler, and `Cleaning` pins the bar full for the
-    // stages that have no fraction at all (the headless Claude call, the
-    // write) rather than leaving it frozen just short of the end.
-    let channel_count = (channels.len() as f64).max(1.0);
+    // The core counts every second it feeds an engine; `scale` reads that back
+    // as a position within the recording (clamping, pinning `Cleaning` to the
+    // end, and refusing to divide by a denominator it hasn't got). This
+    // republishes, it does not compute — the arithmetic and its edge cases are
+    // `ProgressScale`'s, and unit-tested there.
     let mut on_progress = |progress: PipelineProgress| {
-        let seconds_processed = match progress {
-            PipelineProgress::Transcribing { seconds } => {
-                (seconds / channel_count).min(total_seconds)
-            }
-            PipelineProgress::Cleaning => total_seconds,
-        };
         let _ = app.emit(
             TRANSCRIPTION_STATE_EVENT,
             TranscriptionStateEvent::Transcribing {
-                seconds_processed,
-                total_seconds,
+                seconds_processed: scale.position_seconds(progress),
+                total_seconds: scale.total_seconds,
             },
         );
     };

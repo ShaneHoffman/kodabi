@@ -58,6 +58,65 @@ pub enum PipelineProgress {
     Cleaning,
 }
 
+/// The two denominators a [`PipelineProgress`] has to be read against to mean
+/// anything on screen, and the conversion between them.
+///
+/// They are genuinely different numbers. The pipeline counts *work*: every
+/// second of audio it feeds an engine, across channels transcribed one after
+/// the other. A progress bar counts *the recording*: the meeting the user
+/// remembers, which is one channel long. Dividing the first by the channel
+/// count only converts between them when every channel is the same length —
+/// true whenever the combiner finalized the session (it zero-pads both to the
+/// session's length), and **not** true of a crash-recovered spill, which holds
+/// exactly what reached the disk before the process died. A source that stopped
+/// producing mid-meeting leaves a short channel beside a full one, and the
+/// naive divisor would peg such a run's bar at half.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProgressScale {
+    /// The recording's own length: the figure the caller shows, and the value
+    /// [`Self::position_seconds`] never exceeds.
+    pub total_seconds: f64,
+    /// Audio the run will feed the engines in total, summed over every
+    /// channel. The pipeline's own counter runs to this.
+    pub fed_total_seconds: f64,
+}
+
+impl ProgressScale {
+    /// The scale for channels of equal length — every path that transcribes a
+    /// session the combiner finalized, since that pads each channel to the
+    /// session's length.
+    pub fn even(total_seconds: f64, channels: usize) -> Self {
+        Self {
+            total_seconds,
+            fed_total_seconds: total_seconds * channels as f64,
+        }
+    }
+
+    /// Where `progress` sits within the recording, in seconds of it.
+    ///
+    /// [`PipelineProgress::Cleaning`] pins to the end: the audio really is
+    /// through the engines, and the stages it fronts have no fraction to
+    /// report, so a bar that stopped short there would read as a hang.
+    /// The result is always finite and within `0..=total_seconds`, so a
+    /// degenerate scale (an unreadable spill leaving no denominator at all)
+    /// yields a harmless zero rather than a `NaN` on the wire.
+    pub fn position_seconds(self, progress: PipelineProgress) -> f64 {
+        let seconds = match progress {
+            PipelineProgress::Transcribing { seconds } => {
+                if !self.fed_total_seconds.is_finite() || self.fed_total_seconds <= 0.0 {
+                    return 0.0;
+                }
+                seconds / self.fed_total_seconds * self.total_seconds
+            }
+            PipelineProgress::Cleaning => self.total_seconds,
+        };
+        if !seconds.is_finite() {
+            return 0.0;
+        }
+        seconds.clamp(0.0, self.total_seconds.max(0.0))
+    }
+}
+
 /// Transcribes each channel's audio through a freshly built engine, merges
 /// the results into one you/them transcript, runs the glossary cleanup
 /// post-pass, and persists it.
@@ -310,6 +369,75 @@ mod tests {
                 PipelineProgress::Transcribing { seconds: 1.5 },
                 PipelineProgress::Cleaning,
             ]
+        );
+    }
+
+    #[test]
+    fn even_scale_reads_work_seconds_back_onto_the_recording() {
+        // Two channels of a 60s recording: the run feeds 120s of work, and
+        // half of that is the recording's midpoint, not its end.
+        let scale = ProgressScale::even(60.0, 2);
+        assert_eq!(scale.fed_total_seconds, 120.0);
+        assert_eq!(
+            scale.position_seconds(PipelineProgress::Transcribing { seconds: 60.0 }),
+            30.0
+        );
+        assert_eq!(
+            scale.position_seconds(PipelineProgress::Transcribing { seconds: 120.0 }),
+            60.0
+        );
+    }
+
+    #[test]
+    fn an_uneven_scale_still_reaches_the_end_of_the_recording() {
+        // A crash-recovered spill: the mic died five minutes into an hour, so
+        // the run feeds 65 minutes of work for a 60-minute recording. The
+        // naive `work / channels` divisor would peg this at 32:30 of 60:00 —
+        // a bar stuck near half while the ASR pass is actually finishing.
+        let scale = ProgressScale {
+            total_seconds: 3_600.0,
+            fed_total_seconds: 3_900.0,
+        };
+        assert_eq!(
+            scale.position_seconds(PipelineProgress::Transcribing { seconds: 3_900.0 }),
+            3_600.0
+        );
+        assert_eq!(
+            scale.position_seconds(PipelineProgress::Transcribing { seconds: 1_950.0 }),
+            1_800.0
+        );
+    }
+
+    #[test]
+    fn cleaning_pins_to_the_end_of_the_recording() {
+        let scale = ProgressScale::even(60.0, 2);
+        assert_eq!(scale.position_seconds(PipelineProgress::Cleaning), 60.0);
+    }
+
+    #[test]
+    fn a_degenerate_scale_yields_zero_rather_than_a_nan() {
+        // No denominator at all — an unreadable spill on the recovery path.
+        // The caller gets a harmless zero, never a `NaN` on the wire.
+        let scale = ProgressScale {
+            total_seconds: 0.0,
+            fed_total_seconds: 0.0,
+        };
+        assert_eq!(
+            scale.position_seconds(PipelineProgress::Transcribing { seconds: 10.0 }),
+            0.0
+        );
+        assert_eq!(scale.position_seconds(PipelineProgress::Cleaning), 0.0);
+    }
+
+    #[test]
+    fn progress_beyond_the_fed_total_clamps_to_the_recording() {
+        // Rounding either side of the resampler can feed a hair more than the
+        // scale predicted; a figure past the end of the recording is worse
+        // than a figure that stops there.
+        let scale = ProgressScale::even(60.0, 2);
+        assert_eq!(
+            scale.position_seconds(PipelineProgress::Transcribing { seconds: 130.0 }),
+            60.0
         );
     }
 
