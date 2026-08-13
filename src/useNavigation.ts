@@ -24,6 +24,15 @@ export type View =
        * remount the editor for a difference the document cannot see. */
       origin?: View;
     }
+  | {
+      kind: "glossary";
+      /** Which glossary to edit. `null` is the VAULT-WIDE one at the
+       * knowledge-base root — the glossary that biases transcription for every
+       * capture, since a session is transcribed before routing picks a
+       * project. A slug is that project's own glossary, which feeds routing
+       * signals and project context. */
+      slug: string | null;
+    }
   | { kind: "search"; query: string }
   | { kind: "settings" }
   | { kind: "terminal" }
@@ -36,7 +45,7 @@ export const INITIAL_VIEW: View = { kind: "inbox" };
  * A destination's full identity as one string, for anything that has to tell
  * two views of the same kind apart.
  *
- * `view.kind` alone is not that: three of the six kinds carry a payload, so
+ * `view.kind` alone is not that: four of the nine kinds carry a payload, so
  * "project" names every project there is. The error boundary keys on this,
  * because its fallback tells the user to pick another screen — and picking a
  * second project has to actually clear it.
@@ -47,6 +56,13 @@ export function viewKey(view: View): string {
       return `project:${view.slug}`;
     case "noteEditor":
       return `noteEditor:${view.noteId ?? "new"}:${view.project ?? ""}`;
+    case "glossary":
+      // The two scopes are spelled apart rather than folded onto a "vault"
+      // sentinel: `vault` is not a reserved project name (RESERVED_ROOT_DIRS),
+      // so `glossary:${slug ?? "vault"}` handed the vault-wide glossary and a
+      // project slugged `vault` one key — and this string changing is the
+      // whole of what resets the error boundary.
+      return view.slug === null ? "glossary:vault" : `glossary:project:${view.slug}`;
     case "search":
       return `search:${view.query}`;
     default:

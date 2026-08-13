@@ -357,19 +357,27 @@ Three things the prototype does **not** do, and one prediction it falsified.
   transform | filter | backdrop-filter | perspective | contain | will-change | container-type
   ```
 
-  **Update, the wide-Settings ticket:** `SettingsView`'s card grid put `container-type: inline-size`
-  (Tailwind's `@container`) above two `Select` call sites, Retention and Theme, which is §11's
-  trigger 4 by the letter. Measured rather than assumed, with the §12 containing-block probe in
-  headless Chromium (`Edg/151.0.4129.72`): a fixed `top:0 left:0` child of a
-  `container-type: inline-size` wrapper still lands at the viewport's `0,0`, and so does one inside
-  `container-type: size`. The four re-measured beside it — `contain: layout`, `backdrop-filter`,
-  `transform`, `will-change: transform` — each moved that probe to the wrapper's own corner, as this
-  section says they do. So **`container-type` does not capture `position: fixed` in current
-  Chromium**, and the Settings menus land identically, flip and all, with the container present and
-  absent, in both transparency states.
+  **Update, the wide-Settings ticket — `container-type` measured and cleared.** An intermediate
+  version of that ticket briefly put `container-type: inline-size` (Tailwind's `@container`) above
+  two `Select` call sites, Retention and Theme, which is §11's trigger 4 by the letter, so it was
+  measured rather than assumed: with the §12 containing-block probe in headless Chromium
+  (`Edg/151.0.4129.72`), a fixed `top:0 left:0` child of a `container-type: inline-size` wrapper
+  still lands at the viewport's `0,0`, and so does one inside `container-type: size`. The four
+  re-measured beside it — `contain: layout`, `backdrop-filter`, `transform`,
+  `will-change: transform` — each moved that probe to the wrapper's own corner, as this section
+  says they do. So **`container-type` does not capture `position: fixed` in current Chromium**, and
+  both menus placed identically, flip and all, with the container present and absent, in both
+  transparency states.
 
-  The list above stays the grep to run. `container-type` is the one entry whose hit is not
-  automatically a finding: measure it, don't assume it. Trigger 4 is answered rather than open.
+  That container is **no longer in the tree** — Settings ships a plain full-width card stack, so
+  no `container-type` sits above those two triggers any more. The list above is not empty over them
+  even so: `main` wears `glass-panel`, whose `backdrop-filter: blur(28px)` (`src/index.css` §3,
+  applied at `src/components/shell/AppShell.tsx`) is the containing block every view's menus
+  already resolve against, in the transparency state that keeps it. That one predates the ticket
+  and is unchanged by it. The measurement is kept because it is the answer, not because the code
+  still depends on it: the list stays the grep to run, and `container-type` is the one entry whose
+  hit is not automatically a finding — measure it, don't assume it. Trigger 4 is answered rather
+  than open.
 
 - **The anchored menu is ~10px right and ~5px down of today's.** Measured: today's stance gives
   `dxRight −10, dyTop 3`; anchored gives `dxRight 0, dyTop 8`. The cause is real and arguably a fix

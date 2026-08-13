@@ -7,6 +7,7 @@ import { folderHue, useProjects, type FolderHue } from "../../useProjects";
 import { DeleteProjectDialog } from "../dialogs/DeleteProjectDialog";
 import { RenameProjectDialog } from "../dialogs/RenameProjectDialog";
 import { Button } from "../ui/Button";
+import { Menu } from "../ui/Menu";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
 
@@ -126,13 +127,16 @@ export function ProjectView({ slug }: Props) {
             slug
       }
       action={
-        // Ink, not the reserved green: the verbs on a reading screen earn their
-        // place by being quiet text, not by being a colour. Creation leads and
-        // the destructive one sits last; both it and the rename sit behind a
-        // dialog, so neither needs weight of its own here. Three actions
-        // stretches `ViewFrame`'s single-action slot further than its doc
-        // describes — a knowing bend, since editing the folder's identity
-        // belongs beside the identity, which is what this header is.
+        // Ink, not the reserved green: the verbs on a reading screen earn
+        // their place by being quiet text, not by being a colour. Creation
+        // leads and stays a button, because it is the thing you came here to
+        // do.
+        //
+        // EVERYTHING ELSE THIS FOLDER CAN DO GOES IN THE MENU. The header slot
+        // holds one action, and the glossary made three — so rather than grow
+        // a toolbar the frame's doc forbids, the project's other verbs collapse
+        // behind one trigger. Rename is exactly the next project-scoped verb
+        // that home was built for.
         <div className="flex items-center gap-2">
           <Button
             variant="quiet"
@@ -140,16 +144,30 @@ export function ProjectView({ slug }: Props) {
           >
             New note
           </Button>
-          <Button variant="quiet" aria-haspopup="dialog" onClick={() => setRenaming(true)}>
-            Rename
-          </Button>
-          <Button
-            variant="quiet"
-            aria-haspopup="dialog"
-            onClick={() => setConfirmingDelete(true)}
-          >
-            Delete project
-          </Button>
+          <Menu.Root>
+            <Menu.Trigger
+              render={
+                <Button variant="quiet" aria-label={`${displayName} project actions`}>
+                  Project
+                  <span aria-hidden="true" className="text-[10px] text-ink-faint">
+                    ▾
+                  </span>
+                </Button>
+              }
+            />
+            {/* `end`: the trigger sits at the right edge of the header, so the
+                menu hangs back over the view rather than off the panel. */}
+            <Menu.Content align="end">
+              <Menu.Item onClick={() => navigate({ kind: "glossary", slug })}>
+                Glossary
+              </Menu.Item>
+              {/* Rename and delete both need more from the user before they
+                  take effect (a name, a confirmation), which the ellipsis
+                  promises on either. */}
+              <Menu.Item onClick={() => setRenaming(true)}>Rename…</Menu.Item>
+              <Menu.Item onClick={() => setConfirmingDelete(true)}>Delete project…</Menu.Item>
+            </Menu.Content>
+          </Menu.Root>
         </div>
       }
     >

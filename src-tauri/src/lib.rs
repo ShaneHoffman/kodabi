@@ -5,6 +5,7 @@ mod chat_cmds;
 mod chat_distill_cmds;
 mod distill_cmds;
 mod events;
+mod glossary_cmds;
 mod index_cmds;
 mod index_state;
 mod models;
@@ -240,6 +241,10 @@ pub fn run() {
             note_cmds::create_project,
             note_cmds::delete_project,
             note_cmds::rename_project,
+            glossary_cmds::list_glossary_terms,
+            glossary_cmds::add_glossary_term,
+            glossary_cmds::update_glossary_term,
+            glossary_cmds::delete_glossary_term,
             index_cmds::rebuild_index,
             index_cmds::search_notes,
             models_cmds::model_status,

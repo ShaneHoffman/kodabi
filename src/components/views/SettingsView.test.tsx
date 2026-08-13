@@ -3,6 +3,8 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsView } from "./SettingsView";
 import { ModelStatusProvider } from "../providers/ModelStatusProvider";
+import { NavigationProvider } from "../providers/NavigationProvider";
+import { NavigationContext } from "../../useNavigation";
 import { UpdaterProvider } from "../providers/UpdaterProvider";
 import type { OverlaySettings, Settings } from "../../useSettings";
 import { INDEX_STATE_EVENT } from "../../events";
@@ -77,11 +79,15 @@ function settingsWith(overlay: OverlaySettings): Settings {
 async function renderSeeded(settings: Settings = DEFAULTS) {
   onCommand("get_settings", () => settings);
   const result = render(
-    <UpdaterProvider>
-      <ModelStatusProvider>
-        <SettingsView />
-      </ModelStatusProvider>
-    </UpdaterProvider>,
+    // NavigationProvider because the Glossary card's Manage row navigates: in
+    // the app this view is always mounted inside it, under MainContent.
+    <NavigationProvider>
+      <UpdaterProvider>
+        <ModelStatusProvider>
+          <SettingsView />
+        </ModelStatusProvider>
+      </UpdaterProvider>
+    </NavigationProvider>,
   );
   await screen.findByRole("region", { name: "Privacy" });
   return result;
@@ -630,6 +636,51 @@ describe("SettingsView mic test", () => {
       // The licence obliges us to state that the files were changed.
       expect(attribution).toHaveTextContent(/quantized to int8/);
     });
+  });
+});
+
+describe("SettingsView glossary card", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  /**
+   * The vault glossary's only entry point. Every project glossary hangs off
+   * its own project; the vault-wide one belongs to no folder, so if this row
+   * does not navigate there is no way to reach the glossary that actually
+   * biases transcription.
+   */
+  it("hands off to the vault glossary view", async () => {
+    const user = userEvent.setup();
+    const navigate = vi.fn();
+    onCommand("get_settings", () => DEFAULTS);
+    render(
+      <NavigationContext.Provider value={{ view: { kind: "settings" }, navigate }}>
+        <UpdaterProvider>
+          <ModelStatusProvider>
+            <SettingsView />
+          </ModelStatusProvider>
+        </UpdaterProvider>
+      </NavigationContext.Provider>,
+    );
+    await screen.findByRole("region", { name: "Privacy" });
+
+    await user.click(within(card("Glossary")).getByRole("button", { name: "Manage" }));
+
+    // `slug: null` is the vault scope, not a missing argument.
+    expect(navigate).toHaveBeenCalledWith({ kind: "glossary", slug: null });
+  });
+
+  it("says what the vault glossary is for, and where project terms live", async () => {
+    await renderSeeded();
+
+    const glossary = card("Glossary");
+    expect(
+      within(glossary).getByText(/bias transcription for every capture/),
+    ).toBeInTheDocument();
+    expect(
+      within(glossary).getByText(/Each project keeps its own glossary for routing/),
+    ).toBeInTheDocument();
   });
 });
 

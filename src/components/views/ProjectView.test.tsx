@@ -39,6 +39,7 @@ function serveVault(projects: Project[]): void {
   onCommand("list_projects", () => ({ inbox_note_count: 0, projects }));
   onCommand("list_notes", () => []);
   onCommand("list_failed_sessions", () => []);
+  onCommand("list_glossary_terms", (args) => ({ project: args?.project ?? null, terms: [] }));
   onCommand("capture_phase", () => ({
     phase: "idle",
     sources: { loopback: "off", microphone: "off" },
@@ -64,12 +65,22 @@ function renderShell() {
   );
 }
 
-/** Renders the shell and navigates into the Growth project view. */
-async function openGrowth(user: ReturnType<typeof userEvent.setup>) {
+/**
+ * Renders the shell, navigates into the Growth project view, and opens the
+ * header's Project menu — where every project verb but "New note" lives, since
+ * the frame header's action slot holds one control.
+ */
+async function openGrowthMenu(user: ReturnType<typeof userEvent.setup>) {
   serveVault([project("Growth", 2), project("Growth/Q4", 3)]);
   renderShell();
   await user.click(await screen.findByRole("button", { name: /Growth/ }));
-  return screen.findByRole("button", { name: "Delete project" });
+  await user.click(await screen.findByRole("button", { name: "Growth project actions" }));
+}
+
+/** The above, then the menu's delete entry, which is what opens the confirm. */
+async function openGrowth(user: ReturnType<typeof userEvent.setup>) {
+  await openGrowthMenu(user);
+  return screen.findByRole("menuitem", { name: "Delete project…" });
 }
 
 describe("ProjectView delete flow", () => {
@@ -161,25 +172,43 @@ describe("ProjectView delete flow", () => {
   });
 });
 
+describe("ProjectView glossary entry", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  it("opens this project's glossary from the Project menu", async () => {
+    const user = userEvent.setup();
+    await openGrowthMenu(user);
+
+    await user.click(await screen.findByRole("menuitem", { name: "Glossary" }));
+
+    expect(
+      await screen.findByRole("heading", { name: "Growth", level: 2 }),
+    ).toBeInTheDocument();
+    // The project's own glossary, not the vault-wide one: the scope is the
+    // whole difference between biasing transcription and feeding routing.
+    expect(invoke).toHaveBeenCalledWith("list_glossary_terms", { project: "Growth" });
+    expect(
+      screen.getByText(/These terms help route notes to this project/),
+    ).toBeInTheDocument();
+  });
+});
+
 describe("ProjectView rename affordance", () => {
   beforeEach(() => {
     resetTauriMocks();
   });
 
-  it("offers rename beside the other header actions, opening a prefilled dialog", async () => {
-    // The header is where the folder's identity lives (hue, name, slug), so
-    // editing that identity belongs here too. The rename flow itself is
-    // covered by RenameProjectDialog.test.tsx; this pins the wiring.
+  it("opens a prefilled dialog from the Project menu", async () => {
+    // Rename is a project-scoped verb like Glossary and Delete project, so it
+    // lives in the same menu rather than a fourth button contending with
+    // ViewFrame's single header action. The rename flow itself is covered by
+    // RenameProjectDialog.test.tsx; this pins the wiring.
     const user = userEvent.setup();
-    await openGrowth(user);
+    await openGrowthMenu(user);
 
-    const rename = screen.getByRole("button", { name: "Rename" });
-    expect(rename).toHaveAttribute("aria-haspopup", "dialog");
-    // Creation leads, the destructive action sits last.
-    expect(screen.getByRole("button", { name: "New note" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Delete project" })).toBeInTheDocument();
-
-    await user.click(rename);
+    await user.click(await screen.findByRole("menuitem", { name: "Rename…" }));
 
     const dialog = screen.getByRole("dialog", { name: "Rename project" });
     expect(within(dialog).getByLabelText("Project name")).toHaveValue("Growth");

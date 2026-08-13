@@ -51,7 +51,12 @@ function VaultBridge() {
   return null;
 }
 
-/** Renders the shell and opens the rename dialog on the Growth project. */
+/**
+ * Renders the shell and opens the rename dialog on the Growth project via the
+ * header's Project menu, where Rename lives alongside Glossary and Delete
+ * project — ViewFrame's header action slot holds one control, so every verb
+ * but "New note" collapses behind that single trigger.
+ */
 async function openRename(user: ReturnType<typeof userEvent.setup>) {
   serveVault([project("Growth", 2)]);
   render(
@@ -64,7 +69,8 @@ async function openRename(user: ReturnType<typeof userEvent.setup>) {
     </NavigationProvider>,
   );
   await user.click(await screen.findByRole("button", { name: /Growth/ }));
-  await user.click(await screen.findByRole("button", { name: "Rename" }));
+  await user.click(await screen.findByRole("button", { name: "Growth project actions" }));
+  await user.click(await screen.findByRole("menuitem", { name: "Rename…" }));
   return screen.getByRole("dialog", { name: "Rename project" });
 }
 

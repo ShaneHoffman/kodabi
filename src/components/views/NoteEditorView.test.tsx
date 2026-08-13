@@ -293,6 +293,110 @@ describe("NoteEditorView details rail", () => {
   });
 });
 
+describe("NoteEditorView compose title", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  /** Opens a note in compose mode and returns the title box. */
+  async function openEditor(note: NoteDetail, project = "briarwood-golf") {
+    const user = userEvent.setup();
+    renderNote(project, note);
+    await screen.findByRole("heading", { name: note.title });
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    return { user, titleBox: screen.getByRole("textbox", { name: "Title" }) };
+  }
+
+  /** The `input` payload of the one `save_note` invocation. */
+  function savedInput(): Record<string, unknown> {
+    const call = invoke.mock.calls.find(([command]) => command === "save_note");
+    expect(call).toBeDefined();
+    return (call![1] as { input: Record<string, unknown> }).input;
+  }
+
+  const note = () =>
+    makeNote({ id: "n_a1b2c3", title: "Quarterly planning", project: "briarwood-golf" });
+
+  it("edits the title in place and marks the note dirty", async () => {
+    const { user, titleBox } = await openEditor(note());
+    expect(titleBox).toHaveValue("Quarterly planning");
+    // Nothing touched yet: the status line stays silent.
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
+
+    await user.clear(titleBox);
+    await user.type(titleBox, "Q3 planning");
+
+    expect(titleBox).toHaveValue("Q3 planning");
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+  });
+
+  it("sends the new title and shows the saved echo in read mode", async () => {
+    const { user, titleBox } = await openEditor(note());
+    const retitled = makeNote({
+      id: "n_a1b2c3",
+      title: "Q3 planning",
+      project: "briarwood-golf",
+    });
+    onCommand("save_note", () => retitled);
+
+    await user.clear(titleBox);
+    await user.type(titleBox, "Q3 planning");
+    await user.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(invokedCommands()).toContain("save_note"));
+    expect(savedInput().title).toBe("Q3 planning");
+    // The echo lands: read mode names the note by its new title.
+    expect(await screen.findByRole("heading", { name: "Q3 planning" })).toBeInTheDocument();
+  });
+
+  it("sends a null title when only the body changed", async () => {
+    // `note.title` may be a de-slugged filename rather than a stored key, so
+    // an untouched title must not be echoed back and materialized.
+    const { user } = await openEditor(note());
+    onCommand("save_note", () => note());
+
+    await user.type(screen.getByRole("textbox", { name: "Note body" }), " More.");
+    await user.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(invokedCommands()).toContain("save_note"));
+    expect(savedInput().title).toBeNull();
+  });
+
+  it("treats a cleared title as unchanged rather than as a deletion", async () => {
+    const { user, titleBox } = await openEditor(note());
+    onCommand("save_note", () => note());
+
+    await user.clear(titleBox);
+    // An empty box is not an edit: nothing to save yet.
+    expect(screen.queryByText("Unsaved changes")).toBeNull();
+
+    await user.type(screen.getByRole("textbox", { name: "Note body" }), " More.");
+    await user.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(invokedCommands()).toContain("save_note"));
+    expect(savedInput().title).toBeNull();
+  });
+
+  it("adds a title to a note that displays its de-slugged filename", async () => {
+    // No frontmatter `title` key: the backend seeded the display title from
+    // the filename stem, and editing it is what materializes the key.
+    const untitled = makeNote({
+      id: "n_d4e5f6",
+      title: "weekly sync",
+      project: "briarwood-golf",
+    });
+    const { user, titleBox } = await openEditor(untitled);
+    onCommand("save_note", () => untitled);
+
+    await user.clear(titleBox);
+    await user.type(titleBox, "Weekly Sync");
+    await user.click(screen.getByRole("button", { name: "Done" }));
+
+    await waitFor(() => expect(invokedCommands()).toContain("save_note"));
+    expect(savedInput().title).toBe("Weekly Sync");
+  });
+});
+
 describe("NoteEditorView action items", () => {
   beforeEach(() => {
     resetTauriMocks();

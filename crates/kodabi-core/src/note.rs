@@ -450,12 +450,19 @@ impl Routing {
 // ---------------------------------------------------------------------------
 
 /// The editable subset of a note — what the edit flow may replace. Everything
-/// else (`id`, `title`, `source`, routing) is preserved verbatim by
+/// else (`id`, `source`, routing) is preserved verbatim by
 /// [`Note::with_edits`]; moving a note between projects is the re-route flow,
-/// not an edit, and the title is set once at creation like the filename.
+/// not an edit. The *filename* is what is set once at creation: it keeps its
+/// creation slug however the title changes, because renaming the file would
+/// break the note↔source pairing and every link that points at the old path.
 #[derive(Debug, Clone, PartialEq)]
 pub struct NoteEdit {
     pub note_type: NoteType,
+    /// The new display title. `None` preserves the stored title (or its
+    /// absence) verbatim; `Some` sets it through [`Note::with_title`]'s
+    /// normalization, so a blank value clears the key and hands display back
+    /// to the de-slugged filename.
+    pub title: Option<String>,
     pub date: String,
     pub tags: Vec<Tag>,
     pub body: String,
@@ -533,10 +540,12 @@ impl Note {
     /// lives here so every shell (Tauri command, MCP `edit_note`) shares one
     /// implementation instead of re-merging by hand.
     pub fn with_edits(self, edit: NoteEdit) -> Result<Self> {
-        // The title is set once at creation and preserved verbatim across edits
-        // (like `id`, `source`, and routing) — an edit replaces only the body,
-        // tags, date, and type. Carry it across the rebuild.
-        let title = self.title;
+        // `None` preserves the stored title verbatim (the shell sends it when
+        // the user did not touch the title); `Some` replaces it, normalized by
+        // `with_title` — a blank clears the key. The filename keeps its
+        // creation slug either way: renaming it would break the note↔source
+        // pairing and every link to the old path.
+        let title = edit.title.or(self.title);
         Note::new(
             self.id,
             edit.note_type,
@@ -1330,19 +1339,75 @@ contractor shortlist.
     }
 
     #[test]
-    fn with_edits_preserves_the_title() {
+    fn with_edits_preserves_the_title_when_the_edit_carries_none() {
         let note = meeting_note();
         let original_title = note.title.clone();
         assert!(original_title.is_some());
         let edited = note
             .with_edits(NoteEdit {
                 note_type: NoteType::Meeting,
+                title: None,
                 date: "2026-07-11".to_string(),
                 tags: tags(&["edited"]),
                 body: "# Edited\n\nnew body".to_string(),
             })
             .unwrap();
         assert_eq!(edited.title, original_title);
+    }
+
+    #[test]
+    fn with_edits_sets_and_normalizes_the_title_when_the_edit_carries_some() {
+        let note = meeting_note();
+        assert_ne!(note.title.as_deref(), Some("New Title"));
+        let edited = note
+            .with_edits(NoteEdit {
+                note_type: NoteType::Meeting,
+                title: Some("  New\n  Title  ".to_string()),
+                date: "2026-07-11".to_string(),
+                tags: tags(&["edited"]),
+                body: "# Edited\n\nnew body".to_string(),
+            })
+            .unwrap();
+        // Normalization is `with_title`'s, not the shell's: collapsed and
+        // trimmed on the way in.
+        assert_eq!(edited.title.as_deref(), Some("New Title"));
+        assert!(edited.to_markdown().contains("title: New Title"));
+    }
+
+    #[test]
+    fn with_edits_adds_the_title_key_to_a_note_that_lacked_one() {
+        // The edge case: a hand-written note with no `title` key displays a
+        // de-slugged filename. Editing the title materializes the key.
+        let note = note_inbox();
+        assert_eq!(note.title, None);
+        let edited = note
+            .with_edits(NoteEdit {
+                note_type: NoteType::Note,
+                title: Some("Named At Last".to_string()),
+                date: "2026-07-11".to_string(),
+                tags: vec![],
+                body: "body".to_string(),
+            })
+            .unwrap();
+        assert_eq!(edited.title.as_deref(), Some("Named At Last"));
+        assert!(edited.to_markdown().contains("title: Named At Last"));
+    }
+
+    #[test]
+    fn with_edits_clears_the_title_when_the_edit_carries_a_blank() {
+        let note = meeting_note();
+        assert!(note.title.is_some());
+        let edited = note
+            .with_edits(NoteEdit {
+                note_type: NoteType::Meeting,
+                title: Some("   ".to_string()),
+                date: "2026-07-11".to_string(),
+                tags: tags(&["edited"]),
+                body: "# Edited\n\nnew body".to_string(),
+            })
+            .unwrap();
+        assert_eq!(edited.title, None);
+        assert!(!edited.to_markdown().contains("title:"));
     }
 
     // --- field-omission combinations --------------------------------------
@@ -2153,6 +2218,7 @@ contractor shortlist.
             .clone()
             .with_edits(NoteEdit {
                 note_type: NoteType::Note,
+                title: None,
                 date: "2026-07-12".to_string(),
                 tags: vec![Tag::parse("follow-up").unwrap()],
                 body: "Rewritten.".to_string(),
@@ -2187,6 +2253,7 @@ contractor shortlist.
         let merged = manual
             .with_edits(NoteEdit {
                 note_type: NoteType::Note,
+                title: None,
                 date: "2026-07-11".to_string(),
                 tags: vec![],
                 body: "New.".to_string(),
@@ -2217,6 +2284,7 @@ contractor shortlist.
         .unwrap();
         let bad_date = original.with_edits(NoteEdit {
             note_type: NoteType::Note,
+            title: None,
             date: "2026-07-10T14:00:00".to_string(), // offset-less: invalid
             tags: vec![],
             body: String::new(),

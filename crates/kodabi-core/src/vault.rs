@@ -284,6 +284,10 @@ pub fn canonicalize_project(vault_root: &Path, project: &str) -> Result<String> 
 /// atomically rewrite the file in place. `Ok(None)` when no note carries the
 /// id. Every shell — the Tauri `save_note` command, the coming MCP
 /// `edit_note` — should call this rather than re-implementing the sequence.
+///
+/// The returned [`ListedNote`] carries the *post-edit* effective title, so a
+/// caller that indexes or echoes it reflects a retitled note. The filename is
+/// untouched: it keeps its creation slug however the title changes.
 pub fn save_note_edit(
     vault_root: &Path,
     project: &str,
@@ -295,10 +299,14 @@ pub fn save_note_edit(
     };
     let merged = listed.note.with_edits(edit)?;
     note::save_note_at(&listed.path, &merged)?;
+    // Recomputed from the merged note, never carried over from `listed`: an
+    // edit may replace the title, and the stale value would flow straight into
+    // the index and the caller's echo while the file on disk said otherwise.
+    let title = effective_title(&merged, &listed.path);
     Ok(Some(ListedNote {
         note: merged,
         path: listed.path,
-        title: listed.title,
+        title,
     }))
 }
 
@@ -565,25 +573,61 @@ pub struct GlossaryUpsert {
     pub created: bool,
 }
 
-/// Why [`add_glossary_term`] could not store a term. Kept distinct from
+/// Which glossary an operation targets, echoed back with the canonical slug.
+///
+/// `None` is the **vault-wide** glossary at the knowledge-base root: the one
+/// the transcription pipeline loads to bias every capture, since a session is
+/// transcribed before routing has chosen a project. `Some(slug)` is that
+/// project's own glossary, which feeds routing signals and project context.
+type GlossaryScope = Option<String>;
+
+/// A glossary's full contents, in file order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlossaryListing {
+    /// The scope read: `None` for the vault-wide glossary, else the canonical
+    /// (casing-adopted) project slug.
+    pub project: GlossaryScope,
+    /// Every term, in the order the file stores them.
+    pub terms: Vec<glossary::GlossaryTerm>,
+}
+
+/// The outcome of a glossary write: the affected term and whether it was new.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlossaryWrite {
+    /// The scope written: `None` for the vault-wide glossary, else the
+    /// canonical project slug.
+    pub project: GlossaryScope,
+    /// The term as persisted (or, for a removal, the entry that was removed).
+    pub term: glossary::GlossaryTerm,
+    /// `true` when a new term was created; `false` when an existing term was
+    /// updated in place or removed.
+    pub created: bool,
+}
+
+/// Why a glossary operation could not complete. Kept distinct from
 /// [`NoteError`] and [`glossary::GlossaryError`] so a shell can route each case
 /// to the right channel: a malformed slug or field is a caller bug, a missing
-/// project or an `on_conflict: "error"` hit are actionable business faults, and
-/// storage failures are internal.
+/// project, a missing term or an `on_conflict: "error"` hit are actionable
+/// business faults, and storage failures are internal.
 #[derive(Debug, thiserror::Error)]
-pub enum AddGlossaryTermError {
+pub enum GlossaryOpError {
     /// The project slug is malformed (shape or reserved-name violation).
     #[error(transparent)]
     InvalidProject(NoteError),
     /// `term` or `definition` is blank or over its length bound.
     #[error("invalid glossary {field}: {detail}")]
     InvalidInput { field: &'static str, detail: String },
-    /// The target project folder does not exist (this tool never creates one).
+    /// The target project folder does not exist (these functions never create
+    /// one).
     #[error("project {project:?} does not exist")]
     MissingProject { project: String },
-    /// `on_conflict: "error"` and the normalized term already exists.
+    /// `on_conflict: "error"` and the normalized term already exists, or a
+    /// rename would land on another entry's term.
     #[error("glossary term {term:?} already exists")]
     Conflict { term: String },
+    /// The term to update or remove is not in the target glossary.
+    #[error("glossary term {term:?} does not exist")]
+    NotFound { term: String },
     /// Reading or writing the glossary file failed (I/O, YAML, or a duplicate
     /// term already on disk).
     #[error(transparent)]
@@ -591,69 +635,155 @@ pub enum AddGlossaryTermError {
 }
 
 /// Adds or updates a glossary term for `project` — the MCP `add_glossary_term`
-/// tool's shared body (`docs/MCP_TOOL_SURFACE.md` §8). Resolves the project slug
-/// to its folder (adopting on-disk casing), requires the project to already
-/// exist (unlike [`file_note_to_project`], this never creates one), then loads,
-/// upserts by normalized term, and saves the project's `_glossary.yml`.
+/// tool's shared body (`docs/MCP_TOOL_SURFACE.md` §8).
 ///
-/// Returns the stored term (as persisted) and whether it was newly created.
-/// `on_conflict` decides an existing normalized term: [`OnConflict::Update`]
-/// overwrites it, [`OnConflict::Error`] leaves it untouched and returns
-/// [`AddGlossaryTermError::Conflict`].
-///
-/// [`OnConflict::Update`]: glossary::OnConflict::Update
-/// [`OnConflict::Error`]: glossary::OnConflict::Error
+/// A project-scoped shim over [`upsert_glossary_term`], kept because the MCP
+/// tool's payload always names a project: it echoes the canonical slug as a
+/// plain `String` rather than the scope's `Option`.
 pub fn add_glossary_term(
     vault_root: &Path,
     project: &str,
     term: glossary::GlossaryTerm,
     on_conflict: glossary::OnConflict,
-) -> std::result::Result<GlossaryUpsert, AddGlossaryTermError> {
-    // Mirror the input schema's bounds server-side: a term that trims to empty
-    // would persist as a blank key, and both fields are length-capped.
+) -> std::result::Result<GlossaryUpsert, GlossaryOpError> {
+    let write = upsert_glossary_term(vault_root, Some(project), term, on_conflict)?;
+    Ok(GlossaryUpsert {
+        project: write
+            .project
+            .expect("a project-scoped upsert echoes its project"),
+        term: write.term,
+        created: write.created,
+    })
+}
+
+/// Mirrors the MCP input schema's bounds server-side: a term that trims to
+/// empty would persist as a blank key, and both fields are length-capped.
+fn validate_glossary_fields(
+    term: &glossary::GlossaryTerm,
+) -> std::result::Result<(), GlossaryOpError> {
     if term.term.trim().is_empty() {
-        return Err(AddGlossaryTermError::InvalidInput {
+        return Err(GlossaryOpError::InvalidInput {
             field: "term",
             detail: "term must not be blank".to_string(),
         });
     }
     if term.term.chars().count() > GLOSSARY_TERM_MAX_CHARS {
-        return Err(AddGlossaryTermError::InvalidInput {
+        return Err(GlossaryOpError::InvalidInput {
             field: "term",
             detail: format!("term must be at most {GLOSSARY_TERM_MAX_CHARS} characters"),
         });
     }
     if term.definition.trim().is_empty() {
-        return Err(AddGlossaryTermError::InvalidInput {
+        return Err(GlossaryOpError::InvalidInput {
             field: "definition",
             detail: "definition must not be blank".to_string(),
         });
     }
     if term.definition.chars().count() > GLOSSARY_DEFINITION_MAX_CHARS {
-        return Err(AddGlossaryTermError::InvalidInput {
+        return Err(GlossaryOpError::InvalidInput {
             field: "definition",
             detail: format!(
                 "definition must be at most {GLOSSARY_DEFINITION_MAX_CHARS} characters"
             ),
         });
     }
+    Ok(())
+}
 
-    // Validate the slug shape and adopt on-disk casing (rejects reserved/hidden
-    // names and the Inbox). A malformed slug is a caller bug, not a missing
-    // project.
+/// Resolves a glossary scope to the directory holding its `_glossary.yml`,
+/// echoing the canonical scope alongside it.
+///
+/// `None` is the vault root itself. A project slug is validated for shape and
+/// adopts on-disk casing (rejecting reserved/hidden names and the Inbox), and
+/// the folder must already exist — these functions never create a project.
+fn glossary_scope_dir(
+    vault_root: &Path,
+    project: Option<&str>,
+) -> std::result::Result<(GlossaryScope, PathBuf), GlossaryOpError> {
+    let Some(project) = project else {
+        return Ok((None, vault_root.to_path_buf()));
+    };
+    // A malformed slug is a caller bug, not a missing project.
     let canonical =
-        canonicalize_project(vault_root, project).map_err(AddGlossaryTermError::InvalidProject)?;
+        canonicalize_project(vault_root, project).map_err(GlossaryOpError::InvalidProject)?;
     let dir = note::project_dir(vault_root, &canonical);
     if !dir.is_dir() {
-        return Err(AddGlossaryTermError::MissingProject { project: canonical });
+        return Err(GlossaryOpError::MissingProject { project: canonical });
     }
+    Ok((Some(canonical), dir))
+}
+
+/// Opens the glossary for a scope, returning the resolved scope, its directory
+/// and the loaded contents — the shared preamble of every operation below.
+fn load_scoped_glossary(
+    vault_root: &Path,
+    project: Option<&str>,
+) -> std::result::Result<(GlossaryScope, PathBuf, glossary::Glossary), GlossaryOpError> {
+    let (scope, dir) = glossary_scope_dir(vault_root, project)?;
+    let glossary = glossary::Glossary::load(&dir).map_err(glossary_op_err)?;
+    Ok((scope, dir, glossary))
+}
+
+/// Persists a glossary, creating the vault root first when that is the scope.
+///
+/// A project folder is guaranteed to exist by [`glossary_scope_dir`], but the
+/// vault root may not: on a fresh install nothing has written the knowledge
+/// base yet, and the first vault-wide term must not fail on a missing parent.
+fn save_scoped_glossary(
+    glossary: &glossary::Glossary,
+    dir: &Path,
+    scope: &GlossaryScope,
+) -> std::result::Result<(), GlossaryOpError> {
+    if scope.is_none() {
+        std::fs::create_dir_all(dir).map_err(|source| {
+            glossary_op_err(glossary::GlossaryError::Io {
+                path: dir.to_path_buf(),
+                source,
+            })
+        })?;
+    }
+    glossary.save(dir).map_err(glossary_op_err)
+}
+
+/// Reads every term in a glossary, in file order.
+///
+/// `project` is `None` for the vault-wide glossary at the knowledge-base root
+/// (the one transcription biases against) or `Some(slug)` for a project's own.
+/// A scope with no glossary file yet lists no terms rather than failing.
+pub fn list_glossary_terms(
+    vault_root: &Path,
+    project: Option<&str>,
+) -> std::result::Result<GlossaryListing, GlossaryOpError> {
+    let (scope, _dir, glossary) = load_scoped_glossary(vault_root, project)?;
+    Ok(GlossaryListing {
+        project: scope,
+        terms: glossary.terms().to_vec(),
+    })
+}
+
+/// Adds a term to a glossary, or updates the existing entry with the same
+/// normalized term.
+///
+/// `on_conflict` decides an existing normalized term: [`OnConflict::Update`]
+/// overwrites it, [`OnConflict::Error`] leaves it untouched and returns
+/// [`GlossaryOpError::Conflict`].
+///
+/// [`OnConflict::Update`]: glossary::OnConflict::Update
+/// [`OnConflict::Error`]: glossary::OnConflict::Error
+pub fn upsert_glossary_term(
+    vault_root: &Path,
+    project: Option<&str>,
+    term: glossary::GlossaryTerm,
+    on_conflict: glossary::OnConflict,
+) -> std::result::Result<GlossaryWrite, GlossaryOpError> {
+    validate_glossary_fields(&term)?;
+    let (scope, dir, mut glossary) = load_scoped_glossary(vault_root, project)?;
 
     let lookup = term.term.clone();
-    let mut glossary = glossary::Glossary::load(&dir).map_err(glossary_upsert_err)?;
     let created = glossary
         .upsert(term, on_conflict)
-        .map_err(glossary_upsert_err)?;
-    glossary.save(&dir).map_err(glossary_upsert_err)?;
+        .map_err(glossary_op_err)?;
+    save_scoped_glossary(&glossary, &dir, &scope)?;
 
     // Echo exactly what landed on disk. `upsert` just inserted/updated this
     // term, so the lookup is guaranteed to hit.
@@ -661,20 +791,77 @@ pub fn add_glossary_term(
         .get(&lookup)
         .cloned()
         .expect("the just-upserted term is present in the glossary");
-    Ok(GlossaryUpsert {
-        project: canonical,
+    Ok(GlossaryWrite {
+        project: scope,
         term: stored,
         created,
     })
 }
 
-/// Routes a [`glossary::GlossaryError`] into [`AddGlossaryTermError`]: an
-/// `on_conflict: "error"` hit is a distinct business fault the shell surfaces
-/// differently from an I/O or YAML failure.
-fn glossary_upsert_err(err: glossary::GlossaryError) -> AddGlossaryTermError {
+/// Replaces the entry named by `original_term` with `term`, preserving its
+/// position in the file.
+///
+/// `term.term` may differ from `original_term` — that is a rename — but only
+/// onto a key no other entry holds, else [`GlossaryOpError::Conflict`]. An
+/// `original_term` that names nothing is [`GlossaryOpError::NotFound`], which
+/// is how a caller tells a stale edit from a storage failure.
+pub fn update_glossary_term(
+    vault_root: &Path,
+    project: Option<&str>,
+    original_term: &str,
+    term: glossary::GlossaryTerm,
+) -> std::result::Result<GlossaryWrite, GlossaryOpError> {
+    validate_glossary_fields(&term)?;
+    let (scope, dir, mut glossary) = load_scoped_glossary(vault_root, project)?;
+
+    let stored = glossary
+        .update(original_term, term)
+        .map_err(glossary_op_err)?
+        .ok_or_else(|| GlossaryOpError::NotFound {
+            term: original_term.to_string(),
+        })?;
+    save_scoped_glossary(&glossary, &dir, &scope)?;
+
+    Ok(GlossaryWrite {
+        project: scope,
+        term: stored,
+        created: false,
+    })
+}
+
+/// Removes a term from a glossary, echoing the entry that was removed.
+///
+/// Matches the primary term only (aliases point at an entry, they don't name
+/// it). A term that is not present is [`GlossaryOpError::NotFound`].
+pub fn remove_glossary_term(
+    vault_root: &Path,
+    project: Option<&str>,
+    term: &str,
+) -> std::result::Result<GlossaryWrite, GlossaryOpError> {
+    let (scope, dir, mut glossary) = load_scoped_glossary(vault_root, project)?;
+
+    let removed = glossary
+        .remove(term)
+        .ok_or_else(|| GlossaryOpError::NotFound {
+            term: term.to_string(),
+        })?;
+    save_scoped_glossary(&glossary, &dir, &scope)?;
+
+    Ok(GlossaryWrite {
+        project: scope,
+        term: removed,
+        created: false,
+    })
+}
+
+/// Routes a [`glossary::GlossaryError`] into [`GlossaryOpError`]: a conflict
+/// (an `on_conflict: "error"` hit, or a rename onto an existing term) is a
+/// distinct business fault the shell surfaces differently from an I/O or YAML
+/// failure.
+fn glossary_op_err(err: glossary::GlossaryError) -> GlossaryOpError {
     match err {
-        glossary::GlossaryError::Conflict { term } => AddGlossaryTermError::Conflict { term },
-        other => AddGlossaryTermError::Storage(other),
+        glossary::GlossaryError::Conflict { term } => GlossaryOpError::Conflict { term },
+        other => GlossaryOpError::Storage(other),
     }
 }
 
@@ -1966,6 +2153,7 @@ mod tests {
 
         let edit = NoteEdit {
             note_type: NoteType::Meeting,
+            title: None,
             date: "2026-07-12".to_string(),
             tags: vec![Tag::parse("follow-up").unwrap()],
             body: "Rewritten.".to_string(),
@@ -1987,6 +2175,7 @@ mod tests {
             &NoteId::parse("n_zzzzzz").unwrap(),
             NoteEdit {
                 note_type: NoteType::Note,
+                title: None,
                 date: "2026-07-12".to_string(),
                 tags: vec![],
                 body: String::new(),
@@ -1994,6 +2183,91 @@ mod tests {
         )
         .unwrap();
         assert!(missing.is_none());
+    }
+
+    #[test]
+    fn save_note_edit_retitles_and_echoes_the_new_effective_title() {
+        let vault = tempdir().unwrap();
+        let path = write(vault.path(), "Ops", "n_aaaaaa", "2026-07-10", Some("keep"));
+        let id = NoteId::parse("n_aaaaaa").unwrap();
+
+        let saved = save_note_edit(
+            vault.path(),
+            "Ops",
+            &id,
+            NoteEdit {
+                note_type: NoteType::Note,
+                title: Some("Renamed Meeting".to_string()),
+                date: "2026-07-10".to_string(),
+                tags: vec![Tag::parse("fixture").unwrap()],
+                body: "Body.".to_string(),
+            },
+        )
+        .unwrap()
+        .expect("note exists");
+
+        // The regression this pins: the echoed title used to be the pre-edit
+        // one, so the index and the UI disagreed with the file on disk.
+        assert_eq!(saved.title, "Renamed Meeting");
+        assert_eq!(saved.note.title.as_deref(), Some("Renamed Meeting"));
+
+        // The filename does not follow the title.
+        assert_eq!(saved.path, path);
+        assert_eq!(path.file_name().unwrap(), "keep.md");
+        let reread = find_note(vault.path(), "Ops", &id).unwrap().unwrap();
+        assert_eq!(reread.note.title.as_deref(), Some("Renamed Meeting"));
+        assert_eq!(reread.title, "Renamed Meeting");
+    }
+
+    #[test]
+    fn save_note_edit_adds_the_title_key_to_a_note_that_lacked_one() {
+        // The fixture writer names the file but never writes a `title` key, so
+        // this note displays its de-slugged stem — the edge case the editor has
+        // to handle.
+        let vault = tempdir().unwrap();
+        write(
+            vault.path(),
+            "Ops",
+            "n_aaaaaa",
+            "2026-07-10",
+            Some("weekly sync"),
+        );
+        let id = NoteId::parse("n_aaaaaa").unwrap();
+
+        let untouched = save_note_edit(
+            vault.path(),
+            "Ops",
+            &id,
+            NoteEdit {
+                note_type: NoteType::Note,
+                title: None,
+                date: "2026-07-10".to_string(),
+                tags: vec![Tag::parse("fixture").unwrap()],
+                body: "Body.".to_string(),
+            },
+        )
+        .unwrap()
+        .expect("note exists");
+        // No title sent: the key stays absent and display still de-slugs.
+        assert_eq!(untouched.note.title, None);
+        assert_eq!(untouched.title, "weekly sync");
+
+        let retitled = save_note_edit(
+            vault.path(),
+            "Ops",
+            &id,
+            NoteEdit {
+                note_type: NoteType::Note,
+                title: Some("Weekly Sync".to_string()),
+                date: "2026-07-10".to_string(),
+                tags: vec![Tag::parse("fixture").unwrap()],
+                body: "Body.".to_string(),
+            },
+        )
+        .unwrap()
+        .expect("note exists");
+        assert_eq!(retitled.note.title.as_deref(), Some("Weekly Sync"));
+        assert_eq!(retitled.title, "Weekly Sync");
     }
 
     // --- file_note_to_project (re-route) -----------------------------------
@@ -3618,7 +3892,7 @@ mod tests {
             glossary::OnConflict::Error,
         )
         .unwrap_err();
-        assert!(matches!(err, AddGlossaryTermError::Conflict { .. }));
+        assert!(matches!(err, GlossaryOpError::Conflict { .. }));
 
         // The original definition is untouched.
         let loaded = glossary::Glossary::load(&vault.path().join("Growth")).unwrap();
@@ -3639,7 +3913,7 @@ mod tests {
             glossary::OnConflict::Update,
         )
         .unwrap_err();
-        assert!(matches!(err, AddGlossaryTermError::MissingProject { .. }));
+        assert!(matches!(err, GlossaryOpError::MissingProject { .. }));
         assert!(!glossary::glossary_path(&vault.path().join("Growth")).exists());
     }
 
@@ -3674,7 +3948,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             blank,
-            AddGlossaryTermError::InvalidInput { field: "term", .. }
+            GlossaryOpError::InvalidInput { field: "term", .. }
         ));
 
         let long_term = "a".repeat(GLOSSARY_TERM_MAX_CHARS + 1);
@@ -3687,7 +3961,7 @@ mod tests {
         .unwrap_err();
         assert!(matches!(
             too_long,
-            AddGlossaryTermError::InvalidInput { field: "term", .. }
+            GlossaryOpError::InvalidInput { field: "term", .. }
         ));
     }
 
@@ -3701,6 +3975,251 @@ mod tests {
             glossary::OnConflict::Update,
         )
         .unwrap_err();
-        assert!(matches!(err, AddGlossaryTermError::InvalidProject(_)));
+        assert!(matches!(err, GlossaryOpError::InvalidProject(_)));
+    }
+
+    #[test]
+    fn upsert_glossary_term_vault_scope_writes_where_transcription_reads() {
+        let vault = tempdir().unwrap();
+
+        let write = upsert_glossary_term(
+            vault.path(),
+            None,
+            glossary_term("MERIDIAN", "A systems-migration project.", &["meridian"]),
+            glossary::OnConflict::Error,
+        )
+        .unwrap();
+
+        assert!(write.created);
+        assert_eq!(write.project, None);
+        // The vault-wide glossary is the file the transcription pipeline loads
+        // (`Glossary::load(kb_root)` in src-tauri/src/transcribe.rs), so the
+        // term has to land at the root itself, not in any project folder.
+        let loaded = glossary::Glossary::load(vault.path()).unwrap();
+        assert_eq!(loaded.get("meridian").unwrap().term, "MERIDIAN");
+    }
+
+    #[test]
+    fn upsert_glossary_term_vault_scope_creates_the_root() {
+        // A fresh install may not have written the knowledge base yet; the
+        // first vault-wide term must not fail on the missing parent.
+        let parent = tempdir().unwrap();
+        let vault_root = parent.path().join("does-not-exist-yet");
+
+        upsert_glossary_term(
+            &vault_root,
+            None,
+            glossary_term("MERIDIAN", "x.", &[]),
+            glossary::OnConflict::Error,
+        )
+        .unwrap();
+
+        assert!(glossary::glossary_path(&vault_root).exists());
+    }
+
+    #[test]
+    fn list_glossary_terms_reads_both_scopes_in_file_order() {
+        let vault = tempdir().unwrap();
+        fs::create_dir(vault.path().join("Growth")).unwrap();
+        for name in ["Alpha", "Beta", "Gamma"] {
+            upsert_glossary_term(
+                vault.path(),
+                None,
+                glossary_term(name, "Vault-wide.", &[]),
+                glossary::OnConflict::Error,
+            )
+            .unwrap();
+        }
+        upsert_glossary_term(
+            vault.path(),
+            Some("Growth"),
+            glossary_term("TeeTrack", "Project-scoped.", &[]),
+            glossary::OnConflict::Error,
+        )
+        .unwrap();
+
+        let vault_wide = list_glossary_terms(vault.path(), None).unwrap();
+        assert_eq!(vault_wide.project, None);
+        let order: Vec<&str> = vault_wide.terms.iter().map(|t| t.term.as_str()).collect();
+        assert_eq!(order, vec!["Alpha", "Beta", "Gamma"]);
+
+        // The two scopes are separate files and do not bleed into each other.
+        let scoped = list_glossary_terms(vault.path(), Some("Growth")).unwrap();
+        assert_eq!(scoped.project, Some("Growth".to_string()));
+        assert_eq!(scoped.terms.len(), 1);
+        assert_eq!(scoped.terms[0].term, "TeeTrack");
+    }
+
+    #[test]
+    fn list_glossary_terms_with_no_file_is_empty_not_an_error() {
+        let vault = tempdir().unwrap();
+        fs::create_dir(vault.path().join("Growth")).unwrap();
+
+        assert!(list_glossary_terms(vault.path(), None)
+            .unwrap()
+            .terms
+            .is_empty());
+        assert!(list_glossary_terms(vault.path(), Some("Growth"))
+            .unwrap()
+            .terms
+            .is_empty());
+    }
+
+    #[test]
+    fn list_glossary_terms_adopts_casing_and_rejects_a_missing_project() {
+        let vault = tempdir().unwrap();
+        fs::create_dir(vault.path().join("Growth")).unwrap();
+
+        let listing = list_glossary_terms(vault.path(), Some("growth")).unwrap();
+        assert_eq!(listing.project, Some("Growth".to_string()));
+
+        let err = list_glossary_terms(vault.path(), Some("Nope")).unwrap_err();
+        assert!(matches!(err, GlossaryOpError::MissingProject { .. }));
+    }
+
+    #[test]
+    fn list_glossary_terms_surfaces_a_hand_edited_duplicate() {
+        let vault = tempdir().unwrap();
+        // Two entries colliding on the normalized term: the UI has to be able
+        // to tell the user their hand-edited file is unreadable.
+        fs::write(
+            glossary::glossary_path(vault.path()),
+            "terms:\n  - term: MERIDIAN\n    definition: First.\n  - term: meridian\n    definition: Second.\n",
+        )
+        .unwrap();
+
+        let err = list_glossary_terms(vault.path(), None).unwrap_err();
+        assert!(matches!(
+            err,
+            GlossaryOpError::Storage(glossary::GlossaryError::Duplicate { .. })
+        ));
+    }
+
+    #[test]
+    fn update_glossary_term_edits_in_place_and_renames() {
+        let vault = tempdir().unwrap();
+        for name in ["Alpha", "Beta", "Gamma"] {
+            upsert_glossary_term(
+                vault.path(),
+                None,
+                glossary_term(name, "Original.", &[]),
+                glossary::OnConflict::Error,
+            )
+            .unwrap();
+        }
+
+        let write = update_glossary_term(
+            vault.path(),
+            None,
+            "Beta",
+            glossary_term("Bravo", "Renamed.", &["b"]),
+        )
+        .unwrap();
+
+        assert!(!write.created);
+        assert_eq!(write.term.term, "Bravo");
+        // Renaming keeps the entry where it was rather than moving it to the end.
+        let listing = list_glossary_terms(vault.path(), None).unwrap();
+        let order: Vec<&str> = listing.terms.iter().map(|t| t.term.as_str()).collect();
+        assert_eq!(order, vec!["Alpha", "Bravo", "Gamma"]);
+    }
+
+    #[test]
+    fn update_glossary_term_rename_onto_another_term_conflicts() {
+        let vault = tempdir().unwrap();
+        fs::create_dir(vault.path().join("Growth")).unwrap();
+        for name in ["MERIDIAN", "TeeTrack"] {
+            upsert_glossary_term(
+                vault.path(),
+                Some("Growth"),
+                glossary_term(name, "Original.", &[]),
+                glossary::OnConflict::Error,
+            )
+            .unwrap();
+        }
+
+        let err = update_glossary_term(
+            vault.path(),
+            Some("Growth"),
+            "TeeTrack",
+            glossary_term("meridian", "Merged?", &[]),
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, GlossaryOpError::Conflict { .. }));
+        // The rejected rename left the file untouched.
+        let listing = list_glossary_terms(vault.path(), Some("Growth")).unwrap();
+        assert_eq!(listing.terms.len(), 2);
+    }
+
+    #[test]
+    fn update_glossary_term_missing_term_is_not_found() {
+        let vault = tempdir().unwrap();
+        let err = update_glossary_term(
+            vault.path(),
+            None,
+            "nonexistent",
+            glossary_term("Whatever", "Body.", &[]),
+        )
+        .unwrap_err();
+        assert!(matches!(err, GlossaryOpError::NotFound { .. }));
+    }
+
+    #[test]
+    fn update_glossary_term_validates_fields() {
+        let vault = tempdir().unwrap();
+        upsert_glossary_term(
+            vault.path(),
+            None,
+            glossary_term("MERIDIAN", "x.", &[]),
+            glossary::OnConflict::Error,
+        )
+        .unwrap();
+
+        let err = update_glossary_term(
+            vault.path(),
+            None,
+            "MERIDIAN",
+            glossary_term("MERIDIAN", "   ", &[]),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            GlossaryOpError::InvalidInput {
+                field: "definition",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn remove_glossary_term_removes_and_persists() {
+        let vault = tempdir().unwrap();
+        for name in ["MERIDIAN", "TeeTrack"] {
+            upsert_glossary_term(
+                vault.path(),
+                None,
+                glossary_term(name, "Original.", &[]),
+                glossary::OnConflict::Error,
+            )
+            .unwrap();
+        }
+
+        let write = remove_glossary_term(vault.path(), None, "meridian").unwrap();
+
+        assert_eq!(write.term.term, "MERIDIAN");
+        assert!(!write.created);
+        let listing = list_glossary_terms(vault.path(), None).unwrap();
+        assert_eq!(listing.terms.len(), 1);
+        assert_eq!(listing.terms[0].term, "TeeTrack");
+    }
+
+    #[test]
+    fn remove_glossary_term_missing_term_is_not_found() {
+        let vault = tempdir().unwrap();
+        fs::create_dir(vault.path().join("Growth")).unwrap();
+
+        let err = remove_glossary_term(vault.path(), Some("Growth"), "nonexistent").unwrap_err();
+        assert!(matches!(err, GlossaryOpError::NotFound { .. }));
     }
 }
