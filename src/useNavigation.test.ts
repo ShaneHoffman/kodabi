@@ -41,6 +41,10 @@ describe("viewKey", () => {
     expect(viewKey(growth)).not.toBe(viewKey(briarwood));
     expect(viewKey(vault)).not.toBe(viewKey(growth));
     // And it is not confusable with a project literally named "vault".
+    // `vault` is not a reserved project name, so this is a slug a user can
+    // actually make — and the error boundary only resets when this string
+    // changes, so a collision here strands its fallback on screen.
+    expect(viewKey(vault)).not.toBe(viewKey({ kind: "glossary", slug: "vault" }));
     expect(viewKey(vault)).not.toBe(viewKey({ kind: "project", slug: "vault" }));
   });
 

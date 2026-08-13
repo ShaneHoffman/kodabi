@@ -45,7 +45,7 @@ export const INITIAL_VIEW: View = { kind: "inbox" };
  * A destination's full identity as one string, for anything that has to tell
  * two views of the same kind apart.
  *
- * `view.kind` alone is not that: three of the six kinds carry a payload, so
+ * `view.kind` alone is not that: four of the nine kinds carry a payload, so
  * "project" names every project there is. The error boundary keys on this,
  * because its fallback tells the user to pick another screen — and picking a
  * second project has to actually clear it.
@@ -57,7 +57,12 @@ export function viewKey(view: View): string {
     case "noteEditor":
       return `noteEditor:${view.noteId ?? "new"}:${view.project ?? ""}`;
     case "glossary":
-      return `glossary:${view.slug ?? "vault"}`;
+      // The two scopes are spelled apart rather than folded onto a "vault"
+      // sentinel: `vault` is not a reserved project name (RESERVED_ROOT_DIRS),
+      // so `glossary:${slug ?? "vault"}` handed the vault-wide glossary and a
+      // project slugged `vault` one key — and this string changing is the
+      // whole of what resets the error boundary.
+      return view.slug === null ? "glossary:vault" : `glossary:project:${view.slug}`;
     case "search":
       return `search:${view.query}`;
     default:
