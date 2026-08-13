@@ -364,18 +364,35 @@ function DetailsPanel({
   return (
     <section className="glass-card px-4 py-3.5">
       <p className={PANEL_EYEBROW}>Details</p>
-      <dl className="mt-1">
-        <Row label="Filed in" wrap>
+      {/* Two real columns, not a flex row per fact. Under `justify-between` each
+          value's left edge was set by its own label's width, so "Tags" — the
+          shortest label and the longest value — started further left than every
+          other row and its wrapped lines ran back under the label column. An
+          `auto` track sizes itself to the widest label once, for all rows, so
+          the values share an edge and a wrapping value stays inside its own
+          column. */}
+      <dl className="mt-1 grid grid-cols-[auto_minmax(0,1fr)]">
+        <Row label="Filed in">
           {unfiled ? (
             "Inbox"
           ) : (
-            <>
+            /* The dot rides inside the value's own text flow, not beside it as a
+               sibling. As a sibling it was pinned to the left edge of the value
+               column while the right-aligned name wrapped away from it, leaving
+               the hue stranded a column's width from the folder it names. Inline
+               it sits immediately before the first word, and because JSX leaves
+               no whitespace between the two there is no break opportunity there
+               — so it can never be orphaned onto a line of its own. */
+            <span className="min-w-0 break-words">
               <span
                 aria-hidden="true"
-                className={clsx("size-2 flex-none rounded-[2px]", HUE_DOT[folderHue(project)])}
+                className={clsx(
+                  "mr-[7px] inline-block size-2 rounded-[2px]",
+                  HUE_DOT[folderHue(project)],
+                )}
               />
-              <span className="min-w-0 break-words">{project}</span>
-            </>
+              {project}
+            </span>
           )}
         </Row>
         <Row label="Kind">{note.type}</Row>
@@ -389,7 +406,7 @@ function DetailsPanel({
           <span className="font-data text-[11px]">{note.id}</span>
         </Row>
         {showTags && note.tags.length > 0 && (
-          <Row label="Tags" wrap>
+          <Row label="Tags">
             {/* Wraps rather than truncating: read mode's row is the ONLY full
                 listing of a note's tags, since compose mode drops it in favour
                 of the editable chips. A clipped list here is data with nowhere
@@ -404,40 +421,33 @@ function DetailsPanel({
   );
 }
 
-/** One hairline key/value row. The rule goes on top and the first row drops it,
- * so the panel's eyebrow is not underlined by its own first fact.
+/** One hairline key/value row: a `dt`/`dd` pair dropped straight into the
+ * panel's grid, with no wrapper element, because a wrapper would be the grid
+ * item and the two columns would collapse back into one.
  *
- * `wrap` is for the rows whose value is open-ended — a tag list, a nested filing
- * path — which used to truncate at the rail's width and so hid the very data the
- * row exists to show. Baseline rather than start alignment: the label is 12px UI
- * text and a wrapping value may be 11px `font-data`, and baseline puts the label
- * on the value's first line without a magic padding nudge. */
-function Row({
-  label,
-  wrap = false,
-  children,
-}: {
-  label: string;
-  wrap?: boolean;
-  children: ReactNode;
-}) {
+ * Both cells carry the rule and the padding rather than a row div, and that is
+ * what makes the two rules one hairline — so the column gutter is the label's
+ * `pr-3`, never a `gap-x` on the grid. A gap is empty track: it belongs to
+ * neither cell, carries no border, and punches a visible 12px hole through
+ * every rule at the column boundary. As padding it sits inside the label's
+ * border box, so its rule runs on to meet the value's.
+ *
+ * The cells are left at the grid's default `stretch`, which keeps the two
+ * halves at the same y once a value wraps and the row grows: under baseline
+ * alignment the boxes shift independently and the rule breaks again, this time
+ * vertically. Stretch also puts the label's own line at the top of its box,
+ * which is the value's first line. `first:` cannot open the panel here — the
+ * first row is two children, not one — so both cells drop their own rule. */
+function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div
-      className={clsx(
-        "flex justify-between gap-3 border-t border-edge py-2 first:border-t-0",
-        wrap ? "items-baseline" : "items-center",
-      )}
-    >
-      <dt className="flex-none text-[12px] text-ink-faint">{label}</dt>
-      <dd
-        className={clsx(
-          "flex min-w-0 gap-[7px] text-right text-[12px] text-ink-dim",
-          wrap ? "items-baseline" : "items-center",
-        )}
-      >
+    <>
+      <dt className="border-t border-edge py-2 pr-3 text-[12px] text-ink-faint first:border-t-0">
+        {label}
+      </dt>
+      <dd className="flex min-w-0 items-baseline justify-end border-t border-edge py-2 text-right text-[12px] text-ink-dim [&:nth-child(2)]:border-t-0">
         {children}
       </dd>
-    </div>
+    </>
   );
 }
 

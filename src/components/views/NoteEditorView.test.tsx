@@ -288,13 +288,20 @@ describe("NoteEditorView details rail", () => {
     ]) {
       expect(value).toHaveClass("break-words");
       expect(value).toHaveClass("min-w-0");
-      // The `wrap` row's other half: baseline, not centre, so the label stays
-      // on the value's first line once the value is taller than one.
-      expect(value.closest("dd")).toHaveClass("items-baseline");
     }
 
-    // The fixed-width rows keep centring — `wrap` is opt-in, not the default.
-    expect(within(rail).getByText("n_a1b2c3").closest("dd")).toHaveClass("items-center");
+    // Wrapping is only half of it: the values also have to share a left edge.
+    // A flex row per fact took the value's edge from its own label's width, so
+    // "Tags" — shortest label, longest value — started further left than every
+    // other row and wrapped back under the labels. One `auto` label track sized
+    // across all rows is what makes the second column a column.
+    const list = rail.querySelector("dl");
+    expect(list).toHaveClass("grid");
+    expect(list).toHaveClass("grid-cols-[auto_minmax(0,1fr)]");
+    // Each fact is a bare dt/dd pair in that grid: a wrapper element would be
+    // the grid item, and the two columns would collapse back into one.
+    expect(list?.children[0]?.tagName).toBe("DT");
+    expect(list?.children[1]?.tagName).toBe("DD");
   });
 
   it("drops the Tags row in compose mode, where the tags themselves are", async () => {
