@@ -266,7 +266,9 @@ trait with Parakeet + whisper.cpp engines selected at build time via mutually ex
 features (release builds ship Parakeet), the real-meeting benchmark that locks the default,
 glossaries, and raw session storage (transcript + timestamps; audio is not persisted in v1 — an
 opt-in audio-retention toggle is deferred until a use case pulls it, at which point the retention
-policy must cover it) — all shipped.
+policy must cover it) — all shipped, with one deferral: the whisper.cpp fallback's mandatory VAD
+path crashes on Windows on a sherpa-onnx/ONNX Runtime mismatch, so Parakeet is the sole shipping
+engine until a fixed sherpa-onnx lands (board task #53; see §3.4 and `docs/RESOURCE_BUDGET.md`).
 
 **Milestone:** ✅ met — a full Teams meeting produces a clean, timestamped transcript with correct project nouns, hands-free after one hotkey.
 
