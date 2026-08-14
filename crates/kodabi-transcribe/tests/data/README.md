@@ -1,10 +1,12 @@
 # Test fixture: `speech_16k_mono.wav`
 
-The one committed speech fixture, shared by every real-model test in this crate
+The one committed speech fixture, shared by the four real-model tests that transcribe a short clip
 (`parakeet_real.rs`, `whisper_real.rs`, `vad_whisper.rs`, `resource_budget.rs`), each of which
-loads it through an identical `CARGO_MANIFEST_DIR`-relative `read_speech_wav()`. Unlike the
-`benchmark/` fixture next door, this one is committed — so it has to be audio this repo may
-redistribute under a licence, which is what this file records.
+loads it through an identical `CARGO_MANIFEST_DIR`-relative `read_speech_wav()`. The crate's other
+real-model tests — `benchmark_parakeet.rs`, `benchmark_whisper.rs`, `benchmark_compare.rs` — score a
+full meeting instead and read the separate, uncommitted `benchmark/` fixture; they are unaffected by
+anything below. Unlike that fixture next door, this one is committed — so it has to be audio this
+repo may redistribute under a licence, which is what this file records.
 
 Source: LibriSpeech ASR corpus, <https://www.openslr.org/12/> — `test-clean` subset, utterance
 `6930-75918-0017`

@@ -236,9 +236,9 @@ input from disk in chunks. It does **not** change an engine's own internal buffe
 `WhisperEngine` is a batch engine whose `accept` appends the whole session into a `Vec<f32>`
 (`crates/kodabi-transcribe/src/whisper.rs`) and runs whisper.cpp once at `finish` — roughly
 **~230 MB per channel-hour** at 16 kHz `f32`, resident only during the post-meeting burst, one engine
-at a time. Parakeet (the working engine) is VAD-gated and already bounded, and the VAD-gated Whisper
-path is blocked on Windows anyway (task #53), so windowed Whisper feeding is deferred to a follow-up
-rather than done here.
+at a time. Parakeet (the shipping engine) is VAD-gated and already bounded, and the VAD-gated Whisper
+path doesn't ship in v1 anyway (see the deferral decision below — it runs, it's just ~200x slower),
+so windowed Whisper feeding is deferred to a follow-up rather than done here.
 
 **Kill -9 acceptance procedure.** To verify "a crash loses at most the last flush interval and the
 recovered session produces a routed note":
