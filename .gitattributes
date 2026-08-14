@@ -1,0 +1,12 @@
+# Normalize line endings: everything git detects as text is stored LF.
+* text=auto
+
+# Types rewritten in place by tools that always emit LF (the Tauri CLI syncs
+# src-tauri/Cargo.toml, Kangentic writes kangentic.json, pnpm writes
+# pnpm-lock.yaml, cargo writes Cargo.lock). Checking these out LF keeps a
+# tool rewrite byte-identical to the checkout, so worktrees stay clean.
+*.toml text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.lock text eol=lf
