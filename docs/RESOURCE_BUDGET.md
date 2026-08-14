@@ -257,13 +257,27 @@ recovered session produces a routed note":
 ### Transcription burst
 
 **Fixture-based (`crates/kodabi-transcribe/tests/resource_budget.rs`, `speech_16k_mono.wav`,
-6.12s of audio), real models:**
+6.16s of audio), real models:**
 
 | Engine | `speed_x` | Notes |
 |---|---|---|
-| Parakeet (CPU, 1 thread) | **72.19x** | Production configuration (VAD-gated pseudo-streaming) — the leaned default's real number. |
-| Whisper (CPU, 4 threads) | blocked by the sherpa-onnx ORT bug (task #53) | `whisper.cpp` alone (bare `WhisperEngine`, no VAD) transcribed the fixture in ~15.1s as a rough, non-production proxy, but the mandatory VAD gate (`whisper_with_vad`, FOUNDING_DOC §8) crashes — see below. |
-| Whisper (CUDA) | blocked by the sherpa-onnx ORT bug (task #53) | Model loaded onto the RTX 4080 fine, then hit the identical crash at VAD init. |
+| Parakeet (CPU, 1 thread) | **9.94x** | Production configuration (VAD-gated pseudo-streaming) — the leaned default's real number. |
+| Whisper (CPU, VAD-gated, `large-v3-turbo`) | **0.05x** | The mandatory production path (`whisper_with_vad`, FOUNDING_DOC §8): 129.9s of wall time for 6.16s of audio. No longer blocked — see the note under the known-issue section below — but ~200x slower than Parakeet, which is the engine choice restated as a number. |
+| Whisper (CUDA) | not re-measured | Deferred with the fallback engine (see the deferral decision below); the CPU leg above is enough to settle the choice. |
+
+Both figures were measured on 2026-08-14 (i7-13700K, `--release`, one warm run each) when the
+fixture was replaced with an attributed LibriSpeech clip — see
+`crates/kodabi-transcribe/tests/data/README.md`. The earlier bare-`WhisperEngine` proxy (~15.1s, no
+VAD) is dropped: the real gated path is measurable now, so the proxy has nothing left to stand in
+for.
+
+**The 72.19x previously recorded for Parakeet does not reproduce, and the fixture swap is not
+why:** the *old* fixture measures 11.13x under the same command on the same machine today. The
+remaining ~11% (9.94x vs 11.13x) is the clip, and is expected — the new one is continuous speech,
+so the VAD gate hands the recognizer the full 6.16s as one segment, where the old one had ~1.3s of
+digital silence the gate skipped. Whatever produced 72.19x (a different dependency build, a thread
+setting, or an error when it was recorded) was already gone before this change; treat it as
+unexplained rather than as a regression.
 
 **Real end-to-end pipeline** (the ~93s capture above, stopped via `Ctrl+Shift+K`, full
 `transcribe → clean → persist` pipeline, from `KODABI_METRICS`'s `PipelineTimings`):
@@ -288,10 +302,17 @@ dominates the pipeline cost (6.16s of the 6.83s total) — a real target for fut
 the transcription burst ever needs to shrink further, though it's already well inside the
 chosen ceiling.
 
-#### Known issue: sherpa-onnx VAD crashes with an ONNX Runtime version mismatch
+#### Known issue (resolved): sherpa-onnx VAD crashes with an ONNX Runtime version mismatch
+
+**Fixed.** `crates/kodabi-transcribe/build.rs` mirrors sherpa-onnx's shared-mode runtime DLLs into
+`target/<profile>/deps` so the test and bench binaries load the ORT the native library was built
+against (task #53, "mirror sherpa-onnx DLLs into deps/"). Re-checked 2026-08-14: `vad_whisper.rs`'s
+three model-gated tests and `resource_budget.rs`'s whisper leg all pass, which is where the 0.05x
+above comes from. The account below is kept because the deferral decision that follows it rests on
+the history, and because the CRT/link-mode constraints it describes still bind.
 
 Both `whisper_with_vad` (the mandatory production Whisper path) and, separately, the
-`whisper-cuda` feature crash on this machine with:
+`whisper-cuda` feature crashed on this machine with:
 
 ```
 The requested API version [27] is not available, only API versions [1, 17] are supported
@@ -309,10 +330,10 @@ crate's Windows shared-link artifact: its native library appears to request a ne
 Runtime C API version than the `onnxruntime.dll` it bundles actually implements. Parakeet
 (`sherpa-onnx/static` link mode) is unaffected.
 
-This is a real, pre-existing bug independent of this ticket (the `sherpa-onnx` version is
-unchanged by this branch) that blocks the production Whisper fallback path on Windows
-entirely, not just this measurement. Tracked as board task **#53**
-(`fix/sherpa-onnx-ort-mismatch`).
+This was a real, pre-existing bug independent of that ticket (the `sherpa-onnx` version was
+unchanged by that branch) that blocked the production Whisper fallback path on Windows
+entirely, not just this measurement. Tracked and since closed as board task **#53**
+(`fix/sherpa-onnx-ort-mismatch`), by the DLL mirror described above.
 
 ##### Deferral decision (2026-07-19)
 
@@ -323,6 +344,11 @@ either patching the crate's Windows shared-link artifact ourselves or vendoring 
 `onnxruntime.dll`, neither of which is worth doing for a fallback engine that the
 [STT engine benchmark](benchmarks/stt-engine-benchmark.md) already declined to ship (Parakeet
 runs ~10x faster with equivalent silence-safety and near-equal accuracy).
+
+**Still the decision, on new grounds (2026-08-14).** #53 was fixed after all, so the blocked-path
+premise no longer holds — but the measurement it unblocked argues the same way and harder: the
+gated Whisper path runs at 0.05x against Parakeet's 9.94x on the same fixture, roughly 200x slower
+and far below realtime. Parakeet remains the sole shipping engine.
 
 What this decision changes, so the state stops being ambient:
 
