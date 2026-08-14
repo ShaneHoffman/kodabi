@@ -722,7 +722,7 @@ function PipelinePlaceholder({
               {/* Ink, never green: green means audio is being recorded, and
                   this whole run happens after a capture has already stopped
                   (docs/DESIGN_SYSTEM.md §2). */}
-              <span className="size-[7px] flex-none animate-breathe rounded-full bg-ink-faint" />
+              <span className="size-[7px] flex-none animate-pending rounded-full bg-ink-faint" />
               <PhaseStack
                 phase={presence.phase}
                 transcribing="Transcribing the capture"
