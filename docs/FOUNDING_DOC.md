@@ -235,7 +235,7 @@ Principles:
 
 - ❌ Speaker diarization (two-channel you/them split only)
 - ❌ Automated workflows / automations
-- ❌ GitHub / ADO / any integrations (Phase 3)
+- ❌ GitHub / ADO / any integrations (Phase 5 growth candidates)
 - ❌ Team features, sync, sharing
 - ❌ macOS / Linux
 - ❌ Calendar-driven auto start/stop (hotkey is the v1 answer)
@@ -243,9 +243,10 @@ Principles:
 
 ## 6. Roadmap
 
-*The **working roadmap** is [`ROADMAP.md`](ROADMAP.md); Phases 0–1 are broken into individual
-tickets on the Kangentic board. This section keeps only what lives nowhere else: each phase's goal
-and milestone, and the full detail behind the Phase 5 candidates.*
+*The **working roadmap** is [`ROADMAP.md`](ROADMAP.md), which carries the per-phase checklists and
+their shipped state. This section keeps only what lives nowhere else: each phase's goal and
+milestone, and the full detail behind the Phase 5 candidates. Phases 0–3 are complete; Phase 4 is
+in progress.*
 
 ### Phase 0 — Foundations (decisions + skeleton) — ✅ complete
 
@@ -253,33 +254,35 @@ Shipped: license (**AGPL-3.0-only**), design system ([`DESIGN.md`](DESIGN.md),
 `design/tokens.css` — since replaced by the Grove theme in `src/index.css`,
 [`SPIRIT_MARK.md`](SPIRIT_MARK.md)), Tauri + Rust workspace scaffold with CI,
 the frontmatter schema ([`FRONTMATTER_SCHEMA.md`](FRONTMATTER_SCHEMA.md)), and the MCP tool
-surface ([`MCP_TOOL_SURFACE.md`](MCP_TOOL_SURFACE.md)). One item still open, tracked in the
-backlog: reserve the domain and package names (kodabi.app / kodabi.dev, plus the crates.io / npm
-names) and secure kodabi.com. The GitHub repo has since been renamed from `kodama` to
+surface ([`MCP_TOOL_SURFACE.md`](MCP_TOOL_SURFACE.md)). One item still open: reserve the domain
+and package names (kodabi.app / kodabi.dev, plus the crates.io / npm names) and secure
+kodabi.com. The GitHub repo has since been renamed from `kodama` to
 [`github.com/ShaneHoffman/kodabi`](https://github.com/ShaneHoffman/kodabi).
 
-### Phase 1 — Capture & transcribe (the hard 20%)
+### Phase 1 — Capture & transcribe (the hard 20%) — ✅ complete
 
 Capture (WASAPI loopback + mic, hotkey/tray, listening indicator), the `TranscriptionEngine`
 trait with Parakeet + whisper.cpp engines selected at build time via mutually exclusive cargo
 features (release builds ship Parakeet), the real-meeting benchmark that locks the default,
 glossaries, and raw session storage (transcript + timestamps; audio is not persisted in v1 — an
 opt-in audio-retention toggle is deferred until a use case pulls it, at which point the retention
-policy must cover it) — tracked as individual tickets in the backlog.
+policy must cover it) — all shipped, with one deferral: the whisper.cpp fallback's mandatory VAD
+path crashes on Windows on a sherpa-onnx/ONNX Runtime mismatch, so Parakeet is the sole shipping
+engine until a fixed sherpa-onnx lands (board task #53; see §3.4 and `docs/RESOURCE_BUDGET.md`).
 
-**Milestone:** a full Teams meeting produces a clean, timestamped transcript with correct project nouns, hands-free after one hotkey.
+**Milestone:** ✅ met — a full Teams meeting produces a clean, timestamped transcript with correct project nouns, hands-free after one hotkey.
 
-### Phase 2 — Distill, route, store, index
-
-Checklist in [`ROADMAP.md`](ROADMAP.md).
-**Milestone:** the definition-of-done sentence is true, minus chat.
-
-### Phase 3 — The brain (MCP + Claude Code)
+### Phase 2 — Distill, route, store, index — ✅ complete
 
 Checklist in [`ROADMAP.md`](ROADMAP.md).
-**Milestone:** "What's outstanding on Briarwood Golf?" answered correctly in-app from real meeting history. **← Dogfood daily from here.**
+**Milestone:** ✅ met — the definition-of-done sentence is true, minus chat.
 
-### Phase 4 — Polish & open-source launch
+### Phase 3 — The brain (MCP + Claude Code) — ✅ complete
+
+Checklist in [`ROADMAP.md`](ROADMAP.md).
+**Milestone:** ✅ met — "What's outstanding on Briarwood Golf?" answered correctly in-app from real meeting history. **← Dogfooded daily from here.**
+
+### Phase 4 — Polish & open-source launch — in progress
 
 Checklist in [`ROADMAP.md`](ROADMAP.md).
 **Milestone:** a signed, onboarded, documented Windows release, launched publicly.
@@ -324,9 +327,9 @@ order of expected value — each earns its place only after the core loop proves
 | ~~License~~ | — | **DECIDED: AGPL-3.0-only** | ✅ Closed |
 | ~~Frontend stack~~ | — | **DECIDED: React + Tailwind** | ✅ Closed |
 | ~~Default STT engine~~ | — | **DECIDED: Parakeet TDT (sherpa-onnx)** (real-meeting benchmark 2026-07-15 — silence-safe, ~10× faster, no content-accuracy deficit; whisper.cpp stays the fallback. See `docs/benchmarks/stt-engine-benchmark.md`) | ✅ Closed |
-| Embedding model | bge-small / nomic-embed / other | Benchmark retrieval quality on real notes | Phase 2 |
+| ~~Embedding model~~ | — | **DECIDED: bge-small-en-v1.5** (Phase 2 — 384-dimensional, CLS-pooled, run locally via fastembed/ONNX Runtime in `crates/kodabi-embed`'s `bge` backend; fully offline at runtime, and the only embedder release builds ship (`--features parakeet,embed`). A `BGE_DIM == EMBEDDING_DIM` compile-time assert pins it to the index schema.) | ✅ Closed |
 | ~~Audio retention default~~ | — | **DECIDED: audio is not persisted in v1** (only transcript + timestamps); an opt-in audio-retention toggle is deferred until a use case pulls it, at which point the retention policy must cover it. Transcript retention (distill then discard after N days) stays the v1 policy. | ✅ Closed |
-| ~~Headless UI library~~ | — | **DECIDED: no UI runtime dependency** (2026-07-28 spike against base-ui 1.6 — four call sites don't earn it, the library can't express the `busy`/focus contract in §6 of the design system, and collision flipping plus clipping escape come free from CSS anchor positioning because the app ships against one evergreen WebView2. See `docs/decisions/popover-primitive.md`.) | ✅ Closed |
+| ~~Headless UI library~~ | — | **DECIDED: adopt the curated stack** (`@base-ui/react` plus `cmdk`, `sonner`, `motion`, `cva`, `clsx`). The 2026-07-28 spike had closed this the other way — no UI runtime dependency — on the strength of *one* primitive; the Grove redesign (2026-08-01) needs a menu, dialog, popover, tooltip, palette and toaster, and the arithmetic is different at six. `docs/decisions/popover-primitive.md` is superseded but still worth reading: its anchor-positioning measurements and the live `Select` bug in §8.2 outlived its conclusion. See `docs/UI_CONVENTIONS.md` §4. | ✅ Closed |
 | ~~Claude Code invocation~~ | — | **DECIDED: headless CLI** (2026-07, chat UI implementation — the Agent SDK is TypeScript/Python only, so it would force a Node sidecar into a pure-Rust backend; the CLI's bidirectional stream-json mode gives the chat everything the SDK offered: one long-lived process per conversation, token streaming via `--include-partial-messages`, and programmatic write-tool permission prompts over the same pipes via `--permission-prompt-tool stdio`'s `can_use_tool` control requests, verified against a live CLI. All three spawn sites are now CLI: distill (`kodabi-llm`, one-shot), the terminal (PTY, interactive), and chat (`kodabi_core::chat` + `kodabi_llm::chat`, streaming). | ✅ Closed |
 
 ## 8. Risks & mitigations
