@@ -47,14 +47,25 @@ export function TerminalView() {
       title="Terminal"
       summary={STATUS_LINE[status]}
     >
-      {/* The mount IS the well: xterm builds inside it, so the padding here is
-          what holds the rendered rows off the surface's edge. `min-h-0` lets it
-          shrink under its own content, which is what lets the fit addon size the
-          PTY grid to real pixels instead of to a page that keeps growing. */}
-      <div
-        ref={mount}
-        className="glass-term mt-6 min-h-0 flex-1 overflow-hidden px-5 py-[18px]"
-      />
+      {/* Two elements, not one, and the split is load-bearing. The well owns the
+          surface and the inset; the mount inside it owns nothing but size.
+
+          The fit addon sizes the PTY grid from `getComputedStyle(mount)` and
+          subtracts only the `.xterm` element's own padding — never the mount's.
+          Under Tailwind's global `box-sizing: border-box` that read resolves to
+          the PADDING box, so any padding on the mount is handed to fit as grid
+          space: the rows and columns that land in it are drawn outside the
+          visible area and clipped away by `overflow-hidden`. Measured against
+          this well, that was 40x36px of padding, about three columns and two
+          rows off the right and bottom edges.
+
+          `min-h-0` lets the well shrink under its own content, which is what
+          lets fit size the grid to real pixels instead of to a page that keeps
+          growing. The mount then tracks it exactly at `h-full w-full`, so the
+          ResizeObserver in `useXterm` still sees every change. */}
+      <div className="glass-term mt-6 min-h-0 flex-1 overflow-hidden px-5 py-[18px]">
+        <div ref={mount} className="h-full w-full" />
+      </div>
       {exit && (
         <div className="flex items-center gap-2.5 pt-2" role="status">
           <span className="font-data text-[11px] text-ink-dim">
