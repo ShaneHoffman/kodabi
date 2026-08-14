@@ -1,16 +1,25 @@
-//! Pure builders for the embedded Claude Code terminal.
+//! Pure builders and the byte pump for the embedded Claude Code terminal.
 //!
 //! The terminal view (Phase 3, FOUNDING_DOC §4) hosts an *interactive* `claude`
 //! process wired to the `kodabi` MCP server, so chat-over-the-knowledge-base
-//! works with zero setup. The side-effecting PTY spawn lives in the Tauri shell
-//! (`src-tauri/src/terminal_cmds.rs`); everything here is pure and unit-tested
-//! without a subprocess — the argv, the generated `.mcp.json` and Claude Code
-//! settings, and the resize validation. This mirrors how `llm`'s pure
-//! request/parse logic stays testable apart from `kodabi-llm`'s process spawn.
+//! works with zero setup. The side-effecting PTY spawn and the machine-path
+//! resolution live in the Tauri shell (`src-tauri/src/terminal_cmds.rs`);
+//! everything here is pure and unit-tested without a subprocess — the argv, the
+//! generated `.mcp.json` and Claude Code settings, the resize validation, and
+//! the reader/coalescer loops that turn PTY bytes into output batches. Those
+//! loops follow [`crate::watch::watch_vault`]'s split: parameterized on the
+//! channel, the timings and the sinks, so tests drive them with synthetic
+//! chunks and no PTY. This mirrors how `llm`'s pure request/parse logic stays
+//! testable apart from `kodabi-llm`'s process spawn.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::ffi::OsString;
+use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use serde::Serialize;
 
@@ -154,6 +163,181 @@ fn path_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
+/// Cap on the replayed scrollback ring: enough to re-hydrate a re-mounted xterm
+/// without unbounded growth for a long-lived session.
+pub const SCROLLBACK_CAP: usize = 256 * 1024;
+/// Flush the coalescer once this much output has piled up, so one big burst
+/// (a build, `ls -R`) can't grow a single event without bound.
+pub const MAX_EVENT_BYTES: usize = 64 * 1024;
+/// Coalesce window: batches the fast small writes of a redrawing TUI into a few
+/// events instead of hundreds, bounding the webview's event rate.
+pub const COALESCE_WINDOW: Duration = Duration::from_millis(8);
+/// One read from the PTY master.
+pub const READ_BUF: usize = 8192;
+
+/// The byte pump's tunables. Injected rather than read from the constants above
+/// so tests drive [`run_coalescer`] with short timings and tiny caps; the shell
+/// passes [`StreamLimits::default`].
+#[derive(Debug, Clone, Copy)]
+pub struct StreamLimits {
+    /// How long to wait for more output before flushing what has piled up.
+    pub coalesce: Duration,
+    /// Flush once the pending batch has reached this size.
+    pub max_event_bytes: usize,
+    /// Retain at most this many bytes of scrollback.
+    pub scrollback_cap: usize,
+}
+
+impl Default for StreamLimits {
+    fn default() -> Self {
+        Self {
+            coalesce: COALESCE_WINDOW,
+            max_event_bytes: MAX_EVENT_BYTES,
+            scrollback_cap: SCROLLBACK_CAP,
+        }
+    }
+}
+
+/// The shared, observable state of one session's byte stream: what a re-mounted
+/// terminal replays, and the two liveness flags the command handlers read.
+/// Cloning shares the same underlying state — the shell keeps one handle in its
+/// session slot and moves a clone into the coalescer thread.
+#[derive(Clone)]
+pub struct SessionStream {
+    /// Ring of recent raw PTY bytes, capped at [`StreamLimits::scrollback_cap`].
+    pub scrollback: Arc<Mutex<VecDeque<u8>>>,
+    /// Cleared by [`run_coalescer`] when the child exits, so the next open
+    /// respawns rather than reusing a dead session.
+    pub alive: Arc<AtomicBool>,
+    /// Set by a deliberate reap (restart / app exit) so [`run_coalescer`] stays
+    /// silent instead of reporting a spurious exit.
+    pub reaped: Arc<AtomicBool>,
+}
+
+impl SessionStream {
+    /// A live, un-reaped stream with an empty ring.
+    pub fn new() -> Self {
+        Self {
+            scrollback: Arc::new(Mutex::new(VecDeque::new())),
+            alive: Arc::new(AtomicBool::new(true)),
+            reaped: Arc::new(AtomicBool::new(false)),
+        }
+    }
+
+    /// Whether the child is still running.
+    pub fn is_alive(&self) -> bool {
+        self.alive.load(Ordering::Relaxed)
+    }
+
+    /// Marks a deliberate teardown: the session is no longer live, and its exit
+    /// must not be reported.
+    pub fn mark_reaped(&self) {
+        self.reaped.store(true, Ordering::Relaxed);
+        self.alive.store(false, Ordering::Relaxed);
+    }
+
+    /// A copy of the retained scrollback. A poisoned ring yields nothing to
+    /// replay rather than propagating the panic into a command handler.
+    pub fn contents(&self) -> Vec<u8> {
+        self.scrollback
+            .lock()
+            .map(|ring| ring.iter().copied().collect())
+            .unwrap_or_default()
+    }
+}
+
+impl Default for SessionStream {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Drains `reader` into `tx` in [`READ_BUF`] chunks until the PTY reports EOF
+/// (the child exited and the slave was dropped), the read fails, or the receiver
+/// is gone. Blocking, so the shell runs it on its own thread.
+pub fn pump_reader(mut reader: impl Read, tx: Sender<Vec<u8>>) {
+    let mut buf = [0u8; READ_BUF];
+    loop {
+        match reader.read(&mut buf) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                if tx.send(buf[..n].to_vec()).is_err() {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// Batches the reader's chunks into output events and the scrollback ring, then
+/// reports the child's exit.
+///
+/// Each flush appends to the ring (evicting oldest bytes past the cap) and hands
+/// the batch to `on_output` — the shell base64-encodes it and emits, since the
+/// encoding exists only for the IPC boundary. Once the channel disconnects, the
+/// pending batch is flushed, `wait` reaps the child's status, the stream is
+/// marked dead, and `on_exit` fires **unless** the session was deliberately
+/// reaped: a restart or an app exit must not look like `claude` quitting.
+///
+/// Blocking, so the shell runs it on its own thread.
+pub fn run_coalescer(
+    rx: Receiver<Vec<u8>>,
+    limits: StreamLimits,
+    stream: &SessionStream,
+    wait: impl FnOnce() -> Option<i32>,
+    mut on_output: impl FnMut(&[u8]),
+    on_exit: impl FnOnce(Option<i32>),
+) {
+    let mut pending: Vec<u8> = Vec::new();
+    loop {
+        match rx.recv_timeout(limits.coalesce) {
+            Ok(chunk) => {
+                pending.extend_from_slice(&chunk);
+                if pending.len() >= limits.max_event_bytes {
+                    flush(stream, limits.scrollback_cap, &mut pending, &mut on_output);
+                }
+            }
+            Err(RecvTimeoutError::Timeout) => {
+                flush(stream, limits.scrollback_cap, &mut pending, &mut on_output)
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                flush(stream, limits.scrollback_cap, &mut pending, &mut on_output);
+                break;
+            }
+        }
+    }
+
+    let code = wait();
+    stream.alive.store(false, Ordering::Relaxed);
+    if !stream.reaped.load(Ordering::Relaxed) {
+        on_exit(code);
+    }
+}
+
+/// Appends the pending batch to the ring (oldest bytes first out past `cap`) and
+/// hands it to the sink. The ring is updated before the sink runs, so a terminal
+/// re-mounting mid-flush replays what it is about to receive. A quiet coalesce
+/// window leaves `pending` empty, which must not produce an event.
+fn flush(
+    stream: &SessionStream,
+    cap: usize,
+    pending: &mut Vec<u8>,
+    on_output: &mut impl FnMut(&[u8]),
+) {
+    if pending.is_empty() {
+        return;
+    }
+    // A poisoned ring costs the replay, not the live stream: still emit.
+    if let Ok(mut ring) = stream.scrollback.lock() {
+        ring.extend(pending.iter().copied());
+        while ring.len() > cap {
+            ring.pop_front();
+        }
+    }
+    on_output(pending);
+    pending.clear();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,5 +422,244 @@ mod tests {
             valid_resize(5000, 5000),
             Some((MAX_DIMENSION, MAX_DIMENSION))
         );
+    }
+
+    /// Roomy limits, so only an explicit disconnect ends a batch.
+    fn test_limits() -> StreamLimits {
+        StreamLimits {
+            coalesce: Duration::from_millis(50),
+            max_event_bytes: 1024,
+            scrollback_cap: 1024,
+        }
+    }
+
+    /// Runs the pump synchronously over a pre-loaded channel: with the sender
+    /// dropped up front, `recv_timeout` drains the queue without waiting, then
+    /// sees the disconnect. Returns the flushed batches and the exit report,
+    /// where the outer `None` means `on_exit` never fired (a reaped session).
+    #[allow(clippy::type_complexity)]
+    fn drive(
+        limits: StreamLimits,
+        stream: &SessionStream,
+        chunks: &[&[u8]],
+        wait: impl FnOnce() -> Option<i32>,
+    ) -> (Vec<Vec<u8>>, Option<Option<i32>>) {
+        let (tx, rx) = std::sync::mpsc::channel();
+        for chunk in chunks {
+            tx.send(chunk.to_vec()).expect("receiver is live");
+        }
+        drop(tx);
+
+        let mut events = Vec::new();
+        let mut exit = None;
+        run_coalescer(
+            rx,
+            limits,
+            stream,
+            wait,
+            |batch| events.push(batch.to_vec()),
+            |code| exit = Some(code),
+        );
+        (events, exit)
+    }
+
+    #[test]
+    fn a_preloaded_burst_flushes_once_as_one_event() {
+        let stream = SessionStream::new();
+        let (events, exit) = drive(test_limits(), &stream, &[b"ab", b"cd", b"ef"], || Some(0));
+
+        assert_eq!(events, vec![b"abcdef".to_vec()]);
+        assert_eq!(stream.contents(), b"abcdef".to_vec());
+        assert_eq!(exit, Some(Some(0)));
+        assert!(!stream.is_alive());
+    }
+
+    #[test]
+    fn reaching_max_event_bytes_splits_the_burst() {
+        let limits = StreamLimits {
+            max_event_bytes: 4,
+            ..test_limits()
+        };
+        let stream = SessionStream::new();
+        let (events, _) = drive(limits, &stream, &[b"abcd", b"ef"], || Some(0));
+
+        assert_eq!(events, vec![b"abcd".to_vec(), b"ef".to_vec()]);
+        assert_eq!(stream.contents(), b"abcdef".to_vec());
+    }
+
+    #[test]
+    fn one_oversized_chunk_still_flushes_whole() {
+        // The size check runs after the chunk is appended, so a single read
+        // larger than the cap goes out intact rather than being split.
+        let limits = StreamLimits {
+            max_event_bytes: 4,
+            ..test_limits()
+        };
+        let stream = SessionStream::new();
+        let (events, _) = drive(limits, &stream, &[b"abcdefgh"], || Some(0));
+
+        assert_eq!(events, vec![b"abcdefgh".to_vec()]);
+    }
+
+    #[test]
+    fn quiet_gaps_split_output_into_separate_events() {
+        let limits = StreamLimits {
+            coalesce: Duration::from_millis(25),
+            ..test_limits()
+        };
+        let stream = SessionStream::new();
+        let stream_for_thread = stream.clone();
+        let (tx, rx) = std::sync::mpsc::channel();
+
+        let handle = std::thread::spawn(move || {
+            let mut events = Vec::new();
+            run_coalescer(
+                rx,
+                limits,
+                &stream_for_thread,
+                || Some(0),
+                |batch| events.push(batch.to_vec()),
+                |_| {},
+            );
+            events
+        });
+
+        tx.send(b"a".to_vec()).expect("pump is live");
+        std::thread::sleep(Duration::from_millis(150));
+        tx.send(b"b".to_vec()).expect("pump is live");
+        drop(tx);
+
+        let events = handle.join().expect("pump thread finishes");
+        assert_eq!(events, vec![b"a".to_vec(), b"b".to_vec()]);
+    }
+
+    #[test]
+    fn quiet_timeouts_emit_no_empty_events() {
+        let limits = StreamLimits {
+            coalesce: Duration::from_millis(25),
+            ..test_limits()
+        };
+        let stream = SessionStream::new();
+        let stream_for_thread = stream.clone();
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+
+        let handle = std::thread::spawn(move || {
+            let mut events = 0usize;
+            let mut exits = 0usize;
+            run_coalescer(
+                rx,
+                limits,
+                &stream_for_thread,
+                || Some(0),
+                |_| events += 1,
+                |_| exits += 1,
+            );
+            (events, exits)
+        });
+
+        // Several coalesce windows pass with nothing to flush.
+        std::thread::sleep(Duration::from_millis(100));
+        drop(tx);
+
+        let (events, exits) = handle.join().expect("pump thread finishes");
+        assert_eq!(events, 0, "a quiet window must not emit an empty event");
+        assert_eq!(exits, 1);
+    }
+
+    #[test]
+    fn the_ring_evicts_oldest_bytes_beyond_the_cap() {
+        let limits = StreamLimits {
+            scrollback_cap: 8,
+            ..test_limits()
+        };
+
+        let stream = SessionStream::new();
+        let (events, _) = drive(limits, &stream, &[b"abcdefghijkl"], || Some(0));
+        // The event carries everything; only the replay ring is capped.
+        assert_eq!(events, vec![b"abcdefghijkl".to_vec()]);
+        assert_eq!(stream.contents(), b"efghijkl".to_vec());
+
+        // Exactly at the cap nothing is evicted (the boundary is strictly >).
+        let exact = SessionStream::new();
+        drive(limits, &exact, &[b"abcdefgh"], || Some(0));
+        assert_eq!(exact.contents(), b"abcdefgh".to_vec());
+    }
+
+    #[test]
+    fn a_natural_exit_reports_the_code() {
+        let stream = SessionStream::new();
+        let (_, exit) = drive(test_limits(), &stream, &[], || Some(3));
+
+        assert_eq!(exit, Some(Some(3)));
+        assert!(!stream.is_alive());
+    }
+
+    #[test]
+    fn a_wait_error_reports_no_code() {
+        let stream = SessionStream::new();
+        let (_, exit) = drive(test_limits(), &stream, &[], || None);
+
+        // Reported with an unknown code — distinct from not reported at all.
+        assert_eq!(exit, Some(None));
+    }
+
+    #[test]
+    fn a_reaped_session_suppresses_the_exit_report() {
+        let stream = SessionStream::new();
+        stream.mark_reaped();
+        let (events, exit) = drive(test_limits(), &stream, &[b"bye"], || Some(0));
+
+        assert_eq!(exit, None, "a deliberate reap must stay silent");
+        // Output buffered before the reap still reaches the ring and the sink.
+        assert_eq!(events, vec![b"bye".to_vec()]);
+        assert_eq!(stream.contents(), b"bye".to_vec());
+        assert!(!stream.is_alive());
+    }
+
+    #[test]
+    fn session_stream_lifecycle_flags() {
+        let stream = SessionStream::new();
+        assert!(stream.is_alive());
+        assert!(!stream.reaped.load(Ordering::Relaxed));
+
+        stream.mark_reaped();
+        assert!(!stream.is_alive());
+        assert!(stream.reaped.load(Ordering::Relaxed));
+    }
+
+    #[test]
+    fn pump_reader_chunks_and_stops_at_eof() {
+        let source = vec![7u8; READ_BUF * 2 + 512];
+        let (tx, rx) = std::sync::mpsc::channel();
+        pump_reader(std::io::Cursor::new(source.clone()), tx);
+
+        let chunks: Vec<Vec<u8>> = rx.iter().collect();
+        assert!(chunks.len() >= 3, "a read is capped at READ_BUF");
+        assert!(chunks.iter().all(|chunk| chunk.len() <= READ_BUF));
+        assert_eq!(chunks.concat(), source);
+    }
+
+    #[test]
+    fn pump_reader_stops_on_read_error() {
+        struct FailingReader;
+        impl Read for FailingReader {
+            fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("pty closed"))
+            }
+        }
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        pump_reader(FailingReader, tx);
+
+        assert_eq!(rx.iter().count(), 0);
+    }
+
+    #[test]
+    fn pump_reader_stops_when_the_receiver_is_gone() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        drop(rx);
+
+        // Returns rather than spinning on a dead channel.
+        pump_reader(std::io::Cursor::new(vec![1u8; READ_BUF * 2]), tx);
     }
 }
