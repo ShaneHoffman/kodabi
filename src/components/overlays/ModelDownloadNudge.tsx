@@ -100,7 +100,7 @@ export function ModelDownloadNudge({ onClose }: Props) {
           <StatusMessage variant="error" compact>
             Couldn&apos;t finish the download: {state.message}
           </StatusMessage>
-          <p className="text-[12px] text-ink-faint">
+          <p className="text-[12px] text-ink-dim">
             Nothing else was affected. Trying again picks up where it stopped,
             and you can also start it from Settings.
           </p>

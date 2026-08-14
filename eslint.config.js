@@ -26,7 +26,7 @@ import tseslint from "typescript-eslint";
 const COLOUR_LITERAL = "(#[0-9a-fA-F]{3,8}\\b|\\b(rgba?|hsla?|oklch|oklab|color-mix)\\()";
 const COLOUR_MESSAGE =
   "No colour literals in className — Grove colours come from the theme (bg-ground, text-ink, " +
-  "border-edge, text-kodama…) so .day and .hc can re-map them. See docs/DESIGN_SYSTEM.md §6.";
+  "border-edge, text-kodama…) so .day and .hc can re-map them. See docs/DESIGN_SYSTEM.md §7.";
 
 const groveGuardSelectors = [
   {

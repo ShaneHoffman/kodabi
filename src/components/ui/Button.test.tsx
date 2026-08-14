@@ -47,6 +47,60 @@ describe("Button", () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
+  /*
+   * Click is not the only way a composed control is activated. `Menu.Trigger`
+   * merges its own handlers into this button and opens on MOUSEDOWN and on
+   * ArrowDown, neither of which passes through the click guard above — so a
+   * busy trigger stayed fully operable while looking inert. The handlers are
+   * dropped rather than cancelled, because a cancelled mousedown would refuse
+   * the focus `loading` exists to keep and a cancelled keydown would eat Tab.
+   */
+  it("swallows the pointer and key activation a composed trigger opens on", async () => {
+    const user = userEvent.setup();
+    const onMouseDown = vi.fn();
+    const onPointerDown = vi.fn();
+    const onKeyDown = vi.fn();
+    render(
+      <Button
+        loading
+        loadingLabel="Saving…"
+        onMouseDown={onMouseDown}
+        onPointerDown={onPointerDown}
+        onKeyDown={onKeyDown}
+      >
+        Save
+      </Button>,
+    );
+
+    const button = screen.getByRole("button");
+    await user.click(button);
+    button.focus();
+    await user.keyboard("{ArrowDown}");
+
+    expect(onMouseDown).not.toHaveBeenCalled();
+    expect(onPointerDown).not.toHaveBeenCalled();
+    expect(onKeyDown).not.toHaveBeenCalled();
+    // Dropped, not cancelled: the press still handed the button its focus.
+    expect(button).toHaveFocus();
+  });
+
+  it("passes the pointer and key handlers through when it is not busy", async () => {
+    const user = userEvent.setup();
+    const onMouseDown = vi.fn();
+    const onKeyDown = vi.fn();
+    render(
+      <Button onMouseDown={onMouseDown} onKeyDown={onKeyDown}>
+        Save
+      </Button>,
+    );
+
+    await user.click(screen.getByRole("button"));
+    await user.keyboard("{ArrowDown}");
+
+    expect(onMouseDown).toHaveBeenCalledTimes(1);
+    expect(onKeyDown).toHaveBeenCalledTimes(1);
+  });
+
   it("does not submit its form while busy", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn((event: FormEvent) => event.preventDefault());

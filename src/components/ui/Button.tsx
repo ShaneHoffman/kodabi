@@ -157,6 +157,9 @@ export function Button({
   disabled,
   children,
   onClick,
+  onMouseDown,
+  onPointerDown,
+  onKeyDown,
   ...rest
 }: Props) {
   // Busy, not disabled: an explicit `disabled` wins, since a caller asking for
@@ -182,6 +185,18 @@ export function Button({
             }
           : onClick
       }
+      // Click is not the only way a button is activated once something composes
+      // with it. `Menu.Trigger` merges its own handlers into this element and
+      // opens on MOUSEDOWN and on ArrowDown — never reaching the click above —
+      // so a busy trigger stayed fully operable and only *looked* inert. These
+      // three are dropped rather than cancelled: the native default of a
+      // mousedown is focusing this button, and a cancelled keydown would eat
+      // Tab, both of which are exactly the focus `loading` exists to keep.
+      // Enter and Space still arrive as the synthesized click, which is
+      // cancelled above.
+      onMouseDown={busy ? undefined : onMouseDown}
+      onPointerDown={busy ? undefined : onPointerDown}
+      onKeyDown={busy ? undefined : onKeyDown}
       {...rest}
     >
       {loading ? (loadingLabel ?? children) : children}

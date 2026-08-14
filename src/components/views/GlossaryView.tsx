@@ -122,7 +122,7 @@ export function GlossaryView({ slug }: Props) {
           <StatusMessage variant="error">Couldn&apos;t load the glossary: {error}</StatusMessage>
           {/* The core error names the file and the offending term, so the
               guidance only has to say where to go from here. */}
-          <p className="text-[11.5px] leading-relaxed text-ink-faint">
+          <p className="text-[11.5px] leading-relaxed text-ink-dim">
             Fix the file in a text editor, then reopen this view.
           </p>
         </div>

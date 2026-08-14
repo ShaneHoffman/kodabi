@@ -160,7 +160,7 @@ export function ListenPill({
             {/* A real space, not just the margin: the two spans concatenate
                 into one accessible name, and without it a screen reader says
                 "Not listeningCapture failed to start". */}{" "}
-            <span className="ml-1 font-normal tracking-normal normal-case text-ink-faint">
+            <span className="ml-1 font-normal tracking-normal normal-case text-ink-dim">
               {detail}
             </span>
           </>
