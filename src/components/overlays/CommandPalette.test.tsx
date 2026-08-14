@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -218,7 +218,11 @@ describe("CommandPalette", () => {
     const opener = screen.getByRole("button", { name: "Commands" });
 
     await user.click(opener);
-    expect(await screen.findByRole("combobox")).toHaveFocus();
+    // The query field takes initial focus, which base-ui moves a tick after the
+    // dialog mounts.
+    await waitFor(() => {
+      expect(screen.getByRole("combobox")).toHaveFocus();
+    });
 
     await user.keyboard("{Escape}");
 
