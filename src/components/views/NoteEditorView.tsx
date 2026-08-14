@@ -55,7 +55,7 @@ export function NoteEditorView({ noteId, project, origin }: Props) {
  *
  * This view used to render into `ViewFrame variant="doc"`, which capped its
  * column at a single measure — the right answer while the note WAS one column,
- * and impossible once prose at 66ch has a 272px rail beside it. What ViewFrame
+ * and impossible once the prose has a 272px rail beside it. What ViewFrame
  * contributed otherwise was the landmark and the view gutter, and both are two
  * lines here. The landmark even gains a name it never had: `doc` drew its
  * `<section>` with no `title` or `eyebrow` to label it, a documented gap in
@@ -77,25 +77,60 @@ function NoteFrame({ label, children }: { label: string; children: ReactNode }) 
 }
 
 /**
- * The reading room's two columns: prose at its measure, and whatever width is
- * left over as a details rail (docs/DESIGN_SYSTEM.md §1 — the leftover becomes
- * a rail, never longer lines).
+ * How wide the note gets to be: everything from the title to the rail's outer
+ * edge, bounded once, here. Past this the window's extra width becomes margin
+ * OUTSIDE the rail — which reads as page margin, where the same width left
+ * inside the grid read as a hole between the prose and the rail beside it.
  *
- * Below the threshold there is no leftover to become anything, so the rail
- * stops being a rail and stacks under the note. 42rem is the width at which the
- * body still holds a readable line once 272px and the gap are taken out of it;
- * a rail that appears before then is one that took its width from the prose.
+ * 1360px is the assembly, not the prose: less the 272px rail and the 44px gap,
+ * the body lands at 1044px, which is about 113 characters at the note's 15px
+ * Georgia (measured in the window: `66ch` there is 607.6px). Well past the
+ * classic measure, and deliberately — see the grid below.
+ *
+ * A panel wider than this keeps the difference as right margin, which is the
+ * one visible cost: on a maximized 1080p window the rail stops about 270px
+ * short of the panel's edge. That is the trade taken knowingly — the assembly
+ * reads as a page with a margin, where the same width spent inside the grid
+ * read as a hole with nothing in it, and 113 characters is already the far end
+ * of what a line should ask an eye to track back from.
+ */
+const NOTE_SURFACE = "w-full max-w-[1360px]";
+
+/**
+ * The reading room's two columns: prose that takes the width, and a rail at a
+ * fixed 272px.
+ *
+ * This is the note screen's carve-out from docs/DESIGN_SYSTEM.md §1, and the
+ * doc says so. The rule there — prose stops at its measure, the leftover
+ * becomes a rail — assumes the leftover has somewhere to go. Here it did not:
+ * the rail is already as wide as it should be, so every pixel past 66ch + 272px
+ * fell in the gap BETWEEN them, and a reader saw a column of nothing where the
+ * layout should have ended. So on this one screen the rail is the measure: the
+ * body runs to it, and `NOTE_SURFACE` above is what keeps that from becoming an
+ * unreadable line on a very wide monitor.
+ *
+ * Below the threshold there is no leftover to give anyone, so the rail stops
+ * being a rail and stacks under the note — and the body goes back to its own
+ * `max-w`, since with nothing beside it there is nothing to bound it. 42rem is
+ * the width at which the body still holds a readable line once 272px and the
+ * gap are taken out of it; a rail that appears before then is one that took its
+ * width from the prose.
  */
 const NOTE_GRID =
   "mt-8 grid gap-8 @[42rem]:grid-cols-[minmax(0,1fr)_272px] @[42rem]:gap-11";
 
-/** The reading measure. Prose stops here; structure does not. */
-const NOTE_COLUMN = "max-w-[66ch] font-note text-note text-ink-read";
+/** The reading voice. The cap is the measure of last resort — it holds only
+ * while the note is one column, and lifts at the same width that brings in the
+ * rail to bound the prose in its place. */
+const NOTE_COLUMN =
+  "max-w-[66ch] @[42rem]:max-w-none font-note text-note text-ink-read";
 
 /** The note's title, in read and compose alike — they draw the same document
- * and must not disagree about what it looks like. */
+ * and must not disagree about what it looks like. Its cap lifts with the body's,
+ * for the same reason: a title that stopped at 30ch while the prose ran on read
+ * as a different document's heading. */
 const NOTE_TITLE =
-  "max-w-[30ch] text-balance font-ui text-[26px] font-semibold leading-[1.15] tracking-[-0.01em] text-ink";
+  "max-w-[30ch] @[42rem]:max-w-none text-balance font-ui text-[26px] font-semibold leading-[1.15] tracking-[-0.01em] text-ink";
 
 /**
  * Where "back" goes from a note, and what it is called.
@@ -262,7 +297,7 @@ function ReadNoteLayout({
           deterministic wait for "the note screen is up" that is not any of the
           things the source-pairing slice is about to assert on, or the wait
           would beg the question. */}
-      <article data-testid="note-read">
+      <article data-testid="note-read" className={NOTE_SURFACE}>
         <BackLink project={project} origin={origin} />
 
         <header className="mt-3.5 flex items-start justify-between gap-6">
@@ -621,7 +656,7 @@ function EditNote({
 
   return (
     <NoteFrame label={`Editing ${note.title}`}>
-      <form onSubmit={submit}>
+      <form onSubmit={submit} className={NOTE_SURFACE}>
         {/* The mode bar. It is the whole reason compose mode is legible: the
             document below it is identical to read mode, so this line is what
             says which one you are in. */}
@@ -829,9 +864,12 @@ function EditNote({
  * commit button — the only additions are the two things a new note has no
  * answer for, its project and its name.
  *
- * No rail: it would have nothing to say. The note has no id yet, no captured
- * date on disk, and the one fact it does have — where it will be filed — is
- * being typed two lines up rather than reported.
+ * The rail is empty, not absent: it would have nothing to say — the note has no
+ * id yet, no captured date on disk, and the one fact it does have (where it
+ * will be filed) is being typed two lines up rather than reported. But the grid
+ * still runs, because the grid is now what sets the measure. Drop the track and
+ * the body would take the whole panel here and then visibly narrow the instant
+ * Create lands the reader in read mode, over the same words.
  */
 function CreateNote({ initialProject }: { initialProject: string | null }) {
   const { navigate } = useNavigation();
@@ -881,7 +919,7 @@ function CreateNote({ initialProject }: { initialProject: string | null }) {
 
   return (
     <NoteFrame label="New note">
-      <form onSubmit={submit} className={NOTE_COLUMN}>
+      <form onSubmit={submit} className={NOTE_SURFACE}>
         <header className="flex items-center justify-between gap-6">
           <p className={PANEL_EYEBROW}>New note</p>
           <Button
@@ -933,17 +971,23 @@ function CreateNote({ initialProject }: { initialProject: string | null }) {
           </datalist>
         </div>
 
-        <textarea
-          value={body}
-          aria-label="Note body"
-          placeholder="Write here"
-          onChange={(event) => setBody(event.target.value)}
-          className={clsx(
-            NOTE_COLUMN,
-            "focus-ring mt-8 min-h-[300px] w-full resize-none border-none bg-transparent p-0",
-            "caret-kodama placeholder:text-ink-faint",
-          )}
-        />
+        {/* Read mode's grid, with the rail track left empty — the composing
+            surface has to agree with the document it is about to become. */}
+        <div className={NOTE_GRID}>
+          <div className="min-w-0">
+            <textarea
+              value={body}
+              aria-label="Note body"
+              placeholder="Write here"
+              onChange={(event) => setBody(event.target.value)}
+              className={clsx(
+                NOTE_COLUMN,
+                "focus-ring min-h-[300px] w-full resize-none border-none bg-transparent p-0",
+                "caret-kodama placeholder:text-ink-faint",
+              )}
+            />
+          </div>
+        </div>
 
         {error && (
           <StatusMessage variant="error">Couldn&apos;t create this note: {error}</StatusMessage>
