@@ -51,7 +51,7 @@ export function ModelDownloadProgress({ progress }: { progress: DownloadProgress
       </div>
       <div className="h-1 w-full overflow-hidden rounded-[2px] bg-wash" aria-hidden="true">
         <div
-          className="h-full rounded-[2px] bg-ink/50 transition-[width] duration-200 ease-out-strong"
+          className="h-full rounded-[2px] bg-ink/50 transition-[width] duration-200 ease-out-strong motion-reduce:transition-none"
           style={{ width: `${fraction * 100}%` }}
           data-testid="model-progress-fill"
         />
