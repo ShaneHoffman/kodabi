@@ -14,6 +14,7 @@ const { xtermRegistry } = vi.hoisted(() => ({
       options: Record<string, unknown>;
       onDataHandler: ((data: string) => void) | null;
       writes: unknown[];
+      openedIn: HTMLElement | null;
     }>,
   },
 }));
@@ -25,12 +26,15 @@ vi.mock("@xterm/xterm", () => {
     options: Record<string, unknown>;
     onDataHandler: ((data: string) => void) | null = null;
     writes: unknown[] = [];
+    openedIn: HTMLElement | null = null;
     constructor(options: Record<string, unknown>) {
       this.options = options;
       xtermRegistry.instances.push(this);
     }
     loadAddon(): void {}
-    open(): void {}
+    open(node: HTMLElement): void {
+      this.openedIn = node;
+    }
     focus(): void {}
     reset(): void {}
     dispose(): void {}
@@ -93,6 +97,27 @@ describe("TerminalView", () => {
     const { options } = latestTerminal();
     expect(options.fontSize).toBe(12.5);
     expect(options.allowTransparency).toBe(true);
+  });
+
+  // The fit addon reads the mount's computed size to size the PTY grid and
+  // subtracts only the `.xterm` element's padding, never the mount's — and under
+  // `box-sizing: border-box` that read is the padding box. So padding on the
+  // mount becomes grid space the well then clips away (the bug this pins: the
+  // TUI's bottom row and rightmost columns were drawn outside the visible area).
+  // The inset belongs one level up, on the well.
+  //
+  // The size half is the same invariant from the other side, and needs its own
+  // assertion: a mount without `h-full` is a block at its content height, which
+  // IS the rendered grid's height, so fit would read its own last answer back
+  // and the grid could never shrink when the window does.
+  it("opens xterm into a bare mount that fills the inset well", () => {
+    render(<TerminalView />);
+    const mount = latestTerminal().openedIn;
+    expect(mount).not.toBeNull();
+    expect(mount?.className).not.toMatch(/(^|[\s:])p[xytblrse]?-/);
+    expect(mount?.className).toContain("h-full");
+    expect(mount?.className).toContain("w-full");
+    expect(mount?.parentElement?.className).toContain("glass-term");
   });
 
   it("reads the session's state in the header, and flips it on exit", () => {
