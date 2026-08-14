@@ -156,9 +156,10 @@ pub fn run() {
             capture_control::build_tray(app.handle())?;
 
             // Park the capture pill before anything can show it. Done here,
-            // not on first show: the monitor query blocks on the main thread,
-            // and first show happens under the capture toggle lock.
-            overlay::place_initially(app.handle());
+            // where the monitor query it blocks on is free: the main thread,
+            // no capture running, no lock held. Every later recording re-parks
+            // it from `overlay::sync`, which defers back to this same call.
+            overlay::park_at_default(app.handle());
 
             // Windows drops every new tray icon into the hidden overflow, and
             // a mark behind a chevron can't be read at a glance. Lift it onto
@@ -240,6 +241,7 @@ pub fn run() {
             note_cmds::list_projects,
             note_cmds::create_project,
             note_cmds::delete_project,
+            note_cmds::rename_project,
             glossary_cmds::list_glossary_terms,
             glossary_cmds::add_glossary_term,
             glossary_cmds::update_glossary_term,

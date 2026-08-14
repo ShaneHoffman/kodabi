@@ -786,8 +786,12 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
    per-channel segments are recorded relative to session start.
 6. **Identity handles.** The **note write handle is the stable `id`**; `path` is always returned but
    never accepted as a handle, since it changes on move. The **project handle is the `slug`**
-   (`"Growth/Q3"`), which mirrors the on-disk folder path and is human-usable; `Project.id` is
-   exposed for stability, but no tool requires it.
+   (`"Growth/Q3"`), which mirrors the on-disk folder path and is human-usable. `Project.id` is
+   exposed as an informational, deterministic identifier, and no tool requires it — it is derived
+   from the slug (`vault::project_id`), so it is stable for as long as the slug is, and a project
+   renamed at the vault/Tauri layer (`vault::rename_project`, the `rename_project` command) mints a
+   new one. A consumer that needs to follow a project across a rename should follow the slug, not
+   the id; a note's `id`, by contrast, survives both a move and a project rename.
 
 ---
 
@@ -812,6 +816,11 @@ Out of scope for this spec, listed so Phase 3+ doesn't rediscover the gap from s
   rows, and any paired session artifacts. An `mcp__kodabi__delete_note` tool would be the surface's
   first **destructive** write (`destructiveHint: true`), reusing the `NoteId` `$def` as its input
   handle; deferred to the Phase 3 server rather than added to this v1 spec.
+- **`rename_project`** (rename a project, re-filing everything inside it) — now exists at the
+  vault/Tauri layer (`vault::rename_project`, the `rename_project` command): it moves the folder,
+  rewrites the `project:` frontmatter of every contained note including those in child projects,
+  and reconciles the index. An `mcp__kodabi__rename_project` tool would reuse the `ProjectSlug`
+  `$def` for both handles; deferred to the Phase 3 server rather than added to this v1 spec.
 - **MCP resources** (`@kodabi:note://...`) **and prompts** (`/mcp__kodabi__...`) — separate MCP
   surfaces from tools; not addressed by this ticket.
 

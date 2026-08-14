@@ -255,6 +255,55 @@ describe("NoteEditorView details rail", () => {
     expect(within(rail).getByText("budget · q3")).toBeInTheDocument();
   });
 
+  it("lets the rail's open-ended rows wrap rather than clip", async () => {
+    // jsdom has no layout, so what this locks in is the class contract, the
+    // same way ChatView's bubble test does. It matters because `getByText`
+    // above passes identically whether the value span carries `truncate` (the
+    // spelling this replaced, which clips to one nowrap line) or the wrapping
+    // pair — so without this the regression returns green. `min-w-0` is
+    // load-bearing next to `break-words`, not tidiness: `overflow-wrap:
+    // break-word` does not lower a span's min-content width, so a flex item
+    // left at `min-width: auto` cannot shrink and the long word paints outside
+    // the rail. Measured in a browser at the rail's real geometry (a 272px
+    // track, less `glass-card`'s px-4, is a 240px content box): with both
+    // classes a 58-character unbroken tag wraps to 3 lines and overflows by
+    // 0px; drop either one and it paints past the card's edge.
+    //
+    // The Tags row is the one that cannot afford clipping: compose mode drops
+    // it for the editable chips, so read mode is the only full listing a note's
+    // tags ever get.
+    const note = makeNote({
+      id: "n_a1b2c3",
+      title: "Quarterly planning",
+      project: "briarwood-golf-course-renovation",
+      tags: ["quarterly-budget-review", "stakeholders"],
+    });
+    renderNote("briarwood-golf-course-renovation", note);
+    await screen.findByRole("heading", { name: "Quarterly planning" });
+
+    const rail = screen.getByRole("complementary", { name: "Note details" });
+    for (const value of [
+      within(rail).getByText("briarwood-golf-course-renovation"),
+      within(rail).getByText("quarterly-budget-review · stakeholders"),
+    ]) {
+      expect(value).toHaveClass("break-words");
+      expect(value).toHaveClass("min-w-0");
+    }
+
+    // Wrapping is only half of it: the values also have to share a left edge.
+    // A flex row per fact took the value's edge from its own label's width, so
+    // "Tags" — shortest label, longest value — started further left than every
+    // other row and wrapped back under the labels. One `auto` label track sized
+    // across all rows is what makes the second column a column.
+    const list = rail.querySelector("dl");
+    expect(list).toHaveClass("grid");
+    expect(list).toHaveClass("grid-cols-[auto_minmax(0,1fr)]");
+    // Each fact is a bare dt/dd pair in that grid: a wrapper element would be
+    // the grid item, and the two columns would collapse back into one.
+    expect(list?.children[0]?.tagName).toBe("DT");
+    expect(list?.children[1]?.tagName).toBe("DD");
+  });
+
   it("drops the Tags row in compose mode, where the tags themselves are", async () => {
     // Two copies of one list, and this one reads the SAVED note — so adding a
     // tag would leave the rail contradicting the chips two lines above it.

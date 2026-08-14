@@ -5,6 +5,7 @@ import { projectRowMeta } from "../../noteMeta";
 import { todayIsoDate, useProjectNotes } from "../../useNotes";
 import { folderHue, useProjects, type FolderHue } from "../../useProjects";
 import { DeleteProjectDialog } from "../dialogs/DeleteProjectDialog";
+import { RenameProjectDialog } from "../dialogs/RenameProjectDialog";
 import { Button } from "../ui/Button";
 import { Menu } from "../ui/Menu";
 import { StatusMessage } from "../ui/StatusMessage";
@@ -80,6 +81,7 @@ export function ProjectView({ slug }: Props) {
   const { notes, loading, error } = useProjectNotes(slug);
   const { entries } = useProjects();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [renaming, setRenaming] = useState(false);
 
   // What deleting this project would take with it, from the sidebar listing
   // the shell already holds: the project's own notes plus everything under
@@ -133,8 +135,8 @@ export function ProjectView({ slug }: Props) {
         // EVERYTHING ELSE THIS FOLDER CAN DO GOES IN THE MENU. The header slot
         // holds one action, and the glossary made three — so rather than grow
         // a toolbar the frame's doc forbids, the project's other verbs collapse
-        // behind one trigger. That also gives the next project-scoped verb a
-        // home instead of another argument about the ceiling.
+        // behind one trigger. Rename is exactly the next project-scoped verb
+        // that home was built for.
         <div className="flex items-center gap-2">
           <Button
             variant="quiet"
@@ -159,8 +161,10 @@ export function ProjectView({ slug }: Props) {
               <Menu.Item onClick={() => navigate({ kind: "glossary", slug })}>
                 Glossary
               </Menu.Item>
-              {/* The destructive one sits behind a confirmation
-                  (DeleteProjectDialog), which the ellipsis promises. */}
+              {/* Rename and delete both need more from the user before they
+                  take effect (a name, a confirmation), which the ellipsis
+                  promises on either. */}
+              <Menu.Item onClick={() => setRenaming(true)}>Rename…</Menu.Item>
               <Menu.Item onClick={() => setConfirmingDelete(true)}>Delete project…</Menu.Item>
             </Menu.Content>
           </Menu.Root>
@@ -236,6 +240,8 @@ export function ProjectView({ slug }: Props) {
           ))}
         </div>
       )}
+
+      {renaming && <RenameProjectDialog slug={slug} onClose={() => setRenaming(false)} />}
 
       {confirmingDelete && (
         <DeleteProjectDialog

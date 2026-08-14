@@ -28,6 +28,26 @@ fn broadcast_vault_changed(app: &AppHandle) {
     let _ = app.emit(VAULT_CHANGED_EVENT, ());
 }
 
+/// Lands one moved or re-filed note's row on the background index worker.
+///
+/// Every command that relocates a note does this eagerly rather than leaving it
+/// to the file watcher, so the change reflects in search at once and still
+/// converges if the watcher never started. The upsert is keyed by the note's
+/// stable `id`, so a note that only moved updates its existing row instead of
+/// being deleted and reinserted — which is what keeps its embeddings alive.
+/// Best-effort by construction: the `.md` file is already the source of truth,
+/// so a failed index write may never fail the command (see `index_state`).
+fn index_moved_note(index: &IndexState, listed: &ListedNote, kb: &Path) {
+    let rel = listed.path.strip_prefix(kb).unwrap_or(&listed.path);
+    let mut indexed = IndexedNote::from_note(
+        &listed.note,
+        &listed.title,
+        &rel.to_string_lossy().replace('\\', "/"),
+    );
+    indexed.meeting = meeting::meeting_facts_for(&listed.note, kb);
+    index.index_note_best_effort(indexed);
+}
+
 /// Maximum length (in `char`s) of a note-list snippet.
 const SNIPPET_MAX_CHARS: usize = 160;
 
@@ -444,23 +464,9 @@ pub async fn file_note_to_project(
         .map_err(|err| err.to_string())?
         .ok_or_else(|| format!("note {} not found in the vault", input.id))?;
 
-    // Keep the index in step with the move (best-effort; see `write_note_impl`).
-    // A re-route changes the note's project and path; upsert-by-`id` on the
-    // background worker updates the same row. Done here, not left to the file
-    // watcher alone, so a re-correction reflects in search at once and still
-    // converges if the watcher never started.
-    let rel = routed
-        .note
-        .path
-        .strip_prefix(&kb)
-        .unwrap_or(&routed.note.path);
-    let mut indexed = IndexedNote::from_note(
-        &routed.note.note,
-        &routed.note.title,
-        &rel.to_string_lossy().replace('\\', "/"),
-    );
-    indexed.meeting = meeting::meeting_facts_for(&routed.note.note, &kb);
-    app.state::<IndexState>().index_note_best_effort(indexed);
+    // Keep the index in step with the move: a re-route changes the note's
+    // project and path, and the upsert updates the same row.
+    index_moved_note(&app.state::<IndexState>(), &routed.note, &kb);
     broadcast_vault_changed(&app);
 
     Ok(file_note_outcome(routed, &kb))
@@ -535,14 +541,7 @@ pub async fn delete_project(app: AppHandle, project: String) -> Result<DeletedPr
 
     let index = app.state::<IndexState>();
     for listed in &deleted.moved_notes {
-        let rel = listed.path.strip_prefix(&kb).unwrap_or(&listed.path);
-        let mut indexed = IndexedNote::from_note(
-            &listed.note,
-            &listed.title,
-            &rel.to_string_lossy().replace('\\', "/"),
-        );
-        indexed.meeting = meeting::meeting_facts_for(&listed.note, &kb);
-        index.index_note_best_effort(indexed);
+        index_moved_note(&index, listed, &kb);
     }
     index.request_reconcile();
     broadcast_vault_changed(&app);
@@ -551,6 +550,50 @@ pub async fn delete_project(app: AppHandle, project: String) -> Result<DeletedPr
         slug: deleted.slug,
         moved_note_count: deleted.moved_notes.len() as u32,
     })
+}
+
+/// Renames a project via `vault::rename_project`: the folder moves and every
+/// contained note (direct and in child projects) is re-filed under the new
+/// slug. Echoes the canonical project row, like `create_project`, so the
+/// frontend can navigate to the renamed project without waiting for a refetch.
+///
+/// Index consistency is the two best-effort layers `delete_project` uses: a
+/// per-note upsert lands each move immediately (the note keeps its id, so rows
+/// are updated, never deleted, and embeddings survive), then a reconcile sweep
+/// converges the rest. Both are needed here because the file watcher only
+/// reacts to `.md` paths and a directory rename may not produce any.
+#[tauri::command]
+pub async fn rename_project(
+    app: AppHandle,
+    project: String,
+    new_project: String,
+) -> Result<ProjectDto, String> {
+    let kb = knowledge_base_dir(&app)?;
+    let renamed = vault::rename_project(&kb, &project, &new_project).map_err(|err| match err {
+        // The core message suggests passing create_project, which only makes
+        // sense on the filing path; renaming gets plain copy.
+        note::NoteError::MissingProject { project } => {
+            format!("project \"{project}\" does not exist")
+        }
+        other => other.to_string(),
+    })?;
+
+    if !renamed.failed_rewrites.is_empty() {
+        eprintln!(
+            "rename_project: {} note(s) moved to {} but still name the old project",
+            renamed.failed_rewrites.len(),
+            renamed.info.slug
+        );
+    }
+
+    let index = app.state::<IndexState>();
+    for listed in &renamed.renamed_notes {
+        index_moved_note(&index, listed, &kb);
+    }
+    index.request_reconcile();
+    broadcast_vault_changed(&app);
+
+    Ok(project_dto(renamed.info))
 }
 
 /// The `delete_note` outcome echoed to the frontend: the removed note's id, its

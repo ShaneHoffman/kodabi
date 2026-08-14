@@ -51,23 +51,40 @@ export function CaptureOverlayPill() {
     // `deep` (not the bare attribute) so a press on the mark, the label or the
     // clock drags the window too, rather than only one landing on this element.
     //
-    // The contents are centred rather than spread, because the window is a
-    // fixed size and the label is not: it is sized in tauri.conf.json to hold
-    // the widest state this can report ("System audio only" beside an
-    // hours-long clock), so every shorter state would otherwise leave a gap
-    // between the label and the clock wide enough to read as two things rather
-    // than one line. Centred, the slack becomes padding.
+    // The label's `grow` is what absorbs the slack, not a `justify-center` on
+    // this row: the window is sized to the widest state this can report
+    // ("System audio only" beside an hours-long clock, see below), so every
+    // shorter state has spare width, and growing the label keeps the mark
+    // pinned to the left edge and the clock pinned to the right rather than
+    // floating the whole group away from both.
     //
-    // 248px is that widest state measured, not estimated: 13 mark + 125 label
-    // + 46 clock + 20 of gaps + 40 of padding + 2 of border, with a couple of
-    // px spare. Sizing it any wider buys nothing and costs the common
-    // "Listening" state — 66px of label — a visibly slack pill.
+    // TODO(width): measured for the pre-mr-1 layout at 248px; re-measure with
+    // the mark's mr-1 folded in before shipping.
     <div
       data-tauri-drag-region="deep"
       data-testid="capture-overlay-pill"
-      className="glass-pill flex h-screen w-screen cursor-grab items-center justify-center gap-2.5 px-5 select-none active:cursor-grabbing"
+      className="glass-pill flex h-screen w-screen cursor-grab items-center gap-2.5 px-5 select-none active:cursor-grabbing"
     >
-      <SpiritMark mode={markMode(captureState)} size="13px" halo="10px" />
+      {/* The margin is optical, not decorative. `.spirit-mark`'s layout box is
+          the core alone (`--mark-size`), while the listening aura overflows it
+          by `--halo-spread` in every direction — so the flex gap left of the
+          label is filled by glow while the gap right of it, against the clock,
+          stays empty, and the label reads glued to the mark.
+
+          4px, and the value is measured rather than taste: differencing an
+          aura-on against an aura-off render puts the glow's optical mass
+          ~3.8px past the core's edge (it fades out entirely by ~10px). So 4px
+          of clearance lands the *perceived* space either side of the label at
+          10px each, matching the gap-2.5 on the clock's side. Static rather
+          than listening-only, because the aura is the one state that wants it
+          and a conditional margin would jolt the label sideways on every
+          transition into and out of it. */}
+      <SpiritMark
+        mode={markMode(captureState)}
+        size="13px"
+        halo="10px"
+        className="mr-1"
+      />
       {/* The live region is the label alone. Wrapping the clock in it too
           would announce a new time every second, forever.
 
@@ -76,10 +93,14 @@ export function CaptureOverlayPill() {
           point: this window floats over other people's applications, and on
           the desktop the mark is the only green thing while audio is being
           captured (DESIGN_SYSTEM §2). A pill that is half green reads as an
-          alert; the signal here is calm and always on. */}
+          alert; the signal here is calm and always on.
+
+          `grow` and `text-center`: inert while the pill hugs its content, and
+          load-bearing now that the window is wider than most states — see the
+          `grow` note above. */}
       <span
         role="status"
-        className="min-w-0 truncate font-ui text-[11px] font-semibold tracking-[0.12em] text-ink-dim uppercase"
+        className="min-w-0 grow truncate text-center font-ui text-[11px] font-semibold tracking-[0.12em] text-ink-dim uppercase"
       >
         {label.text}
       </span>

@@ -189,4 +189,24 @@ describe("CaptureOverlayPill", () => {
     expect(pill).toHaveClass("h-screen", "w-screen");
     expect(pill).not.toHaveClass("p-3");
   });
+
+  it("holds the label clear of the mark's aura, and centred in any slack", async () => {
+    const { container } = await renderSeeded(LISTENING);
+
+    // The mark's layout box is its core; the listening aura overflows it by
+    // `--halo-spread`, so the flex gap on the label's left is filled with glow
+    // while the gap on its right, against the clock, is empty. The margin is
+    // that difference. `grow` and `text-center` are the other half: with the
+    // window now sized to the widest state this can report, every shorter
+    // state leaves the label spare width, and this is what keeps the mark
+    // pinned left and the clock pinned right while the text floats to the
+    // middle of what's left, rather than the whole group drifting off-edge.
+    expect(container.querySelector(".spirit-mark")).toHaveClass("mr-1");
+    const label = screen.getByRole("status");
+    expect(label).toHaveClass("grow", "text-center");
+    // Centring must not cost the degraded labels their truncation — the
+    // window is sized to fit "System audio only" exactly, so any state
+    // beside it still needs to yield rather than overflow.
+    expect(label).toHaveClass("truncate");
+  });
 });
