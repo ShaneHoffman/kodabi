@@ -105,11 +105,18 @@ describe("TerminalView", () => {
   // mount becomes grid space the well then clips away (the bug this pins: the
   // TUI's bottom row and rightmost columns were drawn outside the visible area).
   // The inset belongs one level up, on the well.
-  it("opens xterm into an unpadded mount, with the inset on the well above it", () => {
+  //
+  // The size half is the same invariant from the other side, and needs its own
+  // assertion: a mount without `h-full` is a block at its content height, which
+  // IS the rendered grid's height, so fit would read its own last answer back
+  // and the grid could never shrink when the window does.
+  it("opens xterm into a bare mount that fills the inset well", () => {
     render(<TerminalView />);
     const mount = latestTerminal().openedIn;
     expect(mount).not.toBeNull();
     expect(mount?.className).not.toMatch(/(^|[\s:])p[xytblrse]?-/);
+    expect(mount?.className).toContain("h-full");
+    expect(mount?.className).toContain("w-full");
     expect(mount?.parentElement?.className).toContain("glass-term");
   });
 
