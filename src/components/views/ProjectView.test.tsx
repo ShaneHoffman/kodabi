@@ -105,8 +105,11 @@ describe("ProjectView delete flow", () => {
     expect(
       within(dialog).getByText("This also deletes 1 project inside it."),
     ).toBeInTheDocument();
-    // Cancel is the primary control of a confirmation and holds initial focus.
-    expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    // Cancel is the primary control of a confirmation and takes initial focus,
+    // which base-ui moves a tick after the dialog mounts.
+    await waitFor(() => {
+      expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    });
   });
 
   it("cancels without deleting", async () => {
