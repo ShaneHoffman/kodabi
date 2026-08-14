@@ -7,12 +7,11 @@ paths:
 
 Grove's doctrine is [`docs/DESIGN_SYSTEM.md`](../../docs/DESIGN_SYSTEM.md); its mechanics are
 [`docs/UI_CONVENTIONS.md`](../../docs/UI_CONVENTIONS.md). Exactly two of their claims are
-machine-enforced — the colour-literal guard and the `.css`-import ban, the two `no-restricted-syntax`
-selectors `eslint.config.js` calls the Grove guards. (The effect ban in the same file is
-[`no-use-effect`](no-use-effect.md)'s, not a design claim.) Everything else the design system says is
-review's job, and
-it says so itself (DESIGN_SYSTEM §7): *"this document is the checklist"*, and **"the absence of a
-guard is not permission."**
+machine-enforced — the colour-literal guard and the `.css`-import ban, the two
+`no-restricted-syntax` selectors `eslint.config.js` calls the Grove guards. (The effect ban in the
+same file is [`no-use-effect`](no-use-effect.md)'s, not a design claim.) Everything else the design
+system says is review's job, and it says so itself (DESIGN_SYSTEM §7): *"this document is the
+checklist"*, and **"the absence of a guard is not permission."**
 
 This file is that checklist in the form review reads it: the questions to ask of a diff that
 touches `src/**` UI, each naming the section that owns the answer. Open the docs — they are the
@@ -30,11 +29,10 @@ authority, and this list deliberately does not restate them.
 - **Every movement carries its reduced-motion partner, at the call site.** The swap table is
   DESIGN_SYSTEM §4: `materialize` / `rise-in` → `fade-in`, `dissolve` → `fade-out`, `halo` / `ring`
   → `halo-still`, `breathe` / `drift` / `drift-back` → nothing, `active:scale-97` → no press
-  transform, a switch
-  knob's `translate` → `duration-0`. Movement is the accessibility problem; life is not, so
-  opacity-only animations (`animate-caret`, `animate-pending`) are correct unpaired, and a duration
-  is gated instead of swapped *exactly* when the end state, not the travel, is what the user is
-  reading. The swap is written in the className because that is what makes it visible in review, and
+  transform, a switch knob's `translate` → `duration-0`. Movement is the accessibility problem; life
+  is not, so opacity-only animations (`animate-caret`, `animate-pending`) are correct unpaired, and a
+  duration is gated instead of swapped *exactly* when the end state, not the travel, is what the user
+  is reading. The swap is written in the className because that makes it visible in review, and
   it **must repeat every guard the thing it swaps carries** or it loses on specificity and goes
   silently dead (UI_CONVENTIONS §3, which also holds the
   `transition-[scale]`-not-`transition-transform` trap). Both failures are invisible on screen:
