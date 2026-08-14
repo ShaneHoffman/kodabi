@@ -39,62 +39,74 @@ export function CaptureOverlayPill() {
   if (!engaged) return null;
 
   return (
-    // The window is deliberately larger than the pill: the pill's drop shadow
-    // needs transparent room to fade into, or it is clipped flat at the window
-    // bounds and reads as a rectangle around a rounded pill. This padded frame
-    // is that room.
+    // The pill *is* the window: it fills it edge to edge, and the window is
+    // sized to the pill. There is no frame around it, because a transparent
+    // webview window is not click-through — every pixel of it takes the mouse,
+    // so a margin the user cannot see would still show the grab cursor and eat
+    // clicks meant for the application underneath. Flush bounds make the thing
+    // you can see and the thing you can grab the same shape. That is also why
+    // `glass-pill` carries no drop shadow: with no room to fade into, a shadow
+    // clips flat and reads as a dark wall over whatever is behind it.
     //
-    // `deep` (not the bare attribute) so a press anywhere — pill or the
-    // transparent frame, which swallows clicks regardless — drags the window.
+    // `deep` (not the bare attribute) so a press on the mark, the label or the
+    // clock drags the window too, rather than only one landing on this element.
+    //
+    // The label's `grow` is what absorbs the slack, not a `justify-center` on
+    // this row: the window is sized to the widest state this can report
+    // ("System audio only" beside an hours-long clock, see below), so every
+    // shorter state has spare width, and growing the label keeps the mark
+    // pinned to the left edge and the clock pinned to the right rather than
+    // floating the whole group away from both.
+    //
+    // TODO(width): measured for the pre-mr-1 layout at 248px; re-measure with
+    // the mark's mr-1 folded in before shipping.
     <div
       data-tauri-drag-region="deep"
-      data-testid="capture-overlay-root"
-      className="flex h-screen w-screen cursor-grab items-center justify-center p-3 select-none active:cursor-grabbing"
+      data-testid="capture-overlay-pill"
+      className="glass-pill flex h-screen w-screen cursor-grab items-center gap-2.5 px-5 select-none active:cursor-grabbing"
     >
-      <div
-        data-testid="capture-overlay-pill"
-        className="glass-pill flex max-w-full min-w-0 items-center gap-2.5 px-5 py-3"
+      {/* The margin is optical, not decorative. `.spirit-mark`'s layout box is
+          the core alone (`--mark-size`), while the listening aura overflows it
+          by `--halo-spread` in every direction — so the flex gap left of the
+          label is filled by glow while the gap right of it, against the clock,
+          stays empty, and the label reads glued to the mark.
+
+          4px, and the value is measured rather than taste: differencing an
+          aura-on against an aura-off render puts the glow's optical mass
+          ~3.8px past the core's edge (it fades out entirely by ~10px). So 4px
+          of clearance lands the *perceived* space either side of the label at
+          10px each, matching the gap-2.5 on the clock's side. Static rather
+          than listening-only, because the aura is the one state that wants it
+          and a conditional margin would jolt the label sideways on every
+          transition into and out of it. */}
+      <SpiritMark
+        mode={markMode(captureState)}
+        size="13px"
+        halo="10px"
+        className="mr-1"
+      />
+      {/* The live region is the label alone. Wrapping the clock in it too
+          would announce a new time every second, forever.
+
+          Faint ink in every state, unlike the in-app ListenPill, whose label
+          does step up to `kodama-ink` while live. That divergence is the
+          point: this window floats over other people's applications, and on
+          the desktop the mark is the only green thing while audio is being
+          captured (DESIGN_SYSTEM §2). A pill that is half green reads as an
+          alert; the signal here is calm and always on.
+
+          `grow` and `text-center`: inert while the pill hugs its content, and
+          load-bearing now that the window is wider than most states — see the
+          `grow` note above. */}
+      <span
+        role="status"
+        className="min-w-0 grow truncate text-center font-ui text-[11px] font-semibold tracking-[0.12em] text-ink-dim uppercase"
       >
-        {/* The margin is optical, not decorative. `.spirit-mark`'s layout box
-            is the core alone (`--mark-size`), while the listening aura
-            overflows it by `--halo-spread` in every direction — so the flex
-            gap left of the label is filled by glow while the gap right of it,
-            against the clock, stays empty, and the label reads glued to the
-            mark.
-
-            4px, and the value is measured rather than taste: differencing an
-            aura-on against an aura-off render puts the glow's optical mass
-            ~3.8px past the core's edge (it fades out entirely by ~10px). So
-            4px of clearance lands the *perceived* space either side of the
-            label at 10px each, matching the gap-2.5 on the clock's side.
-            Static rather than listening-only, because the aura is the one
-            state that wants it and a conditional margin would jolt the label
-            sideways on every transition into and out of it. */}
-        <SpiritMark
-          mode={markMode(captureState)}
-          size="13px"
-          halo="10px"
-          className="mr-1"
-        />
-        {/* The live region is the label alone. Wrapping the clock in it too
-            would announce a new time every second, forever.
-
-            Faint ink in every state, unlike the in-app ListenPill, whose label
-            does step up to `kodama-ink` while live. That divergence is the
-            point: this window floats over other people's applications, and on
-            the desktop the mark is the only green thing while audio is being
-            captured (DESIGN_SYSTEM §2). A pill that is half green reads as an
-            alert; the signal here is calm and always on. */}
-        <span
-          role="status"
-          className="min-w-0 grow truncate text-center font-ui text-[11px] font-semibold tracking-[0.12em] text-ink-dim uppercase"
-        >
-          {label.text}
-        </span>
-        <span className="flex-none font-data text-[13px] text-ink tabular-nums">
-          {formatElapsed(elapsedSeconds)}
-        </span>
-      </div>
+        {label.text}
+      </span>
+      <span className="flex-none font-data text-[13px] text-ink tabular-nums">
+        {formatElapsed(elapsedSeconds)}
+      </span>
     </div>
   );
 }

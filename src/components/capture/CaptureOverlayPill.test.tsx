@@ -167,11 +167,27 @@ describe("CaptureOverlayPill", () => {
     await renderSeeded(LISTENING);
 
     // `deep`, not the bare attribute: bare drags only on a press landing
-    // exactly on the root, so the pill inside it would be a dead zone.
-    expect(screen.getByTestId("capture-overlay-root")).toHaveAttribute(
+    // exactly on this element, so the mark, the label and the clock inside it
+    // would each be a dead zone.
+    expect(screen.getByTestId("capture-overlay-pill")).toHaveAttribute(
       "data-tauri-drag-region",
       "deep",
     );
+  });
+
+  it("fills its window edge to edge, with no frame around it", async () => {
+    const { container } = await renderSeeded(LISTENING);
+
+    // The pill is the whole window. A transparent webview window is not
+    // click-through, so any margin around the pill would still show the grab
+    // cursor and swallow clicks meant for the application underneath — an
+    // invisible thing taking the mouse. Flush bounds keep what you see and what
+    // you can grab the same shape, and are why `glass-pill` carries no drop
+    // shadow: with nowhere to fade, it would clip into a dark wall instead.
+    const pill = screen.getByTestId("capture-overlay-pill");
+    expect(pill.parentElement).toBe(container);
+    expect(pill).toHaveClass("h-screen", "w-screen");
+    expect(pill).not.toHaveClass("p-3");
   });
 
   it("holds the label clear of the mark's aura, and centred in any slack", async () => {
@@ -180,23 +196,17 @@ describe("CaptureOverlayPill", () => {
     // The mark's layout box is its core; the listening aura overflows it by
     // `--halo-spread`, so the flex gap on the label's left is filled with glow
     // while the gap on its right, against the clock, is empty. The margin is
-    // that difference. `text-center` is the other half: inert while the pill
-    // hugs its content, load-bearing the moment anything gives it width.
+    // that difference. `grow` and `text-center` are the other half: with the
+    // window now sized to the widest state this can report, every shorter
+    // state leaves the label spare width, and this is what keeps the mark
+    // pinned left and the clock pinned right while the text floats to the
+    // middle of what's left, rather than the whole group drifting off-edge.
     expect(container.querySelector(".spirit-mark")).toHaveClass("mr-1");
     const label = screen.getByRole("status");
-    expect(label).toHaveClass("text-center");
-    // Centring must not cost the degraded labels their truncation — this is
-    // a 320px window and "System audio only" is the long case.
+    expect(label).toHaveClass("grow", "text-center");
+    // Centring must not cost the degraded labels their truncation — the
+    // window is sized to fit "System audio only" exactly, so any state
+    // beside it still needs to yield rather than overflow.
     expect(label).toHaveClass("truncate");
-  });
-
-  it("keeps the pill inset from the window edge so its shadow can fade out", async () => {
-    await renderSeeded(LISTENING);
-
-    // The pill carries a drop shadow. Flush to the window bounds that shadow is
-    // clipped flat and reads as a rectangle around a rounded pill, which is
-    // exactly what the transparent window is meant to avoid. The padded frame
-    // is the fade-out room, and the window is sized for it.
-    expect(screen.getByTestId("capture-overlay-root")).toHaveClass("p-3");
   });
 });

@@ -6,15 +6,32 @@
     <title>Capture overlay</title>
     <style>
       /* This window is `transparent: true` (src-tauri/tauri.conf.json): the page
-         itself must never paint, so only the pill and its shadow land on the
-         desktop. Inline here rather than in src/index.css for two reasons: it
-         has to hold from the very first frame, before the bundle loads, or the
-         window flashes an opaque rectangle every time a capture starts; and
-         index.css is shared with the main window, which must keep its ground. */
+         itself must never paint, so only the pill lands on the desktop. Inline
+         here rather than in src/index.css for two reasons: it has to hold from
+         the very first frame, before the bundle loads, or the window flashes an
+         opaque rectangle every time a capture starts; and index.css is shared
+         with the main window, which must keep its ground. */
       html,
       body,
       #root {
         background: transparent;
+      }
+
+      /* The window is sized to the pill, so there is nowhere to scroll TO — and
+         without this, it scrolls anyway. The spirit-mark's aura is absolutely
+         positioned and animated: `halo` peaks at `scale(1.12)` and the lobes
+         counter-rotate, which is enough to push the scrollable box about a pixel
+         past the window at the top of each breath. That one pixel raises a
+         vertical scrollbar, and because the pill is sized in `100vw`/`100vh` —
+         which COUNT the scrollbar gutter — the pill is then wider than the space
+         left for it, so a horizontal scrollbar follows, which steals height,
+         which deepens the overflow. Both bars latch for a second, every few
+         breaths, over whatever the user is doing.
+         Clipping the page is the fix rather than shrinking the aura: the glow is
+         meant to reach past the mark, and it is decorative either way. */
+      html,
+      body {
+        overflow: hidden;
       }
     </style>
   </head>
