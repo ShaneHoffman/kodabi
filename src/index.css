@@ -1138,8 +1138,15 @@
   width: 10px;
   height: 10px;
 }
+/* The track stops short of both ends by the largest radius any scroll surface
+   in the app carries (the panel's 18px; dialogs are 16 and cards 14). Without
+   it the thumb's travel runs into the corner arc, where the border has already
+   curved inward past the pill's own column — the tip then reads as poking
+   outside the card rather than riding inside it. Named rather than a literal
+   so the clearance follows the radius if it ever moves. */
 ::-webkit-scrollbar-track {
   background: transparent;
+  margin: var(--radius-panel);
 }
 /* The stepper arrows, stated rather than assumed. Chromium collapses an
    unstyled button to zero once any `::-webkit-scrollbar` rule is in play, so
