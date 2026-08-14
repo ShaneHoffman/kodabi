@@ -3,6 +3,7 @@ import {
   pipelineStage,
   savedDestination,
   savedPathMatchesNote,
+  transcribeBeat,
   type CapturePipeline,
 } from "./useCapturePipeline";
 
@@ -93,7 +94,24 @@ describe("pipelineStage", () => {
   });
 
   it("reports transcribing", () => {
-    expect(pipelineStage(pipeline({ transcription: { status: "transcribing" } }))).toEqual({
+    expect(
+      pipelineStage(
+        pipeline({
+          transcription: { status: "transcribing", seconds_processed: 0, total_seconds: 60 },
+        }),
+      ),
+    ).toEqual({
+      id: "transcribing",
+      kind: "transcribing",
+      awaitingTranscribe: false,
+    });
+  });
+
+  it("reports a queued run as the same started stage, never as one to give up on", () => {
+    // A run parked behind `TRANSCRIBE_LOCK` has acknowledged the stop, so the
+    // grace timer (`awaitingTranscribe`) must not waive it — a long
+    // predecessor can hold it there for minutes.
+    expect(pipelineStage(pipeline({ transcription: { status: "queued" } }))).toEqual({
       id: "transcribing",
       kind: "transcribing",
       awaitingTranscribe: false,
@@ -201,5 +219,71 @@ describe("pipelineStage", () => {
     expect(
       pipelineStage(pipeline({ transcription: { status: "error", message: "boom" } })),
     ).toBeNull();
+  });
+});
+
+describe("transcribeBeat", () => {
+  const STARTING = {
+    copy: "just stopped · processing audio",
+    figures: null,
+    fraction: null,
+  };
+
+  it("says work is starting before the backend has said anything", () => {
+    expect(transcribeBeat({ status: "idle" })).toEqual(STARTING);
+  });
+
+  it("says queued only for a run genuinely parked behind another", () => {
+    expect(transcribeBeat({ status: "queued" })).toEqual({
+      copy: "queued behind the previous capture",
+      figures: null,
+      fraction: null,
+    });
+  });
+
+  it("reports position within the recording while the ASR pass runs", () => {
+    // 750s of a 58:04 recording: the figures read against the meeting the
+    // user remembers, not the two-channel work total the backend divides down.
+    expect(transcribeBeat({ status: "transcribing", seconds_processed: 750, total_seconds: 3484 }))
+      .toEqual({
+        copy: "processing audio",
+        figures: "12:30 of 58:04",
+        fraction: 750 / 3484,
+      });
+  });
+
+  it("names the cleanup stage rather than leaving a full bar looking stalled", () => {
+    expect(
+      transcribeBeat({ status: "transcribing", seconds_processed: 3484, total_seconds: 3484 }),
+    ).toEqual({ copy: "cleaning up transcript", figures: null, fraction: 1 });
+  });
+
+  it("clamps a fraction that overshoots its total", () => {
+    // The backend clamps too, but a bar wider than its track is the kind of
+    // thing that must not depend on both sides agreeing.
+    const beat = transcribeBeat({
+      status: "transcribing",
+      seconds_processed: 3600,
+      total_seconds: 3484,
+    });
+    expect(beat.fraction).toBe(1);
+  });
+
+  it("falls back to words rather than dividing by a zero or absent total", () => {
+    expect(
+      transcribeBeat({ status: "transcribing", seconds_processed: 0, total_seconds: 0 }),
+    ).toEqual(STARTING);
+    expect(
+      transcribeBeat({
+        status: "transcribing",
+        seconds_processed: Number.NaN,
+        total_seconds: 60,
+      }),
+    ).toEqual(STARTING);
+  });
+
+  it("treats terminal states as the starting beat, so nothing lingers mid-run", () => {
+    expect(transcribeBeat({ status: "saved", path: "t.jsonl" })).toEqual(STARTING);
+    expect(transcribeBeat({ status: "error", message: "boom" })).toEqual(STARTING);
   });
 });

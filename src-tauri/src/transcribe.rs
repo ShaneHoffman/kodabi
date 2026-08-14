@@ -27,7 +27,7 @@ use kodabi_core::device::DeviceId;
 use kodabi_core::glossary::Glossary;
 use kodabi_core::inflight::{self, InflightSession, OrphanKind, RecoverableOrphan};
 use kodabi_core::metrics::PipelineTimings;
-use kodabi_core::pipeline::transcribe_and_persist;
+use kodabi_core::pipeline::{transcribe_and_persist, PipelineProgress, ProgressScale};
 use kodabi_core::transcription::{self, AudioSource, Channel, SliceSource, TranscriptionEngine};
 use kodabi_llm::{ClaudeConfig, ClaudeRunner};
 use tauri::{AppHandle, Emitter, Manager};
@@ -39,6 +39,13 @@ const ENGINE_SAMPLE_RATE_HZ: u32 = 16_000;
 /// seconds at 16 kHz — matches the streamed-from-disk cadence so both paths
 /// exercise the engine the same way.
 const IN_MEMORY_CHUNK_SAMPLES: usize = ENGINE_SAMPLE_RATE_HZ as usize * 10;
+
+/// Channels every path transcribes: You (the mic) and Them (the system
+/// loopback). Both `run_spilled` and `run_in_memory` build exactly this pair.
+/// A session the combiner finalized has both padded to the recording's own
+/// length, which is what makes [`ProgressScale::even`] the right scale for a
+/// live stop — and what a crash-recovered spill cannot promise.
+const TRANSCRIBED_CHANNELS: usize = 2;
 
 /// How long an un-recoverable in-flight directory (corrupt, lone-channel, a
 /// mis-tap) is kept before [`kodabi_core::inflight::sweep_stale`] deletes it.
@@ -57,14 +64,33 @@ const AUDIO_STAGING_NAME: &str = ".audio.tmp";
 pub const TRANSCRIPTION_STATE_EVENT: &str = "transcription:state";
 
 /// Payload for [`TRANSCRIPTION_STATE_EVENT`]. Tagged on `status` so the
-/// frontend can switch on that alone; `path`/`message` only accompany their
-/// matching variant.
+/// frontend can switch on that alone; the fields only accompany their
+/// matching variant. Mirrored by `TranscriptionState` in
+/// `src/useTranscriptionState.ts` (`.claude/rules/tauri-command-parity.md`):
+/// `rename_all` renames the *variants*, so the fields ride the wire in
+/// snake_case and the TS type spells them that way too.
 #[derive(Clone, serde::Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 enum TranscriptionStateEvent {
-    Transcribing,
-    Saved { path: String },
-    Error { message: String },
+    /// This run is parked behind a predecessor holding [`TRANSCRIBE_LOCK`].
+    /// Genuinely waiting, which is the one case the UI may call "queued".
+    Queued,
+    /// Progress through the ASR pass, recording-normalized: `seconds_processed`
+    /// is the audio fed to the engines read back onto the recording's own
+    /// length by [`ProgressScale`], and `total_seconds` is that length. The
+    /// channels are transcribed one after the other, so the raw fed total runs
+    /// to roughly twice the meeting's length — a figure the user has no way to
+    /// read against the meeting they remember.
+    Transcribing {
+        seconds_processed: f64,
+        total_seconds: f64,
+    },
+    Saved {
+        path: String,
+    },
+    Error {
+        message: String,
+    },
 }
 
 /// Minimum captured length worth transcribing. A shorter two-channel session
@@ -118,22 +144,28 @@ pub fn spawn_transcription(
             Utc::now() - chrono::Duration::milliseconds(duration.as_millis() as i64)
         });
 
+    // A live stop always finalizes, so both channels are the recording's own
+    // length and the run feeds exactly two of them.
+    let scale = ProgressScale::even(duration.as_secs_f64(), TRANSCRIBED_CHANNELS);
+
     std::thread::spawn(move || {
         // Hold the lock across the whole pipeline so only one engine is ever
         // resident; a queued stop waits here rather than piling a second model
-        // load on top of the first.
-        let _guard = TRANSCRIBE_LOCK
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        // Announce `Transcribing` only once this run actually starts (i.e.
-        // after the lock is held). Emitting before blocking on the lock would
-        // let a queued back-to-back stop fire a second `Transcribing` up front
-        // and leave a stale `Saved`/`Error` showing while it waits its turn.
+        // load on top of the first. The `try_lock` probe exists to name that
+        // wait: a run parked behind a predecessor says `Queued` and nothing
+        // else until its turn comes, which is the only state the UI is allowed
+        // to call queued. `Transcribing` still waits for the lock — emitting it
+        // up front would leave a stale `Saved`/`Error` from the previous run
+        // showing while this one merely waits.
+        let _guard = acquire_transcribe_lock(&app);
         let _ = app.emit(
             TRANSCRIPTION_STATE_EVENT,
-            TranscriptionStateEvent::Transcribing,
+            TranscriptionStateEvent::Transcribing {
+                seconds_processed: 0.0,
+                total_seconds: scale.total_seconds,
+            },
         );
-        match run(&app, combined, captured_at) {
+        match run(&app, combined, captured_at, scale) {
             Ok(path) => {
                 let _ = app.emit(
                     TRANSCRIPTION_STATE_EVENT,
@@ -182,6 +214,27 @@ pub fn spawn_transcription(
             }
         }
     });
+}
+
+/// Take [`TRANSCRIBE_LOCK`], announcing the wait if there is one.
+///
+/// The probe is the whole point: an uncontended run acquires silently and goes
+/// straight to `Transcribing`, while one parked behind a predecessor emits
+/// `Queued` first, so "queued" on screen means a run that genuinely is. A
+/// poisoned lock is recovered rather than propagated — the mutex guards
+/// serialization, not data, so a panicking predecessor must not wedge every
+/// later meeting.
+fn acquire_transcribe_lock(app: &AppHandle) -> std::sync::MutexGuard<'static, ()> {
+    match TRANSCRIBE_LOCK.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => {
+            let _ = app.emit(TRANSCRIPTION_STATE_EVENT, TranscriptionStateEvent::Queued);
+            TRANSCRIBE_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+        }
+    }
 }
 
 /// Duration of a finalized session, whichever form it took.
@@ -242,9 +295,7 @@ pub fn spawn_recovery(app: &AppHandle) {
 /// delete its directory. A failure keeps the directory (dropping `orphan`
 /// releases its lock but leaves the spill on disk) for the next launch to retry.
 fn recover_orphan(app: &AppHandle, orphan: RecoverableOrphan) {
-    let _guard = TRANSCRIBE_LOCK
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _guard = acquire_transcribe_lock(app);
     let captured_at = orphan.meta.started_at;
 
     // Idempotency: the spill directory is deleted only *after* its transcript
@@ -263,9 +314,28 @@ fn recover_orphan(app: &AppHandle, orphan: RecoverableOrphan) {
         }
     }
 
+    // The in-flight metadata records when capture started but not how much of
+    // it reached the disk, so both denominators come from the spill files
+    // themselves. The longer channel is the session's length, matching what
+    // `AlignedSession::duration` would have reported for a normal stop; the
+    // sum is what the engines will actually be fed. This is the one path where
+    // those two can disagree by more than the channel count: a crash never
+    // finalizes, so a source that died mid-meeting leaves a short channel
+    // beside a full one, and `ProgressScale::even` would peg the bar near half
+    // for the whole run.
+    let mic_seconds = spill_seconds(&orphan.mic_pcm, orphan.meta.sample_rate);
+    let system_seconds = spill_seconds(&orphan.system_pcm, orphan.meta.sample_rate);
+    let scale = ProgressScale {
+        total_seconds: mic_seconds.max(system_seconds),
+        fed_total_seconds: mic_seconds + system_seconds,
+    };
+
     let _ = app.emit(
         TRANSCRIPTION_STATE_EVENT,
-        TranscriptionStateEvent::Transcribing,
+        TranscriptionStateEvent::Transcribing {
+            seconds_processed: 0.0,
+            total_seconds: scale.total_seconds,
+        },
     );
     match run_spilled(
         app,
@@ -273,6 +343,7 @@ fn recover_orphan(app: &AppHandle, orphan: RecoverableOrphan) {
         &orphan.system_pcm,
         orphan.meta.sample_rate,
         captured_at,
+        scale,
     ) {
         Ok(path) => {
             let _ = app.emit(
@@ -303,6 +374,25 @@ fn recover_orphan(app: &AppHandle, orphan: RecoverableOrphan) {
             );
         }
     }
+}
+
+/// Length of a spilled channel, from its size alone.
+///
+/// Spill files are raw headerless `f32` little-endian at the capture rate
+/// (`kodabi_audio::spill`), so this is one `metadata` call rather than a read.
+/// The division floors, which is what a crash-truncated trailing partial
+/// sample deserves — the reader tolerates it the same way. An unreadable file
+/// (or a zero sample rate) reports zero, leaving the caller with no
+/// denominator rather than a wrong one.
+fn spill_seconds(path: &Path, sample_rate: u32) -> f64 {
+    if sample_rate == 0 {
+        return 0.0;
+    }
+    let Ok(meta) = std::fs::metadata(path) else {
+        return 0.0;
+    };
+    let samples = meta.len() / std::mem::size_of::<f32>() as u64;
+    samples as f64 / f64::from(sample_rate)
 }
 
 /// Environment override for the knowledge-base root.
@@ -349,10 +439,14 @@ pub(crate) fn knowledge_base_dir(app: &AppHandle) -> Result<PathBuf, String> {
 /// the in-memory buffer when spilling was unavailable. Errors collapse to a
 /// message string — the same convention `audio_cmds` uses for IPC results —
 /// since the only consumer here is the `transcription:state` event.
+///
+/// `scale` carries the recording's own length and the audio this run will
+/// feed the engines, the pair the progress events are reported against.
 fn run(
     app: &AppHandle,
     combined: CombinedSession,
     captured_at: DateTime<Utc>,
+    scale: ProgressScale,
 ) -> Result<PathBuf, String> {
     match combined {
         CombinedSession::Spilled(spilled) => run_spilled(
@@ -361,8 +455,9 @@ fn run(
             &spilled.system_path,
             spilled.sample_rate,
             captured_at,
+            scale,
         ),
-        CombinedSession::InMemory(session) => run_in_memory(app, &session, captured_at),
+        CombinedSession::InMemory(session) => run_in_memory(app, &session, captured_at, scale),
     }
 }
 
@@ -375,6 +470,7 @@ fn run_spilled(
     system_path: &Path,
     source_rate: u32,
     captured_at: DateTime<Utc>,
+    scale: ProgressScale,
 ) -> Result<PathBuf, String> {
     let mut mic =
         Resampling16kSource::open(mic_path, source_rate).map_err(|err| err.to_string())?;
@@ -394,7 +490,7 @@ fn run_spilled(
         (Channel::You, &mut cleaned_mic),
         (Channel::Them, &mut system),
     ];
-    let path = persist(app, &mut channels, captured_at)?;
+    let path = persist(app, &mut channels, captured_at, scale)?;
     // Retain the recording now, while the spill files still exist — the
     // callers remove the in-flight directory only after this returns. The
     // staging temp lives inside that directory, so a crash mid-write leaves
@@ -421,6 +517,7 @@ fn run_in_memory(
     app: &AppHandle,
     session: &AlignedSession,
     captured_at: DateTime<Utc>,
+    scale: ProgressScale,
 ) -> Result<PathBuf, String> {
     let mic_pcm = session
         .channel_resampled(SessionChannel::Mic, ENGINE_SAMPLE_RATE_HZ)
@@ -439,7 +536,7 @@ fn run_in_memory(
         (Channel::You, &mut cleaned_mic),
         (Channel::Them, &mut system),
     ];
-    let path = persist(app, &mut channels, captured_at)?;
+    let path = persist(app, &mut channels, captured_at, scale)?;
     // Retain the recording from the resident 48 kHz channels (`channel`, not
     // `channel_resampled` — the WAV keeps capture fidelity). The staging temp
     // is a `.tmp` sibling in the sessions directory, invisible to both the
@@ -474,11 +571,14 @@ fn retain_audio(result: io::Result<()>, session_path: &Path) {
 }
 
 /// Load the glossary and device identity and run the core transcribe → clean →
-/// persist pipeline over `channels` (each already yielding 16 kHz mono `f32`).
+/// persist pipeline over `channels` (each already yielding 16 kHz mono `f32`),
+/// republishing the pipeline's progress as `transcription:state` events read
+/// through `scale`.
 fn persist(
     app: &AppHandle,
     channels: &mut [(Channel, &mut dyn AudioSource)],
     captured_at: DateTime<Utc>,
+    scale: ProgressScale,
 ) -> Result<PathBuf, String> {
     let kb_dir = knowledge_base_dir(app)?;
     let glossary = Glossary::load(&kb_dir).map_err(|err| err.to_string())?;
@@ -490,6 +590,21 @@ fn persist(
     let stt_paths = crate::models::resolve_stt_paths(app);
     let mut make_engine = || build_engine(&stt_paths);
 
+    // The core counts every second it feeds an engine; `scale` reads that back
+    // as a position within the recording (clamping, pinning `Cleaning` to the
+    // end, and refusing to divide by a denominator it hasn't got). This
+    // republishes, it does not compute — the arithmetic and its edge cases are
+    // `ProgressScale`'s, and unit-tested there.
+    let mut on_progress = |progress: PipelineProgress| {
+        let _ = app.emit(
+            TRANSCRIPTION_STATE_EVENT,
+            TranscriptionStateEvent::Transcribing {
+                seconds_processed: scale.position_seconds(progress),
+                total_seconds: scale.total_seconds,
+            },
+        );
+    };
+
     let outcome = transcribe_and_persist(
         &mut make_engine,
         &cleaner,
@@ -500,6 +615,7 @@ fn persist(
         captured_at,
         &device,
         None,
+        &mut on_progress,
     )
     .map_err(|err| err.to_string())?;
 
@@ -841,11 +957,30 @@ compile_error!(
      the MockEngine fallback is debug-only"
 );
 
+/// Milliseconds the mock engine sleeps per accepted chunk, so a dev build can
+/// show a transcription that takes long enough to watch.
+///
+/// The mock is instantaneous, which means a debug capture finishes its whole
+/// pipeline between frames and the Inbox card's progress bar never renders a
+/// state worth looking at. Chunks are ten audio-seconds, so a one-minute
+/// capture is twelve of them across the two channels: `400` stretches that to
+/// roughly five seconds of moving bar. Unset (or unparsable) is zero, which is
+/// what the gates and every test run with.
+#[cfg(not(any(feature = "parakeet", feature = "whisper")))]
+const MOCK_STT_DELAY_ENV: &str = "KODABI_MOCK_STT_DELAY_MS";
+
 #[cfg(not(any(feature = "parakeet", feature = "whisper")))]
 fn build_engine(
     _paths: &crate::models::ResolvedSttPaths,
 ) -> transcription::Result<Box<dyn TranscriptionEngine>> {
-    Ok(Box::new(transcription::MockEngine::new()))
+    let delay = std::env::var(MOCK_STT_DELAY_ENV)
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .unwrap_or_default();
+    Ok(Box::new(
+        transcription::MockEngine::new().with_accept_delay(delay),
+    ))
 }
 
 /// Reads a model file path from an environment variable. An unset var resolves
@@ -926,6 +1061,72 @@ mod tests {
             &sample_timings(),
             "Z:\\definitely\\not\\a\\real\\path.jsonl",
         );
+    }
+
+    /// The wire shape `src/useTranscriptionState.ts` mirrors. Nothing else
+    /// checks it: the invoke-parity test only covers command names, so a
+    /// renamed field would otherwise reach the frontend as a silent `undefined`
+    /// (`.claude/rules/tauri-command-parity.md`).
+    #[test]
+    fn transcription_state_event_serializes_the_documented_wire_shape() {
+        assert_eq!(
+            serde_json::to_value(TranscriptionStateEvent::Queued).unwrap(),
+            serde_json::json!({ "status": "queued" })
+        );
+        assert_eq!(
+            serde_json::to_value(TranscriptionStateEvent::Transcribing {
+                seconds_processed: 12.5,
+                total_seconds: 3_484.0,
+            })
+            .unwrap(),
+            serde_json::json!({
+                "status": "transcribing",
+                "seconds_processed": 12.5,
+                "total_seconds": 3_484.0,
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(TranscriptionStateEvent::Saved {
+                path: "C:\\kb\\sessions\\s.jsonl".to_owned(),
+            })
+            .unwrap(),
+            serde_json::json!({ "status": "saved", "path": "C:\\kb\\sessions\\s.jsonl" })
+        );
+        assert_eq!(
+            serde_json::to_value(TranscriptionStateEvent::Error {
+                message: "model missing".to_owned(),
+            })
+            .unwrap(),
+            serde_json::json!({ "status": "error", "message": "model missing" })
+        );
+    }
+
+    #[test]
+    fn spill_seconds_floors_a_truncated_trailing_sample() {
+        let path = scratch_path("spill");
+        let _ = std::fs::remove_file(&path);
+        // 13 bytes: three whole f32 samples plus a crash-truncated fourth.
+        std::fs::write(&path, [0u8; 13]).unwrap();
+
+        let seconds = spill_seconds(&path, 3);
+        std::fs::remove_file(&path).ok();
+
+        assert_eq!(seconds, 1.0);
+    }
+
+    #[test]
+    fn spill_seconds_reports_zero_rather_than_a_wrong_denominator() {
+        assert_eq!(
+            spill_seconds(Path::new("Z:\\no\\such\\spill.pcm"), 48_000),
+            0.0
+        );
+
+        let path = scratch_path("spill-rate");
+        let _ = std::fs::remove_file(&path);
+        std::fs::write(&path, [0u8; 16]).unwrap();
+        let seconds = spill_seconds(&path, 0);
+        std::fs::remove_file(&path).ok();
+        assert_eq!(seconds, 0.0);
     }
 
     /// A cheap deterministic pseudo-random generator, scaled into the f32 PCM

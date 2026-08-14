@@ -43,6 +43,80 @@ pub struct PipelineOutcome {
     pub timings: PipelineTimings,
 }
 
+/// How far [`transcribe_and_persist`] has got, reported as it works.
+///
+/// Deliberately not a fraction: this module knows how much audio it has fed
+/// the engines, but not how much there is in total — the caller holds the
+/// recording's duration and supplies its own denominator.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum PipelineProgress {
+    /// Cumulative seconds of audio fed to the engines, across all channels.
+    Transcribing { seconds: f64 },
+    /// Every channel is transcribed; the cleanup pass has begun. The stages
+    /// after this one (a headless Claude call, then the write) have no
+    /// measurable fraction, so this is the last thing reported.
+    Cleaning,
+}
+
+/// The two denominators a [`PipelineProgress`] has to be read against to mean
+/// anything on screen, and the conversion between them.
+///
+/// They are genuinely different numbers. The pipeline counts *work*: every
+/// second of audio it feeds an engine, across channels transcribed one after
+/// the other. A progress bar counts *the recording*: the meeting the user
+/// remembers, which is one channel long. Dividing the first by the channel
+/// count only converts between them when every channel is the same length —
+/// true whenever the combiner finalized the session (it zero-pads both to the
+/// session's length), and **not** true of a crash-recovered spill, which holds
+/// exactly what reached the disk before the process died. A source that stopped
+/// producing mid-meeting leaves a short channel beside a full one, and the
+/// naive divisor would peg such a run's bar at half.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProgressScale {
+    /// The recording's own length: the figure the caller shows, and the value
+    /// [`Self::position_seconds`] never exceeds.
+    pub total_seconds: f64,
+    /// Audio the run will feed the engines in total, summed over every
+    /// channel. The pipeline's own counter runs to this.
+    pub fed_total_seconds: f64,
+}
+
+impl ProgressScale {
+    /// The scale for channels of equal length — every path that transcribes a
+    /// session the combiner finalized, since that pads each channel to the
+    /// session's length.
+    pub fn even(total_seconds: f64, channels: usize) -> Self {
+        Self {
+            total_seconds,
+            fed_total_seconds: total_seconds * channels as f64,
+        }
+    }
+
+    /// Where `progress` sits within the recording, in seconds of it.
+    ///
+    /// [`PipelineProgress::Cleaning`] pins to the end: the audio really is
+    /// through the engines, and the stages it fronts have no fraction to
+    /// report, so a bar that stopped short there would read as a hang.
+    /// The result is always finite and within `0..=total_seconds`, so a
+    /// degenerate scale (an unreadable spill leaving no denominator at all)
+    /// yields a harmless zero rather than a `NaN` on the wire.
+    pub fn position_seconds(self, progress: PipelineProgress) -> f64 {
+        let seconds = match progress {
+            PipelineProgress::Transcribing { seconds } => {
+                if !self.fed_total_seconds.is_finite() || self.fed_total_seconds <= 0.0 {
+                    return 0.0;
+                }
+                seconds / self.fed_total_seconds * self.total_seconds
+            }
+            PipelineProgress::Cleaning => self.total_seconds,
+        };
+        if !seconds.is_finite() {
+            return 0.0;
+        }
+        seconds.clamp(0.0, self.total_seconds.max(0.0))
+    }
+}
+
 /// Transcribes each channel's audio through a freshly built engine, merges
 /// the results into one you/them transcript, runs the glossary cleanup
 /// post-pass, and persists it.
@@ -60,6 +134,12 @@ pub struct PipelineOutcome {
 /// [`PipelineOutcome::timings`] regardless of whether the caller looks at
 /// them — see `src-tauri/src/transcribe.rs`'s `KODABI_METRICS` gate for the
 /// only place that does.
+///
+/// `on_progress` is called once per audio chunk fed to an engine (chunks are
+/// ~10 audio-seconds, so a long meeting reports steadily rather than in a
+/// burst) and once more with [`PipelineProgress::Cleaning`] when the last
+/// channel is done. It is the shell's hook for a progress bar; a caller with
+/// nothing to report to can pass `&mut |_| {}`.
 #[allow(clippy::too_many_arguments)]
 pub fn transcribe_and_persist(
     make_engine: &mut dyn FnMut() -> transcription::Result<Box<dyn TranscriptionEngine>>,
@@ -71,6 +151,7 @@ pub fn transcribe_and_persist(
     captured_at: DateTime<Utc>,
     device: &DeviceId,
     slug: Option<&str>,
+    on_progress: &mut dyn FnMut(PipelineProgress),
 ) -> Result<PipelineOutcome, PipelineError> {
     let total_start = Instant::now();
     let bias_terms = glossary_bias_terms(glossary);
@@ -79,6 +160,10 @@ pub fn transcribe_and_persist(
     let mut engine_build_ms: u64 = 0;
     let mut transcribe_ms = Vec::with_capacity(channels.len());
     let mut audio_secs = 0.0f64;
+    // Cumulative across every channel, not per-channel: channels are
+    // transcribed one after another, so progress that reset at each boundary
+    // would read as the run going backwards.
+    let mut fed_samples: u64 = 0;
     for (channel, source) in channels.iter_mut() {
         let build_start = Instant::now();
         let mut engine = make_engine()?;
@@ -92,10 +177,14 @@ pub fn transcribe_and_persist(
         let mut channel_samples: u64 = 0;
         while let Some(chunk) = source.next_chunk()? {
             channel_samples += chunk.len() as u64;
+            fed_samples += chunk.len() as u64;
             segments.extend(engine.accept(AudioChunk {
                 samples: chunk,
                 sample_rate,
             })?);
+            on_progress(PipelineProgress::Transcribing {
+                seconds: fed_samples as f64 / sample_rate.max(1) as f64,
+            });
         }
         segments.extend(engine.finish()?);
         transcribe_ms.push(transcribe_start.elapsed().as_millis() as u64);
@@ -103,6 +192,12 @@ pub fn transcribe_and_persist(
         audio_secs += channel_samples as f64 / sample_rate.max(1) as f64;
         per_channel.push((*channel, segments));
     }
+
+    // Every channel is through the engines. Assembling is microseconds, but
+    // the cleanup call it fronts is a headless Claude subprocess that can take
+    // seconds — reported here so a caller's bar can say so rather than sitting
+    // at a fraction that has stopped moving.
+    on_progress(PipelineProgress::Cleaning);
 
     let assemble_start = Instant::now();
     let assembled = raw_session::assemble(per_channel);
@@ -186,6 +281,7 @@ mod tests {
             instant(),
             &device(),
             None,
+            &mut |_| {},
         )
         .expect("pipeline should succeed");
 
@@ -221,6 +317,7 @@ mod tests {
             instant(),
             &device(),
             None,
+            &mut |_| {},
         )
         .expect("pipeline should succeed");
 
@@ -231,6 +328,117 @@ mod tests {
         assert_eq!(segments[3].end_ms, 1_000);
         // Audio duration is summed across chunks, not lost to chunking.
         assert_eq!(outcome.timings.audio_secs, 1.0);
+    }
+
+    #[test]
+    fn reports_cumulative_progress_across_channels_then_cleaning() {
+        let dir = tempdir().unwrap();
+        let you = silence(16_000); // 1000 ms, fed as two 500 ms chunks
+        let them = silence(8_000); // 500 ms, one chunk
+        let mut you_source = SliceSource::new(&you, 8_000);
+        let mut them_source = SliceSource::new(&them, 8_000);
+        let mut channels: [(Channel, &mut dyn AudioSource); 2] = [
+            (Channel::You, &mut you_source),
+            (Channel::Them, &mut them_source),
+        ];
+        let mut make_engine = mock_engine_factory();
+        let mut reported = Vec::new();
+
+        transcribe_and_persist(
+            &mut make_engine,
+            &NoopRunner,
+            &Glossary::default(),
+            &mut channels,
+            16_000,
+            dir.path(),
+            instant(),
+            &device(),
+            None,
+            &mut |progress| reported.push(progress),
+        )
+        .expect("pipeline should succeed");
+
+        // Seconds keep climbing across the channel boundary — the second
+        // channel resumes at 1.0, it does not restart at 0.5 — and `Cleaning`
+        // lands exactly once, after the last chunk.
+        assert_eq!(
+            reported,
+            vec![
+                PipelineProgress::Transcribing { seconds: 0.5 },
+                PipelineProgress::Transcribing { seconds: 1.0 },
+                PipelineProgress::Transcribing { seconds: 1.5 },
+                PipelineProgress::Cleaning,
+            ]
+        );
+    }
+
+    #[test]
+    fn even_scale_reads_work_seconds_back_onto_the_recording() {
+        // Two channels of a 60s recording: the run feeds 120s of work, and
+        // half of that is the recording's midpoint, not its end.
+        let scale = ProgressScale::even(60.0, 2);
+        assert_eq!(scale.fed_total_seconds, 120.0);
+        assert_eq!(
+            scale.position_seconds(PipelineProgress::Transcribing { seconds: 60.0 }),
+            30.0
+        );
+        assert_eq!(
+            scale.position_seconds(PipelineProgress::Transcribing { seconds: 120.0 }),
+            60.0
+        );
+    }
+
+    #[test]
+    fn an_uneven_scale_still_reaches_the_end_of_the_recording() {
+        // A crash-recovered spill: the mic died five minutes into an hour, so
+        // the run feeds 65 minutes of work for a 60-minute recording. The
+        // naive `work / channels` divisor would peg this at 32:30 of 60:00 —
+        // a bar stuck near half while the ASR pass is actually finishing.
+        let scale = ProgressScale {
+            total_seconds: 3_600.0,
+            fed_total_seconds: 3_900.0,
+        };
+        assert_eq!(
+            scale.position_seconds(PipelineProgress::Transcribing { seconds: 3_900.0 }),
+            3_600.0
+        );
+        assert_eq!(
+            scale.position_seconds(PipelineProgress::Transcribing { seconds: 1_950.0 }),
+            1_800.0
+        );
+    }
+
+    #[test]
+    fn cleaning_pins_to_the_end_of_the_recording() {
+        let scale = ProgressScale::even(60.0, 2);
+        assert_eq!(scale.position_seconds(PipelineProgress::Cleaning), 60.0);
+    }
+
+    #[test]
+    fn a_degenerate_scale_yields_zero_rather_than_a_nan() {
+        // No denominator at all — an unreadable spill on the recovery path.
+        // The caller gets a harmless zero, never a `NaN` on the wire.
+        let scale = ProgressScale {
+            total_seconds: 0.0,
+            fed_total_seconds: 0.0,
+        };
+        assert_eq!(
+            scale.position_seconds(PipelineProgress::Transcribing { seconds: 10.0 }),
+            0.0
+        );
+        assert_eq!(scale.position_seconds(PipelineProgress::Cleaning), 0.0);
+    }
+
+    #[test]
+    fn progress_beyond_the_fed_total_clamps_to_the_recording() {
+        // Rounding either side of the resampler can feed a hair more than the
+        // scale predicted; a figure past the end of the recording is worse
+        // than a figure that stops there.
+        let scale = ProgressScale::even(60.0, 2);
+        assert_eq!(
+            scale.position_seconds(PipelineProgress::Transcribing { seconds: 130.0 }),
+            60.0
+        );
     }
 
     #[test]
@@ -248,6 +456,7 @@ mod tests {
             instant(),
             &device(),
             None,
+            &mut |_| {},
         )
         .expect("pipeline should succeed with no channels");
 
@@ -279,6 +488,7 @@ mod tests {
             instant(),
             &device(),
             None,
+            &mut |_| {},
         )
         .unwrap_err();
 
@@ -311,6 +521,7 @@ mod tests {
             instant(),
             &device(),
             None,
+            &mut |_| {},
         )
         .unwrap_err();
 
@@ -336,6 +547,7 @@ mod tests {
             instant(),
             &device(),
             None,
+            &mut |_| {},
         )
         .unwrap_err();
 

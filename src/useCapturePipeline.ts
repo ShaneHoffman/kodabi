@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 import { isCaptureActive, type CaptureStateEvent } from "./useCaptureState";
 import type { DistillState } from "./useDistillState";
+import { formatElapsed } from "./useElapsed";
 import type { TranscriptionState } from "./useTranscriptionState";
 
 /**
@@ -146,6 +147,15 @@ export function pipelineStage(pipeline: CapturePipeline): PipelineStage | null {
   }
 
   switch (pipeline.transcription.status) {
+    // Queued and transcribing are the same run to this derivation — a parked
+    // run is a started one, so it shares the stage id (and the timers keyed on
+    // it) with the moment it acquires the lock. What differs is only the words
+    // the card uses, which `transcribeBeat` below decides. Both are
+    // `awaitingTranscribe: false`: the grace timer exists for a stop the
+    // backend never acknowledged, and a run that has said "queued" has
+    // acknowledged it. Waiving one because it waited a while behind a long
+    // predecessor is exactly the wrong call.
+    case "queued":
     case "transcribing":
       return { id: "transcribing", kind: "transcribing", awaitingTranscribe: false };
     // The gap before distill picks up is sub-millisecond in a real build
@@ -162,5 +172,59 @@ export function pipelineStage(pipeline: CapturePipeline): PipelineStage | null {
       return pipeline.stopPending
         ? { id: "stopped", kind: "transcribing", awaitingTranscribe: true }
         : null;
+  }
+}
+
+/** What the transcribing phase says about itself: the words left of the clock,
+ * the position within the recording, and how full the bar is. */
+export type TranscribeBeat = {
+  copy: string;
+  /** "12:30 of 58:04", shown after `copy`; null while there is no fraction to
+   * state, so the line never reads "0:00 of 0:00" waiting for a first tick. */
+  figures: string | null;
+  /** 0..1 bar fill, or null to keep the bar hidden. */
+  fraction: number | null;
+};
+
+/**
+ * The transcribing phase, in the card's own words.
+ *
+ * "Queued" is reserved for the one state that genuinely is: a run parked
+ * behind a predecessor still holding `TRANSCRIBE_LOCK`. Everything else the
+ * phase covers is work happening, and says so — including the stages a
+ * fraction cannot describe. Progress that has reached the end of the audio is
+ * the cleanup call (`transcribe.rs` reports `Cleaning` as a full bar), which
+ * would otherwise read as a bar that stopped moving.
+ */
+export function transcribeBeat(transcription: TranscriptionState): TranscribeBeat {
+  // The stop the shell witnessed, before the backend has said anything: the
+  // pipeline is starting, it just has no numbers yet.
+  const starting: TranscribeBeat = {
+    copy: "just stopped · processing audio",
+    figures: null,
+    fraction: null,
+  };
+  switch (transcription.status) {
+    case "queued":
+      return { copy: "queued behind the previous capture", figures: null, fraction: null };
+    case "transcribing": {
+      const { seconds_processed: processed, total_seconds: total } = transcription;
+      // A total of zero would divide into Infinity, and a run whose duration
+      // never reached the frontend is better served by the wordless beat than
+      // by a bar that means nothing.
+      if (!Number.isFinite(total) || total <= 0 || !Number.isFinite(processed)) return starting;
+      if (processed >= total) {
+        return { copy: "cleaning up transcript", figures: null, fraction: 1 };
+      }
+      return {
+        copy: "processing audio",
+        figures: `${formatElapsed(Math.floor(Math.max(0, processed)))} of ${formatElapsed(Math.round(total))}`,
+        fraction: Math.max(0, processed) / total,
+      };
+    }
+    case "idle":
+    case "saved":
+    case "error":
+      return starting;
   }
 }

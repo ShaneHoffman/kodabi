@@ -28,6 +28,14 @@ vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
 const CAPTURE_STATE_EVENT = "capture:state";
 const TRANSCRIPTION_STATE_EVENT = "transcription:state";
 
+/** A run's opening progress event: the denominator is known from the start
+ * (the backend has the recording's duration), the numerator is not yet. */
+const TRANSCRIBING_AT_START = {
+  status: "transcribing",
+  seconds_processed: 0,
+  total_seconds: 60,
+};
+
 const IDLE = { phase: "idle", sources: { loopback: "off", microphone: "off" } };
 const STARTING = { phase: "starting", sources: { loopback: "off", microphone: "off" } };
 const LISTENING = {
@@ -186,12 +194,24 @@ function activeStatusText(): string | null {
   return placeholder.querySelector("[data-visible]")?.textContent ?? null;
 }
 
+/** The meta (sub-)line's currently shown text — the second crossfading pair in
+ * the card, below the status line `activeStatusText` reads. */
+function activeMetaText(): string | null {
+  const placeholder = screen.getByTestId("pipeline-placeholder");
+  return placeholder.querySelectorAll("[data-visible]")[1]?.textContent ?? null;
+}
+
 /** What the placeholder actually announces: the sr-only line inside its
  * `role="status"` region. The visual crossfade is aria-hidden and always
  * carries both stage texts, so only this line's rewrite is an announcement. */
 function announcedStatusText(): string | null {
   const placeholder = screen.getByTestId("pipeline-placeholder");
   return placeholder.querySelector(".sr-only")?.textContent ?? null;
+}
+
+/** The progress bar's fill width, as the inline style sets it. */
+function progressFillWidth(): string | undefined {
+  return screen.getByTestId("placeholder-progress-fill").style.width;
 }
 
 describe("InboxView", () => {
@@ -829,6 +849,81 @@ describe("InboxView", () => {
       expect(screen.getByTestId("pipeline-placeholder")).toBeInTheDocument();
       expect(activeStatusText()).toBe("Transcribing the capture");
       expect(announcedStatusText()).toBe("Transcribing the capture");
+      // Work is starting, not waiting: nothing here says "queued".
+      expect(activeMetaText()).toContain("just stopped · processing audio");
+      expect(activeMetaText()).not.toContain("queued");
+    });
+
+    it("says queued only while a run is parked behind another, and never gives up on it", async () => {
+      serveVault([]);
+      renderInbox();
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, LISTENING);
+      });
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, IDLE);
+      });
+      await act(async () => {
+        emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "queued" });
+      });
+
+      expect(activeMetaText()).toContain("queued behind the previous capture");
+      // The heading and the announcement still describe the phase, not the beat.
+      expect(activeStatusText()).toBe("Transcribing the capture");
+      expect(announcedStatusText()).toBe("Transcribing the capture");
+
+      // A predecessor can hold the lock for minutes; the grace timer must not
+      // retire a run that has already acknowledged the stop.
+      await act(async () => {
+        vi.advanceTimersByTime(10_000); // GRACE_MS
+      });
+      expect(screen.getByTestId("pipeline-placeholder")).toBeInTheDocument();
+    });
+
+    it("shows real progress against the recording, then names the cleanup stage", async () => {
+      serveVault([]);
+      renderInbox();
+      await screen.findByText(/Nothing waiting/);
+
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, LISTENING);
+      });
+      await act(async () => {
+        emitFromBackend(CAPTURE_STATE_EVENT, IDLE);
+      });
+      await act(async () => {
+        emitFromBackend(TRANSCRIPTION_STATE_EVENT, {
+          status: "transcribing",
+          seconds_processed: 750,
+          total_seconds: 3484,
+        });
+      });
+
+      expect(activeMetaText()).toContain("processing audio · 12:30 of 58:04");
+      expect(progressFillWidth()).toBe(`${(750 / 3484) * 100}%`);
+      // The bar is a visual aid only: the announcement is unchanged, and
+      // nothing in the bar reaches an assistive reader.
+      expect(announcedStatusText()).toBe("Transcribing the capture");
+      expect(
+        screen.getByTestId("placeholder-progress-fill").closest("[aria-hidden='true']"),
+      ).not.toBeNull();
+      expect(
+        screen.getByTestId("pipeline-placeholder").querySelectorAll(".sr-only"),
+      ).toHaveLength(1);
+
+      // The audio is through the engines but the run isn't over: a bar that
+      // simply stopped at full would read as a hang.
+      await act(async () => {
+        emitFromBackend(TRANSCRIPTION_STATE_EVENT, {
+          status: "transcribing",
+          seconds_processed: 3484,
+          total_seconds: 3484,
+        });
+      });
+      expect(activeMetaText()).toContain("cleaning up transcript");
+      expect(progressFillWidth()).toBe("100%");
     });
 
     it("holds through the backend's own transcribing without being waived", async () => {
@@ -843,7 +938,7 @@ describe("InboxView", () => {
         emitFromBackend(CAPTURE_STATE_EVENT, IDLE);
       });
       await act(async () => {
-        emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "transcribing" });
+        emitFromBackend(TRANSCRIPTION_STATE_EVENT, TRANSCRIBING_AT_START);
       });
       expect(activeStatusText()).toBe("Transcribing the capture");
 
@@ -947,7 +1042,7 @@ describe("InboxView", () => {
       // The worker's opening event beats the `capture:state idle` broadcast —
       // it must not be dropped as a stale straggler.
       await act(async () => {
-        emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "transcribing" });
+        emitFromBackend(TRANSCRIPTION_STATE_EVENT, TRANSCRIBING_AT_START);
       });
       await act(async () => {
         emitFromBackend(CAPTURE_STATE_EVENT, IDLE);
@@ -973,7 +1068,7 @@ describe("InboxView", () => {
       await screen.findByText("Quarterly planning");
 
       await act(async () => {
-        emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "transcribing" });
+        emitFromBackend(TRANSCRIPTION_STATE_EVENT, TRANSCRIBING_AT_START);
       });
       expect(activeStatusText()).toBe("Transcribing the capture");
       expect(announcedStatusText()).toBe("Transcribing the capture");
@@ -1000,7 +1095,7 @@ describe("InboxView", () => {
       await screen.findByText(/Nothing waiting/);
 
       await act(async () => {
-        emitFromBackend(TRANSCRIPTION_STATE_EVENT, { status: "transcribing" });
+        emitFromBackend(TRANSCRIPTION_STATE_EVENT, TRANSCRIBING_AT_START);
       });
 
       expect(screen.getByTestId("pipeline-placeholder")).toBeInTheDocument();
