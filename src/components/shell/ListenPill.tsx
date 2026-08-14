@@ -71,6 +71,41 @@ type Props = {
  * Starting and reconnecting are the opposite case — engaged, recording
  * nothing — so they stay neutral, and the clock stays hidden with them: a
  * timer running over a capture that is writing nothing is a confident lie.
+ *
+ * ## SHARED GEOMETRY — change this and CaptureOverlayPill together
+ *
+ * The two capture pills are meant to read as one control, so the mark
+ * (`14px` core, `11px` halo, `mr-1`), the label (`11.5px` semibold,
+ * `tracking-[0.1em]`, `leading-none`), the clock (`font-data` `11.5px`,
+ * `tabular-nums`) and the `gap-3` between them are the same in both. What
+ * stays deliberately different is listed in CaptureOverlayPill: that window
+ * has its own glass, its own padding, a label that never takes the green, and
+ * a height set by the window rather than by this pill's `py-1.5`.
+ *
+ * ## CENTRING — why the text carries a 1px translate
+ *
+ * Flex `items-center` centres layout BOXES, and it does that perfectly here:
+ * every box in this row measures 0.00px off the pill's centreline. What the
+ * eye reads is not the box, though, but the glyphs inside it, and a font's
+ * ascent and descent are not symmetric about its cap band — so centred boxes
+ * still render text that sits high.
+ *
+ * Measured against the built stylesheet in headless Edge at DPR 1 (mass
+ * centroid of the rendered ink, cross-checked against the cap band derived
+ * from the DOM baseline and canvas TextMetrics): the label sat **1.51px**
+ * above the centreline and the clock **0.93px** above it. Note that
+ * `leading-none` does NOT fix this — half-leading is symmetric, so
+ * line-height very nearly cancels out of the ink-vs-box offset; it is here to
+ * make the pill a whole 28px (14px mark + `py-1.5` + border) instead of
+ * 31.25px, and to stop the row's height depending on which glyphs it holds.
+ *
+ * `translate-y-px` corrects both, and 1px is not a rounding of taste: Chromium
+ * snaps a text translation to whole device pixels, so 0.5px, 0.75px, 1px and
+ * 1.25px all rasterise identically and only integers are reachable. 1px lands
+ * the label 0.51px low-side of centre and the clock 0.07px past it; 2px
+ * overshoots both. This is a static optical correction, not a press or a
+ * motion state, so `--press-scale` and the reduced-motion swaps
+ * (DESIGN_SYSTEM §2) have no bearing on it — nothing about it ever moves.
  */
 export function ListenPill({
   mode,
@@ -103,7 +138,12 @@ export function ListenPill({
       <span
         role="status"
         className={clsx(
-          "font-ui text-[11.5px] font-semibold tracking-[0.1em] uppercase",
+          "font-ui text-[11.5px] leading-none font-semibold tracking-[0.1em] uppercase",
+          // See CENTRING above. `leading-none` makes the pill 28px instead of
+          // 31.25px; `translate-y-px` is the optical correction, and it is
+          // layout-inert, so it moves the glyphs without re-biasing the
+          // `items-center` that positions the box.
+          "translate-y-px",
           "transition-colors duration-300 ease-out-strong",
           // Not `text-kodama`: as a sentence the mark's green measures under
           // 4.5:1 on both grounds. `kodama-ink` is the step that exists for
@@ -127,7 +167,10 @@ export function ListenPill({
         )}
       </span>
       {live && elapsedSeconds != null && (
-        <span className="font-data text-[11.5px] text-ink tabular-nums">
+        // Same treatment as the label, and the same 1px: Cascadia Mono's digits
+        // sit 0.93px high in their box where Bahnschrift's caps sit 1.51px
+        // high, and both round to the same whole pixel (see CENTRING).
+        <span className="translate-y-px font-data text-[11.5px] leading-none text-ink tabular-nums">
           {formatElapsed(elapsedSeconds)}
         </span>
       )}

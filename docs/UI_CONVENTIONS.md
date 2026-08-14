@@ -140,6 +140,29 @@ Folder hues are chosen by data, not by markup, so they arrive as a lookup from t
 than as a literal class — `PROJECT_HUE[project]` returning `"text-coral"`, never a computed
 `` `text-${hue}` `` (Tailwind cannot see a constructed class name and will not emit it).
 
+### Text in a control sets `leading-none`, and centring it is two steps
+
+A control whose height should be predictable — a button, a pill, a menu row, a palette row — sets
+`leading-none` on its text. Without it the text inherits a 1.5 line-height, so an 11.5px label
+occupies a 17.25px box and *that* becomes the control's height: fractional, and dependent on which
+glyphs it happens to hold. `Button`, `Menu`, `CommandPalette` and both capture pills all spell it.
+Reading surfaces are the opposite case and take an explicit ratio instead (`leading-[1.55]`,
+`leading-[1.65]`, or `text-note`, which carries its own).
+
+`leading-none` is not, on its own, a centring fix — this is the part worth knowing before chasing a
+label that looks a pixel high. Flex `items-center` centres the *box*, and it does that exactly; but a
+font's ascent and descent are not symmetric about its cap band, so a perfectly centred box still
+renders text that sits high or low. The half-leading either side of a line box is symmetric, which is
+why changing line-height barely moves the glyphs relative to their own box. The correction is a
+static `translate-y-px`, which is layout-inert and so cannot re-bias the `items-center` that placed
+the box. Two rules for reaching for it:
+
+- **Measure, never eyeball.** [`ListenPill`](../src/components/shell/ListenPill.tsx)'s CENTRING note
+  records the method (render against the built stylesheet in headless Edge at DPR 1, then compare the
+  ink's mass centroid to the pill's centreline) and the numbers it produced.
+- **Only whole pixels exist.** Chromium snaps a text translation to whole device pixels, so `0.5px`,
+  `0.75px` and `1px` all rasterise identically. Write the integer.
+
 ### The two variants
 
 `.day` and `.hc` are root classes, set imperatively by [`src/theme.ts`](../src/theme.ts) and
