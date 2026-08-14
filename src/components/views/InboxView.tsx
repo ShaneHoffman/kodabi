@@ -1203,7 +1203,10 @@ function InboxRow({
                      document body just as base-ui returns it to this trigger.
                      That is the exact bug `loading` exists to avoid
                      (docs/UI_CONVENTIONS.md §4). Busy through the departure
-                     keeps it focusable and still swallows activation. */
+                     keeps it focusable, and `Button` swallows the pointer and
+                     arrow activation base-ui opens this menu on — not just the
+                     click — so the menu cannot reopen over a note that has
+                     already moved. */
                   <Button
                     loading={pending || leaving}
                     loadingLabel="Filing…"

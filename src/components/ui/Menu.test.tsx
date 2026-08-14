@@ -60,6 +60,42 @@ describe("Menu", () => {
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
 
+  /*
+   * The composition's sharpest edge. A row that files a note marks its trigger
+   * `loading` rather than `disabled`, so the control keeps the focus base-ui
+   * just handed back to it (docs/UI_CONVENTIONS.md §4) — but base-ui opens this
+   * menu on MOUSEDOWN and on ArrowDown, and a busy `Button` used to cancel only
+   * the click. The trigger looked inert and reopened on the first press,
+   * offering a second run of an action already in flight.
+   */
+  it("does not open while the trigger is busy", async () => {
+    const user = userEvent.setup();
+    render(
+      <Menu.Root>
+        <Menu.Trigger render={<Button loading loadingLabel="Filing…">File</Button>} />
+        <Menu.Content>
+          <Menu.Item>Briarwood Golf</Menu.Item>
+        </Menu.Content>
+      </Menu.Root>,
+    );
+
+    const trigger = screen.getByRole("button", { name: "Filing…" });
+    await user.click(trigger);
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
+
+    // `aria-expanded`, not the absence of the popup: the popup mounts a frame
+    // after its trigger fires, so asserting it is missing would pass on the
+    // broken build too. base-ui writes the open decision to the trigger
+    // synchronously, which makes this the assertion that can actually fail.
+    expect(trigger).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("menuitem")).not.toBeInTheDocument();
+    // Still the user's place in the page, which is why it is busy and not
+    // disabled in the first place.
+    expect(trigger).not.toBeDisabled();
+    expect(trigger).toHaveFocus();
+  });
+
   it("carries its row appearances as variants, not as call-site overrides", async () => {
     // Font size and text colour belong to the row recipe, so a call site
     // passing `text-[11.5px]` alongside the recipe's own `text-[13px]` is
