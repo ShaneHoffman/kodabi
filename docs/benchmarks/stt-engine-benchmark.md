@@ -48,27 +48,29 @@ Processing time for the full 6 minutes of audio (both channels): Parakeet **~36 
 The reference is a **verbatim** transcript (every "um", "uh", stutter, and false start typed out); a
 good STT engine deliberately cleans those, so it is "penalized" for being more readable than ground
 truth. A word-level analysis of the content-heavy "them" channel found Parakeet's 21.6% WER
-decomposes almost entirely into **filler dropped** ("um/uh/yanno/I mean"), **stutters collapsed**
-("you can't … you can't" → "you can't"), **trivial normalization** ("1"→"one", "posted"→"post"),
-and **segment-boundary attribution** from the mic bleed. **No proper nouns, numbers, decisions, or
-key content were lost.** For meeting-notes purposes both engines captured the substance accurately.
+decomposes almost entirely into **filler dropped** (ums, uhs, and colloquial verbal tics),
+**stutters collapsed** (a false-started phrase rendered once), **trivial normalization**
+(digit-vs-word and inflection variants), and **segment-boundary attribution** from the mic bleed.
+**No proper nouns, numbers, decisions, or key content were lost.** For meeting-notes purposes both
+engines captured the substance accurately.
 
 ### Why the headline recall gap does not favor Whisper in practice
 
-Whisper's 100% vs. 90% edge is a single name ("Ali Farahmand") and rests on two artifacts:
+Whisper's 100% vs. 90% edge is a single term (a teammate's name) and rests on two artifacts:
 
 - **Prompt-bias asymmetry:** Whisper was fed the exact glossary spellings in its initial prompt;
   Parakeet has no such hook — its equivalent is the engine-agnostic **post-pass cleanup** (§3.4),
-  which is not part of this benchmark. Parakeet's one miss ("Allie" for "Ali") is exactly what that
-  post-pass fixes.
-- **Even so, Whisper garbled the client name:** on the main "them" channel Whisper wrote the client's
-  name as **"Fluity"** (only scoring a hit because the bleed channel happened to catch "Fluty").
-  Parakeet, unaided, wrote **"Fluty"** correctly on the main channel. On a clean headset recording
-  Whisper would have *failed* that term.
+  which is not part of this benchmark. Parakeet's one miss (a homophone spelling of the teammate's
+  first name) is exactly what that post-pass fixes.
+- **Even so, Whisper garbled the client name:** on the main "them" channel Whisper wrote a
+  **mangled variant** of the client's name (only scoring a hit because the bleed channel happened
+  to catch the correct spelling). Parakeet, unaided, spelled it **correctly** on the main channel.
+  On a clean headset recording Whisper would have *failed* that term.
 
 On real content fidelity Parakeet was **cleaner**: lower "them"-channel WER, correct client-name
-spelling, and fewer meaning-changing errors (Whisper turned "flip side" → "not sure" and "job
-seeker" → "seeer"; Parakeet's only comparable slip was the acronym "TBD" → "GPD").
+spelling, and fewer meaning-changing errors (Whisper turned a common idiom into an unrelated
+phrase and a compound noun into a non-word; Parakeet's only comparable slip was garbling one
+spoken acronym).
 
 ## Decision & rationale
 
