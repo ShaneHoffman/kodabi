@@ -140,6 +140,29 @@ Folder hues are chosen by data, not by markup, so they arrive as a lookup from t
 than as a literal class — `PROJECT_HUE[project]` returning `"text-coral"`, never a computed
 `` `text-${hue}` `` (Tailwind cannot see a constructed class name and will not emit it).
 
+### Text in a control sets `leading-none`, and centring it is two steps
+
+A control whose height should be predictable — a button, a pill, a menu row, a palette row — sets
+`leading-none` on its text. Without it the text inherits a 1.5 line-height, so an 11.5px label
+occupies a 17.25px box and *that* becomes the control's height: fractional, and dependent on which
+glyphs it happens to hold. `Button`, `Menu`, `CommandPalette` and both capture pills all spell it.
+Reading surfaces are the opposite case and take an explicit ratio instead (`leading-[1.55]`,
+`leading-[1.65]`, or `text-note`, which carries its own).
+
+`leading-none` is not, on its own, a centring fix — this is the part worth knowing before chasing a
+label that looks a pixel high. Flex `items-center` centres the *box*, and it does that exactly; but a
+font's ascent and descent are not symmetric about its cap band, so a perfectly centred box still
+renders text that sits high or low. The half-leading either side of a line box is symmetric, which is
+why changing line-height barely moves the glyphs relative to their own box. The correction is a
+static `translate-y-px`, which is layout-inert and so cannot re-bias the `items-center` that placed
+the box. Two rules for reaching for it:
+
+- **Measure, never eyeball.** [`ListenPill`](../src/components/shell/ListenPill.tsx)'s CENTRING note
+  records the method (render against the built stylesheet in headless Edge at DPR 1, then compare the
+  ink's mass centroid to the pill's centreline) and the numbers it produced.
+- **Only whole pixels exist.** Chromium snaps a text translation to whole device pixels, so `0.5px`,
+  `0.75px` and `1px` all rasterise identically. Write the integer.
+
 ### The two variants
 
 `.day` and `.hc` are root classes, set imperatively by [`src/theme.ts`](../src/theme.ts) and
@@ -405,12 +428,15 @@ That is a decision, not an accident of what got built first. A region that some 
 others don't makes the main column's width depend on where you navigated, which reads as the layout
 being unstable rather than as two places being different kinds of place. The two candidates people
 reach for — a note's metadata, and its session artifacts — are answered inside the note's own view:
-they sit in the details rail described below, which is leftover width rather than a region, and every
-other destination keeps the full main slot.
+they sit in the details rail described below, which is a track in that view's own grid rather than a
+region, and every other destination keeps the full main slot.
 
-The note editor's details rail is not a counterexample. It is what the *leftover* width becomes once
-prose has stopped at its measure (DESIGN_SYSTEM §1), inside the one main slot — not a second region
-the shell provides.
+The note editor's details rail is not a counterexample. It is a second column the note screen draws
+for itself inside the one main slot — not a second region the shell provides, and nothing outside
+that view knows it exists. It is also the one place where prose ends against a neighbour instead of
+at its own measure (DESIGN_SYSTEM §1's carve-out): the body runs to the rail, so no width is ever
+stranded between the two. Past the reading surface's own bound the extra falls outside the pair, as
+margin — never back into the gap.
 
 **What would overturn it:** a majority of destinations wanting the *same* persistent secondary
 content, which has to stay visible while the main column is being used. One line of metadata is not

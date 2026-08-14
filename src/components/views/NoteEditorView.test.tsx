@@ -483,3 +483,65 @@ describe("NoteEditorView action items", () => {
     ).toBeInTheDocument();
   });
 });
+
+describe("NoteEditorView measure", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  /** The rail's fixed track — which is also the thing that bounds the prose,
+   * now that the body runs to it rather than stopping at a `ch` count. */
+  const RAIL_TRACK = "@[42rem]:grid-cols-[minmax(0,1fr)_272px]";
+
+  // jsdom has no layout, so what these lock in is the class contract, the same
+  // way the rail-wrapping test above does. They matter because the change they
+  // guard is invisible to every other assertion in this file: the same words
+  // render either way, and a re-added cap would leave a column of nothing
+  // between the prose and the rail with the whole suite still green.
+
+  it("runs the body to the rail in read and compose alike", async () => {
+    const user = userEvent.setup();
+    const note = makeNote({
+      id: "n_a1b2c3",
+      title: "Quarterly planning",
+      project: "briarwood-golf",
+    });
+    renderNote("briarwood-golf", note);
+    await screen.findByRole("heading", { name: "Quarterly planning" });
+
+    // `font-note` is the reading voice, and read mode wears it on exactly one
+    // element: the body column itself.
+    const prose = screen.getByTestId("note-read").querySelector(".font-note");
+    // The cap survives as the one-column fallback and lifts at the width that
+    // brings in the rail to bound the prose in its place.
+    expect(prose).toHaveClass("max-w-[66ch]");
+    expect(prose).toHaveClass("@[42rem]:max-w-none");
+    expect(prose?.closest("div.grid")).toHaveClass(RAIL_TRACK);
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+
+    const composed = screen.getByRole("textbox", { name: "Note body" });
+    expect(composed).toHaveClass("max-w-[66ch]");
+    expect(composed).toHaveClass("@[42rem]:max-w-none");
+    expect(composed.closest("div.grid")).toHaveClass(RAIL_TRACK);
+  });
+
+  it("gives a new note the same grid, with the rail track left empty", async () => {
+    onCommand("list_projects", () => ({ inbox_note_count: 0, projects: [] }));
+    render(
+      <NavigationContext value={{ view: INITIAL_VIEW, navigate: vi.fn() }}>
+        <NoteEditorView noteId={null} project={null} />
+      </NavigationContext>,
+    );
+
+    const body = await screen.findByRole("textbox", { name: "Note body" });
+    expect(body).toHaveClass("max-w-[66ch]");
+    expect(body).toHaveClass("@[42rem]:max-w-none");
+    // Empty, not absent. Without the track the body would take the whole panel
+    // and then narrow the instant Create lands the reader in read mode.
+    const grid = body.closest("div.grid");
+    expect(grid).toHaveClass(RAIL_TRACK);
+    expect(grid?.children).toHaveLength(1);
+    expect(screen.queryByRole("complementary", { name: "Note details" })).toBeNull();
+  });
+});

@@ -74,6 +74,8 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   `hideLabel`, `emptyLabel`), `Switch` (`busy` as its only inert form — no `disabled` prop
   exists; `label` is the visible words verbatim; the knob's travel is duration-gated, so it
   still arrives under reduced motion),
+  `Checkbox` (a box and its label; no variants, and §4 carries no contract bullet for it, so
+  the table row is the whole documented claim),
   `Field` (`error` + `aria-invalid` travel together, `hint` and
   `error` both → `aria-describedby`, error described first),
   `StatusMessage` (variant → ARIA role), `ViewFrame` (seven variants; `summary` a **type
@@ -82,6 +84,11 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   elements rather than a plain string), `Dialog` (base-ui owns the focus trap, Escape, the outside
   press and the scroll lock; `initialFocus` where the first tabbable control is destructive;
   margin centering, since `materialize` animates `transform`),
+  `Menu` (base-ui anchoring; `Menu.Item`'s three variants `default`/`suggested`/`foot` are
+  variants precisely *because* a call-site `className` loses the cascade, so a row carries
+  exactly one size utility and one colour utility with nothing to resolve — `Menu.test.tsx`
+  counts them; `Menu.Trigger` **composes, it does not wrap**: the control goes through
+  `render` so one `<button>` carries both the Grove chrome and base-ui's wiring),
   `DestructiveConfirmDialog` (presentational, never self-closing; the copy
   structure — title, `subject` strip, consequence, the dialog's own permanence line, quiet
   Cancel before the danger confirm).

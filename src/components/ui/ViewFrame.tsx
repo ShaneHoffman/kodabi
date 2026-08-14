@@ -43,10 +43,12 @@ import type { ReactNode } from "react";
  *   search  — results under a query field. Caps no column: the field runs the
  *             panel's full width, and its rows are rows.
  *   terminal— the embedded Claude Code terminal. A small masthead over a
- *             full-bleed pane: its body (the xterm mount) grows to fill the
- *             height the gutter leaves, and scrolls inside itself. Its summary
- *             is the hosted session's state, which is the one thing the chrome
- *             can say about a pane whose contents belong to another program.
+ *             full-bleed pane: its body (the `glass-term` well, which holds the
+ *             xterm mount bare inside it — TerminalView.tsx says why the two are
+ *             separate) grows to fill the height the gutter leaves, and scrolls
+ *             inside itself. Its summary is the hosted session's state, which is
+ *             the one thing the chrome can say about a pane whose contents
+ *             belong to another program.
  *
  * `doc` and `search` render no header of their own: their headers are a
  * genuinely different shape (a back link and its own actions; a query field)
@@ -194,8 +196,8 @@ export function ViewFrame({
           // each view depending on how wide its measure happens to be, which
           // is the instability the shared gutter above just removed.
           variant === "doc" && "max-w-[660px]",
-          // `min-h-0` lets the mount shrink below its content, which is what
-          // lets xterm size to real pixels.
+          // `min-h-0` lets the terminal's well shrink below its content, which
+          // is what lets xterm size to real pixels.
           variant === "terminal" && "flex min-h-0 flex-1 flex-col",
         )}
       >

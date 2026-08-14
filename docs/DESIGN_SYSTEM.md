@@ -79,12 +79,25 @@ The single most important typographic rule in Grove, and the one a full-width la
 
 - **Structure fills the space it is given.** Lists, rows, cards, tables, and the dock all stretch to
   the panel width. A row that stops short of the edge looks broken.
-- **Prose stops at its measure.** Note bodies at `66ch`, a chat answer at `78ch`, a settings hint at
-  `46ch`. When the panel is wider than the measure, the leftover width becomes a details rail — not
-  longer lines.
+- **Prose stops at its measure.** A chat answer at `78ch`, a settings hint at `46ch`, a note body at
+  `66ch` while it is alone on the screen. When the panel is wider than the measure, the leftover
+  width becomes a details rail — not longer lines.
 
-`text-note` carries the reading size and its leading together (15px / 1.75) so a note can never open
-at two different sizes on two different screens.
+**Prose that already has a rail beside it ends against the rail, not at a `ch` count.** This is the
+note screen's carve-out, and it is the case that showed the rule needs one. "The leftover becomes a
+rail" assumes the leftover has somewhere to go. On the note screen it did not: the rail is already
+the width it should be (272px), so every pixel past the body's measure plus that rail fell into the
+gap *between* the two, and a wide window drew a column of nothing where the layout should have
+ended. So there the rail is the measure — the body runs to it — and the whole reading surface, title
+and prose and rail together, stops at 1360px. That puts a very wide monitor's leftover outside the
+rail as page margin, where the same width left inside the grid read as a hole. Below the width at
+which the rail fits at all (`@[42rem]`, where the rail stacks under the note), the body falls back to
+`66ch`: with nothing beside it, there is nothing to bound it.
+
+The carve-out reaches exactly that far. It is for prose with a fixed-width neighbour to end against;
+a lone column of prose still stops at its measure, and `text-note` still carries the reading size and
+its leading together (15px / 1.75) so a note can never open at two different sizes on two different
+screens.
 
 ---
 

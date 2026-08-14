@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { render, screen, within } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { DestructiveConfirmDialog } from "./DestructiveConfirmDialog";
@@ -51,8 +51,11 @@ describe("DestructiveConfirmDialog", () => {
 
     const dialog = screen.getByRole("dialog", { name: "Delete this thing?" });
     // Cancel is the default action of a confirmation, so the keyboard's first
-    // Enter dismisses rather than destroys.
-    expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    // Enter dismisses rather than destroys. base-ui moves initial focus a tick
+    // after the dialog mounts.
+    await waitFor(() => {
+      expect(within(dialog).getByRole("button", { name: "Cancel" })).toHaveFocus();
+    });
   });
 
   it("names the acted-on thing in its own strip and owns the permanence warning", async () => {
