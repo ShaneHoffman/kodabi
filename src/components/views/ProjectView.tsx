@@ -41,7 +41,7 @@ const PROJECT_ROW = [
 
 /** The eyebrow over each run of rows. The view's ONE level of eyebrow — the
  * header deliberately carries none, because two levels of the same small
- * uppercase voice on one surface is one too many (DESIGN_SYSTEM §3). */
+ * uppercase voice on one surface is one too many (DESIGN_SYSTEM §1). */
 const GROUP_LABEL = [
   "font-data text-[10px] uppercase tracking-[0.22em] text-ink-faint",
   "mt-6.5 mb-1.5 px-2.5 first:mt-4.5",

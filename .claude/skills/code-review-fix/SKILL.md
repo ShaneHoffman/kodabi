@@ -64,7 +64,7 @@ Then the repo's rule surface (follow each link; don't re-derive it here):
   eslint gate does not encode this rule's judgment calls, so review is where it lands.
 - [`design-consistency`](../../rules/design-consistency.md) — when `src/**` UI changed:
   the four view states, the reduced-motion partner on every movement, the one focus-ring
-  recipe, primitive-first composition and the six slots, spacing. Only three design rules
+  recipe, primitive-first composition and the six slots, spacing. Only two design rules
   are machine-enforced, so this is where the rest lands.
 - [`shell-discipline`](../../rules/shell-discipline.md) — when the diff adds scripts or
   agent-facing command guidance.

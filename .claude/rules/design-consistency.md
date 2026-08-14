@@ -7,9 +7,10 @@ paths:
 
 Grove's doctrine is [`docs/DESIGN_SYSTEM.md`](../../docs/DESIGN_SYSTEM.md); its mechanics are
 [`docs/UI_CONVENTIONS.md`](../../docs/UI_CONVENTIONS.md). Exactly two of their claims are
-machine-enforced — the colour-literal guard and the `.css`-import ban, both `no-restricted-syntax`
-in `eslint.config.js`, which is the third Grove guard's home too
-([`no-use-effect`](no-use-effect.md)). Everything else the design system says is review's job, and
+machine-enforced — the colour-literal guard and the `.css`-import ban, the two `no-restricted-syntax`
+selectors `eslint.config.js` calls the Grove guards. (The effect ban in the same file is
+[`no-use-effect`](no-use-effect.md)'s, not a design claim.) Everything else the design system says is
+review's job, and
 it says so itself (DESIGN_SYSTEM §7): *"this document is the checklist"*, and **"the absence of a
 guard is not permission."**
 
@@ -24,10 +25,12 @@ authority, and this list deliberately does not restate them.
   copy, not an apology. Error names what failed and what happens next, never leaks an exception
   string, and leaves the data reachable. Success is the absence of noise, plus a toast where the
   thing left the screen. `StatusMessage` is the one way a view says nothing/failed/working, and its
-  variant fixes the ARIA role — a hand-rolled state block with its own `role` is a finding.
+  variant fixes the ARIA role (UI_CONVENTIONS §4) — a hand-rolled state block with its own `role` is
+  a finding.
 - **Every movement carries its reduced-motion partner, at the call site.** The swap table is
   DESIGN_SYSTEM §4: `materialize` / `rise-in` → `fade-in`, `dissolve` → `fade-out`, `halo` / `ring`
-  → `halo-still`, `breathe` / `drift` → nothing, `active:scale-97` → no press transform, a switch
+  → `halo-still`, `breathe` / `drift` / `drift-back` → nothing, `active:scale-97` → no press
+  transform, a switch
   knob's `translate` → `duration-0`. Movement is the accessibility problem; life is not, so
   opacity-only animations (`animate-caret`, `animate-pending`) are correct unpaired, and a duration
   is gated instead of swapped *exactly* when the end state, not the travel, is what the user is
@@ -75,7 +78,9 @@ meanings, rectangles versus pills, the one press spec, the nine glass thicknesse
 the measured contrast floor, the `.hc` three-token budget, focus order and live regions: when a diff
 touches any of those, open [`docs/DESIGN_SYSTEM.md`](../../docs/DESIGN_SYSTEM.md).
 
-Enforcement is the three eslint guards plus this rule read at the Code Review stage
-([`code-review-fix`](../skills/code-review-fix/SKILL.md) step 2, for every diff touching `src/**`)
-plus `src/components/dev/PrimitiveGallery.test.tsx`, which renders every Grove control under all
-four grounds. There is no CI scan for anything above.
+Enforcement is the two Grove guards, plus the three tests DESIGN_SYSTEM §7 names
+(`src/theme.test.ts` and `src/contrast.test.ts` pin the two variant classes;
+`src/components/dev/PrimitiveGallery.test.tsx` renders every Grove control under all four grounds),
+plus this rule read at the Code Review stage
+([`code-review-fix`](../skills/code-review-fix/SKILL.md) step 2, for every diff touching `src/**`).
+Nothing above is scanned in CI beyond those.

@@ -222,7 +222,7 @@ Topical rules that aren't repo-wide engineering constraints live as modular file
 `docs-stay-in-sync`, `tauri-command-parity`, `no-personal-info`,
 `no-use-effect` (effects only in blessed bridge hooks), `skill-authoring`,
 `typescript-style`, `utc-timestamps`, `dev-sandbox` (agent launches never touch real data),
-`design-consistency` (the review checklist for the design doctrine the three eslint guards
+`design-consistency` (the review checklist for the design doctrine the two Grove guards
 don't cover: view states, reduced-motion partners, the focus ring, composition).
 
 ## Skills & agents
