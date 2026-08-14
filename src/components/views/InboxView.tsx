@@ -722,7 +722,12 @@ function PipelinePlaceholder({
               {/* Ink, never green: green means audio is being recorded, and
                   this whole run happens after a capture has already stopped
                   (docs/DESIGN_SYSTEM.md §2). */}
-              <span className="size-[7px] flex-none animate-breathe rounded-full bg-ink-faint" />
+              {/* `animate-pending`, not `animate-breathe`: breathe is the
+                  kodama's, a pure transform whose reduced-motion partner is
+                  nothing at all, so this dot went still exactly when it was
+                  still working. Pending is opacity-only and is the animation
+                  src/index.css names for this dot. */}
+              <span className="size-[7px] flex-none animate-pending rounded-full bg-ink-faint" />
               <PhaseStack
                 phase={presence.phase}
                 transcribing="Transcribing the capture"
@@ -1191,10 +1196,17 @@ function InboxRow({
             <Menu.Root>
               <Menu.Trigger
                 render={
+                  /* One inert form, not two. The success path sets `leaving`
+                     without clearing `pending`, so passing both put the native
+                     `disabled` back on a control that was mid-task — and
+                     `disabled` wins over `loading`, which drops focus to the
+                     document body just as base-ui returns it to this trigger.
+                     That is the exact bug `loading` exists to avoid
+                     (docs/UI_CONVENTIONS.md §4). Busy through the departure
+                     keeps it focusable and still swallows activation. */
                   <Button
-                    loading={pending}
+                    loading={pending || leaving}
                     loadingLabel="Filing…"
-                    disabled={leaving}
                     aria-label={`File "${note.title}" to project`}
                   >
                     File

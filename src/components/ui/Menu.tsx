@@ -78,7 +78,14 @@ const MENU_SURFACE =
 export const menuRow = cva(
   [
     "flex w-full cursor-default select-none items-center gap-2 rounded-[9px] px-2.5 py-2",
-    "font-ui font-medium leading-none outline-hidden",
+    // `focus-ring-inset` beside `outline-hidden`: base-ui's menu moves REAL DOM
+    // focus to the highlighted row (its list navigation is not virtual), so
+    // keyboard focus here matches :focus-visible and the bare `outline-hidden`
+    // left `data-highlighted`'s colour change as the only focus signal — the one
+    // thing DESIGN_SYSTEM §2 says focus may never be. Inset because the row
+    // fills its scroller, which is the case src/index.css names for it. Inert on
+    // Select's options, which never take focus (aria-activedescendant).
+    "font-ui font-medium leading-none outline-hidden focus-ring-inset",
     "transition-[background-color,color] duration-140 ease-out-strong",
     "data-highlighted:bg-wash data-highlighted:text-ink",
     "data-disabled:text-ink-faint",

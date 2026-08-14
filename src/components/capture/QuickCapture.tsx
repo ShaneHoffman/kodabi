@@ -241,7 +241,7 @@ export function QuickCapture() {
             <span
               role="status"
               data-testid="quick-capture-models-notice"
-              className="min-w-0 flex-1 font-data text-[10.5px] text-ink-faint"
+              className="min-w-0 flex-1 font-data text-[10.5px] text-ink-dim"
             >
               {modelsNotice}
             </span>

@@ -30,8 +30,10 @@ const HUE_TEXT: Record<FolderHue, string> = {
 
 /** The idle hint and the no-hits line are the same voice at the same weight:
  * one quiet line where the rows would be, saying what this field does or what
- * it just did. */
-const QUIET_LINE = "px-2.5 py-3.5 font-data text-[10.5px] text-ink-faint";
+ * it just did. `ink-dim`, not `ink-faint`: both lines are sentences the user
+ * reads for meaning, and the faint step is the metadata register
+ * (docs/DESIGN_SYSTEM.md §6). */
+const QUIET_LINE = "px-2.5 py-3.5 font-data text-[10.5px] text-ink-dim";
 
 /** One shared empty list, so "no results yet" is one identity rather than a
  * fresh array on every render. */

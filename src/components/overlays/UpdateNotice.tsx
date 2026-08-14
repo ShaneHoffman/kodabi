@@ -107,7 +107,7 @@ export function UpdateNotice({ onClose }: Props) {
           </StatusMessage>
           {/* Says what was NOT harmed, because a failed self-update is exactly
               the kind of thing a user assumes has broken their install. */}
-          <p className="text-[12px] text-ink-faint">
+          <p className="text-[12px] text-ink-dim">
             Your current version is untouched and your notes are safe.
           </p>
           <div className="flex items-center justify-end gap-2.5">

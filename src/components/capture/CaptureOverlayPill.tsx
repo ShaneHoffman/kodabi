@@ -88,7 +88,7 @@ export function CaptureOverlayPill() {
       {/* The live region is the label alone. Wrapping the clock in it too
           would announce a new time every second, forever.
 
-          Faint ink in every state, unlike the in-app ListenPill, whose label
+          Dim ink in every state, unlike the in-app ListenPill, whose label
           does step up to `kodama-ink` while live. That divergence is the
           point: this window floats over other people's applications, and on
           the desktop the mark is the only green thing while audio is being
