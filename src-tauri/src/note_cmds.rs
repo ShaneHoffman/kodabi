@@ -3,8 +3,9 @@
 //! writes, disk enumeration, and all validation live in `kodabi-core`; these
 //! commands only own the serde IPC DTOs, mint the note id server-side at
 //! creation, resolve the knowledge-base root, and map results to the MCP
-//! `NoteSummary` projection. Errors collapse to a message string — the same
-//! convention `audio_cmds` uses for IPC results.
+//! `NoteSummary` projection. Errors cross IPC as user-facing copy (see
+//! `user_errors`); the raw detail goes to stderr — the same convention
+//! `audio_cmds` uses for IPC results.
 
 use std::path::Path;
 
@@ -18,6 +19,12 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::events::VAULT_CHANGED_EVENT;
 use crate::index_state::IndexState;
 use crate::transcribe::knowledge_base_dir;
+use crate::user_errors::{note_error, reported};
+
+/// The sentence a failed create wears, shared by the command and the pure
+/// input parser below so both halves of "create a note" fail the same way.
+const CREATE_FAILED: &str = "Couldn't create the note. Nothing was saved; check that your vault \
+                             folder is writable and try again.";
 
 /// Broadcasts `vault:changed` so every open window refetches its disk-backed
 /// lists immediately after an in-app write, without waiting on the file
@@ -161,13 +168,14 @@ fn write_note_impl(app: &AppHandle, mut input: NewNoteInput) -> Result<WrittenNo
 
     // Adopt the on-disk casing of any existing project folder, so the
     // frontmatter never disagrees with the folder the file actually lands in.
-    input.project =
-        vault::canonicalize_project(&kb, &input.project).map_err(|err| err.to_string())?;
+    input.project = vault::canonicalize_project(&kb, &input.project)
+        .map_err(|err| note_error("write_note", err, CREATE_FAILED))?;
 
-    let id = NoteId::generate().map_err(|err| err.to_string())?;
+    let id = NoteId::generate().map_err(|err| reported("write_note", err, CREATE_FAILED))?;
     let note = note_from_input(input, id)?;
 
-    let path = note::write_note(&kb, &note, title.as_deref()).map_err(|err| err.to_string())?;
+    let path = note::write_note(&kb, &note, title.as_deref())
+        .map_err(|err| note_error("write_note", err, CREATE_FAILED))?;
     let rel = path.strip_prefix(&kb).unwrap_or(&path);
 
     // Keep the index in step with the disk write. Best-effort: the file is the
@@ -192,18 +200,20 @@ fn write_note_impl(app: &AppHandle, mut input: NewNoteInput) -> Result<WrittenNo
 /// Builds a validated core [`Note`] from the wire input and a freshly minted
 /// `id`. Pure (no filesystem), so it can be unit-tested without an `AppHandle`.
 fn note_from_input(input: NewNoteInput, id: NoteId) -> Result<Note, String> {
-    let note_type = NoteType::parse(&input.note_type).map_err(|err| err.to_string())?;
-    let source = Source::parse(&input.source).map_err(|err| err.to_string())?;
+    let note_type = NoteType::parse(&input.note_type)
+        .map_err(|err| note_error("write_note", err, CREATE_FAILED))?;
+    let source =
+        Source::parse(&input.source).map_err(|err| note_error("write_note", err, CREATE_FAILED))?;
     let tags = parse_tags(&input.tags)?;
     let routing = Routing::from_project_and_confidence(input.project, input.confidence)
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| note_error("write_note", err, CREATE_FAILED))?;
 
     // The caller's title is stored in frontmatter (normalized by `with_title`),
     // so it survives past the 40-char filename slug it also seeds.
     let title = input.title;
     Note::new(id, note_type, routing, input.date, tags, source, input.body)
         .map(|note| note.with_title(title))
-        .map_err(|err| err.to_string())
+        .map_err(|err| note_error("write_note", err, CREATE_FAILED))
 }
 
 /// Parses wire tags through the core's lenient input normalization
@@ -213,7 +223,7 @@ fn parse_tags(tags: &[String]) -> Result<Vec<Tag>, String> {
     tags.iter()
         .map(|t| Tag::parse_normalized(t))
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|err| err.to_string())
+        .map_err(|err| note_error("parse_tags", err, CREATE_FAILED))
 }
 
 /// Projects a written [`Note`] to the `NoteSummary` wire shape: the Inbox
@@ -338,7 +348,14 @@ pub struct ProjectListDto {
 #[tauri::command]
 pub async fn list_notes(app: AppHandle, project: String) -> Result<Vec<NoteSummaryDto>, String> {
     let kb = knowledge_base_dir(&app)?;
-    let scan = vault::scan_project_notes(&kb, &project).map_err(|err| err.to_string())?;
+    let scan = vault::scan_project_notes(&kb, &project).map_err(|err| {
+        note_error(
+            "list_notes",
+            err,
+            "Couldn't read your notes. The files on disk are untouched; reopen this view to try \
+             again.",
+        )
+    })?;
     if !scan.skipped.is_empty() {
         eprintln!(
             "list_notes: skipped {} unparseable file(s) in {project}",
@@ -375,8 +392,19 @@ pub async fn read_note(
     let kb = knowledge_base_dir(&app)?;
     let id = parse_note_id(&id)?;
     let listed = vault::find_note(&kb, &project, &id)
-        .map_err(|err| err.to_string())?
-        .ok_or_else(|| format!("note {} not found in {project}", id.as_str()))?;
+        .map_err(|err| {
+            note_error(
+                "read_note",
+                err,
+                "Couldn't open this note. The file on disk is untouched; go back to the list and \
+                 try again.",
+            )
+        })?
+        .ok_or_else(|| {
+            "This note is no longer here. It may have been moved or deleted; go back to the list \
+             to find it."
+                .to_string()
+        })?;
     Ok(note_detail(&listed, &kb))
 }
 
@@ -392,8 +420,19 @@ pub async fn save_note(app: AppHandle, input: SaveNoteInput) -> Result<NoteDetai
     let id = parse_note_id(&input.id)?;
     let edit = note_edit_from_input(&input)?;
     let listed = vault::save_note_edit(&kb, &input.project, &id, edit)
-        .map_err(|err| err.to_string())?
-        .ok_or_else(|| format!("note {} not found in {}", input.id, input.project))?;
+        .map_err(|err| {
+            note_error(
+                "save_note",
+                err,
+                "Couldn't save your changes. Your last saved version is still on disk and your \
+                 edits are still in the editor; try again.",
+            )
+        })?
+        .ok_or_else(|| {
+            "This note is no longer where it was, so the edit wasn't saved. Your text is still in \
+             the editor; copy it before leaving."
+                .to_string()
+        })?;
 
     // Re-index the edited note (best-effort; see `write_note_impl`). Editing the
     // body drops its stale vectors in `upsert_note`, so this re-embeds them.
@@ -461,8 +500,17 @@ pub async fn file_note_to_project(
         reason: input.reason,
     };
     let routed = vault::file_note_to_project(&kb, &id, &input.project, &options)
-        .map_err(|err| err.to_string())?
-        .ok_or_else(|| format!("note {} not found in the vault", input.id))?;
+        .map_err(|err| {
+            note_error(
+                "file_note_to_project",
+                err,
+                "Couldn't file this note. It is still where it was; try again.",
+            )
+        })?
+        .ok_or_else(|| {
+            "This note is no longer in the vault. It may have been deleted; refresh the list."
+                .to_string()
+        })?;
 
     // Keep the index in step with the move: a re-route changes the note's
     // project and path, and the upsert updates the same row.
@@ -494,8 +542,14 @@ fn file_note_outcome(routed: RoutedNote, kb: &Path) -> FileNoteOutcomeDto {
 #[tauri::command]
 pub async fn list_projects(app: AppHandle) -> Result<ProjectListDto, String> {
     let kb = knowledge_base_dir(&app)?;
-    let projects = vault::list_projects(&kb).map_err(|err| err.to_string())?;
-    let inbox = vault::scan_project_notes(&kb, note::INBOX).map_err(|err| err.to_string())?;
+    // The sidebar renders this and is always mounted, so "reopen this view"
+    // would be advice with nothing behind it.
+    const FAILED: &str = "Couldn't read your projects. They are still on disk; restart Kodabi if \
+                          this keeps happening.";
+    let projects =
+        vault::list_projects(&kb).map_err(|err| note_error("list_projects", err, FAILED))?;
+    let inbox = vault::scan_project_notes(&kb, note::INBOX)
+        .map_err(|err| note_error("list_projects", err, FAILED))?;
     Ok(ProjectListDto {
         inbox_note_count: inbox.notes.len() as u32,
         projects: projects.into_iter().map(project_dto).collect(),
@@ -508,7 +562,18 @@ pub async fn list_projects(app: AppHandle) -> Result<ProjectListDto, String> {
 #[tauri::command]
 pub async fn create_project(app: AppHandle, project: String) -> Result<ProjectDto, String> {
     let kb = knowledge_base_dir(&app)?;
-    let info = vault::create_project(&kb, &project).map_err(|err| err.to_string())?;
+    // Validation and "already exists" answer for themselves in `note_error`;
+    // this sentence covers only the I/O half.
+    let info = vault::create_project(&kb, &project).map_err(|err| {
+        note_error(
+            "create_project",
+            err,
+            // Not "nothing was created": `create_project` is `create_dir_all`,
+            // which for a nested slug can land the parent folders and then fail.
+            "Couldn't finish creating the project. Check that your vault folder is writable, \
+             then try again; your notes are untouched.",
+        )
+    })?;
     broadcast_vault_changed(&app);
     Ok(project_dto(info))
 }
@@ -531,12 +596,17 @@ pub struct DeletedProjectDto {
 pub async fn delete_project(app: AppHandle, project: String) -> Result<DeletedProjectDto, String> {
     let kb = knowledge_base_dir(&app)?;
     let deleted = vault::delete_project(&kb, &project).map_err(|err| match err {
-        // The core message suggests passing create_project, which only makes
-        // sense on the filing path; deletion gets plain copy.
-        note::NoteError::MissingProject { project } => {
-            format!("project \"{project}\" does not exist")
+        // `note_error`'s shared MissingProject copy points at the note list; a
+        // deletion's next step is the sidebar it just failed to change.
+        note::NoteError::MissingProject { .. } => {
+            "That project does not exist. It may already be deleted; refresh the sidebar."
+                .to_string()
         }
-        other => other.to_string(),
+        other => note_error(
+            "delete_project",
+            other,
+            "Couldn't delete the project. Its notes are untouched; try again.",
+        ),
     })?;
 
     let index = app.state::<IndexState>();
@@ -570,12 +640,18 @@ pub async fn rename_project(
 ) -> Result<ProjectDto, String> {
     let kb = knowledge_base_dir(&app)?;
     let renamed = vault::rename_project(&kb, &project, &new_project).map_err(|err| match err {
-        // The core message suggests passing create_project, which only makes
-        // sense on the filing path; renaming gets plain copy.
-        note::NoteError::MissingProject { project } => {
-            format!("project \"{project}\" does not exist")
+        // As in `delete_project`: the sidebar, not the note list, is where the
+        // reader recovers from a rename that found nothing to rename.
+        note::NoteError::MissingProject { .. } => {
+            "That project does not exist. It may have been renamed already; refresh the sidebar."
+                .to_string()
         }
-        other => other.to_string(),
+        other => note_error(
+            "rename_project",
+            other,
+            "Couldn't rename the project. It keeps its current name and its notes are untouched; \
+             try again.",
+        ),
     })?;
 
     if !renamed.failed_rewrites.is_empty() {
@@ -626,7 +702,14 @@ pub async fn delete_note(app: AppHandle, id: String) -> Result<DeletedNoteDto, S
     let kb = knowledge_base_dir(&app)?;
     let note_id = parse_note_id(&id)?;
 
-    let Some(deleted) = vault::delete_note(&kb, &note_id).map_err(|err| err.to_string())? else {
+    let Some(deleted) = vault::delete_note(&kb, &note_id).map_err(|err| {
+        note_error(
+            "delete_note",
+            err,
+            "Couldn't delete the note. It is untouched; try again.",
+        )
+    })?
+    else {
         return Ok(DeletedNoteDto {
             id,
             title: None,
@@ -653,15 +736,31 @@ pub async fn delete_note(app: AppHandle, id: String) -> Result<DeletedNoteDto, S
     })
 }
 
+/// Ids reach these commands from lists the app itself rendered, never from
+/// anything the user typed, so a malformed one is our bug and not their input:
+/// the regex goes to the log and the reader gets a way out of the view.
 fn parse_note_id(id: &str) -> Result<NoteId, String> {
-    NoteId::parse(id).map_err(|_| format!("id {id:?} must match ^n_[0-9a-z]{{6,}}$"))
+    NoteId::parse(id).map_err(|_| {
+        reported(
+            "parse_note_id",
+            format!("id {id:?} must match ^n_[0-9a-z]{{6,}}$"),
+            "Kodabi couldn't identify this note. Reopen the view and try again.",
+        )
+    })
 }
 
 /// Parses the wire edit into the core's [`NoteEdit`] (the merge itself —
 /// preserving `id`, `source`, routing — is `Note::with_edits` in kodabi-core).
 fn note_edit_from_input(input: &SaveNoteInput) -> Result<NoteEdit, String> {
     Ok(NoteEdit {
-        note_type: NoteType::parse(&input.note_type).map_err(|err| err.to_string())?,
+        note_type: NoteType::parse(&input.note_type).map_err(|err| {
+            note_error(
+                "save_note",
+                err,
+                "Couldn't save your changes. Your last saved version is still on disk and your \
+                 edits are still in the editor; try again.",
+            )
+        })?,
         // Verbatim: `Note::with_title` is the one authority on title
         // normalization, so every entry point folds identically.
         title: input.title.clone(),

@@ -22,9 +22,22 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::routing_env::{report_signal_failures, routing_config_from_env};
 use crate::settings_cmds::SettingsState;
 use crate::transcribe::knowledge_base_dir;
+use crate::user_errors::reported;
 
 /// Event the frontend subscribes to for distill progress.
 pub const DISTILL_STATE_EVENT: &str = "distill:state";
+
+/// What a failed run says in Needs attention. Distill never consumes its
+/// inputs, so the reassurance is literally true and is the whole reason a
+/// failure here is recoverable.
+const DISTILL_FAILED: &str = "The distill didn't finish. The recording and transcript are safe; \
+                              you can retry from here.";
+
+/// Every rejection from [`validate_session_path`], for the same reason
+/// `session_cmds` gives: the lexical rule that failed is a fact about our IPC,
+/// not about anything the reader did.
+const SESSION_PATH_REJECTED: &str = "Kodabi couldn't verify that capture's location. Reopen Needs \
+                                     attention and try again.";
 
 /// Payload for [`DISTILL_STATE_EVENT`]. Tagged on `status` so the frontend
 /// can switch on that alone; `path`/`reason`/`message` only accompany their
@@ -169,7 +182,14 @@ pub struct FailedSessionDto {
 #[tauri::command]
 pub async fn list_failed_sessions(app: AppHandle) -> Result<Vec<FailedSessionDto>, String> {
     let kb = knowledge_base_dir(&app)?;
-    let sessions = kodabi_core::sessions::list_failed_sessions(&kb).map_err(|e| e.to_string())?;
+    let sessions = kodabi_core::sessions::list_failed_sessions(&kb).map_err(|err| {
+        reported(
+            "list_failed_sessions",
+            err,
+            "Couldn't read the captured sessions. The recordings on disk are untouched; reopen \
+             this view to try again.",
+        )
+    })?;
     // Take the claim list once for the whole filter rather than per session.
     let queued = in_flight();
     Ok(sessions
@@ -194,7 +214,13 @@ pub async fn list_failed_sessions(app: AppHandle) -> Result<Vec<FailedSessionDto
 pub fn dismiss_session(app: AppHandle, session_path: String) -> Result<(), String> {
     let kb = knowledge_base_dir(&app)?;
     let path = validate_session_path(&kb, &session_path)?;
-    kodabi_core::sessions::dismiss_session(&path).map_err(|e| e.to_string())
+    kodabi_core::sessions::dismiss_session(&path).map_err(|err| {
+        reported(
+            "dismiss_session",
+            err,
+            "Couldn't update this capture. The recording and transcript are untouched; try again.",
+        )
+    })
 }
 
 /// Clears a session's dismissed marker so it counts as needing attention
@@ -203,7 +229,13 @@ pub fn dismiss_session(app: AppHandle, session_path: String) -> Result<(), Strin
 pub fn restore_session(app: AppHandle, session_path: String) -> Result<(), String> {
     let kb = knowledge_base_dir(&app)?;
     let path = validate_session_path(&kb, &session_path)?;
-    kodabi_core::sessions::restore_session(&path).map_err(|e| e.to_string())
+    kodabi_core::sessions::restore_session(&path).map_err(|err| {
+        reported(
+            "restore_session",
+            err,
+            "Couldn't update this capture. The recording and transcript are untouched; try again.",
+        )
+    })
 }
 
 /// Permanently deletes a failed session: transcript, retained recording, and
@@ -215,9 +247,19 @@ pub fn delete_session(app: AppHandle, session_path: String) -> Result<(), String
     let kb = knowledge_base_dir(&app)?;
     let path = validate_session_path(&kb, &session_path)?;
     if in_flight().contains(&path) {
-        return Err("That session is being distilled.".to_string());
+        return Err(
+            "That capture is being distilled right now, so it wasn't deleted. Try again once it \
+             finishes."
+                .to_string(),
+        );
     }
-    kodabi_core::sessions::delete_session(&path).map_err(|e| e.to_string())
+    kodabi_core::sessions::delete_session(&path).map_err(|err| {
+        reported(
+            "delete_session",
+            err,
+            "Couldn't delete this capture. Its files are untouched; try again.",
+        )
+    })
 }
 
 /// Spawns the distill on a background thread and returns immediately, so
@@ -288,21 +330,21 @@ pub(crate) fn spawn_distill(app: &AppHandle, session_path: PathBuf) -> bool {
                 reason,
                 session_path: session_path.display().to_string(),
             },
-            Ok(Err(DistillFailure::Other(message))) => {
-                eprintln!("distill pipeline failed: {message}");
-                DistillStateEvent::Error {
-                    message,
-                    session_path: session_path.display().to_string(),
-                }
-            }
-            Err(panic) => {
-                let message = format!("distill panicked: {}", panic_message(panic.as_ref()));
-                eprintln!("{message}");
-                DistillStateEvent::Error {
-                    message,
-                    session_path: session_path.display().to_string(),
-                }
-            }
+            // Already user copy, and already logged raw at the point it was
+            // translated (`run`, and `knowledge_base_dir` before it) — the event
+            // message renders verbatim in Needs attention.
+            Ok(Err(DistillFailure::Other(message))) => DistillStateEvent::Error {
+                message,
+                session_path: session_path.display().to_string(),
+            },
+            Err(panic) => DistillStateEvent::Error {
+                message: crate::user_errors::reported(
+                    "distill",
+                    format!("distill panicked: {}", panic_message(panic.as_ref())),
+                    DISTILL_FAILED,
+                ),
+                session_path: session_path.display().to_string(),
+            },
         };
         let _ = app.emit(DISTILL_STATE_EVENT, event);
     });
@@ -351,9 +393,10 @@ pub(crate) fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
 /// router (`route_distilled`) with the threshold resolved from the environment
 /// at this boundary; if signals can't load it fails soft to Inbox and emits a
 /// [`DistillStateEvent::RoutingFallback`] warning rather than losing the note.
-/// Errors collapse to a message string — the house IPC/event convention —
-/// except the empty-transcript case, which stays typed so [`spawn_distill`]
-/// can report it as a skip rather than a failure.
+/// Errors cross as user-facing copy (see `user_errors`) with the raw detail
+/// logged — the house IPC/event convention — except the empty-transcript case,
+/// which stays typed so [`spawn_distill`] can report it as a skip rather than a
+/// failure.
 fn run(app: &AppHandle, session_path: &Path) -> Result<PathBuf, DistillFailure> {
     let kb = knowledge_base_dir(app).map_err(DistillFailure::Other)?;
     let runner = ClaudeRunner::new(ClaudeConfig::distill_from_env());
@@ -383,7 +426,14 @@ fn run(app: &AppHandle, session_path: &Path) -> Result<PathBuf, DistillFailure> 
         DistillError::EmptyTranscript => DistillFailure::EmptyTranscript {
             reason: err.to_string(),
         },
-        other => DistillFailure::Other(other.to_string()),
+        // Every remaining variant is a machine fact (a read error carrying a
+        // path, a headless-Claude failure, a chunk-limit arithmetic), and this
+        // string is rendered, not logged: the raw goes to stderr instead.
+        other => DistillFailure::Other(crate::user_errors::reported(
+            "distill",
+            other,
+            DISTILL_FAILED,
+        )),
     })
 }
 
@@ -396,21 +446,31 @@ fn run(app: &AppHandle, session_path: &Path) -> Result<PathBuf, DistillFailure> 
 fn validate_session_path(kb: &Path, raw: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(raw);
     if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
-        return Err(format!("not a .jsonl session file: {raw}"));
+        return Err(reported(
+            "validate_session_path",
+            format!("not a .jsonl session file: {raw}"),
+            SESSION_PATH_REJECTED,
+        ));
     }
     if path
         .components()
         .any(|c| matches!(c, Component::ParentDir | Component::CurDir))
     {
-        return Err(format!(
-            "session path must not contain '.' or '..' segments: {raw}"
+        return Err(reported(
+            "validate_session_path",
+            format!("session path must not contain '.' or '..' segments: {raw}"),
+            SESSION_PATH_REJECTED,
         ));
     }
     let sessions = kb.join("sessions");
     if path.parent() != Some(sessions.as_path()) {
-        return Err(format!(
-            "session path must be directly inside {}",
-            sessions.display()
+        return Err(reported(
+            "validate_session_path",
+            format!(
+                "session path must be directly inside {}",
+                sessions.display()
+            ),
+            SESSION_PATH_REJECTED,
         ));
     }
     Ok(path)

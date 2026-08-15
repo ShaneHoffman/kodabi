@@ -6,6 +6,7 @@ import {
   updateGlossaryTerm,
   type GlossaryTerm,
 } from "../../useGlossary";
+import { backendCopy } from "../../errorCopy";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Field } from "../ui/Field";
@@ -69,7 +70,9 @@ export function GlossaryTermDialog({ slug, initial, onClose }: Props) {
       // closing is the whole of the success path.
       onClose();
     } catch (err) {
-      setError(String(err));
+      setError(
+        backendCopy(err, "Couldn't save the term. The glossary is unchanged; try again."),
+      );
       setSubmitting(false);
     }
   };

@@ -98,11 +98,12 @@ export function ModelDownloadNudge({ onClose }: Props) {
       {state.status === "error" && (
         <div className="flex flex-col gap-2">
           <StatusMessage variant="error" compact>
-            Couldn&apos;t finish the download: {state.message}
+            {state.message}
           </StatusMessage>
+          {/* The message above now carries what was unaffected and what a retry
+              does (`models_cmds`), so this only adds the other way in. */}
           <p className="text-[12px] text-ink-dim">
-            Nothing else was affected. Trying again picks up where it stopped,
-            and you can also start it from Settings.
+            You can also start it from Settings.
           </p>
         </div>
       )}

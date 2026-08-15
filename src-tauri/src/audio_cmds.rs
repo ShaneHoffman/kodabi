@@ -39,6 +39,12 @@ const FRAME_CAPACITY: usize = 256;
 /// 16 kHz mono need is a downstream downsample, not this layer's concern.
 const TWO_CHANNEL_SAMPLE_RATE: u32 = 48_000;
 
+/// What a failed liveness read says. Shared by the three status paths
+/// (`is_active`, `health`, `status`) because the reader's recovery is the same
+/// in all three: the engine's own words name a device or a channel, which is
+/// not something the toggle can act on.
+const STATUS_UNREADABLE: &str = "Couldn't read the recorder's status. Toggle capture to try again.";
+
 /// The managed capture state: the two-channel capture engine plus the
 /// currently-open in-flight session (the on-disk spill it streams to). The
 /// in-flight session is set at `start` and taken at `stop`; `None` between
@@ -62,14 +68,18 @@ impl CaptureState {
     /// `DualCapture::is_active` — the true backend state a toggle must act
     /// on, not a UI guess.
     pub(crate) fn is_active(&self) -> Result<bool, String> {
-        self.0.is_active().map_err(|e| e.to_string())
+        self.0
+            .is_active()
+            .map_err(|err| crate::user_errors::reported("capture", err, STATUS_UNREADABLE))
     }
 
     /// Per-source health: what is *actually* recording right now. Delegates to
     /// `DualCapture::health`, the liveness truth an honest indicator needs
     /// (unlike `is_active`, which stays true through a device rebuild).
     pub(crate) fn health(&self) -> Result<DualHealth, String> {
-        self.0.health().map_err(|e| e.to_string())
+        self.0
+            .health()
+            .map_err(|err| crate::user_errors::reported("capture", err, STATUS_UNREADABLE))
     }
 
     /// Store the in-flight session for the current capture, returning any
@@ -304,7 +314,14 @@ pub(crate) fn start_capture_impl(
     } else {
         create_inflight_spill(app, state)
     };
-    let status = state.0.start(spill).map_err(|e| e.to_string())?;
+    let status = state.0.start(spill).map_err(|err| {
+        crate::user_errors::reported(
+            "start_capture",
+            err,
+            "Couldn't start recording. Check your microphone in Windows sound settings, then try \
+             again.",
+        )
+    })?;
     Ok(CaptureStatus::from_parts(status, None))
 }
 
@@ -377,13 +394,26 @@ pub(crate) fn stop_capture_and_transcribe(
 fn stop_and_finalize(
     state: &CaptureState,
 ) -> Result<(DualStatus, Option<CombinedSession>), String> {
-    state.0.stop().map_err(|e| e.to_string())
+    state.0.stop().map_err(|err| {
+        crate::user_errors::reported(
+            "stop_capture",
+            err,
+            // Not "will be processed": a failed stop returns before
+            // `spawn_transcription`, so nothing runs for it in this session.
+            // `transcribe::spawn_recovery` is what finds it, on the next start.
+            "Couldn't stop the recording cleanly. The audio captured so far is on disk, and \
+             Kodabi picks it up the next time it starts.",
+        )
+    })
 }
 
 fn capture_status_impl(state: &CaptureState) -> Result<CaptureStatus, String> {
     // The aligned session only exists once `stop_capture` finalizes it; a
     // status poll while running has nothing to report yet.
-    let status = state.0.status().map_err(|e| e.to_string())?;
+    let status = state
+        .0
+        .status()
+        .map_err(|err| crate::user_errors::reported("capture_status", err, STATUS_UNREADABLE))?;
     Ok(CaptureStatus::from_parts(status, None))
 }
 
@@ -403,7 +433,13 @@ pub fn start_capture(
             crate::capture_control::CONSENT_REQUIRED_EVENT,
             crate::capture_control::ConsentRequiredEvent {},
         );
-        return Err("consent required before first capture".to_string());
+        // The reader has already asked to record by the time this returns, and
+        // the emit above is what opens the nudge, so "turn capture on" would be
+        // advice for the thing they just did.
+        return Err(
+            "Recording needs your consent first. Answer the consent prompt and capture will start."
+                .to_string(),
+        );
     }
     // An IPC start is still a start the user asked for (the consent nudge and
     // the in-window control both land here), so the pill reads the manual
@@ -507,26 +543,30 @@ pub async fn run_mic_test(
     settings: tauri::State<'_, crate::settings_cmds::SettingsState>,
 ) -> Result<CoreSettings, String> {
     if capture.is_active()? {
-        return Err("stop the current capture before running the mic test".to_string());
+        return Err("Stop the current capture before running the mic test.".to_string());
     }
+    const TEST_FAILED: &str = "The mic test didn't finish. Nothing was recorded; try again.";
     let outcome = tauri::async_runtime::spawn_blocking(kodabi_audio::run_mic_test)
         .await
-        .map_err(|err| err.to_string())?
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| crate::user_errors::reported("run_mic_test", err, TEST_FAILED))?
+        .map_err(|err| crate::user_errors::reported("run_mic_test", err, TEST_FAILED))?;
     // Re-check now that the command no longer serializes against capture
     // starts: a hotkey/tray start during the test puts meeting audio into the
     // measurement (and the tone into the meeting), so the classification is
     // untrustworthy — discard it rather than persist a corrupted result.
     if capture.is_active()? {
         return Err(
-            "a capture started during the mic test, so its result was discarded. Run the test again after stopping".to_string(),
+            "A capture started during the mic test, so its result was discarded. Stop the capture, then run the test again.".to_string(),
         );
     }
     let result = MicCheckResult {
         outcome: to_settings_outcome(outcome),
         measured_at: Utc::now(),
     };
-    let updated = settings.update(|s| s.mic_check = Some(result))?;
+    let updated = settings.update(
+        "The mic test ran but its result couldn't be saved. Run it again.",
+        |s| s.mic_check = Some(result),
+    )?;
     let _ = app.emit(crate::settings_cmds::SETTINGS_CHANGED_EVENT, updated);
     Ok(updated)
 }

@@ -115,7 +115,7 @@ describe("ConsentNudge", () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     onCommand("acknowledge_consent", () => {
-      throw "settings file is read-only";
+      throw "Couldn't save your choice, so recording stays off. Try again.";
     });
     onCommand("start_capture", () => null);
     render(<ConsentNudge onClose={onClose} />);
@@ -126,7 +126,7 @@ describe("ConsentNudge", () => {
     // so nothing may record.
     expect(invokedCommands()).not.toContain("start_capture");
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Couldn't save your choice: settings file is read-only",
+      "Couldn't save your choice, so recording stays off. Try again.",
     );
     expect(onClose).not.toHaveBeenCalled();
     // Re-enabled, so the user can retry rather than being stuck.
@@ -138,14 +138,14 @@ describe("ConsentNudge", () => {
     const onClose = vi.fn();
     onCommand("acknowledge_consent", () => ACKNOWLEDGED);
     onCommand("start_capture", () => {
-      throw "no input device";
+      throw "Couldn't start recording. Check your microphone in Windows sound settings, then try again.";
     });
     render(<ConsentNudge onClose={onClose} />);
 
     await user.click(primaryButton());
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Couldn't start capture: no input device",
+      "Couldn't start recording. Check your microphone in Windows sound settings, then try again.",
     );
     expect(onClose).not.toHaveBeenCalled();
   });

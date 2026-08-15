@@ -10,6 +10,7 @@ import {
   type FailedSession,
 } from "../../useSessions";
 import { notifyVaultChanged } from "../../useVaultQuery";
+import { backendCopy } from "../../errorCopy";
 import type { DistillEvent } from "../../useDistillState";
 import { SpiritMark } from "../capture/SpiritMark";
 import { Button } from "../ui/Button";
@@ -145,12 +146,6 @@ type SessionAction = {
   verb: "dismiss" | "restore" | "delete";
 };
 
-const ACTION_LABEL: Record<SessionAction["verb"], string> = {
-  dismiss: "Dismiss",
-  restore: "Restore",
-  delete: "Delete",
-};
-
 /**
  * Meetings that were captured but never became a note, each with a one-click
  * retry. The founding doc's "never silently misfile" principle extends to never
@@ -201,9 +196,11 @@ export function NeedsAttentionView() {
     // that is still going, which would queue a second run and a second note.
     setPendingPath((current) => (current === payload.session_path ? null : current));
     if (payload.status === "error") {
+      // Verbatim: the distill's own event message is already a sentence naming
+      // the failure and what is still safe (`distill_cmds`).
       setRowErrors((current) => ({
         ...current,
-        [payload.session_path]: `Retry failed: ${payload.message}`,
+        [payload.session_path]: payload.message,
       }));
     }
     // No notifyVaultChanged() here. The sidebar's needs-attention row is
@@ -243,7 +240,13 @@ export function NeedsAttentionView() {
     });
     retryDistill(path).catch((err: unknown) => {
       setPendingPath(null);
-      setRowErrors((current) => ({ ...current, [path]: `Retry failed: ${String(err)}` }));
+      setRowErrors((current) => ({
+        ...current,
+        [path]: backendCopy(
+          err,
+          "Couldn't start the retry. The recording and transcript are safe; try again.",
+        ),
+      }));
     });
   };
 
@@ -263,7 +266,10 @@ export function NeedsAttentionView() {
       .catch((err: unknown) => {
         setRowErrors((current) => ({
           ...current,
-          [path]: `${ACTION_LABEL[verb]} failed: ${String(err)}`,
+          [path]: backendCopy(
+            err,
+            "Couldn't update this capture. The recording and transcript are untouched; try again.",
+          ),
         }));
       })
       .finally(() => setActionPending(null));
@@ -290,7 +296,9 @@ export function NeedsAttentionView() {
         notifyVaultChanged();
       })
       .catch((err: unknown) => {
-        setDeleteError(`Couldn't delete the capture: ${String(err)}`);
+        setDeleteError(
+          backendCopy(err, "Couldn't delete this capture. Its files are untouched; try again."),
+        );
       })
       .finally(() => setActionPending(null));
   };
@@ -317,7 +325,7 @@ export function NeedsAttentionView() {
     >
       {error ? (
         <StatusMessage variant="error">
-          Couldn&apos;t list captured sessions: {error}
+          {error}
         </StatusMessage>
       ) : (
         <>

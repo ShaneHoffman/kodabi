@@ -482,14 +482,18 @@ describe("ChatView", () => {
     expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
   });
 
-  it("surfaces a failed turn as a prefixed error line", async () => {
+  it("surfaces a failed turn as the sentence the backend worded", async () => {
+    // The prefix moved to `chat_cmds`, which words this once for both the live
+    // event and the entry a restored snapshot replays. The view renders it
+    // verbatim; wording it here as well is what used to make one failure read
+    // two different ways.
     await renderChat();
     act(() => {
       emitFromBackend("chat:event", {
         type: "turn_done",
         chat_id: CHAT_ID,
         stopped: false,
-        error: "usage limit reached",
+        error: "Couldn't finish the answer: usage limit reached",
       });
     });
     expect(screen.getByRole("alert")).toHaveTextContent(
@@ -522,7 +526,9 @@ describe("ChatView", () => {
 
   it("says what failed when the session cannot start", async () => {
     onCommand("chat_open", () => {
-      throw new Error("claude not found");
+      // A string, like the real wire: a command rejection is the backend's own
+      // user copy (`src-tauri/src/user_errors.rs`), which the view renders whole.
+      throw "Couldn't start the chat. Check that the claude command is installed, then reopen this view.";
     });
     render(
       <NavigationContext.Provider value={{ view: { kind: "chat" }, navigate }}>
@@ -531,7 +537,9 @@ describe("ChatView", () => {
     );
 
     expect(
-      await screen.findByText(/Couldn't start chat: .*claude not found/),
+      await screen.findByText(
+        "Couldn't start the chat. Check that the claude command is installed, then reopen this view.",
+      ),
     ).toBeInTheDocument();
   });
 

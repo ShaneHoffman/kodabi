@@ -340,7 +340,7 @@ describe("NeedsAttentionView", () => {
     const user = userEvent.setup();
     serveSessions([makeSession("team-sync")]);
     onCommand("dismiss_session", () => {
-      throw "marker write failed";
+      throw "Couldn't update this capture. The recording and transcript are untouched; try again.";
     });
     renderView();
     await screen.findByText("team sync");
@@ -348,7 +348,9 @@ describe("NeedsAttentionView", () => {
     await user.click(screen.getByRole("button", { name: "Dismiss" }));
 
     expect(
-      await screen.findByText(/Dismiss failed: marker write failed/),
+      await screen.findByText(
+        "Couldn't update this capture. The recording and transcript are untouched; try again.",
+      ),
     ).toBeInTheDocument();
     // Still listed, still actionable.
     expect(screen.getByTestId("retry-distill")).toBeInTheDocument();
@@ -422,7 +424,7 @@ describe("NeedsAttentionView", () => {
     const user = userEvent.setup();
     serveSessions([makeSession("team-sync", true)]);
     onCommand("delete_session", () => {
-      throw "session is locked";
+      throw "Couldn't delete this capture. Its files are untouched; try again.";
     });
     renderView();
 
@@ -433,7 +435,9 @@ describe("NeedsAttentionView", () => {
     await user.click(within(dialog).getByRole("button", { name: "Delete capture" }));
 
     expect(
-      await within(dialog).findByText("Couldn't delete the capture: session is locked"),
+      await within(dialog).findByText(
+        "Couldn't delete this capture. Its files are untouched; try again.",
+      ),
     ).toBeInTheDocument();
     // The modal stays open so the delete can be retried or cancelled.
     expect(screen.getByRole("dialog", { name: "Delete this capture?" })).toBeInTheDocument();

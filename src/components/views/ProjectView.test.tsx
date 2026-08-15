@@ -158,7 +158,7 @@ describe("ProjectView delete flow", () => {
   it("shows a failed delete inside the dialog and stays open", async () => {
     const user = userEvent.setup();
     onCommand("delete_project", () => {
-      throw "folder is locked";
+      throw "Couldn't delete the project. Its notes are untouched; try again.";
     });
     const deleteButton = await openGrowth(user);
 
@@ -168,7 +168,7 @@ describe("ProjectView delete flow", () => {
 
     expect(
       await within(dialog).findByText(
-        "Couldn't delete the project: folder is locked",
+        "Couldn't delete the project. Its notes are untouched; try again.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Delete this project?" })).toBeInTheDocument();

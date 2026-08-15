@@ -429,16 +429,26 @@ pub(crate) fn knowledge_base_dir(app: &AppHandle) -> Result<PathBuf, String> {
     if let Some(root) = std::env::var_os(KB_ROOT_ENV).filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(root));
     }
-    app.path()
-        .app_data_dir()
-        .map_err(|err| format!("failed to resolve knowledge base directory: {err}"))
+    app.path().app_data_dir().map_err(|err| {
+        crate::user_errors::reported(
+            "knowledge_base_dir",
+            err,
+            "Kodabi couldn't find its data folder. Restart the app; your notes on disk are \
+             untouched.",
+        )
+    })
 }
 
 /// Runs the pure `kodabi-core` pipeline against a finalized session, streaming
 /// from its spill files (a long meeting never materialises in memory) or from
-/// the in-memory buffer when spilling was unavailable. Errors collapse to a
-/// message string — the same convention `audio_cmds` uses for IPC results —
-/// since the only consumer here is the `transcription:state` event.
+/// the in-memory buffer when spilling was unavailable.
+///
+/// These errors are the one place a raw `to_string()` is still right: nothing
+/// renders them. The only consumer is the `transcription:state` `Failed` event,
+/// whose `message` no view reads — `CaptureToast` chooses its own copy from the
+/// pipeline's status (and `models`), because the remedy differs by cause in a
+/// way the error text cannot express. Anything that starts rendering that
+/// message has to translate it first (see `user_errors`).
 ///
 /// `scale` carries the recording's own length and the audio this run will
 /// feed the engines, the pair the progress events are reported against.

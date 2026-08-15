@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { deleteGlossaryTerm, useGlossary, type GlossaryTerm } from "../../useGlossary";
+import { backendCopy } from "../../errorCopy";
 import { GlossaryTermDialog } from "../dialogs/GlossaryTermDialog";
 import { Button } from "../ui/Button";
 import { DestructiveConfirmDialog } from "../ui/DestructiveConfirmDialog";
@@ -79,7 +80,9 @@ export function GlossaryView({ slug }: Props) {
         setConfirmingDelete(null);
       })
       .catch((err: unknown) => {
-        setDeleteError(`Couldn't delete the term: ${String(err)}`);
+        setDeleteError(
+          backendCopy(err, "Couldn't delete the term. The glossary is unchanged; try again."),
+        );
       })
       .finally(() => setDeleteBusy(false));
   };
@@ -118,13 +121,12 @@ export function GlossaryView({ slug }: Props) {
       </p>
 
       {error ? (
-        <div className="mt-[26px] flex flex-col gap-2">
-          <StatusMessage variant="error">Couldn&apos;t load the glossary: {error}</StatusMessage>
-          {/* The core error names the file and the offending term, so the
-              guidance only has to say where to go from here. */}
-          <p className="text-[11.5px] leading-relaxed text-ink-dim">
-            Fix the file in a text editor, then reopen this view.
-          </p>
+        // One block, not two: the "fix the file in a text editor" half used to
+        // live here because the backend only supplied the what. It now carries
+        // both halves (`user_errors::glossary_error`), which is what lets a
+        // recovery differ by cause instead of being the same line every time.
+        <div className="mt-[26px]">
+          <StatusMessage variant="error">{error}</StatusMessage>
         </div>
       ) : terms.length === 0 ? (
         // Gated on !loading as well, so a cold start shows nothing rather than

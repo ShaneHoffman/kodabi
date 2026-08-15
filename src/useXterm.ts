@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal, type ITheme } from "@xterm/xterm";
+import { backendCopy } from "./errorCopy";
 // xterm.js ships its own required stylesheet — the terminal does not render
 // without it, and it is a vendor file we neither write nor migrate.
 // eslint-disable-next-line no-restricted-syntax -- third-party stylesheet, not ours to replace
@@ -223,7 +224,12 @@ export function useXterm(container: RefObject<HTMLDivElement | null>): XtermHand
         // it in the pane rather than leaving a blank terminal. \x1b[31m…\x1b[0m
         // is the ANSI red the terminal already renders.
         if (!active) return;
-        term.writeln(`\x1b[31mCould not start Claude Code: ${String(error)}\x1b[0m`);
+        term.writeln(
+          `\x1b[31m${backendCopy(
+            error,
+            "Couldn't start Claude Code. Check that the claude command is installed, then reopen this view.",
+          )}\x1b[0m`,
+        );
         setStatus("failed");
       });
 
@@ -282,7 +288,10 @@ export function useXterm(container: RefObject<HTMLDivElement | null>): XtermHand
         // reasons the first spawn could, and an unreported rejection would leave
         // the pane sitting on a dead session with no account of why.
         termRef.current?.writeln(
-          `\x1b[31mCould not restart Claude Code: ${String(error)}\x1b[0m`,
+          `\x1b[31m${backendCopy(
+            error,
+            "Couldn't restart Claude Code. Check that the claude command is installed, then reopen this view.",
+          )}\x1b[0m`,
         );
         setStatus("failed");
       });

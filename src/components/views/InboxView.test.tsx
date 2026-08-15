@@ -557,17 +557,23 @@ describe("InboxView", () => {
     const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
     serveVault([PLANNING]);
     onCommand("file_note_to_project", () => {
-      throw "no such project: briarwood-golf";
+      throw "That project does not exist. It may have been renamed or deleted; refresh the list and try again.";
     });
     renderInbox();
     await screen.findByText("Quarterly planning");
 
     await fileNote(user, "Quarterly planning", "briarwood-golf");
 
-    // Substring, not exact: the message is rendered behind a prefix naming what
-    // failed, so the raw backend string is never the whole line
-    // (docs/DESIGN_SYSTEM.md §3).
-    expect(await screen.findByText(/no such project: briarwood-golf/)).toBeInTheDocument();
+    // Exact, and the whole line: a command's rejection is finished user copy
+    // now (`src-tauri/src/user_errors.rs`), so the row renders it as-is rather
+    // than behind a prefix of its own. The old spelling here concatenated a
+    // developer string onto "Couldn't file this note: ", which is the leak
+    // docs/DESIGN_SYSTEM.md §3 forbids.
+    expect(
+      await screen.findByText(
+        "That project does not exist. It may have been renamed or deleted; refresh the list and try again.",
+      ),
+    ).toBeInTheDocument();
     // The note is still unfiled, so it must still be actionable: row present
     // and the trigger back (not stuck on "Filing…").
     expect(screen.getByText("Quarterly planning")).toBeInTheDocument();
@@ -709,15 +715,25 @@ describe("InboxView", () => {
     expect(screen.queryByTestId("retry-distill")).not.toBeInTheDocument();
   });
 
-  it("surfaces a failed listing instead of claiming an empty inbox", async () => {
+  it("surfaces a failed listing instead of claiming an empty inbox, in the user's words", async () => {
+    // The leak pin for a view-level StatusMessage. The thrown value is shaped
+    // like the developer-facing string a wrapper would emit if the translation
+    // in `user_errors.rs` were reverted; the assertion is that none of it
+    // reaches the screen (docs/DESIGN_SYSTEM.md §3), and that the listing still
+    // refuses to read as "nothing here".
     onCommand("list_notes", () => {
-      throw "the vault is unreadable";
+      throw "note I/O failed at C:\\Users\\someone\\kb\\Inbox: Access is denied. (os error 5)";
     });
     onCommand("list_projects", () => ({ inbox_note_count: 0, projects: [] }));
 
     renderInbox();
 
-    expect(await screen.findByText(/the vault is unreadable/)).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "Couldn't read your notes. They are still on disk; reopen this view to try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/os error|C:\\|Access is denied/)).toBeNull();
     expect(screen.queryByText(/Nothing waiting/)).not.toBeInTheDocument();
   });
 
@@ -807,7 +823,7 @@ describe("InboxView", () => {
       const user = userEvent.setup({ advanceTimers: advanceTimersForUserEvent });
       serveVault([PLANNING]);
       onCommand("delete_note", () => {
-        throw "the vault is read-only";
+        throw "Couldn't delete the note. It is untouched; try again.";
       });
       renderInbox();
       await screen.findByText("Quarterly planning");
@@ -820,7 +836,7 @@ describe("InboxView", () => {
 
       expect(
         await within(dialog).findByText(
-          "Couldn't delete the note: the vault is read-only",
+          "Couldn't delete the note. It is untouched; try again.",
         ),
       ).toBeInTheDocument();
       // Scoped to the list: the open dialog names the note too, in its subject

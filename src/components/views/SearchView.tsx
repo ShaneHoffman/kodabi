@@ -154,7 +154,7 @@ export function SearchView({ query }: Props) {
       </div>
 
       {error ? (
-        <StatusMessage variant="error">Couldn&apos;t search your notes: {error}</StatusMessage>
+        <StatusMessage variant="error">{error}</StatusMessage>
       ) : !searchedQuery ? (
         <p className={QUIET_LINE}>Searches every note in full, title and body.</p>
       ) : hits.length === 0 ? (

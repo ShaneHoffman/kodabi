@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useNavigation } from "../../useNavigation";
 import { createProject, type Project } from "../../useProjects";
+import { backendCopy } from "../../errorCopy";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Field } from "../ui/Field";
@@ -60,7 +61,15 @@ export function CreateProjectDialog({ onClose, onCreated }: Props) {
       if (onCreated) onCreated(created);
       else navigate({ kind: "project", slug: created.slug });
     } catch (err) {
-      setError(String(err));
+      // The backend's copy is what belongs in the field: for a name the user
+      // typed it is the validation rule they broke, which no generic sentence
+      // could replace.
+      setError(
+        backendCopy(
+          err,
+          "Couldn't finish creating the project. Your notes are untouched; try again.",
+        ),
+      );
       setSubmitting(false);
     }
   };

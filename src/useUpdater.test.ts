@@ -91,6 +91,11 @@ describe("useUpdater", () => {
   });
 
   it("surfaces a manual check failure, unlike the startup one", async () => {
+    // The plugin's own error text never reaches the card. Unlike a Kodabi
+    // command's rejection, a `tauri-plugin-updater` one is mostly a transparent
+    // wrapper over reqwest/io ("no route to host"), so `opaqueFailure` logs it
+    // and the step's sentence renders instead (docs/DESIGN_SYSTEM.md §3).
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     failCheck("no route to host");
     const { result } = renderQuiet();
     await act(async () => {
@@ -99,8 +104,10 @@ describe("useUpdater", () => {
     expect(result.current.state.phase).toEqual({
       status: "error",
       step: "check",
-      message: "no route to host",
+      message: "Couldn't check for updates. Kodabi will try again next launch.",
     });
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
   });
 
   it("follows a download through to ready", async () => {
@@ -145,7 +152,7 @@ describe("useUpdater", () => {
     expect(result.current.state.phase).toEqual({
       status: "error",
       step: "download",
-      message: "the connection was reset",
+      message: "Couldn't download the update. Your current version is untouched; try again.",
     });
   });
 
@@ -200,7 +207,7 @@ describe("useUpdater", () => {
     expect(result.current.state.phase).toEqual({
       status: "error",
       step: "install",
-      message: "the installer could not replace kodabi.exe",
+      message: "Couldn't install the update. Your current version is untouched; try again.",
     });
   });
 

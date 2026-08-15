@@ -130,7 +130,7 @@ export function ChatView() {
       <ChatFrame>
         {chat.startError && (
           <StatusMessage variant="error">
-            Couldn&apos;t start chat: {chat.startError}
+            {chat.startError}
           </StatusMessage>
         )}
       </ChatFrame>

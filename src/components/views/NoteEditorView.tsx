@@ -13,6 +13,7 @@ import {
 import { folderHue, useProjects, type FolderHue } from "../../useProjects";
 import { isSessionSource, useSessionArtifacts, type SessionArtifacts } from "../../useSessions";
 import { applyMarkup, selectionAnchor } from "../../textareaCaret";
+import { backendCopy } from "../../errorCopy";
 import { DeleteNoteDialog } from "../dialogs/DeleteNoteDialog";
 import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
@@ -189,7 +190,7 @@ function OpenedNote({
   if (error) {
     return (
       <NoteFrame label="Note">
-        <StatusMessage variant="error">Couldn&apos;t open this note: {error}</StatusMessage>
+        <StatusMessage variant="error">{error}</StatusMessage>
       </NoteFrame>
     );
   }
@@ -650,7 +651,12 @@ function EditNote({
       .then((result) => onDone(result))
       .catch((err: unknown) => {
         setSaving(false);
-        setError(String(err));
+        setError(
+          backendCopy(
+            err,
+            "Couldn't save your changes. Your edits are still in the editor; try again.",
+          ),
+        );
       });
   };
 
@@ -851,7 +857,7 @@ function EditNote({
         </div>
 
         {error && (
-          <StatusMessage variant="error">Couldn&apos;t save this note: {error}</StatusMessage>
+          <StatusMessage variant="error">{error}</StatusMessage>
         )}
       </form>
     </NoteFrame>
@@ -913,7 +919,12 @@ function CreateNote({ initialProject }: { initialProject: string | null }) {
       })
       .catch((err: unknown) => {
         setSubmitting(false);
-        setError(String(err));
+        setError(
+          backendCopy(
+            err,
+            "Couldn't create the note. Your text is still in the editor; try again.",
+          ),
+        );
       });
   };
 
@@ -990,7 +1001,7 @@ function CreateNote({ initialProject }: { initialProject: string | null }) {
         </div>
 
         {error && (
-          <StatusMessage variant="error">Couldn&apos;t create this note: {error}</StatusMessage>
+          <StatusMessage variant="error">{error}</StatusMessage>
         )}
       </form>
     </NoteFrame>

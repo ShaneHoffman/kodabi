@@ -304,14 +304,28 @@ describe("SessionPanel", () => {
     expect(screen.getByTestId("source-panel")).toHaveAttribute("id", controls);
   });
 
-  it("surfaces a failed artifact read as an error", async () => {
+  it("surfaces a failed artifact read as an error, without the exception behind it", async () => {
+    // The leak pin for this surface. `SessionPanel` renders its error as the
+    // ENTIRE message, with no sentence of its own around it, so whatever
+    // arrives here is what the reader sees — which is why the hook supplies a
+    // fixed sentence and discards the rejection (docs/DESIGN_SYSTEM.md §3:
+    // "never leaks an exception string").
+    //
+    // The thrown value is shaped like the developer-facing string a wrapper
+    // would produce if someone reverted the translation in `user_errors.rs`:
+    // an absolute path and an OS error. Asserting on its ABSENCE (rather than
+    // on the sentence alone) is what makes this a regression test.
     serveNote();
     onCommand("read_session_artifacts", () => {
-      throw "not a session source: sessions/nope.jsonl";
+      throw "note I/O failed at C:\\Users\\someone\\kb\\sessions\\a.jsonl: Access is denied. (os error 5)";
     });
     renderNote();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("not a session source");
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Couldn't read this note's session files. The note itself is fine; reopen it to try again.",
+    );
+    expect(screen.queryByText(/os error|C:\\|\.jsonl/)).toBeNull();
     // The panel exists even when the fetch failed: the testid means "this note
     // has a session", which is the claim a keyword-sourced note has to fail.
     expect(screen.getByTestId("session-artifacts")).toBeInTheDocument();

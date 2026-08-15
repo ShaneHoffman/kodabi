@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from "react";
 import { useNavigation } from "../../useNavigation";
 import { renameProject } from "../../useProjects";
+import { backendCopy } from "../../errorCopy";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { Field } from "../ui/Field";
@@ -55,7 +56,13 @@ export function RenameProjectDialog({ slug, onClose }: Props) {
       onClose();
       navigate({ kind: "project", slug: renamed.slug });
     } catch (err) {
-      setError(String(err));
+      // As in `CreateProjectDialog`: the validation detail is the point.
+      setError(
+        backendCopy(
+          err,
+          "Couldn't rename the project. It keeps its current name; try again.",
+        ),
+      );
       setSubmitting(false);
     }
   };

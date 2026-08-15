@@ -5,6 +5,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
 import { captureLabel, markMode } from "../../captureLabel";
+import { backendCopy } from "../../errorCopy";
 import { startCapture, stopCapture } from "../../captureControl";
 import { hideQuickCaptureWindow, submitQuickCapture } from "../../quickCapture";
 import { isCaptureActive, useCaptureState } from "../../useCaptureState";
@@ -141,7 +142,13 @@ export function QuickCapture() {
         // and error intact — preserved across a hide/show so a blur-dismiss
         // can't lose the thought.
         if (sessionRef.current !== session) return;
-        setStatus({ kind: "error", message: String(err) });
+        setStatus({
+          kind: "error",
+          message: backendCopy(
+            err,
+            "Couldn't file this. Your text is still here; try again.",
+          ),
+        });
       });
   };
 
@@ -154,13 +161,21 @@ export function QuickCapture() {
   // in the box means losing it when the window hides.
   const stopAndFile = () => {
     setCaptureError(null);
-    stopCapture().catch((err: unknown) => setCaptureError(String(err)));
+    stopCapture().catch((err: unknown) =>
+      setCaptureError(
+        backendCopy(err, "Couldn't reach the recorder. Try the capture toggle again."),
+      ),
+    );
     if (text.trim()) submit();
   };
 
   const record = () => {
     setCaptureError(null);
-    startCapture().catch((err: unknown) => setCaptureError(String(err)));
+    startCapture().catch((err: unknown) =>
+      setCaptureError(
+        backendCopy(err, "Couldn't reach the recorder. Try the capture toggle again."),
+      ),
+    );
   };
 
   const onKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -225,11 +240,11 @@ export function QuickCapture() {
             // role="alert": a failed capture arrives asynchronously and the user
             // may not be looking at the box.
             <StatusMessage variant="error" compact>
-              Couldn&apos;t file this: {status.message}
+              {status.message}
             </StatusMessage>
           ) : captureError ? (
             <StatusMessage variant="error" compact>
-              Couldn&apos;t reach the recorder: {captureError}
+              {captureError}
             </StatusMessage>
           ) : modelsNotice ? (
             // Recording is never blocked for want of models: the audio is kept

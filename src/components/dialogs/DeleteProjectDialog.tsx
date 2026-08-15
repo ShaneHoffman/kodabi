@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigation } from "../../useNavigation";
 import { deleteProject } from "../../useProjects";
+import { backendCopy } from "../../errorCopy";
 import { DestructiveConfirmDialog } from "../ui/DestructiveConfirmDialog";
 
 type Props = {
@@ -42,7 +43,12 @@ export function DeleteProjectDialog({
       onClose();
       navigate({ kind: "inbox" });
     } catch (err) {
-      setError(`Couldn't delete the project: ${String(err)}`);
+      setError(
+        backendCopy(
+          err,
+          "Couldn't delete the project. Its notes are untouched; try again.",
+        ),
+      );
       setDeleting(false);
     }
   };

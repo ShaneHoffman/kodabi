@@ -172,7 +172,7 @@ export function ProjectView({ slug }: Props) {
       }
     >
       {error ? (
-        <StatusMessage variant="error">Couldn&apos;t load notes: {error}</StatusMessage>
+        <StatusMessage variant="error">{error}</StatusMessage>
       ) : notes.length === 0 ? (
         // Gated on !loading as well, so a cold start shows nothing rather than
         // flashing the empty state before the first read lands.

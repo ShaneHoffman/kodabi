@@ -247,9 +247,14 @@ impl Tag {
         if is_kebab_case(s) {
             Ok(Self(s.to_string()))
         } else {
+            // Tags are typed by hand in the note editor, so this detail is copy
+            // the reader sees verbatim (`src-tauri/src/user_errors.rs` passes
+            // `InvalidField` through). It names the rule in their terms rather
+            // than in the regex's: "kebab-case" and the leading `#` are both
+            // spellings the UI never offers.
             Err(invalid(
                 "tags",
-                format!("tag {s:?} must be lowercase kebab-case with no leading '#'"),
+                format!("tag {s:?} may use only lowercase letters, numbers, and hyphens"),
             ))
         }
     }
@@ -771,11 +776,12 @@ pub(crate) fn validate_project(project: &str) -> Result<()> {
         ));
     }
     if project.len() > MAX_PROJECT_LEN {
+        // The bound is the MCP `ProjectSlug` maxLength (see the constant's doc);
+        // the wording stays user-facing because `InvalidField` detail is copy the
+        // dialogs render verbatim (`src-tauri/src/user_errors.rs`).
         return Err(invalid(
             "project",
-            format!(
-                "project must be at most {MAX_PROJECT_LEN} characters (MCP ProjectSlug maxLength)"
-            ),
+            format!("project must be at most {MAX_PROJECT_LEN} characters"),
         ));
     }
     // The `Inbox` sentinel owns `<vault>/Inbox/`. A real project whose first

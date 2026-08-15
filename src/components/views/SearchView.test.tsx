@@ -230,14 +230,16 @@ describe("SearchView", () => {
   it("surfaces a failed search, which is also how an unavailable index reads", async () => {
     const user = userEvent.setup();
     onCommand("search_notes", () => {
-      throw new Error("the note index is unavailable this session");
+      throw "Search isn't available this session. Your notes are safe; restart Kodabi to bring it back.";
     });
     const field = await openSearch(user);
 
     await user.type(field, "tournament");
 
     expect(
-      await screen.findByText(/the note index is unavailable this session/),
+      await screen.findByText(
+        "Search isn't available this session. Your notes are safe; restart Kodabi to bring it back.",
+      ),
     ).toBeInTheDocument();
   });
 });

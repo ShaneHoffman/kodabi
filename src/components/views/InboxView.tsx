@@ -22,6 +22,7 @@ import {
 } from "../../useNotes";
 import { folderHue, useProjects, type FolderHue, type Project } from "../../useProjects";
 import { isSessionSource } from "../../useSessions";
+import { backendCopy } from "../../errorCopy";
 import { formatElapsed, useElapsed } from "../../useElapsed";
 import { useReduceMotion } from "../../useReduceMotion";
 import { useTimeout } from "../../useTimeout";
@@ -358,7 +359,7 @@ export function InboxView() {
       }
     >
       {error ? (
-        <StatusMessage variant="error">Couldn&apos;t load the inbox: {error}</StatusMessage>
+        <StatusMessage variant="error">{error}</StatusMessage>
       ) : (
         <>
           {remaining > 0 && <Progress cleared={cleared} />}
@@ -1085,7 +1086,9 @@ function InboxRow({
       })
       .catch((err: unknown) => {
         setPending(false);
-        setError(String(err));
+        setError(
+          backendCopy(err, "Couldn't file this note. It is still in the Inbox; try again."),
+        );
       });
   };
 
@@ -1281,7 +1284,7 @@ function InboxRow({
         </div>
         {error && (
           <StatusMessage variant="error" compact>
-            Couldn&apos;t file this note: {error}
+            {error}
           </StatusMessage>
         )}
         {confirmingDelete && (

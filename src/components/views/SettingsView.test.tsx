@@ -741,11 +741,20 @@ describe("SettingsView About card", () => {
   it("reports a failed manual check here, which is the one place that does", async () => {
     // The corner notice deliberately stays quiet about check failures; a check
     // someone clicked has to answer for itself.
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     failCheck("no route to host");
     const user = userEvent.setup();
     await renderSeeded();
 
     await user.click(within(about()).getByRole("button", { name: "Check for updates" }));
-    expect(await within(about()).findByText(/no route to host/)).toBeInTheDocument();
+    // The plugin's transport error stays in the log; the card says what failed
+    // and what happens next.
+    expect(
+      await within(about()).findByText(
+        "Couldn't check for updates. Kodabi will try again next launch.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(about()).queryByText(/no route to host/)).toBeNull();
+    logged.mockRestore();
   });
 });

@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { backendCopy } from "../../errorCopy";
 import {
   buildRetentionPolicy,
   DEFAULT_KEEP_DAYS,
@@ -212,7 +213,13 @@ function RebuildIndexControl() {
     } catch (err) {
       // A command-level failure (index unavailable this session) never emits an
       // event, so surface it here.
-      setState({ status: "error", message: String(err) });
+      setState({
+        status: "error",
+        message: backendCopy(
+          err,
+          "Couldn't start the rebuild. Search may be stale but your notes are unaffected; try again.",
+        ),
+      });
     }
   };
 
@@ -229,7 +236,7 @@ function RebuildIndexControl() {
           )}
           {state.status === "error" && (
             <StatusMessage variant="error" compact>
-              Couldn&apos;t rebuild the index: {state.message}
+              {state.message}
             </StatusMessage>
           )}
         </>
@@ -270,7 +277,7 @@ function ModelsControl() {
           )}
           {state.status === "error" && (
             <StatusMessage variant="error" compact>
-              Couldn&apos;t finish the download: {state.message}
+              {state.message}
             </StatusMessage>
           )}
         </>
@@ -363,11 +370,7 @@ function UpdateControl() {
           {confirmed && <ConfirmLine>You are on the latest version.</ConfirmLine>}
           {phase.status === "error" && (
             <StatusMessage variant="error" compact>
-              {phase.step === "check"
-                ? `Couldn't check for updates: ${phase.message}`
-                : phase.step === "download"
-                  ? `Couldn't download the update: ${phase.message}`
-                  : `Couldn't install the update: ${phase.message}`}
+              {phase.message}
             </StatusMessage>
           )}
         </>
@@ -479,7 +482,9 @@ export function SettingsView() {
     try {
       setSettings(await runMicTest());
     } catch (err) {
-      setMicTestError(String(err));
+      setMicTestError(
+        backendCopy(err, "The mic test didn't finish. Nothing was recorded; try again."),
+      );
     } finally {
       setRunningMicTest(false);
     }
@@ -511,7 +516,12 @@ export function SettingsView() {
         setDaysSavedTick((tick) => tick + 1);
       }
     } catch (err) {
-      setSaveError(String(err));
+      setSaveError(
+        backendCopy(
+          err,
+          "Couldn't save the retention policy. The previous policy still applies; try again.",
+        ),
+      );
       setDaysSaved(false);
     } finally {
       setSavingRetention(false);
@@ -533,7 +543,12 @@ export function SettingsView() {
       const updated = await setCaptureOverlay({ ...settings.overlay, ...change });
       setSettings(updated);
     } catch (err) {
-      setOverlayError(String(err));
+      setOverlayError(
+        backendCopy(
+          err,
+          "Couldn't save the capture pill setting. The previous setting still applies; try again.",
+        ),
+      );
     } finally {
       setSavingOverlay(false);
     }
@@ -548,7 +563,12 @@ export function SettingsView() {
     try {
       setSettings(await setAppearance({ theme }));
     } catch (err) {
-      setAppearanceError(String(err));
+      setAppearanceError(
+        backendCopy(
+          err,
+          "Couldn't save the theme. The previous theme still applies; try again.",
+        ),
+      );
     } finally {
       setSavingAppearance(false);
     }
@@ -557,7 +577,7 @@ export function SettingsView() {
   return (
     <ViewFrame variant="panel" eyebrow="System" title="Settings">
       {error && (
-        <StatusMessage variant="error">Couldn&apos;t load settings: {error}</StatusMessage>
+        <StatusMessage variant="error">{error}</StatusMessage>
       )}
 
       {settings && (
@@ -606,7 +626,7 @@ export function SettingsView() {
                   {daysSaved && kind === "keep_days" && <ConfirmLine>Saved.</ConfirmLine>}
                   {saveError && (
                     <StatusMessage variant="error" compact>
-                      Couldn&apos;t save the retention policy: {saveError}
+                      {saveError}
                     </StatusMessage>
                   )}
                 </>
@@ -673,7 +693,7 @@ export function SettingsView() {
               foot={
                 appearanceError && (
                   <StatusMessage variant="error" compact>
-                    Couldn&apos;t save the theme: {appearanceError}
+                    {appearanceError}
                   </StatusMessage>
                 )
               }
@@ -757,7 +777,7 @@ export function SettingsView() {
               foot={
                 overlayError && (
                   <StatusMessage variant="error" compact>
-                    Couldn&apos;t save the capture pill setting: {overlayError}
+                    {overlayError}
                   </StatusMessage>
                 )
               }
@@ -786,7 +806,7 @@ export function SettingsView() {
                   )}
                   {micTestError && (
                     <StatusMessage variant="error" compact>
-                      Couldn&apos;t run the mic test: {micTestError}
+                      {micTestError}
                     </StatusMessage>
                   )}
                 </>

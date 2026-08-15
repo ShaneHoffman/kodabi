@@ -8,6 +8,7 @@ import {
   type SessionArtifacts,
   type TranscriptSegment,
 } from "../../useSessions";
+import { backendCopy } from "../../errorCopy";
 
 /** The visible speaker label per wire channel, and the value tone that
  * separates the two sides of the exchange — label plus value, never hue (the
@@ -172,7 +173,12 @@ export function SessionPanel({
                 onClick={() => {
                   setRevealError(null);
                   revealSessionAudio(audioPath).catch((thrown: unknown) => {
-                    setRevealError(String(thrown));
+                    setRevealError(
+                      backendCopy(
+                        thrown,
+                        "Couldn't reveal the recording. It is still in your vault's sessions folder.",
+                      ),
+                    );
                   });
                 }}
               >

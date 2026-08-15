@@ -157,7 +157,7 @@ export function Dock() {
         {/* A failed listing must not masquerade as an empty vault. */}
         {error && (
           <StatusMessage variant="error" compact>
-            Couldn&apos;t load projects: {error}
+            {error}
           </StatusMessage>
         )}
 

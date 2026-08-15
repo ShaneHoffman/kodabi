@@ -131,7 +131,7 @@ describe("NoteEditorView delete flow", () => {
       project: "briarwood-golf",
     });
     onCommand("delete_note", () => {
-      throw "disk is full";
+      throw "Couldn't delete the note. It is untouched; try again.";
     });
     const navigate = renderNote("briarwood-golf", note);
     await screen.findByRole("heading", { name: "Quarterly planning" });
@@ -141,7 +141,9 @@ describe("NoteEditorView delete flow", () => {
     await user.click(within(dialog).getByRole("button", { name: "Delete note" }));
 
     expect(
-      await within(dialog).findByText("Couldn't delete the note: disk is full"),
+      await within(dialog).findByText(
+        "Couldn't delete the note. It is untouched; try again.",
+      ),
     ).toBeInTheDocument();
     expect(navigate).not.toHaveBeenCalled();
   });
