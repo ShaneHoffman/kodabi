@@ -315,6 +315,7 @@ describe("SessionPanel", () => {
     // would produce if someone reverted the translation in `user_errors.rs`:
     // an absolute path and an OS error. Asserting on its ABSENCE (rather than
     // on the sentence alone) is what makes this a regression test.
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     serveNote();
     onCommand("read_session_artifacts", () => {
       throw "note I/O failed at C:\\Users\\someone\\kb\\sessions\\a.jsonl: Access is denied. (os error 5)";
@@ -326,6 +327,11 @@ describe("SessionPanel", () => {
       "Couldn't read this note's session files. The note itself is fine; reopen it to try again.",
     );
     expect(screen.queryByText(/os error|C:\\|\.jsonl/)).toBeNull();
+    // Discarded from the screen, not from the record: a hook with a fixed
+    // sentence is the only place a rejection would otherwise vanish entirely,
+    // and the console is all there is to catch it.
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
     // The panel exists even when the fetch failed: the testid means "this note
     // has a session", which is the claim a keyword-sourced note has to fail.
     expect(screen.getByTestId("session-artifacts")).toBeInTheDocument();

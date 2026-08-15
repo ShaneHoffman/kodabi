@@ -51,9 +51,10 @@ const MAX_DELTA_BYTES: usize = 8 * 1024;
 /// session unrecoverable, and restarting the chat is the way out.
 const POISONED: &str = "Chat hit an internal error. Reopen this view to continue.";
 
-/// Writing to the child failed, on any of the three control paths (send,
-/// interrupt, permission answer). The session object is still there, so the
-/// reader's next attempt is a real one.
+/// Writing the user's message to the child failed. The interrupt and
+/// permission-answer paths word their own, because what did not happen differs;
+/// what they share is the reassurance, and it is this one: the session object is
+/// still there, so the reader's next attempt is a real one.
 const CHAT_SEND_FAILED: &str = "Couldn't send the message. The chat is still open; try again.";
 
 /// Spawning or transcript setup failed. As with the terminal, naming `claude`

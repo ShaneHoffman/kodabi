@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { backendCopy } from "./errorCopy";
+import { backendCopy, opaqueFailure } from "./errorCopy";
 
 /*
  * Vault change signal — a per-webview fan-out: something changed on disk, so
@@ -72,12 +72,16 @@ export function useVaultQuery<T>(
         })
         .catch((err: unknown) => {
           if (active && ticket === seq.current) {
-            const message =
-              errorText ??
-              backendCopy(
-                err,
-                "Couldn't load this from your vault. Your notes on disk are untouched; reopen this view to try again.",
-              );
+            // `opaqueFailure` rather than a bare `errorText`: a caller with a
+            // fixed sentence discards the rejection, so the console is the only
+            // account left of what actually failed. Dropping it unlogged is the
+            // one hole the two helpers exist to close.
+            const message = errorText
+              ? opaqueFailure(err, errorText)
+              : backendCopy(
+                  err,
+                  "Couldn't load this from your vault. Your notes on disk are untouched; reopen this view to try again.",
+                );
             setState({ data: null, loading: false, error: message });
           }
         });

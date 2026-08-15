@@ -157,8 +157,13 @@ pub fn distill_session(app: AppHandle, session_path: String) -> Result<(), Strin
     let path = validate_session_path(&kb, &session_path)?;
     if !spawn_distill(&app, path) {
         // A stale row the user clicked after a run for it already started.
-        // Refusing is what keeps one meeting from becoming two notes.
-        return Err("That session is already being distilled.".to_string());
+        // Refusing is what keeps one meeting from becoming two notes. Worded
+        // like `delete_session`'s sibling refusal: the retry did nothing, and
+        // the run already going is what the reader waits on.
+        return Err(
+            "That capture is already being distilled. Wait for the run in progress to finish."
+                .to_string(),
+        );
     }
     Ok(())
 }
