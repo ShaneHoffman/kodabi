@@ -93,30 +93,27 @@ const groveGuardSelectors = [
       "Styles are Tailwind utilities in the component, and the one stylesheet is src/index.css. " +
       "A .css import needs an eslint-disable comment justifying it — see docs/UI_CONVENTIONS.md.",
   },
-  // The reduced-motion swap, in the four shapes a class string is written in.
-  // The contract each selector enforces is that the pair is CO-LOCATED: the
+  // The reduced-motion swap. The contract is that the pair is CO-LOCATED: the
   // partner lives in the same string literal as the thing it swaps, which is
   // how Dialog and Menu already spell it. That is the only version a static
   // check can hold, and it is the version the doctrine asks for anyway.
+  //
+  // Position-blind on purpose, unlike the colour guard above. A class string is
+  // written in more shapes than a selector list can chase — a className, a
+  // *_CLASS const, a clsx()/cva() argument, a bare const (ProjectView's
+  // RISES_IN), a `+` concatenation (Menu's MENU_SURFACE) — and enumerating four
+  // of them left the last two silently unguarded. `animate-` followed by one of
+  // eight keyframe names is specific enough that no string carrying it is
+  // anything but a class string, so the node's position is not information
+  // worth spending a hole on. Comments stay out of reach either way: a comment
+  // is not an AST node, which is why the prose in InboxView and CommandPalette
+  // may keep naming these tokens.
   {
-    selector: `JSXAttribute[name.name="className"] Literal[value=/${MOTION_LITERAL}/]:not([value=/motion-reduce:/])`,
+    selector: `Literal[value=/${MOTION_LITERAL}/]:not([value=/motion-reduce:/])`,
     message: MOTION_MESSAGE,
   },
   {
-    selector: `JSXAttribute[name.name="className"] TemplateElement[value.raw=/${MOTION_LITERAL}/]:not([value.raw=/motion-reduce:/])`,
-    message: MOTION_MESSAGE,
-  },
-  {
-    selector: `VariableDeclarator[id.name=/(CLASS|CLASSES)$/] > Literal[value=/${MOTION_LITERAL}/]:not([value=/motion-reduce:/])`,
-    message: MOTION_MESSAGE,
-  },
-  {
-    // The hole the three above leave, and the one the app actually writes in:
-    // a class string hoisted into a clsx()/cva() const (PALETTE_SURFACE, the
-    // variant maps) is neither inside a className attribute nor named *CLASS,
-    // so nothing else here can see it. This is the selector that catches a
-    // pair split across two adjacent array elements.
-    selector: `CallExpression[callee.name=/^(clsx|cva)$/] Literal[value=/${MOTION_LITERAL}/]:not([value=/motion-reduce:/])`,
+    selector: `TemplateElement[value.raw=/${MOTION_LITERAL}/]:not([value.raw=/motion-reduce:/])`,
     message: MOTION_MESSAGE,
   },
 ];
@@ -182,9 +179,22 @@ export default tseslint.config(
           ],
         },
       ],
-      // The effect ban plus the Grove guards plus the copy guard (all defined
-      // at the top of this file, so the overrides below can re-state whichever
-      // half stays on, verbatim).
+      // The effect ban plus the Grove guards (both defined at the top of this
+      // file, so the overrides below can re-state whichever half stays on,
+      // verbatim). The copy guard is NOT here: this block reaches every
+      // `.ts`/`.tsx` in the repo, and `vite.config.ts` — the only one outside
+      // `src/` — holds no language a user reads. It is added back one block
+      // down, scoped to `src/`, which is the scope all three docs state.
+      "no-restricted-syntax": ["error", noEffectSelector, ...groveGuardSelectors],
+    },
+  },
+  // The app's own sources, and the only place the copy guard applies. Same
+  // re-statement discipline as every override below — `no-restricted-syntax` is
+  // one rule, so adding a selector for `src/` means naming everything that was
+  // already on.
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    rules: {
       "no-restricted-syntax": [
         "error",
         noEffectSelector,

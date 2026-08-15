@@ -42,7 +42,7 @@ Where a bullet says a guard holds something, read it as *that part is no longer 
   is reading. **Eslint now holds the bare presence of a partner** for the `animate-*` rows, in the
   same class string — that is the check that would have caught `animate-breathe` on a placeholder
   dot. It holds nothing else here, and the rest is where the real failures are: whether the partner
-  is the *correct* one for that animation, the two rows a className guard structurally cannot read
+  is the *correct* one for that animation, the two rows a class-string guard structurally cannot read
   (`active:scale-97` and the switch knob's `translate`), the loops applied from `src/index.css`
   rather than a className, and above all that the swap **must repeat every guard the thing it swaps
   carries** or it loses on specificity and goes silently dead (UI_CONVENTIONS §3, which also holds

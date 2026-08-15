@@ -577,9 +577,10 @@ What remains machine-checked, in `pnpm exec eslint . --max-warnings=0`:
   unlayered declaration of the same name would silently win (UI_CONVENTIONS §6).
 - **No moving animation without its `motion-reduce:` partner in the same class string.** The token
   list is the moving column of §4's swap table above, and it is checked against that table by
-  `pnpm test` (below) rather than copied by hand. It reads the four shapes a class string is written
-  in — a `className` literal, a `className` template, a `*_CLASS` const, and a `clsx()` / `cva()`
-  call — in both the utility and arbitrary-value spellings, so `animate-[dissolve_110ms_ease_forwards]`
+  `pnpm test` (below) rather than copied by hand. It reads every string literal and template chunk,
+  whatever shape the class string is written in — a `className`, a `*_CLASS` const, a `clsx()` /
+  `cva()` argument, a bare const, a `+` concatenation — in both the utility and
+  arbitrary-value spellings, so `animate-[dissolve_110ms_ease_forwards]`
   counts and `animate-halo-still` correctly does not. **What it cannot see is most of the rule.** It
   does not know whether the partner you wrote is the *right* one, whether it survives specificity
   (UI_CONVENTIONS §3 — the failure that leaves a live swap silently dead), or that `breathe`, `halo`
