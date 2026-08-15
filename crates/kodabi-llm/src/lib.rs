@@ -15,11 +15,20 @@
 //! e.g. `--bare`, which is deliberately never used here since it would
 //! silently break subscription login).
 //!
-//! On Windows, an npm-installed `claude` is typically a `.cmd` shim.
-//! `std::process::Command` resolves and invokes it safely on its own
-//! (Rust >= 1.77.2 shells `.cmd`/`.bat` targets through `cmd.exe` internally
-//! with correct escaping — the fix for CVE-2024-24576), so no manual
-//! `cmd /C` wrapping is needed here.
+//! On Windows, an npm-installed `claude` is typically a `.cmd` shim, and that
+//! is the one install shape this crate cannot spawn: the PATH search behind
+//! `std::process::Command` appends only `.exe` to a bare name, so a machine
+//! whose only `claude` is `claude.cmd` fails here with `ErrorKind::NotFound`
+//! while having Claude Code installed. (Rust >= 1.77.2 does *invoke* a
+//! `.cmd`/`.bat` safely, shelling it through `cmd.exe` with correct escaping —
+//! the fix for CVE-2024-24576 — but that is about invocation once the name has
+//! resolved, not about resolving a bare name to it. The embedded terminal hits
+//! neither problem: it runs `cmd.exe /C claude`, which honours `PATHEXT`.)
+//!
+//! No manual `cmd /C` wrapping here, so on such a machine the headless passes
+//! fail. What must not follow is telling the user Claude Code is missing when
+//! it is not — see [`is_missing_claude`], which confirms absence against
+//! `PATHEXT` before the prerequisite message is used.
 
 pub mod chat;
 
@@ -179,7 +188,7 @@ fn invoke(config: &ClaudeConfig, request: &LlmRequest) -> Result<String, LlmRunE
         .clone()
         .unwrap_or_else(|| PathBuf::from("claude"));
 
-    let mut command = hidden_command(program);
+    let mut command = hidden_command(program.clone());
     command
         .arg("-p")
         .arg("--output-format")
@@ -211,7 +220,7 @@ fn invoke(config: &ClaudeConfig, request: &LlmRequest) -> Result<String, LlmRunE
     // maps it: the other `Spawn` producers below (empty stdout, wait failure,
     // timeout) are all cases where the binary was found and ran.
     let child = command.spawn().map_err(|err| {
-        if err.kind() == std::io::ErrorKind::NotFound {
+        if is_missing_claude(&err, &program) {
             LlmRunError::ClaudeMissing
         } else {
             LlmRunError::Spawn(err.to_string())
@@ -327,16 +336,31 @@ fn hide_console_window(command: &mut Command) {
 #[cfg(not(windows))]
 fn hide_console_window(_command: &mut Command) {}
 
+/// Whether the spawn failure `err` means Claude Code is genuinely absent, and
+/// so may be reported with `CLAUDE_MISSING_MESSAGE`.
+///
+/// `ErrorKind::NotFound` is necessary but **not sufficient**, which is the
+/// whole reason this exists: per the module docs, a bare `claude` that only
+/// exists as an npm `claude.cmd` fails that way on Windows while being
+/// installed. Claiming "Claude Code isn't installed" there would be flatly
+/// wrong — the same machine runs `claude` in the embedded terminal — so
+/// absence is confirmed against `PATHEXT` via [`program_resolves`] before the
+/// prerequisite message is used, and anything else stays the OS error it is.
+pub(crate) fn is_missing_claude(err: &std::io::Error, program: &std::path::Path) -> bool {
+    err.kind() == std::io::ErrorKind::NotFound && !program_resolves(program.as_os_str())
+}
+
 /// Whether `program` would resolve at spawn time, reading `PATH` (and, on
 /// Windows, `PATHEXT`) from the environment.
 ///
-/// A pre-flight for callers that **cannot** learn this from the spawn itself.
-/// The embedded terminal is the case: it launches through `cmd.exe /C claude`
-/// on Windows (portable-pty's `CommandBuilder` won't shell an npm `claude.cmd`
-/// the way `std::process::Command` does), so a missing `claude` spawns
-/// `cmd.exe` *successfully* and only surfaces as a shell error inside the PTY.
-/// The spawn sites in this crate need none of this: they get
-/// `ErrorKind::NotFound` directly.
+/// Two callers, for two different reasons. The embedded terminal **cannot**
+/// learn this from its spawn at all: it launches through `cmd.exe /C claude`
+/// on Windows (portable-pty's `CommandBuilder` executes the program directly
+/// and so cannot run a `.cmd` shim), so a missing `claude` spawns `cmd.exe`
+/// *successfully* and only surfaces as a shell error inside the PTY. The spawn
+/// sites in this crate do get `ErrorKind::NotFound` directly, but that error
+/// over-reports absence on Windows, so they read this through
+/// [`is_missing_claude`] to tell the two apart.
 pub fn program_resolves(program: &std::ffi::OsStr) -> bool {
     let dirs: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|path| std::env::split_paths(&path).collect())
@@ -578,6 +602,42 @@ mod tests {
         .unwrap_err();
 
         assert!(matches!(err, LlmRunError::ClaudeMissing), "got {err:?}");
+    }
+
+    #[test]
+    fn a_not_found_spawn_of_a_program_that_exists_is_not_called_missing() {
+        // The npm-shim case, which is the reason `NotFound` alone can't decide
+        // this: on Windows the PATH search behind `std::process::Command`
+        // appends only `.exe`, so a machine whose only `claude` is a `.cmd`
+        // gets `NotFound` while Claude Code is installed and the embedded
+        // terminal runs it. Telling that user to go install it is worse than
+        // the OS error was.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let shim = dir.path().join("claude.cmd");
+        std::fs::write(&shim, "").expect("write");
+        let not_found = std::io::Error::new(std::io::ErrorKind::NotFound, "program not found");
+
+        assert!(
+            !is_missing_claude(&not_found, &shim),
+            "a program on disk is not a missing prerequisite"
+        );
+        assert!(is_missing_claude(
+            &not_found,
+            &dir.path().join("no-such-claude")
+        ));
+    }
+
+    #[test]
+    fn a_spawn_failure_that_is_not_not_found_is_never_called_missing() {
+        // Permission denied, ENOEXEC, a full process table: the binary was
+        // found, so whatever went wrong, it wasn't absent.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let denied = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+
+        assert!(!is_missing_claude(
+            &denied,
+            &dir.path().join("no-such-claude")
+        ));
     }
 
     #[test]

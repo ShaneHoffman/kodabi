@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { isClaudeMissingMessage } from "./claudeMissing";
 import {
@@ -6,13 +8,44 @@ import {
 } from "./test/claudeMissing";
 
 /**
- * The TS half of a cross-language pin. The fixture is
- * `kodabi_core::llm::CLAUDE_MISSING_MESSAGE` (crates/kodabi-core/src/llm.rs)
- * copied verbatim; the test beside that constant asserts the same marker phrase
- * from the Rust side. The copy may change, but the marker has to survive in
- * both, or one of these two tests fails.
+ * The cross-language pin, and it has to actually cross: the detection is a
+ * substring match against a string minted in Rust, so a test asserting the TS
+ * marker against a TS fixture proves only that the fixture and the marker
+ * agree with each other. Reword `CLAUDE_MISSING_MESSAGE` in Rust and every
+ * test on both sides stays green while `isClaudeMissingMessage` quietly
+ * matches nothing and all four surfaces fall back to echoing the raw error.
+ *
+ * So the Rust constant is read from source here, the way
+ * `src/invokeParity.test.ts` reads the `generate_handler![…]` list. That makes
+ * a reworded message a failing test rather than a silent regression, and the
+ * fixture in `src/test/claudeMissing.ts` a checked copy rather than a hopeful
+ * one.
  */
+const LLM_RS = join(process.cwd(), "crates", "kodabi-core", "src", "llm.rs");
+
+/** `kodabi_core::llm::CLAUDE_MISSING_MESSAGE`, read out of the Rust source. */
+function rustMissingMessage(): string {
+  const source = readFileSync(LLM_RS, "utf8");
+  const declaration = /pub const CLAUDE_MISSING_MESSAGE: &str = "([^"]*)";/.exec(
+    source,
+  );
+  if (!declaration) {
+    throw new Error(
+      `no CLAUDE_MISSING_MESSAGE declaration found in ${relative(process.cwd(), LLM_RS)}`,
+    );
+  }
+  return declaration[1];
+}
+
 describe("isClaudeMissingMessage", () => {
+  it("recognises the message Rust actually ships", () => {
+    expect(isClaudeMissingMessage(rustMissingMessage())).toBe(true);
+  });
+
+  it("keeps the test fixture a verbatim copy of the Rust constant", () => {
+    expect(CLAUDE_MISSING_MESSAGE).toBe(rustMissingMessage());
+  });
+
   it("recognises the canonical message from Rust", () => {
     expect(isClaudeMissingMessage(CLAUDE_MISSING_MESSAGE)).toBe(true);
   });

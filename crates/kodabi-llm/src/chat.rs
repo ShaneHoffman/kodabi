@@ -152,7 +152,7 @@ pub fn spawn_chat(
         .clone()
         .unwrap_or_else(|| PathBuf::from("claude"));
 
-    let mut command = crate::hidden_command(program);
+    let mut command = crate::hidden_command(program.clone());
     command
         .args(chat_argv(mcp_config, &config.model, session_id))
         .env(SKIP_HISTORY_ENV, "1")
@@ -164,9 +164,11 @@ pub fn spawn_chat(
     // A missing `claude` carries the prerequisite message rather than an OS
     // error: this newtype is a string, so the frontend recognises the case by
     // the marker phrase inside it (see `CLAUDE_MISSING_MESSAGE`), and the
-    // Display prefix above keeps it a substring.
+    // Display prefix above keeps it a substring. `is_missing_claude` rather
+    // than the raw error kind, because on Windows `NotFound` also means "an
+    // npm `.cmd` shim this spawn can't resolve" — see the crate docs.
     let mut child = command.spawn().map_err(|err| {
-        if err.kind() == std::io::ErrorKind::NotFound {
+        if crate::is_missing_claude(&err, &program) {
             ChatSpawnError(kodabi_core::llm::CLAUDE_MISSING_MESSAGE.to_owned())
         } else {
             ChatSpawnError(err.to_string())

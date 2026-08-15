@@ -205,4 +205,27 @@ describe("TerminalView", () => {
     );
     expect(screen.getByText("claude · kodabi mcp connected")).toBeInTheDocument();
   });
+
+  it("drops the exit row when the restart finds no CLI to run", async () => {
+    // The CLI goes off PATH while a session is up, so the exit the view is
+    // holding is real but stale. One account of the state, not two: the
+    // prerequisite row owns the retry from here.
+    render(<TerminalView />);
+    act(() => {
+      emitFromBackend("terminal:exit", { code: 0 });
+    });
+    expect(screen.getByText(/session ended/i)).toBeInTheDocument();
+
+    onCommand("terminal_restart", () => {
+      throw CLAUDE_MISSING_MESSAGE;
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Restart" }));
+
+    await screen.findByText("claude · not installed");
+    expect(screen.queryByText(/session ended/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Restart" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
 });

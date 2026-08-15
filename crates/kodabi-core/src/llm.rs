@@ -35,8 +35,11 @@ pub struct LlmRequest {
 /// `terminal_open` — so rather than three new wire shapes, the frontend
 /// recognises this failure by the contiguous marker phrase
 /// `Claude Code isn't installed` inside this message. `src/claudeMissing.ts`
-/// pins that phrase on the TS side; a test there and one below hold the two
-/// halves together. **Editing this copy must keep the marker phrase intact.**
+/// pins that phrase on the TS side, and `src/claudeMissing.test.ts` reads this
+/// declaration out of this file to check the two halves against each other
+/// rather than each against itself. **Editing this copy must keep the marker
+/// phrase intact** — and keep the declaration a single plain string literal,
+/// which is what that test parses.
 pub const CLAUDE_MISSING_MESSAGE: &str = "Kodabi's AI features run through Claude Code, and Claude Code isn't installed on this computer. Install the claude CLI from docs.claude.com/en/docs/claude-code/overview, then try again.";
 
 /// Failure invoking the headless runner.

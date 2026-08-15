@@ -83,7 +83,12 @@ export function TerminalView() {
           <Button onClick={restart}>Try again</Button>
         </div>
       )}
-      {exit && (
+      {/* Suppressed under `missing`, which is reachable with a stale `exit` in
+          hand: a session that ran and exited, then a restart that never got a
+          process (the CLI went off PATH meanwhile). The row above already
+          carries the account and the retry, and "Session ended" under "not
+          installed" would be a second, contradicting one. */}
+      {exit && status !== "missing" && (
         <div className="flex items-center gap-2.5 pt-2" role="status">
           <span className="font-data text-[11px] text-ink-dim">
             Session ended
