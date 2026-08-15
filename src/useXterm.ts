@@ -5,6 +5,7 @@ import { Terminal, type ITheme } from "@xterm/xterm";
 // without it, and it is a vendor file we neither write nor migrate.
 // eslint-disable-next-line no-restricted-syntax -- third-party stylesheet, not ours to replace
 import "@xterm/xterm/css/xterm.css";
+import { CLAUDE_INSTALL_URL, isClaudeMissingMessage } from "./claudeMissing";
 import { TERMINAL_EXIT_EVENT, TERMINAL_OUTPUT_EVENT } from "./events";
 import {
   openTerminal,
@@ -21,12 +22,17 @@ import { useTauriEvent } from "./useTauriEvent";
 export type TerminalExit = { code: number | null };
 
 /**
- * What the hosted session is doing, for the view's header line. Three states
- * and no "starting": `terminal_open` is idempotent and resolves in a frame or
- * two against an already-running PTY, so a fourth state would exist only to be
- * rendered on the way past.
+ * What the hosted session is doing, for the view's header line. No "starting":
+ * `terminal_open` is idempotent and resolves in a frame or two against an
+ * already-running PTY, so that state would exist only to be rendered on the way
+ * past.
+ *
+ * `missing` is a `failed` that names its cause: the backend pre-flights `PATH`
+ * before opening the PTY (src-tauri/src/terminal_cmds.rs), so a session that
+ * never started for want of the `claude` CLI is knowable here, and it is the
+ * only start failure the user can act on.
  */
-export type TerminalStatus = "running" | "exited" | "failed";
+export type TerminalStatus = "running" | "exited" | "failed" | "missing";
 
 export type XtermHandle = {
   /** Non-null once `claude` has exited; the view then shows a restart affordance. */
@@ -36,6 +42,23 @@ export type XtermHandle = {
   /** Reap the exited/old session and spawn a fresh one, clearing the screen. */
   restart: () => void;
 };
+
+/**
+ * What the pane says when a session will not start.
+ *
+ * The missing-CLI case is written out rather than echoed: the raw form of it
+ * arrives as an OS error, and this pane is where a first-time user is most
+ * likely to be looking when they meet it.
+ */
+function startFailureMessage(error: unknown, verb: "start" | "restart" = "start"): string {
+  const raw = String(error);
+  if (isClaudeMissingMessage(raw)) {
+    return `Kodabi's AI features run through Claude Code, and Claude Code isn't installed on this computer. Install the claude CLI from ${CLAUDE_INSTALL_URL}, then try again.`;
+  }
+  return verb === "start"
+    ? `Could not start Claude Code: ${raw}`
+    : `Could not restart Claude Code: ${raw}`;
+}
 
 /** The terminal's size, in the number xterm wants rather than a CSS length.
  * Grove sets type sizes at the call site rather than in tokens, and this is
@@ -219,12 +242,12 @@ export function useXterm(container: RefObject<HTMLDivElement | null>): XtermHand
         if (active) applySnapshot(snapshot);
       })
       .catch((error: unknown) => {
-        // A spawn failure (e.g. no `claude` on PATH) rejects the command; show
-        // it in the pane rather than leaving a blank terminal. \x1b[31m…\x1b[0m
-        // is the ANSI red the terminal already renders.
+        // A spawn failure rejects the command; show it in the pane rather than
+        // leaving a blank terminal. \x1b[31m…\x1b[0m is the ANSI red the
+        // terminal already renders.
         if (!active) return;
-        term.writeln(`\x1b[31mCould not start Claude Code: ${String(error)}\x1b[0m`);
-        setStatus("failed");
+        term.writeln(`\x1b[31m${startFailureMessage(error)}\x1b[0m`);
+        setStatus(isClaudeMissingMessage(String(error)) ? "missing" : "failed");
       });
 
     const observer = new ResizeObserver(() => {
@@ -282,9 +305,9 @@ export function useXterm(container: RefObject<HTMLDivElement | null>): XtermHand
         // reasons the first spawn could, and an unreported rejection would leave
         // the pane sitting on a dead session with no account of why.
         termRef.current?.writeln(
-          `\x1b[31mCould not restart Claude Code: ${String(error)}\x1b[0m`,
+          `\x1b[31m${startFailureMessage(error, "restart")}\x1b[0m`,
         );
-        setStatus("failed");
+        setStatus(isClaudeMissingMessage(String(error)) ? "missing" : "failed");
       });
   };
 

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CLAUDE_INSTALL_URL, isClaudeMissingMessage } from "../../claudeMissing";
 import { DISTILL_STATE_EVENT } from "../../events";
 import { useTauriEvent } from "../../useTauriEvent";
 import {
@@ -82,6 +83,21 @@ function lastFailure(sessions: FailedSession[]): string | null {
     month: "short",
     day: "numeric",
   });
+}
+
+/**
+ * What to say under a row whose Retry just failed.
+ *
+ * A missing `claude` is the one cause worth naming: it is not this capture's
+ * fault, no number of retries will fix it, and the remedy is an install the
+ * user can go do. Everything else keeps the raw backend message, which is the
+ * only detail there is for a failure the app cannot interpret.
+ */
+function retryFailureMessage(raw: string): string {
+  if (isClaudeMissingMessage(raw)) {
+    return `Retry needs Claude Code: Kodabi's AI features run through the claude CLI, and it isn't installed. Install it from ${CLAUDE_INSTALL_URL}, then retry.`;
+  }
+  return `Retry failed: ${raw}`;
 }
 
 /**
@@ -203,7 +219,7 @@ export function NeedsAttentionView() {
     if (payload.status === "error") {
       setRowErrors((current) => ({
         ...current,
-        [payload.session_path]: `Retry failed: ${payload.message}`,
+        [payload.session_path]: retryFailureMessage(payload.message),
       }));
     }
     // No notifyVaultChanged() here. The sidebar's needs-attention row is
@@ -243,7 +259,7 @@ export function NeedsAttentionView() {
     });
     retryDistill(path).catch((err: unknown) => {
       setPendingPath(null);
-      setRowErrors((current) => ({ ...current, [path]: `Retry failed: ${String(err)}` }));
+      setRowErrors((current) => ({ ...current, [path]: retryFailureMessage(String(err)) }));
     });
   };
 

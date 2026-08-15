@@ -26,6 +26,19 @@ pub struct LlmRequest {
     pub prompt: String,
 }
 
+/// The one user-facing account of a missing `claude` CLI.
+///
+/// The CLI is a user-installed prerequisite (README.md), so on a fresh machine
+/// this is the *first* thing most users hit. Every channel that can carry the
+/// failure to the frontend is a plain string — the `distill:state` event's
+/// `message`, and the `Result<T, String>` rejection of `chat_open` /
+/// `terminal_open` — so rather than three new wire shapes, the frontend
+/// recognises this failure by the contiguous marker phrase
+/// `Claude Code isn't installed` inside this message. `src/claudeMissing.ts`
+/// pins that phrase on the TS side; a test there and one below hold the two
+/// halves together. **Editing this copy must keep the marker phrase intact.**
+pub const CLAUDE_MISSING_MESSAGE: &str = "Kodabi's AI features run through Claude Code, and Claude Code isn't installed on this computer. Install the claude CLI from docs.claude.com/en/docs/claude-code/overview, then try again.";
+
 /// Failure invoking the headless runner.
 ///
 /// What a failure *means* is each pass's call: the glossary cleanup treats
@@ -34,6 +47,12 @@ pub struct LlmRequest {
 /// note is better than a fabricated one).
 #[derive(Debug, Clone, thiserror::Error)]
 pub enum LlmRunError {
+    /// The `claude` binary could not be found at all (`ErrorKind::NotFound` at
+    /// spawn). Split from [`LlmRunError::Spawn`] so the surfaces this reaches
+    /// can name the missing prerequisite and where to install it, instead of
+    /// echoing an OS error string at someone on their first capture.
+    #[error("{}", CLAUDE_MISSING_MESSAGE)]
+    ClaudeMissing,
     #[error("failed to run headless Claude Code: {0}")]
     Spawn(String),
     #[error("headless Claude Code reported an error: {0}")]
@@ -116,6 +135,26 @@ fn scan_spans(text: &str, open: char, close: char, track_prose_quotes: bool) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_missing_claude_variant_renders_the_canonical_message() {
+        assert_eq!(
+            LlmRunError::ClaudeMissing.to_string(),
+            CLAUDE_MISSING_MESSAGE
+        );
+    }
+
+    #[test]
+    fn the_missing_claude_message_carries_the_marker_the_frontend_matches() {
+        // The Rust half of a cross-language pin: `src/claudeMissing.ts` detects
+        // this failure by this exact substring, because every channel it
+        // travels is a plain string. Its sibling test there holds the other
+        // half. Changing the copy is fine; dropping the phrase is not.
+        assert!(
+            CLAUDE_MISSING_MESSAGE.contains("Claude Code isn't installed"),
+            "message: {CLAUDE_MISSING_MESSAGE}"
+        );
+    }
 
     #[test]
     fn extracts_a_bare_object_span() {

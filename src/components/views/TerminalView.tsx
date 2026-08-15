@@ -1,4 +1,5 @@
 import { useRef } from "react";
+import { CLAUDE_INSTALL_URL } from "../../claudeMissing";
 import { useXterm, type TerminalStatus } from "../../useXterm";
 import { Button } from "../ui/Button";
 import { ViewFrame } from "../ui/ViewFrame";
@@ -19,6 +20,7 @@ const STATUS_LINE: Record<TerminalStatus, string> = {
   running: "claude · kodabi mcp connected",
   exited: "claude · exited",
   failed: "claude · could not start",
+  missing: "claude · not installed",
 };
 
 /**
@@ -66,6 +68,21 @@ export function TerminalView() {
       <div className="glass-term mt-6 min-h-0 flex-1 overflow-hidden px-5 py-[18px]">
         <div ref={mount} className="h-full w-full" />
       </div>
+      {/* The prerequisite, in the chrome as well as the pane. The pane's copy
+          scrolls away the moment a session does start, and this is the one
+          terminal failure with something for the user to go and do, so the row
+          that offers the retry says what has to be true first. Same shape as
+          the exit row below it, which is this view's established way of pairing
+          a sentence with the action that answers it. */}
+      {status === "missing" && (
+        <div className="flex items-center gap-2.5 pt-2" role="status">
+          <span className="font-data text-[11px] text-ink-dim">
+            Claude Code isn&apos;t installed. Install the claude CLI from{" "}
+            {CLAUDE_INSTALL_URL}.
+          </span>
+          <Button onClick={restart}>Try again</Button>
+        </div>
+      )}
       {exit && (
         <div className="flex items-center gap-2.5 pt-2" role="status">
           <span className="font-data text-[11px] text-ink-dim">

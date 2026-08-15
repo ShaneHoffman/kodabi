@@ -6,6 +6,7 @@ import { ModelStatusProvider } from "../providers/ModelStatusProvider";
 import { CaptureToast } from "./CaptureToast";
 import { DISTILL_STATE_EVENT } from "../../events";
 import { emitFromBackend, onCommand, resetTauriMocks } from "../../test/tauri";
+import { CLAUDE_MISSING_MESSAGE } from "../../test/claudeMissing";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
@@ -126,6 +127,23 @@ describe("CaptureToast", () => {
     await distill({ status: "error", message: "boom", session_path: "s.jsonl" });
 
     expect(screen.getByRole("alert")).toHaveTextContent("Needs attention");
+  });
+
+  it("names the missing prerequisite when that is why the distill failed", async () => {
+    // The first capture on a machine without the CLI. Sending the user to a
+    // Needs attention row whose Retry can only fail the same way is the dead
+    // end this fork exists to break, so the toast says what to install.
+    await renderToast();
+
+    await distill({
+      status: "error",
+      message: CLAUDE_MISSING_MESSAGE,
+      session_path: "s.jsonl",
+    });
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent(/Claude Code isn't installed/);
+    expect(alert).toHaveTextContent(/docs\.claude\.com/);
   });
 
   it("stays quiet for a skipped distill", async () => {

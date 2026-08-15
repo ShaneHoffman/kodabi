@@ -7,6 +7,7 @@ import { DISTILL_STATE_EVENT } from "../../events";
 import type { FailedSession } from "../../useSessions";
 import { notifyVaultChanged } from "../../useVaultQuery";
 import { emitFromBackend, invoke, onCommand, resetTauriMocks } from "../../test/tauri";
+import { CLAUDE_MISSING_MESSAGE } from "../../test/claudeMissing";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
@@ -216,6 +217,27 @@ describe("NeedsAttentionView", () => {
     await waitFor(() => {
       expect(screen.queryByText(/claude exited 1/)).not.toBeInTheDocument();
     });
+  });
+
+  it("names the missing prerequisite instead of echoing it under the row", async () => {
+    // Retry cannot fix this one, so the row has to say what will: the raw
+    // message is an account of the failure, not of the remedy.
+    const teamSync = makeSession("team-sync");
+    serveSessions([teamSync]);
+    renderView();
+    await screen.findByText("team sync");
+
+    act(() => {
+      emitFromBackend(DISTILL_STATE_EVENT, {
+        status: "error",
+        session_path: teamSync.path,
+        message: CLAUDE_MISSING_MESSAGE,
+      });
+    });
+
+    expect(await screen.findByText(/Retry needs Claude Code/)).toBeInTheDocument();
+    expect(screen.getByText(/docs\.claude\.com/)).toBeInTheDocument();
+    expect(screen.queryByText(/Retry failed:/)).not.toBeInTheDocument();
   });
 
   it("clears the pending row and says so when the retry call itself fails", async () => {

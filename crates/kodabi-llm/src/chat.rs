@@ -161,9 +161,17 @@ pub fn spawn_chat(
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
 
-    let mut child = command
-        .spawn()
-        .map_err(|err| ChatSpawnError(err.to_string()))?;
+    // A missing `claude` carries the prerequisite message rather than an OS
+    // error: this newtype is a string, so the frontend recognises the case by
+    // the marker phrase inside it (see `CLAUDE_MISSING_MESSAGE`), and the
+    // Display prefix above keeps it a substring.
+    let mut child = command.spawn().map_err(|err| {
+        if err.kind() == std::io::ErrorKind::NotFound {
+            ChatSpawnError(kodabi_core::llm::CLAUDE_MISSING_MESSAGE.to_owned())
+        } else {
+            ChatSpawnError(err.to_string())
+        }
+    })?;
     let pid = child.id();
 
     let stdin = child
@@ -253,5 +261,28 @@ mod tests {
         let config = ChatProcessConfig::from_overrides(Some("  ".to_owned()), Some(String::new()));
         assert_eq!(config.model, CHAT_DEFAULT_MODEL);
         assert!(config.binary.is_none());
+    }
+
+    #[test]
+    fn a_missing_binary_spawns_the_prerequisite_message() {
+        // The chat half of the missing-CLI contract: ChatView reads this
+        // string, so it must carry the canonical message rather than the OS
+        // error. See `kodabi_core::llm::CLAUDE_MISSING_MESSAGE`.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = ChatProcessConfig {
+            binary: Some(dir.path().join("no-such-claude")),
+            ..ChatProcessConfig::default()
+        };
+
+        let err = spawn_chat(&config, &dir.path().join(".mcp.json"), "c_test", dir.path())
+            .err()
+            .expect("spawn should fail");
+
+        assert_eq!(err.0, kodabi_core::llm::CLAUDE_MISSING_MESSAGE);
+        assert!(
+            err.to_string()
+                .contains(kodabi_core::llm::CLAUDE_MISSING_MESSAGE),
+            "Display must keep the message a substring: {err}"
+        );
     }
 }

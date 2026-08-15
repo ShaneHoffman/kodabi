@@ -1,4 +1,8 @@
 import { useState } from "react";
+import {
+  CLAUDE_INSTALL_URL,
+  isClaudeMissingMessage,
+} from "../../claudeMissing";
 import type { ModelDownloadState } from "../../models";
 import { useCapturePipeline } from "../../useCapturePipeline";
 import { isTranscriptionReady, useModelStatus } from "../../useModelStatus";
@@ -29,6 +33,15 @@ function noticeFor(
   models: ModelDownloadState,
 ): Notice | null {
   if (pipeline.distill.status === "error") {
+    // A missing `claude` is the one distill failure with a fix, and on a fresh
+    // install it is the likeliest one: name the prerequisite instead of sending
+    // the user to a Needs attention row whose Retry can only fail again.
+    if (isClaudeMissingMessage(pipeline.distill.message)) {
+      return {
+        id: "distill:claude-missing",
+        text: `Couldn't distill that capture: Kodabi's AI features run through Claude Code, and Claude Code isn't installed. Install the claude CLI from ${CLAUDE_INSTALL_URL}, then retry it from Needs attention.`,
+      };
+    }
     return {
       id: "distill:error",
       // Where to go next, not just what broke: the session is already listed

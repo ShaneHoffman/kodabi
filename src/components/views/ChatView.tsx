@@ -8,6 +8,7 @@ import {
 } from "react";
 import { clsx } from "clsx";
 import type { ChatEntry, ChatNoteRef, PendingPermission } from "../../chat";
+import { CLAUDE_INSTALL_URL, isClaudeMissingMessage } from "../../claudeMissing";
 import { citationsFor } from "../../chatCitations";
 import { useChatSession } from "../../useChatSession";
 import { useNavigation } from "../../useNavigation";
@@ -124,15 +125,28 @@ export function ChatView() {
     });
 
   // Loading renders nothing (docs/DESIGN_SYSTEM.md §3) — but a session that
-  // could not start at all must still say so.
+  // could not start at all must still say so. A missing `claude` is named
+  // rather than echoed: it is the likeliest reason chat never opens on a fresh
+  // machine, and unlike every other start failure the user can fix it.
   if (!chat.ready) {
     return (
       <ChatFrame>
-        {chat.startError && (
-          <StatusMessage variant="error">
-            Couldn&apos;t start chat: {chat.startError}
-          </StatusMessage>
-        )}
+        {chat.startError &&
+          (isClaudeMissingMessage(chat.startError) ? (
+            <div className="flex items-baseline gap-3">
+              <StatusMessage variant="error">
+                Couldn&apos;t start chat: Kodabi&apos;s chat runs through Claude
+                Code, and Claude Code isn&apos;t installed on this computer.
+                Install the claude CLI from {CLAUDE_INSTALL_URL}, then try
+                again.
+              </StatusMessage>
+              <Button onClick={chat.restart}>Try again</Button>
+            </div>
+          ) : (
+            <StatusMessage variant="error">
+              Couldn&apos;t start chat: {chat.startError}
+            </StatusMessage>
+          ))}
       </ChatFrame>
     );
   }

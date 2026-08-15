@@ -41,6 +41,9 @@ vi.mock("@xterm/xterm", () => {
     write(data: unknown): void {
       this.writes.push(data);
     }
+    writeln(data: unknown): void {
+      this.writes.push(data);
+    }
     onData(callback: (data: string) => void): { dispose(): void } {
       this.onDataHandler = callback;
       return { dispose() {} };
@@ -62,6 +65,7 @@ import {
   onCommand,
   resetTauriMocks,
 } from "../../test/tauri";
+import { CLAUDE_MISSING_MESSAGE } from "../../test/claudeMissing";
 import { TerminalView } from "./TerminalView";
 
 const SNAPSHOT = { running: true, scrollback: "", cols: 80, rows: 24 };
@@ -149,6 +153,42 @@ describe("TerminalView", () => {
       emitFromBackend("terminal:output", { data: btoa("hello") });
     });
     expect(term.writes.length).toBeGreaterThan(before);
+  });
+
+  it("names the missing prerequisite in the header, the pane, and the retry", async () => {
+    // The backend pre-flights PATH, so a machine without the CLI rejects
+    // `terminal_open` rather than opening a PTY that prints a shell error.
+    // Nothing here should read as the session having run and died.
+    onCommand("terminal_open", () => {
+      throw CLAUDE_MISSING_MESSAGE;
+    });
+    render(<TerminalView />);
+
+    expect(
+      await screen.findByText("claude · not installed"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Claude Code isn't installed/)).toHaveTextContent(
+      /docs\.claude\.com/,
+    );
+    const written = latestTerminal().writes.join("");
+    expect(written).toContain("Claude Code isn't installed");
+    expect(written).not.toContain("Could not start Claude Code:");
+    expect(screen.queryByText(/session ended/i)).not.toBeInTheDocument();
+  });
+
+  it("retries the session once the CLI is installed", async () => {
+    onCommand("terminal_open", () => {
+      throw CLAUDE_MISSING_MESSAGE;
+    });
+    render(<TerminalView />);
+    await screen.findByText("claude · not installed");
+
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(invokedCommands()).toContain("terminal_restart");
+    await waitFor(() =>
+      expect(screen.getByText("claude · kodabi mcp connected")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/Claude Code isn't installed/)).not.toBeInTheDocument();
   });
 
   it("offers a restart after the session exits", async () => {
