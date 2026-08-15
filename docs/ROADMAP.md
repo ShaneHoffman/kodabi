@@ -9,9 +9,9 @@ working roadmap derived from it.
 **Decisions already locked that affect later phases:** License = AGPL-3.0-only · Frontend = React +
 Tailwind · Transcription = per-channel (you/them attribution) · Default STT engine = Parakeet TDT,
 selected at build time via mutually exclusive cargo features (release builds ship Parakeet and fail
-to compile without a real engine; the whisper.cpp fallback is deferred for v1 — blocked on Windows
-by the sherpa-onnx/ORT mismatch, board #53, see `docs/RESOURCE_BUDGET.md`) · Glossary-cleanup
-post-pass pulled forward into Phase 1.
+to compile without a real engine; the whisper.cpp fallback is deferred for v1 — it runs on Windows
+now that board #53 is fixed, but ~200x slower than Parakeet, see `docs/RESOURCE_BUDGET.md`) ·
+Glossary-cleanup post-pass pulled forward into Phase 1.
 
 ---
 

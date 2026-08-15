@@ -7,9 +7,11 @@
 //! because it needs ~630 MB of ONNX model files that are not committed to the
 //! repo. CI's `app-dev` job downloads and caches them, then runs this target
 //! with `--ignored` so the shipping engine is proven end-to-end on every Rust
-//! change; the speech fixture it transcribes *is* committed. Run it locally
-//! the same way, after downloading `sherpa-onnx-nemo-parakeet-tdt-0.6b-v2`
-//! (int8) and `silero_vad.onnx` and pointing the env vars below at them:
+//! change; the speech fixture it transcribes *is* committed (a LibriSpeech
+//! test-clean utterance — provenance and licence in `tests/data/README.md`).
+//! Run it locally the same way, after downloading
+//! `sherpa-onnx-nemo-parakeet-tdt-0.6b-v2` (int8) and `silero_vad.onnx` and
+//! pointing the env vars below at them:
 //!
 //! ```text
 //! PARAKEET_ENCODER=... PARAKEET_DECODER=... PARAKEET_JOINER=... \
@@ -125,7 +127,7 @@ fn chunked_feed_recovers_speech_after_leading_silence() {
     let mut engine = ParakeetEngine::new(real_config()).expect("engine should load");
     let speech = read_speech_wav();
 
-    // 3s silence + speech + 1s silence + speech (~16.2s): an utterance that
+    // 3s silence + speech + 1s silence + speech (~16.3s): an utterance that
     // starts well before the end of the first 10s pipeline chunk, plus a
     // second one in the next chunk. Regression coverage for the window-feed
     // bug where whole-chunk `accept_waveform` calls collapsed the VAD's
@@ -168,7 +170,7 @@ fn chunked_feed_recovers_speech_after_leading_silence() {
     );
     assert!(
         segments.iter().any(|s| s.start_ms >= 9800),
-        "the second utterance (from ~10.1s) should be found, got {segments:?}"
+        "the second utterance (from ~10.2s) should be found, got {segments:?}"
     );
     let last_end = segments.last().expect("segments is non-empty").end_ms;
     assert!(

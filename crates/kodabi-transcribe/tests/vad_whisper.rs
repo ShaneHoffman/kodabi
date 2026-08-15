@@ -118,7 +118,7 @@ fn chunked_feed_recovers_speech_after_leading_silence() {
         whisper_with_vad(real_whisper_config(), real_vad_config()).expect("engine should load");
     let speech = read_speech_wav();
 
-    // 3s silence + speech + 1s silence + speech (~16.2s): an utterance that
+    // 3s silence + speech + 1s silence + speech (~16.3s): an utterance that
     // starts well before the end of the first 10s pipeline chunk, plus a
     // second one in the next chunk. Regression coverage for the window-feed
     // bug where whole-chunk `accept_waveform` calls collapsed the VAD's
@@ -162,7 +162,7 @@ fn chunked_feed_recovers_speech_after_leading_silence() {
     );
     assert!(
         segments.iter().any(|s| s.start_ms >= 9800),
-        "the second utterance (from ~10.1s) should be found, got {segments:?}"
+        "the second utterance (from ~10.2s) should be found, got {segments:?}"
     );
     // Looser than the parakeet mirror's 15,000: the last end comes from
     // whisper's own inner timestamps mapped via `offset_into_span`, which are
