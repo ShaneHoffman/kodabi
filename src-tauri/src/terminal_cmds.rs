@@ -1,12 +1,12 @@
 //! The embedded Claude Code terminal's PTY orchestration (Phase 3, FOUNDING_DOC §4).
 //!
 //! The pure argv / `.mcp.json` / settings / resize logic lives in
-//! `kodabi_core::terminal`; this module owns only the side-effecting parts that
-//! are inherently Tauri-bound — resolving machine paths through `app.path()`,
-//! spawning the PTY, streaming its output as events, and reaping the child tree
-//! on true app exit. It follows `capture_control.rs` (Tauri-coupled shell code),
-//! not `kodabi-llm` (a crate a pure consumer needs): nothing pure consumes the
-//! PTY, so there is no crate boundary to earn.
+//! `kodabi_core::terminal`, and so does the byte pump that batches PTY output
+//! into the scrollback ring — parameterized on its channel and sinks, the way
+//! `kodabi_core::watch`'s debounce loop is, so it is unit-tested without a PTY.
+//! This module owns what stays inherently Tauri-bound: resolving machine paths
+//! through `app.path()`, spawning the PTY, emitting the pump's batches as
+//! events, and reaping the child tree on true app exit.
 //!
 //! One live session at a time, held in [`TerminalState`]. It survives hide-to-
 //! tray and view-switches (the webview's xterm is disposed and re-hydrated from
@@ -15,24 +15,22 @@
 //! `CloseRequested` only hides to tray, so it must NOT reap here.
 //!
 //! Concurrency is the house `std::thread` + `mpsc` style (per `kodabi-llm`), not
-//! async. Two threads per session: a blocking reader draining the PTY into a
-//! channel, and a coalescer that batches, appends to the scrollback ring, and
-//! emits `terminal:output`. The slot is mutated only by command handlers under
-//! the lock; the coalescer only flips atomics, so there is no slot race.
+//! async. Two threads per session, both running a core loop: a blocking reader
+//! draining the PTY into a channel ([`terminal::pump_reader`]), and a coalescer
+//! ([`terminal::run_coalescer`]) whose sinks emit `terminal:output` and
+//! `terminal:exit`. The slot is mutated only by command handlers under the
+//! lock; the pump only flips the stream's atomics, so there is no slot race.
 
-use std::collections::VecDeque;
 use std::ffi::OsString;
 use std::fs;
-use std::io::{Read, Write};
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{self, RecvTimeoutError};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::mpsc;
+use std::sync::Mutex;
 
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -45,16 +43,6 @@ pub const TERMINAL_OUTPUT_EVENT: &str = "terminal:output";
 /// silent). Mirrors `ExitPayload`.
 pub const TERMINAL_EXIT_EVENT: &str = "terminal:exit";
 
-/// Cap on the replayed scrollback ring: enough to re-hydrate a re-mounted xterm
-/// without unbounded growth for a long-lived session.
-const SCROLLBACK_CAP: usize = 256 * 1024;
-/// Flush the coalescer once this much output has piled up, so one big burst
-/// (a build, `ls -R`) can't grow a single event without bound.
-const MAX_EVENT_BYTES: usize = 64 * 1024;
-const READ_BUF: usize = 8192;
-/// Coalesce window: batches the fast small writes of a redrawing TUI into a few
-/// events instead of hundreds, bounding the webview's event rate.
-const COALESCE_MS: u64 = 8;
 const DEFAULT_COLS: u16 = 80;
 const DEFAULT_ROWS: u16 = 24;
 const POISONED: &str = "terminal state lock poisoned";
@@ -68,33 +56,22 @@ pub struct TerminalState(pub Mutex<Option<TerminalSession>>);
 /// A running PTY hosting `claude`. The reader/coalescer threads and the child
 /// handle live outside this struct (in the coalescer thread); what stays here is
 /// what the command handlers need: the master (resize + keep-alive), the writer
-/// (stdin), the pid (reap), the scrollback ring (reattach), and the liveness
-/// atomics.
+/// (stdin), the pid (reap), and the shared stream state (the scrollback ring for
+/// reattach, plus the liveness atomics the pump flips).
 pub struct TerminalSession {
     master: Box<dyn MasterPty + Send>,
     writer: Box<dyn Write + Send>,
     pid: Option<u32>,
-    scrollback: Arc<Mutex<VecDeque<u8>>>,
-    /// Cleared by the coalescer when the child exits; the next `terminal_open`
-    /// sees `false` and respawns rather than reusing a dead session.
-    alive: Arc<AtomicBool>,
-    /// Set by a deliberate reap (restart / app exit) so the coalescer stays
-    /// silent instead of emitting a spurious `terminal:exit`.
-    reaped: Arc<AtomicBool>,
+    stream: terminal::SessionStream,
     cols: u16,
     rows: u16,
 }
 
 impl TerminalSession {
     fn snapshot(&self) -> TerminalSnapshot {
-        let scrollback = self
-            .scrollback
-            .lock()
-            .map(|ring| BASE64.encode(ring.iter().copied().collect::<Vec<u8>>()))
-            .unwrap_or_default();
         TerminalSnapshot {
-            running: self.alive.load(Ordering::Relaxed),
-            scrollback,
+            running: self.stream.is_alive(),
+            scrollback: BASE64.encode(self.stream.contents()),
             cols: self.cols,
             rows: self.rows,
         }
@@ -103,8 +80,7 @@ impl TerminalSession {
     /// Deliberate teardown: mark it reaped (so the coalescer stays quiet) and
     /// kill the whole `cmd.exe → claude → kodabi-mcp` tree.
     fn reap(&self) {
-        self.reaped.store(true, Ordering::Relaxed);
-        self.alive.store(false, Ordering::Relaxed);
+        self.stream.mark_reaped();
         if let Some(pid) = self.pid {
             kodabi_llm::kill_process_tree(pid);
         }
@@ -138,6 +114,15 @@ struct OutputPayload {
     data: String,
 }
 
+/// Wraps one coalesced batch for the wire. Base64 because the payload is raw
+/// PTY bytes: a per-batch UTF-8 decode would corrupt a multibyte sequence split
+/// across reads, so `useXterm.ts` decodes these bytes itself.
+fn output_payload(pending: &[u8]) -> OutputPayload {
+    OutputPayload {
+        data: BASE64.encode(pending),
+    }
+}
+
 #[derive(Clone, Serialize)]
 struct ExitPayload {
     code: Option<i32>,
@@ -154,7 +139,7 @@ pub fn terminal_open(
 ) -> Result<TerminalSnapshot, String> {
     let mut guard = state.0.lock().map_err(|_| POISONED.to_string())?;
     if let Some(session) = guard.as_ref() {
-        if session.alive.load(Ordering::Relaxed) {
+        if session.stream.is_alive() {
             return Ok(session.snapshot());
         }
     }
@@ -172,7 +157,7 @@ pub fn terminal_open(
 pub fn terminal_write(state: State<'_, TerminalState>, data: String) -> Result<(), String> {
     let mut guard = state.0.lock().map_err(|_| POISONED.to_string())?;
     if let Some(session) = guard.as_mut() {
-        if session.alive.load(Ordering::Relaxed) {
+        if session.stream.is_alive() {
             session
                 .writer
                 .write_all(data.as_bytes())
@@ -275,38 +260,26 @@ fn spawn_session(app: &AppHandle) -> Result<TerminalSession, String> {
     let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
     let master = pair.master;
 
-    let scrollback = Arc::new(Mutex::new(VecDeque::<u8>::new()));
-    let alive = Arc::new(AtomicBool::new(true));
-    let reaped = Arc::new(AtomicBool::new(false));
+    let stream = terminal::SessionStream::new();
 
     let (tx, rx) = mpsc::channel::<Vec<u8>>();
-    std::thread::spawn(move || {
-        let mut reader = reader;
-        let mut buf = [0u8; READ_BUF];
-        loop {
-            match reader.read(&mut buf) {
-                Ok(0) | Err(_) => break,
-                Ok(n) => {
-                    if tx.send(buf[..n].to_vec()).is_err() {
-                        break;
-                    }
-                }
-            }
-        }
-    });
+    std::thread::spawn(move || terminal::pump_reader(reader, tx));
 
     let coalesce_app = app.clone();
-    let coalesce_scrollback = Arc::clone(&scrollback);
-    let coalesce_alive = Arc::clone(&alive);
-    let coalesce_reaped = Arc::clone(&reaped);
+    let coalesce_stream = stream.clone();
     std::thread::spawn(move || {
-        run_coalescer(
-            coalesce_app,
+        let mut child = child;
+        terminal::run_coalescer(
             rx,
-            coalesce_scrollback,
-            coalesce_alive,
-            coalesce_reaped,
-            child,
+            terminal::StreamLimits::default(),
+            &coalesce_stream,
+            move || child.wait().ok().map(|status| status.exit_code() as i32),
+            |pending| {
+                let _ = coalesce_app.emit(TERMINAL_OUTPUT_EVENT, output_payload(pending));
+            },
+            |code| {
+                let _ = coalesce_app.emit(TERMINAL_EXIT_EVENT, ExitPayload { code });
+            },
         );
     });
 
@@ -314,62 +287,10 @@ fn spawn_session(app: &AppHandle) -> Result<TerminalSession, String> {
         master,
         writer,
         pid,
-        scrollback,
-        alive,
-        reaped,
+        stream,
         cols: DEFAULT_COLS,
         rows: DEFAULT_ROWS,
     })
-}
-
-/// Drains the reader channel, batching output into `terminal:output` events and
-/// the scrollback ring, then waits for the child and (unless reaped) emits
-/// `terminal:exit`.
-fn run_coalescer(
-    app: AppHandle,
-    rx: mpsc::Receiver<Vec<u8>>,
-    scrollback: Arc<Mutex<VecDeque<u8>>>,
-    alive: Arc<AtomicBool>,
-    reaped: Arc<AtomicBool>,
-    mut child: Box<dyn Child + Send + Sync>,
-) {
-    let mut pending: Vec<u8> = Vec::new();
-    loop {
-        match rx.recv_timeout(Duration::from_millis(COALESCE_MS)) {
-            Ok(chunk) => {
-                pending.extend_from_slice(&chunk);
-                if pending.len() >= MAX_EVENT_BYTES {
-                    flush(&app, &scrollback, &mut pending);
-                }
-            }
-            Err(RecvTimeoutError::Timeout) => flush(&app, &scrollback, &mut pending),
-            Err(RecvTimeoutError::Disconnected) => {
-                flush(&app, &scrollback, &mut pending);
-                break;
-            }
-        }
-    }
-
-    let code = child.wait().ok().map(|status| status.exit_code() as i32);
-    alive.store(false, Ordering::Relaxed);
-    if !reaped.load(Ordering::Relaxed) {
-        let _ = app.emit(TERMINAL_EXIT_EVENT, ExitPayload { code });
-    }
-}
-
-fn flush(app: &AppHandle, scrollback: &Arc<Mutex<VecDeque<u8>>>, pending: &mut Vec<u8>) {
-    if pending.is_empty() {
-        return;
-    }
-    if let Ok(mut ring) = scrollback.lock() {
-        ring.extend(pending.iter().copied());
-        while ring.len() > SCROLLBACK_CAP {
-            ring.pop_front();
-        }
-    }
-    let data = BASE64.encode(&pending);
-    let _ = app.emit(TERMINAL_OUTPUT_EVENT, OutputPayload { data });
-    pending.clear();
 }
 
 /// Builds the `claude` launch. On Windows this goes through `cmd.exe /C` because
@@ -525,3 +446,147 @@ fn resolve_mcp_binary(app: &AppHandle) -> Result<PathBuf, String> {
 const MCP_BINARY_NAME: &str = "kodabi-mcp.exe";
 #[cfg(not(windows))]
 const MCP_BINARY_NAME: &str = "kodabi-mcp";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The three payload shapes below mirror `src/terminal.ts`; the byte pump
+    /// itself is tested in `kodabi_core::terminal`.
+    #[test]
+    fn output_payload_is_standard_padded_base64() {
+        // The standard alphabet's two distinguishing characters (`+` and `/`,
+        // where the URL-safe alphabet has `-` and `_`) plus `=` padding, which
+        // is what `base64ToBytes` in `src/useXterm.ts` decodes with `atob`.
+        assert_eq!(output_payload(&[0xfb, 0xef, 0xbe]).data, "++++");
+        assert_eq!(output_payload(&[0xff]).data, "/w==");
+
+        let value = serde_json::to_value(output_payload(b"hi")).expect("serializes");
+        assert_eq!(value, serde_json::json!({ "data": "aGk=" }));
+    }
+
+    #[test]
+    fn exit_payload_wire_shape() {
+        // `code` is nullable on the wire: an unknown status must not be dropped
+        // to a number the frontend would read as a clean exit.
+        let unknown = serde_json::to_value(ExitPayload { code: None }).expect("serializes");
+        assert_eq!(unknown, serde_json::json!({ "code": null }));
+
+        let clean = serde_json::to_value(ExitPayload { code: Some(0) }).expect("serializes");
+        assert_eq!(clean, serde_json::json!({ "code": 0 }));
+    }
+
+    #[test]
+    fn terminal_snapshot_wire_shape() {
+        let snapshot = TerminalSnapshot {
+            running: true,
+            // Empty means "nothing to replay" — see `useXterm.ts`.
+            scrollback: String::new(),
+            cols: DEFAULT_COLS,
+            rows: DEFAULT_ROWS,
+        };
+        let value = serde_json::to_value(snapshot).expect("serializes");
+
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "running": true,
+                "scrollback": "",
+                "cols": 80,
+                "rows": 24,
+            })
+        );
+    }
+
+    /// The PTY plumbing the core tests fake: a real child's bytes cross a real
+    /// master, get batched by the coalescer, and land in both the sink and the
+    /// replay ring. Uses `cmd.exe` rather than `claude` so it needs no install
+    /// and no `KODABI_CLAUDE_BINARY` (which is process-global and would race the
+    /// rest of the suite).
+    ///
+    /// The exit half is deliberately not asserted here, because on Windows it
+    /// does not happen: the ConPTY keeps the master's read handle open after the
+    /// child exits, so [`terminal::pump_reader`] never sees EOF, the channel
+    /// never disconnects, and `terminal:exit` never fires (measured — the child
+    /// exits, `alive` stays true, and nothing is reported). That is a real defect
+    /// in the terminal's exit affordance rather than a test artifact, and fixing
+    /// it is out of this change's scope; the exit and reap-suppression logic is
+    /// covered in `kodabi_core::terminal` against an injected `wait`.
+    #[cfg(windows)]
+    #[test]
+    fn a_real_pty_child_streams_its_output() {
+        use std::time::Duration;
+
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: DEFAULT_ROWS,
+                cols: DEFAULT_COLS,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .expect("opens a pty");
+
+        let shell = std::env::var_os("ComSpec").unwrap_or_else(|| OsString::from("cmd.exe"));
+        let mut command = CommandBuilder::new(shell);
+        command.arg("/C");
+        command.arg("echo");
+        command.arg("kodabi-pty-smoke");
+        let mut child = pair.slave.spawn_command(command).expect("spawns the child");
+        drop(pair.slave);
+
+        // The ConPTY opens by asking the terminal where the cursor is (`ESC[6n`)
+        // and waits for the report before it forwards the child's output. In the
+        // app xterm.js answers; here the test does, once, up front.
+        let mut writer = pair.master.take_writer().expect("takes the writer");
+        writer
+            .write_all(b"\x1b[1;1R")
+            .expect("answers the cursor-position probe");
+        writer.flush().expect("flushes the probe answer");
+
+        let reader = pair.master.try_clone_reader().expect("clones the reader");
+        let (tx, rx) = mpsc::channel::<Vec<u8>>();
+        std::thread::spawn(move || terminal::pump_reader(reader, tx));
+
+        let stream = terminal::SessionStream::new();
+        let pump_stream = stream.clone();
+        let (output_tx, output_rx) = mpsc::channel::<Vec<u8>>();
+        std::thread::spawn(move || {
+            terminal::run_coalescer(
+                rx,
+                terminal::StreamLimits::default(),
+                &pump_stream,
+                move || child.wait().ok().map(|status| status.exit_code() as i32),
+                |batch| {
+                    let _ = output_tx.send(batch.to_vec());
+                },
+                |_| {},
+            );
+        });
+
+        // Drain until the child's line shows up, on a bounded deadline so a
+        // wedged ConPTY fails the test instead of hanging. The first batches are
+        // the ConPTY's own handshake (a cursor-position probe), so this waits
+        // for the marker rather than for the stream to go quiet.
+        let deadline = std::time::Instant::now() + Duration::from_secs(30);
+        let mut output: Vec<u8> = Vec::new();
+        while !String::from_utf8_lossy(&output).contains("kodabi-pty-smoke") {
+            let remaining = deadline
+                .checked_duration_since(std::time::Instant::now())
+                .unwrap_or_default();
+            let batch = output_rx.recv_timeout(remaining).unwrap_or_else(|_| {
+                panic!("timed out; got {:?}", String::from_utf8_lossy(&output))
+            });
+            output.extend_from_slice(&batch);
+        }
+        // A batch reaches the sink only after the ring has taken it, so the ring
+        // holds everything received here — and possibly a later batch too.
+        assert!(
+            stream.contents().starts_with(&output),
+            "the ring replays what was emitted"
+        );
+
+        // The threads block on a master the ConPTY holds open; dropping it here
+        // releases what this test owns, and the harness reaps the rest.
+        drop(pair.master);
+    }
+}
