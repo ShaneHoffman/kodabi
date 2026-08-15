@@ -65,14 +65,17 @@ describe("SpiritMark", () => {
   it("swaps the aura for the pulse ring in the ring variant", () => {
     const { container } = render(<SpiritMark mode="listening" variant="ring" />);
 
+    // Movement stops, the breath does not (DESIGN_SYSTEM §4). And the breath
+    // has to be visible to be a breath: the ring's box is the core's box, so
+    // without a resting radius the opacity-only partner pulses underneath an
+    // opaque disc and the reduced mark reads dead.
+    //
+    // One space-separated string rather than an argument each, because that is
+    // the contract the motion guard holds — a movement and its partner in the
+    // same string — and an assertion split across arguments would read as an
+    // unpaired `animate-ring` to it.
     expect(container.querySelector(".spirit-mark__ring")).toHaveClass(
-      "animate-ring",
-      // Movement stops, the breath does not (DESIGN_SYSTEM §4).
-      "motion-reduce:animate-halo-still",
-      // And the breath has to be visible to be a breath: the ring's box is
-      // the core's box, so without a resting radius the opacity-only partner
-      // pulses underneath an opaque disc and the reduced mark reads dead.
-      "motion-reduce:scale-[1.7]",
+      "animate-ring motion-reduce:animate-halo-still motion-reduce:scale-[1.7]",
     );
     expect(container.querySelector(".spirit-mark__aura")).not.toBeInTheDocument();
     expect(container.querySelector(".spirit-mark__core")).toBeInTheDocument();

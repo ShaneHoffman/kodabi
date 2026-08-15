@@ -182,12 +182,17 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   Night is the default; `.day` and `.hc` are root classes set by `src/theme.ts` and
   `src/contrast.ts`, and they combine. Both are **token remaps** — a `day:` or `hc:` variant in a
   className is a claim that no token could have carried it.
-  **Enforced by two eslint rules, not by review** (`no-restricted-syntax` in `eslint.config.js`): no
+  **Enforced by four eslint rules, not by review** (`no-restricted-syntax` in `eslint.config.js`): no
   colour literal in a `className` (a hex survives both variants unchanged, which is the one literal
-  that is not merely untidy but wrong), and no `.css` import outside `src/index.css` without a
+  that is not merely untidy but wrong); no `.css` import outside `src/index.css` without a
   justifying `eslint-disable` comment — there are no exceptions left in the app's own code, so a new
-  stylesheet has to argue its case. `pnpm test` adds `src/theme.test.ts` and `src/contrast.test.ts`,
-  which pin the two variant classes to the DOM, and
+  stylesheet has to argue its case; no transform-bearing `animate-*` class without its
+  `motion-reduce:` partner in the same class string (DESIGN_SYSTEM §4's swap table is the token
+  list); and no em dash in JSX text or a string literal under `src/`, per `copy-style` — the test
+  harness and the dev-only gallery are exempt from that last one, and comments are out of reach by
+  construction. `pnpm test` adds `src/theme.test.ts` and `src/contrast.test.ts`,
+  which pin the two variant classes to the DOM, `src/motionGuardParity.test.ts`, which pins the
+  motion guard's token list to §4's table in both directions, and
   `src/components/dev/PrimitiveGallery.test.tsx`, which renders every Grove control under all four
   grounds (`ViewFrame` is a page scaffold and has its own tests). The controls themselves are on
   `/gallery.html` — a dev-only Vite entry, deliberately
@@ -218,12 +223,14 @@ the fixes are docs-only) whatever the branch prefix, so review-driven correction
   `.claude/rules/dev-sandbox.md`.
 
 Topical rules that aren't repo-wide engineering constraints live as modular files under
-`.claude/rules/`: `copy-style` (no em dashes in user-facing copy), `shell-discipline`,
+`.claude/rules/`: `copy-style` (no em dashes in user-facing copy; lint-enforced under `src/`),
+`shell-discipline`,
 `docs-stay-in-sync`, `tauri-command-parity`, `no-personal-info`,
 `no-use-effect` (effects only in blessed bridge hooks), `skill-authoring`,
 `typescript-style`, `utc-timestamps`, `dev-sandbox` (agent launches never touch real data),
-`design-consistency` (the review checklist for the design doctrine the two Grove guards
-don't cover: view states, reduced-motion partners, the focus ring, composition).
+`design-consistency` (the review checklist for the design doctrine the four eslint guards
+don't cover: view states, the focus ring and focus order, composition and the six slots, and the
+judgment half of the two rules they do partly hold).
 
 ## Skills & agents
 
