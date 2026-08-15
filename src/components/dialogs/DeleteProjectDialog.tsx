@@ -55,6 +55,7 @@ export function DeleteProjectDialog({
       busyLabel="Deleting…"
       busy={deleting}
       error={error}
+      errorHint="The project and its notes are untouched. You can try again or cancel."
       onConfirm={confirm}
       onClose={onClose}
     >

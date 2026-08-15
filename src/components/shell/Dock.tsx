@@ -156,9 +156,16 @@ export function Dock() {
       >
         {/* A failed listing must not masquerade as an empty vault. */}
         {error && (
-          <StatusMessage variant="error" compact>
-            Couldn&apos;t load projects: {error}
-          </StatusMessage>
+          <div className="flex flex-col gap-2">
+            <StatusMessage variant="error" compact>
+              Couldn&apos;t load projects: {error}
+            </StatusMessage>
+            {/* The dock never unmounts, so "reopen this view" is not the way
+                out here; a restart is. */}
+            <p className="text-[11.5px] leading-relaxed text-ink-dim">
+              Your project folders are untouched. Restarting Kodabi reloads them.
+            </p>
+          </div>
         )}
 
         {/* The system group: the three things that act on the whole vault. */}

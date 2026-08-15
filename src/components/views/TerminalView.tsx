@@ -39,7 +39,7 @@ const STATUS_LINE: Record<TerminalStatus, string> = {
  */
 export function TerminalView() {
   const mount = useRef<HTMLDivElement>(null);
-  const { exit, status, restart } = useXterm(mount);
+  const { exit, startError, status, restart } = useXterm(mount);
 
   return (
     <ViewFrame
@@ -67,16 +67,37 @@ export function TerminalView() {
       <div className="glass-term mt-6 min-h-0 flex-1 overflow-hidden px-5 py-[18px]">
         <div ref={mount} className="h-full w-full" />
       </div>
-      {exit && (
-        // The region is the sentence, not the row: `StatusMessage`'s variant
-        // carries the `role="status"` this div used to hold by hand, and the
-        // Restart control sits outside it rather than being read out as part
-        // of the announcement.
+      {/* The session's state, and the one control that state raises
+          (docs/UI_CONVENTIONS.md §5 — Restart belongs to the block, not to the
+          frame). Gated on `status`, not on `exit`: a session that never started
+          has no exit code, and gating on one left the failed path raising
+          nothing at all — no announcement, and no way back.
+
+          `StatusMessage` rather than a hand-rolled row, so the ARIA role comes
+          from the variant (UI_CONVENTIONS §4): a failure is assertive, because
+          the user did not ask for it, and an ordinary exit is polite.
+
+          The keys are what make that second half true. Both branches render the
+          same component at the same position, so without them React reconciles
+          the exited row INTO the failed one: one `<p>` whose `role` mutates from
+          "status" to "alert" in place. A live region is registered with the
+          assistive tech when its node is inserted, so swapping the attribute
+          afterwards downgrades a restart failure to the polite announcement the
+          node was registered with. Distinct keys remount it, which is the only
+          way the assertive role is the one actually in force. */}
+      {status !== "running" && (
         <div className="flex items-center gap-2.5 pt-2">
-          <StatusMessage variant="status" compact>
-            Session ended
-            {exit.code != null && exit.code !== 0 ? ` (exit ${exit.code})` : ""}.
-          </StatusMessage>
+          {status === "failed" ? (
+            <StatusMessage key="failed" variant="error" compact>
+              Couldn&apos;t start Claude Code{startError ? `: ${startError}` : ""}. Restart
+              to try again.
+            </StatusMessage>
+          ) : (
+            <StatusMessage key="exited" variant="status" compact>
+              Session ended
+              {exit?.code != null && exit.code !== 0 ? ` (exit ${exit.code})` : ""}.
+            </StatusMessage>
+          )}
           <Button onClick={restart}>Restart</Button>
         </div>
       )}

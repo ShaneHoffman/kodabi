@@ -533,6 +533,39 @@ describe("ChatView", () => {
     expect(
       await screen.findByText(/Couldn't start chat: .*claude not found/),
     ).toBeInTheDocument();
+    // And what happens next: the composer is below this branch, so without a
+    // control here the screen would be a dead end (docs/DESIGN_SYSTEM.md §3).
+    expect(
+      screen.getByText(/Nothing was lost\. This usually means the Claude Code CLI/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+
+  it("retries a failed start from the error itself", async () => {
+    const user = userEvent.setup();
+    let attempts = 0;
+    onCommand("chat_open", () => {
+      attempts += 1;
+      throw new Error("claude not found");
+    });
+    render(
+      <NavigationContext.Provider value={{ view: { kind: "chat" }, navigate }}>
+        <ChatView />
+      </NavigationContext.Provider>,
+    );
+    await screen.findByRole("button", { name: "Try again" });
+    expect(attempts).toBe(1);
+
+    // `chat_restart` is the command behind the button; the point of the test is
+    // that pressing it reaches the backend rather than sitting inert.
+    let restarts = 0;
+    onCommand("chat_restart", () => {
+      restarts += 1;
+      throw new Error("claude not found");
+    });
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+
+    await waitFor(() => expect(restarts).toBe(1));
   });
 
   // ---------- citations ----------

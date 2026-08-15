@@ -85,9 +85,16 @@ export function SessionPanel({
     // note has to fail.
     return (
       <section className="glass-card px-4 py-3.5" data-testid="session-artifacts">
-        <StatusMessage variant="error" compact>
-          {error}
-        </StatusMessage>
+        <div className="flex flex-col gap-2">
+          <StatusMessage variant="error" compact>
+            Couldn&apos;t read this session&apos;s files: {error}
+          </StatusMessage>
+          {/* This is a side panel: the note it sits beside is still on screen
+              and still readable, which is the thing worth saying. */}
+          <p className="text-[11.5px] leading-relaxed text-ink-dim">
+            The note itself is unaffected. Reopen it to try again.
+          </p>
+        </div>
       </section>
     );
   }
@@ -172,16 +179,24 @@ export function SessionPanel({
                 onClick={() => {
                   setRevealError(null);
                   revealSessionAudio(audioPath).catch((thrown: unknown) => {
-                    setRevealError(String(thrown));
+                    setRevealError(`Couldn't reveal the recording: ${String(thrown)}`);
                   });
                 }}
               >
                 Reveal in Explorer
               </Button>
               {revealError !== null && (
-                <StatusMessage variant="error" compact className="mt-2">
-                  {revealError}
-                </StatusMessage>
+                <div className="mt-2 flex flex-col gap-2">
+                  <StatusMessage variant="error" compact>
+                    {revealError}
+                  </StatusMessage>
+                  {/* The likeliest cause is the retention sweep having already
+                      taken the file (see `revealSessionAudio`), which is a
+                      different answer from "press it again". */}
+                  <p className="text-[11.5px] leading-relaxed text-ink-dim">
+                    Retention may have already removed this recording. Otherwise, try again.
+                  </p>
+                </div>
               )}
             </>
           )}

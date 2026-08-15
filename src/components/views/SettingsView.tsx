@@ -558,7 +558,14 @@ export function SettingsView() {
   return (
     <ViewFrame variant="panel" eyebrow="System" title="Settings">
       {error && (
-        <StatusMessage variant="error">Couldn&apos;t load settings: {error}</StatusMessage>
+        <div className="flex flex-col gap-2">
+          <StatusMessage variant="error">Couldn&apos;t load settings: {error}</StatusMessage>
+          {/* Every row below is gated on `settings`, so this failure blanks the
+              screen: it has to say the file survived and how to get back. */}
+          <p className="text-[11.5px] leading-relaxed text-ink-dim">
+            Your settings file is untouched. Leave Settings and come back to try again.
+          </p>
+        </div>
       )}
 
       {settings && (
@@ -606,9 +613,18 @@ export function SettingsView() {
                 <>
                   {daysSaved && kind === "keep_days" && <ConfirmLine>Saved.</ConfirmLine>}
                   {saveError && (
-                    <StatusMessage variant="error" compact>
-                      Couldn&apos;t save the retention policy: {saveError}
-                    </StatusMessage>
+                    <>
+                      <StatusMessage variant="error" compact>
+                        Couldn&apos;t save the retention policy: {saveError}
+                      </StatusMessage>
+                      {/* A failed save leaves the control showing what the user
+                          picked, so the next step has to say which value is
+                          actually in force. The foot spaces its lines by their
+                          own margin, like `ConfirmLine`, not by a flex gap. */}
+                      <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
+                        Your previous setting is still in effect. Change it again to retry.
+                      </p>
+                    </>
                   )}
                 </>
               }
@@ -673,9 +689,14 @@ export function SettingsView() {
               }
               foot={
                 appearanceError && (
-                  <StatusMessage variant="error" compact>
-                    Couldn&apos;t save the theme: {appearanceError}
-                  </StatusMessage>
+                  <>
+                    <StatusMessage variant="error" compact>
+                      Couldn&apos;t save the theme: {appearanceError}
+                    </StatusMessage>
+                    <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
+                      Your previous setting is still in effect. Change it again to retry.
+                    </p>
+                  </>
                 )
               }
             >
@@ -757,9 +778,14 @@ export function SettingsView() {
               // error, so the two switches are the unit that fails.
               foot={
                 overlayError && (
-                  <StatusMessage variant="error" compact>
-                    Couldn&apos;t save the capture pill setting: {overlayError}
-                  </StatusMessage>
+                  <>
+                    <StatusMessage variant="error" compact>
+                      Couldn&apos;t save the capture pill setting: {overlayError}
+                    </StatusMessage>
+                    <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
+                      Your previous setting is still in effect. Change it again to retry.
+                    </p>
+                  </>
                 )
               }
             >
@@ -786,9 +812,16 @@ export function SettingsView() {
                     </ConfirmLine>
                   )}
                   {micTestError && (
-                    <StatusMessage variant="error" compact>
-                      Couldn&apos;t run the mic test: {micTestError}
-                    </StatusMessage>
+                    <>
+                      <StatusMessage variant="error" compact>
+                        Couldn&apos;t run the mic test: {micTestError}
+                      </StatusMessage>
+                      {/* The likeliest cause is hardware rather than Kodabi, so
+                          the next step points at the device first. */}
+                      <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
+                        Check that your microphone is connected, then run the test again.
+                      </p>
+                    </>
                   )}
                 </>
               }

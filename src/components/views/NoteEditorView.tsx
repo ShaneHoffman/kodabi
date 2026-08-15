@@ -189,7 +189,15 @@ function OpenedNote({
   if (error) {
     return (
       <NoteFrame label="Note">
-        <StatusMessage variant="error">Couldn&apos;t open this note: {error}</StatusMessage>
+        <div className="flex flex-col gap-2">
+          <StatusMessage variant="error">Couldn&apos;t open this note: {error}</StatusMessage>
+          {/* This branch replaces the whole note, so the one thing worth
+              saying is that the file behind it survived the failed read. */}
+          <p className="text-[11.5px] leading-relaxed text-ink-dim">
+            The note file is still on disk. Go back and open it again, or fix the file in a text
+            editor.
+          </p>
+        </div>
       </NoteFrame>
     );
   }
@@ -851,7 +859,15 @@ function EditNote({
         </div>
 
         {error && (
-          <StatusMessage variant="error">Couldn&apos;t save this note: {error}</StatusMessage>
+          <div className="flex flex-col gap-2">
+            <StatusMessage variant="error">Couldn&apos;t save this note: {error}</StatusMessage>
+            {/* A failed save is the moment a user assumes their typing is
+                gone. It is not: the form keeps the draft and the file is
+                whatever it was before. */}
+            <p className="text-[11.5px] leading-relaxed text-ink-dim">
+              Your edits are still here and the file on disk is unchanged. Save again to retry.
+            </p>
+          </div>
         )}
       </form>
     </NoteFrame>
@@ -990,7 +1006,12 @@ function CreateNote({ initialProject }: { initialProject: string | null }) {
         </div>
 
         {error && (
-          <StatusMessage variant="error">Couldn&apos;t create this note: {error}</StatusMessage>
+          <div className="flex flex-col gap-2">
+            <StatusMessage variant="error">Couldn&apos;t create this note: {error}</StatusMessage>
+            <p className="text-[11.5px] leading-relaxed text-ink-dim">
+              Nothing was created and your draft is still here. Press Create again to retry.
+            </p>
+          </div>
         )}
       </form>
     </NoteFrame>

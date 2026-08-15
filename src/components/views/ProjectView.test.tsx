@@ -171,7 +171,33 @@ describe("ProjectView delete flow", () => {
         "Couldn't delete the project: folder is locked",
       ),
     ).toBeInTheDocument();
+    // Plus what happens next, which the dialog lays out as a sibling of the
+    // alert (docs/DESIGN_SYSTEM.md §3).
+    expect(
+      within(dialog).getByText(
+        "The project and its notes are untouched. You can try again or cancel.",
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Delete this project?" })).toBeInTheDocument();
+  });
+
+  it("says what failed and what happens next when the notes listing errors", async () => {
+    const user = userEvent.setup();
+    serveVault([project("Growth", 2)]);
+    onCommand("list_notes", () => {
+      throw "vault is unreadable";
+    });
+    renderShell();
+
+    await user.click(await screen.findByRole("button", { name: /Growth/ }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't load notes: vault is unreadable");
+    expect(
+      screen.getByText("Your notes are still on disk. Reopen this view to try again."),
+    ).toBeInTheDocument();
+    // A failed read is not an empty project.
+    expect(screen.queryByText(/No notes here yet\./)).not.toBeInTheDocument();
   });
 });
 
