@@ -155,6 +155,33 @@ describe("Dock needs-attention row", () => {
   });
 });
 
+describe("Dock project listing failure", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  it("says what failed, what happens next, and keeps the vault reachable", async () => {
+    serveVault();
+    onCommand("list_projects", () => {
+      throw "index is locked";
+    });
+
+    renderShell();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't load projects: index is locked");
+    // The dock never unmounts, so "reopen this view" is not the way out here
+    // (docs/DESIGN_SYSTEM.md §3).
+    expect(
+      screen.getByText("Your project folders are untouched. Restarting Kodabi reloads them."),
+    ).toBeInTheDocument();
+    // Data stays reachable: a failed listing must not read as an empty vault,
+    // and the system destinations still work.
+    expect(screen.queryByText(/No projects yet\./)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Search" })).toBeInTheDocument();
+  });
+});
+
 describe("Dock layout", () => {
   beforeEach(() => {
     resetTauriMocks();
