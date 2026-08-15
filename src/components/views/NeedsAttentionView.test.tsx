@@ -229,7 +229,14 @@ describe("NeedsAttentionView", () => {
 
     await user.click(screen.getByTestId("retry-distill"));
 
-    expect(await screen.findByText(/no capture session at that path/)).toBeInTheDocument();
+    // Named in the same register as every other failure on this screen, which
+    // "Retry failed:" was not.
+    expect(
+      await screen.findByText(/Couldn't retry this capture: no capture session at that path/),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("The capture is unchanged and still listed. You can try again."),
+    ).toBeInTheDocument();
     // Still actionable: the button is back, not stuck on "Retrying…".
     expect(screen.getByTestId("retry-distill")).toHaveAccessibleName("Retry");
   });
@@ -348,7 +355,12 @@ describe("NeedsAttentionView", () => {
     await user.click(screen.getByRole("button", { name: "Dismiss" }));
 
     expect(
-      await screen.findByText(/Dismiss failed: marker write failed/),
+      await screen.findByText(/Couldn't dismiss this capture: marker write failed/),
+    ).toBeInTheDocument();
+    // And what happens next, which is the half the message used to omit
+    // (docs/DESIGN_SYSTEM.md §3).
+    expect(
+      screen.getByText("The capture is unchanged and still listed. You can try again."),
     ).toBeInTheDocument();
     // Still listed, still actionable.
     expect(screen.getByTestId("retry-distill")).toBeInTheDocument();
@@ -435,6 +447,11 @@ describe("NeedsAttentionView", () => {
     expect(
       await within(dialog).findByText("Couldn't delete the capture: session is locked"),
     ).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(
+        "The capture and its recording are still on disk. You can try again or cancel.",
+      ),
+    ).toBeInTheDocument();
     // The modal stays open so the delete can be retried or cancelled.
     expect(screen.getByRole("dialog", { name: "Delete this capture?" })).toBeInTheDocument();
   });
@@ -448,6 +465,11 @@ describe("NeedsAttentionView", () => {
 
     expect(
       await screen.findByText(/the sessions folder is unreadable/),
+    ).toBeInTheDocument();
+    // Nothing here retries on its own, so the recordings surviving is the
+    // load-bearing half of the message.
+    expect(
+      screen.getByText("Your captures are still on disk. Reopen this view to try again."),
     ).toBeInTheDocument();
     expect(screen.queryByText(/All clear/)).not.toBeInTheDocument();
   });

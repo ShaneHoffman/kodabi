@@ -358,7 +358,12 @@ export function InboxView() {
       }
     >
       {error ? (
-        <StatusMessage variant="error">Couldn&apos;t load the inbox: {error}</StatusMessage>
+        <div className="flex flex-col gap-2">
+          <StatusMessage variant="error">Couldn&apos;t load the inbox: {error}</StatusMessage>
+          <p className="text-[11.5px] leading-relaxed text-ink-dim">
+            Your captured notes are still on disk. Reopen this view to try again.
+          </p>
+        </div>
       ) : (
         <>
           {remaining > 0 && <Progress cleared={cleared} />}
@@ -1280,9 +1285,16 @@ function InboxRow({
           </div>
         </div>
         {error && (
-          <StatusMessage variant="error" compact>
-            Couldn&apos;t file this note: {error}
-          </StatusMessage>
+          <div className="flex flex-col gap-2">
+            <StatusMessage variant="error" compact>
+              Couldn&apos;t file this note: {error}
+            </StatusMessage>
+            {/* The row stays put and its controls come back live on failure,
+                so the retry is the same menu they just used. */}
+            <p className="text-[11.5px] leading-relaxed text-ink-dim">
+              The note is still in your inbox. Pick a project again to retry.
+            </p>
+          </div>
         )}
         {confirmingDelete && (
           <DeleteNoteDialog

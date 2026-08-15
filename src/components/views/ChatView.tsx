@@ -129,9 +129,21 @@ export function ChatView() {
     return (
       <ChatFrame>
         {chat.startError && (
-          <StatusMessage variant="error">
-            Couldn&apos;t start chat: {chat.startError}
-          </StatusMessage>
+          <div className="flex flex-col items-start gap-2">
+            <StatusMessage variant="error">
+              Couldn&apos;t start chat: {chat.startError}
+            </StatusMessage>
+            <p className="text-[11.5px] leading-relaxed text-ink-dim">
+              Nothing was lost. Chat needs the Claude Code CLI to be installed.
+            </p>
+            {/* The composer lives below this early return, so without a control
+                here the screen is the app's one dead end: the same `restart`
+                the exited state offers is the way out (DESIGN_SYSTEM §3 leaves
+                the data reachable). */}
+            <Button className="mt-1" onClick={chat.restart}>
+              Try again
+            </Button>
+          </div>
         )}
       </ChatFrame>
     );

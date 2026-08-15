@@ -291,6 +291,37 @@ describe("SettingsView retention", () => {
   });
 });
 
+describe("SettingsView failures", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  it("says what happens next when the settings file will not load", async () => {
+    // Every card is gated on `settings`, so this failure blanks the screen: it
+    // is the one error here with nothing else left to look at
+    // (docs/DESIGN_SYSTEM.md §3).
+    onCommand("get_settings", () => {
+      throw "settings.json is malformed";
+    });
+    render(
+      <NavigationProvider>
+        <UpdaterProvider>
+          <ModelStatusProvider>
+            <SettingsView />
+          </ModelStatusProvider>
+        </UpdaterProvider>
+      </NavigationProvider>,
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't load settings: settings.json is malformed");
+    expect(
+      screen.getByText("Your settings file is untouched. Leave Settings and come back to try again."),
+    ).toBeInTheDocument();
+  });
+
+});
+
 describe("SettingsView layout", () => {
   beforeEach(() => {
     resetTauriMocks();
@@ -374,7 +405,12 @@ describe("SettingsView appearance", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       /the settings file is read only/,
     );
-    // Not flipped optimistically: the control still shows what is on disk.
+    // Not flipped optimistically: the control still shows what is on disk. The
+    // next-step line is what says so in words, since the row alone leaves "did
+    // that stick?" open (docs/DESIGN_SYSTEM.md §3).
+    expect(
+      screen.getByText("Your previous setting is still in effect. Change it again to retry."),
+    ).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: /Theme/ })).toHaveTextContent(
       "Match the system",
     );

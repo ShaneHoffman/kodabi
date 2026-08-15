@@ -154,7 +154,14 @@ export function SearchView({ query }: Props) {
       </div>
 
       {error ? (
-        <StatusMessage variant="error">Couldn&apos;t search your notes: {error}</StatusMessage>
+        <div className="flex flex-col gap-2">
+          <StatusMessage variant="error">Couldn&apos;t search your notes: {error}</StatusMessage>
+          {/* The field above is still live, so the retry is a keystroke away
+              and nothing was written. */}
+          <p className="text-[11.5px] leading-relaxed text-ink-dim">
+            Your notes are untouched. Edit the search to try again.
+          </p>
+        </div>
       ) : !searchedQuery ? (
         <p className={QUIET_LINE}>Searches every note in full, title and body.</p>
       ) : hits.length === 0 ? (

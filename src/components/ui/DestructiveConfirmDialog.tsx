@@ -19,6 +19,10 @@ type Props = {
   busy: boolean;
   /** An error to show in the dialog, or null. */
   error: string | null;
+  /** What happens next after that error, in the user's terms: what is still
+   * safe and how to get out of it (docs/DESIGN_SYSTEM.md §3). Shown only
+   * alongside `error`, so a caller sets it once rather than per failure. */
+  errorHint?: string;
   /** Runs the destructive action. */
   onConfirm: () => void;
   /** Dismiss without acting: Cancel, Escape, or a scrim press. */
@@ -61,6 +65,11 @@ type Props = {
  * `busy`/`error` state, success behaviour, and error copy, and passes the
  * results down. On confirm this calls `onConfirm`; it never closes itself, so
  * the caller decides what success means (navigate away, refetch, unmount).
+ *
+ * `errorHint` is the one part of the error the dialog lays out rather than the
+ * caller: §3 asks an error to say what happens next, and a sibling line is not
+ * expressible through the `error` string without gluing copy onto a raw
+ * backend tail. The caller still writes both sentences.
  */
 export function DestructiveConfirmDialog({
   title,
@@ -69,6 +78,7 @@ export function DestructiveConfirmDialog({
   busyLabel,
   busy,
   error,
+  errorHint,
   onConfirm,
   onClose,
   children,
@@ -111,9 +121,16 @@ export function DestructiveConfirmDialog({
       <p className="text-[13px] leading-relaxed text-danger">This cannot be undone.</p>
 
       {error && (
-        <StatusMessage variant="error" compact>
-          {error}
-        </StatusMessage>
+        // The pair reads as one block, so it takes its own tighter gap rather
+        // than the dialog's gap-4 between its parts.
+        <div className="flex flex-col gap-2">
+          <StatusMessage variant="error" compact>
+            {error}
+          </StatusMessage>
+          {errorHint && (
+            <p className="text-[11.5px] leading-relaxed text-ink-dim">{errorHint}</p>
+          )}
+        </div>
       )}
 
       <div className="flex items-center justify-end gap-2.5">

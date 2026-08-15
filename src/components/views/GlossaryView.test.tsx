@@ -391,6 +391,10 @@ describe("GlossaryView delete", () => {
     expect(
       await within(dialog).findByText("Couldn't delete the term: file is read-only"),
     ).toBeInTheDocument();
+    // And the half that says where to go from here (docs/DESIGN_SYSTEM.md §3).
+    expect(
+      within(dialog).getByText("The term is still in your glossary. You can try again or cancel."),
+    ).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Delete this term?" })).toBeInTheDocument();
   });
 

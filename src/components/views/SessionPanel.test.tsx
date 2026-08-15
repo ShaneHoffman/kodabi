@@ -259,9 +259,14 @@ describe("SessionPanel", () => {
     await userEvent.click(await screen.findByTestId("session-audio"));
     await userEvent.click(screen.getByTestId("reveal-recording"));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "The recording file is missing.",
-    );
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't reveal the recording:");
+    expect(alert).toHaveTextContent("The recording file is missing.");
+    // Retention racing an open note is the likeliest cause, and it is a
+    // different answer from "press it again" (docs/DESIGN_SYSTEM.md §3).
+    expect(
+      screen.getByText("Retention may have already removed this recording. Otherwise, try again."),
+    ).toBeInTheDocument();
   });
 
   it("does not carry a failed reveal across closing the chip", async () => {
@@ -311,7 +316,14 @@ describe("SessionPanel", () => {
     });
     renderNote();
 
-    expect(await screen.findByRole("alert")).toHaveTextContent("not a session source");
+    // Named, not bare: this used to render the raw backend string as the whole
+    // message, with nothing saying what had failed or what to do about it.
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't read this session's files:");
+    expect(alert).toHaveTextContent("not a session source");
+    expect(
+      screen.getByText("The note itself is unaffected. Reopen it to try again."),
+    ).toBeInTheDocument();
     // The panel exists even when the fetch failed: the testid means "this note
     // has a session", which is the claim a keyword-sourced note has to fail.
     expect(screen.getByTestId("session-artifacts")).toBeInTheDocument();

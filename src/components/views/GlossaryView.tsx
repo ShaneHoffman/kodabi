@@ -202,6 +202,7 @@ export function GlossaryView({ slug }: Props) {
           busyLabel="Deleting…"
           busy={deleteBusy}
           error={deleteError}
+          errorHint="The term is still in your glossary. You can try again or cancel."
           onConfirm={confirmDelete}
           onClose={() => {
             setConfirmingDelete(null);
