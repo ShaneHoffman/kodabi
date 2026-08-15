@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { useXterm, type TerminalStatus } from "../../useXterm";
 import { Button } from "../ui/Button";
+import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
 
 /**
@@ -38,7 +39,7 @@ const STATUS_LINE: Record<TerminalStatus, string> = {
  */
 export function TerminalView() {
   const mount = useRef<HTMLDivElement>(null);
-  const { exit, status, restart } = useXterm(mount);
+  const { exit, startError, status, restart } = useXterm(mount);
 
   return (
     <ViewFrame
@@ -66,12 +67,28 @@ export function TerminalView() {
       <div className="glass-term mt-6 min-h-0 flex-1 overflow-hidden px-5 py-[18px]">
         <div ref={mount} className="h-full w-full" />
       </div>
-      {exit && (
-        <div className="flex items-center gap-2.5 pt-2" role="status">
-          <span className="font-data text-[11px] text-ink-dim">
-            Session ended
-            {exit.code != null && exit.code !== 0 ? ` (exit ${exit.code})` : ""}.
-          </span>
+      {/* The session's state, and the one control that state raises
+          (docs/UI_CONVENTIONS.md §5 — Restart belongs to the block, not to the
+          frame). Gated on `status`, not on `exit`: a session that never started
+          has no exit code, and gating on one left the failed path raising
+          nothing at all — no announcement, and no way back.
+
+          `StatusMessage` rather than a hand-rolled row, so the ARIA role comes
+          from the variant (UI_CONVENTIONS §4): a failure is assertive, because
+          the user did not ask for it, and an ordinary exit is polite. */}
+      {status !== "running" && (
+        <div className="flex items-center gap-2.5 pt-2">
+          {status === "failed" ? (
+            <StatusMessage variant="error" compact>
+              Couldn&apos;t start Claude Code{startError ? `: ${startError}` : ""}. Restart
+              to try again.
+            </StatusMessage>
+          ) : (
+            <StatusMessage variant="status" compact>
+              Session ended
+              {exit?.code != null && exit.code !== 0 ? ` (exit ${exit.code})` : ""}.
+            </StatusMessage>
+          )}
           <Button onClick={restart}>Restart</Button>
         </div>
       )}
