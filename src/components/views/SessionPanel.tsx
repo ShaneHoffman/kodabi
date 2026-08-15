@@ -210,12 +210,19 @@ export function SessionPanel({
         // would do until a click if it sat behind a chip. It names only the
         // transcript even when the audio is gone too, because `audio_path: null`
         // cannot tell "pruned" from "never retained".
-        <p
-          className="mt-2.5 text-[12px] text-ink-faint"
+        //
+        // `empty`, not `status`: the variant fixes the ARIA role, and this is a
+        // standing statement about what the note has rather than something that
+        // just happened — `role="status"` would make a static sentence a live
+        // region, announced on every open (§3).
+        <StatusMessage
+          variant="empty"
+          compact
+          className="mt-2.5"
           data-testid="session-source-pruned"
         >
           The raw transcript for this note is no longer stored.
-        </p>
+        </StatusMessage>
       )}
     </section>
   );

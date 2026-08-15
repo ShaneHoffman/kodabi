@@ -204,10 +204,15 @@ export function ChatView() {
           />
         )}
         {chat.exited && (
-          <div className="flex items-baseline gap-3" role="status">
-            <p className="text-[13.5px] text-ink-dim">
+          // The region is the sentence, not the row: the variant carries the
+          // `role="status"` this div used to hold by hand, and the restart
+          // control stays outside it. Full size rather than `compact`, to sit
+          // in the same register as the empty state above it — both are the
+          // conversation column speaking about the session, not a row's line.
+          <div className="flex items-baseline gap-3">
+            <StatusMessage variant="status">
               Claude Code exited. Start a new chat to continue.
-            </p>
+            </StatusMessage>
             <Button onClick={chat.restart}>Start a new chat</Button>
           </div>
         )}

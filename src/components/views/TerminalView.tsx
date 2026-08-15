@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { useXterm, type TerminalStatus } from "../../useXterm";
 import { Button } from "../ui/Button";
+import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
 
 /**
@@ -67,11 +68,15 @@ export function TerminalView() {
         <div ref={mount} className="h-full w-full" />
       </div>
       {exit && (
-        <div className="flex items-center gap-2.5 pt-2" role="status">
-          <span className="font-data text-[11px] text-ink-dim">
+        // The region is the sentence, not the row: `StatusMessage`'s variant
+        // carries the `role="status"` this div used to hold by hand, and the
+        // Restart control sits outside it rather than being read out as part
+        // of the announcement.
+        <div className="flex items-center gap-2.5 pt-2">
+          <StatusMessage variant="status" compact>
             Session ended
             {exit.code != null && exit.code !== 0 ? ` (exit ${exit.code})` : ""}.
-          </span>
+          </StatusMessage>
           <Button onClick={restart}>Restart</Button>
         </div>
       )}

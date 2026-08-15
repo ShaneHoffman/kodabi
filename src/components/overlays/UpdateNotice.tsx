@@ -1,7 +1,6 @@
 import { formatMegabytes } from "../../models";
 import { useUpdaterStatus } from "../../useUpdaterStatus";
 import { Button } from "../ui/Button";
-import { StatusMessage } from "../ui/StatusMessage";
 
 type Props = {
   onClose: () => void;
@@ -100,11 +99,19 @@ export function UpdateNotice({ onClose }: Props) {
 
       {phase.status === "error" && phase.step !== "check" && (
         <>
-          <StatusMessage variant="error" compact>
+          {/* Not a `StatusMessage`, and that is the argued exception: the
+              container above is already the live region for this overlay, and
+              it has to be — the announcement is meant to carry the reassurance
+              line below as well as the failure, which one message element
+              cannot reach. A `variant="error"` here would nest a second
+              `role="alert"` inside the first and announce the failure twice.
+              This matches `CaptureToast`, where the corner surface likewise
+              owns its region. The register is the primitive's compact one. */}
+          <p className="text-[12px] text-ink-dim">
             {phase.step === "download"
               ? `Couldn't download the update: ${phase.message}`
               : `Couldn't install the update: ${phase.message}`}
-          </StatusMessage>
+          </p>
           {/* Says what was NOT harmed, because a failed self-update is exactly
               the kind of thing a user assumes has broken their install. */}
           <p className="text-[12px] text-ink-dim">
