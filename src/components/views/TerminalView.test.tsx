@@ -207,6 +207,7 @@ describe("TerminalView", () => {
       emitFromBackend("terminal:exit", { code: 1 });
     });
     expect(screen.getByText(/session ended/i)).toBeInTheDocument();
+    const ended = screen.getByRole("status");
 
     onCommand("terminal_restart", () => {
       throw "claude is not on PATH";
@@ -216,5 +217,12 @@ describe("TerminalView", () => {
     const failure = await screen.findByRole("alert");
     expect(failure).toHaveTextContent(/couldn't start claude code/i);
     expect(screen.queryByText(/session ended/i)).not.toBeInTheDocument();
+    // And it is a NEW element, not the exited row with its `role` rewritten.
+    // Both branches are the same component at the same position, so unkeyed
+    // they reconcile into one `<p>` that merely swaps "status" for "alert" —
+    // and a live region carries the politeness it was registered with when it
+    // was inserted, so the assertive role would never take effect. Asserting
+    // the attribute alone cannot tell the two apart; node identity can.
+    expect(failure).not.toBe(ended);
   });
 });

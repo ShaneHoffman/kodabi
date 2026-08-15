@@ -75,16 +75,25 @@ export function TerminalView() {
 
           `StatusMessage` rather than a hand-rolled row, so the ARIA role comes
           from the variant (UI_CONVENTIONS §4): a failure is assertive, because
-          the user did not ask for it, and an ordinary exit is polite. */}
+          the user did not ask for it, and an ordinary exit is polite.
+
+          The keys are what make that second half true. Both branches render the
+          same component at the same position, so without them React reconciles
+          the exited row INTO the failed one: one `<p>` whose `role` mutates from
+          "status" to "alert" in place. A live region is registered with the
+          assistive tech when its node is inserted, so swapping the attribute
+          afterwards downgrades a restart failure to the polite announcement the
+          node was registered with. Distinct keys remount it, which is the only
+          way the assertive role is the one actually in force. */}
       {status !== "running" && (
         <div className="flex items-center gap-2.5 pt-2">
           {status === "failed" ? (
-            <StatusMessage variant="error" compact>
+            <StatusMessage key="failed" variant="error" compact>
               Couldn&apos;t start Claude Code{startError ? `: ${startError}` : ""}. Restart
               to try again.
             </StatusMessage>
           ) : (
-            <StatusMessage variant="status" compact>
+            <StatusMessage key="exited" variant="status" compact>
               Session ended
               {exit?.code != null && exit.code !== 0 ? ` (exit ${exit.code})` : ""}.
             </StatusMessage>
