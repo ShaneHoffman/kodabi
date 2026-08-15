@@ -2,6 +2,7 @@ import { useRef } from "react";
 import { CLAUDE_INSTALL_URL } from "../../claudeMissing";
 import { useXterm, type TerminalStatus } from "../../useXterm";
 import { Button } from "../ui/Button";
+import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
 
 /**
@@ -40,7 +41,7 @@ const STATUS_LINE: Record<TerminalStatus, string> = {
  */
 export function TerminalView() {
   const mount = useRef<HTMLDivElement>(null);
-  const { exit, status, restart } = useXterm(mount);
+  const { exit, startError, status, restart } = useXterm(mount);
 
   return (
     <ViewFrame
@@ -68,33 +69,51 @@ export function TerminalView() {
       <div className="glass-term mt-6 min-h-0 flex-1 overflow-hidden px-5 py-[18px]">
         <div ref={mount} className="h-full w-full" />
       </div>
-      {/* The prerequisite, in the chrome as well as the pane. The pane's copy
-          scrolls away the moment a session does start, and this is the one
-          terminal failure with something for the user to go and do, so the row
-          that offers the retry says what has to be true first. Same shape as
-          the exit row below it, which is this view's established way of pairing
-          a sentence with the action that answers it. */}
-      {status === "missing" && (
-        <div className="flex items-center gap-2.5 pt-2" role="status">
-          <span className="font-data text-[11px] text-ink-dim">
-            Claude Code isn&apos;t installed. Install the claude CLI from{" "}
-            {CLAUDE_INSTALL_URL}.
-          </span>
-          <Button onClick={restart}>Try again</Button>
-        </div>
-      )}
-      {/* Suppressed under `missing`, which is reachable with a stale `exit` in
-          hand: a session that ran and exited, then a restart that never got a
-          process (the CLI went off PATH meanwhile). The row above already
-          carries the account and the retry, and "Session ended" under "not
-          installed" would be a second, contradicting one. */}
-      {exit && status !== "missing" && (
-        <div className="flex items-center gap-2.5 pt-2" role="status">
-          <span className="font-data text-[11px] text-ink-dim">
-            Session ended
-            {exit.code != null && exit.code !== 0 ? ` (exit ${exit.code})` : ""}.
-          </span>
-          <Button onClick={restart}>Restart</Button>
+      {/* The session's state, and the one control that state raises
+          (docs/UI_CONVENTIONS.md §5 — Restart belongs to the block, not to the
+          frame). Gated on `status`, not on `exit`: a session that never started
+          has no exit code, and gating on one left the failed path raising
+          nothing at all — no announcement, and no way back. `status` is one
+          value, so "missing", "failed", and "exited" are already mutually
+          exclusive — a restart that finds no CLI clears the stale `exit` it
+          inherited (`useXterm`), so there is never a second, contradicting row
+          underneath.
+
+          `StatusMessage` rather than a hand-rolled row, so the ARIA role comes
+          from the variant (UI_CONVENTIONS §4): a failure is assertive, because
+          the user did not ask for it, and an ordinary exit is polite. "missing"
+          gets its own branch and copy: it is the one terminal failure with a
+          fix the user can go and act on, so it names the remedy — installing
+          the CLI — rather than an OS error string, and its button reads "Try
+          again" rather than "Restart", since nothing here ever ran.
+
+          The keys are what make the role half true. All three branches render
+          the same component at the same position, so without them React
+          reconciles a status swap INTO the previous row: one `<p>` whose `role`
+          mutates in place. A live region is registered with the assistive tech
+          when its node is inserted, so swapping the attribute afterwards
+          downgrades a restart failure to the polite announcement the node was
+          registered with. Distinct keys remount it, which is the only way the
+          right role is the one actually in force. */}
+      {status !== "running" && (
+        <div className="flex items-center gap-2.5 pt-2">
+          {status === "missing" ? (
+            <StatusMessage key="missing" variant="error" compact>
+              Claude Code isn&apos;t installed. Install the claude CLI from{" "}
+              {CLAUDE_INSTALL_URL}, then try again.
+            </StatusMessage>
+          ) : status === "failed" ? (
+            <StatusMessage key="failed" variant="error" compact>
+              Couldn&apos;t start Claude Code{startError ? `: ${startError}` : ""}. Restart
+              to try again.
+            </StatusMessage>
+          ) : (
+            <StatusMessage key="exited" variant="status" compact>
+              Session ended
+              {exit?.code != null && exit.code !== 0 ? ` (exit ${exit.code})` : ""}.
+            </StatusMessage>
+          )}
+          <Button onClick={restart}>{status === "missing" ? "Try again" : "Restart"}</Button>
         </div>
       )}
     </ViewFrame>

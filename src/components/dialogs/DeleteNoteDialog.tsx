@@ -55,6 +55,7 @@ export function DeleteNoteDialog({ id, noteTitle, sessionBacked, onClose, onDele
       busyLabel="Deleting…"
       busy={deleting}
       error={error}
+      errorHint="The note is still in your vault. You can try again or cancel."
       onConfirm={confirm}
       onClose={onClose}
     >

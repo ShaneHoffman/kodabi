@@ -233,6 +233,23 @@ describe("InboxView", () => {
     expect(screen.getByText("Vendor follow-up")).toBeInTheDocument();
   });
 
+  it("says what failed and what happens next when the listing errors", async () => {
+    serveVault([PLANNING]);
+    onCommand("list_notes", () => {
+      throw "the vault is unreadable";
+    });
+
+    renderInbox();
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't load the inbox: the vault is unreadable");
+    expect(
+      screen.getByText("Your captured notes are still on disk. Reopen this view to try again."),
+    ).toBeInTheDocument();
+    // A failed read is not an empty inbox: the first-run copy must stay away.
+    expect(screen.queryByTestId("inbox-list")).not.toBeInTheDocument();
+  });
+
   /* The 14px between rows is not a `gap` on the list: it is an animated margin
    * on each slot, so it can collapse with the row that owns it. That makes it
    * the one piece of pure LAYOUT living inside a motion variant table, and a
@@ -568,6 +585,10 @@ describe("InboxView", () => {
     // failed, so the raw backend string is never the whole line
     // (docs/DESIGN_SYSTEM.md §3).
     expect(await screen.findByText(/no such project: briarwood-golf/)).toBeInTheDocument();
+    // And the other half: where the note is now and how to retry.
+    expect(
+      screen.getByText("The note is still in your inbox. Pick a project again to retry."),
+    ).toBeInTheDocument();
     // The note is still unfiled, so it must still be actionable: row present
     // and the trigger back (not stuck on "Filing…").
     expect(screen.getByText("Quarterly planning")).toBeInTheDocument();

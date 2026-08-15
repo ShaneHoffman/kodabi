@@ -97,7 +97,7 @@ function retryFailureMessage(raw: string): string {
   if (isClaudeMissingMessage(raw)) {
     return `Retry needs Claude Code: Kodabi's AI features run through the claude CLI, and it isn't installed. Install it from ${CLAUDE_INSTALL_URL}, then retry.`;
   }
-  return `Retry failed: ${raw}`;
+  return `Couldn't retry this capture: ${raw}`;
 }
 
 /**
@@ -146,9 +146,18 @@ function CaptureSummary({
         </p>
       )}
       {rowError && (
-        <StatusMessage variant="error" compact>
-          {rowError}
-        </StatusMessage>
+        <>
+          <StatusMessage variant="error" compact>
+            {rowError}
+          </StatusMessage>
+          {/* One sentence for all four verbs, and the only safety copy a
+              DISMISSED row gets: the sentence above it is gated on !dismissed,
+              so a failed restore would otherwise say nothing about what
+              survived. The row's buttons stay live, which is the retry. */}
+          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
+            The capture is unchanged and still listed. You can try again.
+          </p>
+        </>
       )}
     </div>
   );
@@ -159,12 +168,6 @@ function CaptureSummary({
 type SessionAction = {
   path: string;
   verb: "dismiss" | "restore" | "delete";
-};
-
-const ACTION_LABEL: Record<SessionAction["verb"], string> = {
-  dismiss: "Dismiss",
-  restore: "Restore",
-  delete: "Delete",
 };
 
 /**
@@ -279,7 +282,7 @@ export function NeedsAttentionView() {
       .catch((err: unknown) => {
         setRowErrors((current) => ({
           ...current,
-          [path]: `${ACTION_LABEL[verb]} failed: ${String(err)}`,
+          [path]: `Couldn't ${verb} this capture: ${String(err)}`,
         }));
       })
       .finally(() => setActionPending(null));
@@ -332,9 +335,16 @@ export function NeedsAttentionView() {
       }
     >
       {error ? (
-        <StatusMessage variant="error">
-          Couldn&apos;t list captured sessions: {error}
-        </StatusMessage>
+        <div className="flex flex-col gap-2">
+          <StatusMessage variant="error">
+            Couldn&apos;t list captured sessions: {error}
+          </StatusMessage>
+          {/* Nothing here is retried automatically, so the recordings being
+              intact is the load-bearing half. */}
+          <p className="text-[11.5px] leading-relaxed text-ink-dim">
+            Your captures are still on disk. Reopen this view to try again.
+          </p>
+        </div>
       ) : (
         <>
           {activeSessions.length === 0 ? (
@@ -535,6 +545,7 @@ export function NeedsAttentionView() {
               busyLabel="Deleting…"
               busy={isRunning("delete", confirmingSession.path)}
               error={deleteError}
+              errorHint="The capture and its recording are still on disk. You can try again or cancel."
               onConfirm={confirmDelete}
               onClose={() => {
                 setConfirmingDeletePath(null);

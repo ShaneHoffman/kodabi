@@ -133,19 +133,41 @@ export function ChatView() {
       <ChatFrame>
         {chat.startError &&
           (isClaudeMissingMessage(chat.startError) ? (
-            <div className="flex items-baseline gap-3">
+            // Detected with certainty, so the message already carries the
+            // remedy: no hedge sentence needed under it, unlike the fallback
+            // below.
+            <div className="flex flex-col items-start gap-2">
               <StatusMessage variant="error">
                 Couldn&apos;t start chat: Kodabi&apos;s chat runs through Claude
                 Code, and Claude Code isn&apos;t installed on this computer.
                 Install the claude CLI from {CLAUDE_INSTALL_URL}, then try
                 again.
               </StatusMessage>
-              <Button onClick={chat.restart}>Try again</Button>
+              <Button className="mt-1" onClick={chat.restart}>
+                Try again
+              </Button>
             </div>
           ) : (
-            <StatusMessage variant="error">
-              Couldn&apos;t start chat: {chat.startError}
-            </StatusMessage>
+            <div className="flex flex-col items-start gap-2">
+              <StatusMessage variant="error">
+                Couldn&apos;t start chat: {chat.startError}
+              </StatusMessage>
+              {/* Every other `chat_open` failure: writing the MCP config,
+                  resolving the vault, and creating the chat transcript can all
+                  fail before the process is ever spawned. The branch above
+                  already ruled out a missing CLI, so this no longer guesses at
+                  that cause the way it once did. */}
+              <p className="text-[11.5px] leading-relaxed text-ink-dim">
+                Nothing was lost. Restarting tries the connection again.
+              </p>
+              {/* The composer lives below this early return, so without a
+                  control here the screen is the app's one dead end: the same
+                  `restart` the exited state offers is the way out
+                  (DESIGN_SYSTEM §3 leaves the data reachable). */}
+              <Button className="mt-1" onClick={chat.restart}>
+                Try again
+              </Button>
+            </div>
           ))}
       </ChatFrame>
     );

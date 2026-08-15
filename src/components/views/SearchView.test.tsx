@@ -109,6 +109,25 @@ describe("SearchView", () => {
     expect(invokedCommands()).not.toContain("search_notes");
   });
 
+  it("says what failed and what happens next when the index errors", async () => {
+    const user = userEvent.setup();
+    onCommand("search_notes", () => {
+      throw "index is rebuilding";
+    });
+    const field = await openSearch(user);
+
+    await user.type(field, "tournament");
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent("Couldn't search your notes: index is rebuilding");
+    expect(
+      screen.getByText("Your notes are untouched. Edit the search to try again."),
+    ).toBeInTheDocument();
+    // The retry the copy promises: the field is still there, still holding the
+    // query (docs/DESIGN_SYSTEM.md §3 leaves the data reachable).
+    expect(field).toHaveValue("tournament");
+  });
+
   it("asks the index for one page and renders the hits it returns", async () => {
     const user = userEvent.setup();
     const calls: unknown[] = [];
