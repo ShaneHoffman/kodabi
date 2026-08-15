@@ -52,7 +52,7 @@ Glossary-cleanup post-pass pulled forward into Phase 1.
 - [ ] Onboarding: first project, glossary seeding, hotkey setup, consent nudge
 - [ ] README with screenshots, architecture doc (trimmed founding doc), contribution guide — `README.md` (with screenshots) and `CONTRIBUTING.md` are live at the repo root; the architecture doc is the one piece still owed
 - [x] Windows installer / signing — shipped (#156–#160): `.github/workflows/release.yml` builds the NSIS installer and signs every shipped binary through Azure Artifact Signing, authenticating with a secretless GitHub OIDC federated credential, and `tauri-plugin-updater` verifies each release with its own minisign signature. The Azure side and the repository variables that switch it on are configured; v0.1.0 and v0.2.0 both shipped signed, with auto-update verified end to end
-- [ ] Crash reporting decision (opt-in only)
+- [x] Crash reporting decision (opt-in only) — decided 2026-08-14: v1 ships none, and the app captures no crash data at all (no panic hook, no crash log, so there is nothing to report even if reporting existed). Any future reporting is strictly opt-in, local-capture-first, and never transmits user-derived content automatically. Evidence and revisit triggers: `docs/decisions/crash-reporting.md`
 - [ ] Launch: GitHub, relevant communities — **deliberately held.** The release pipeline is ready; launch waits on more feature work first (the 2026-08-14 Phase 4 gap audit, tickets #183–#203)
 
 ## Phase 5 — Parking Lot (growth candidates)
