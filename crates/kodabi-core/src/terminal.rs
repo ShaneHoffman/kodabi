@@ -510,27 +510,41 @@ mod tests {
         let stream = SessionStream::new();
         let stream_for_thread = stream.clone();
         let (tx, rx) = std::sync::mpsc::channel();
+        let (events_tx, events_rx) = std::sync::mpsc::channel();
 
         let handle = std::thread::spawn(move || {
-            let mut events = Vec::new();
             run_coalescer(
                 rx,
                 limits,
                 &stream_for_thread,
                 || Some(0),
-                |batch| events.push(batch.to_vec()),
+                |batch| {
+                    let _ = events_tx.send(batch.to_vec());
+                },
                 |_| {},
             );
-            events
         });
 
+        // The gap is a rendezvous, not a sleep: the second chunk goes in only
+        // once the first has actually been flushed, so the split can't hinge on
+        // the pump thread being scheduled inside a fixed window. The receive
+        // itself is the assertion — nothing but the quiet-window flush can
+        // produce an event here, since neither `max_event_bytes` nor the
+        // disconnect has been reached. Its timeout is a failure bound, not a
+        // synchronisation delay.
         tx.send(b"a".to_vec()).expect("pump is live");
-        std::thread::sleep(Duration::from_millis(150));
+        let first = events_rx
+            .recv_timeout(Duration::from_secs(5))
+            .expect("the quiet window flushes the first chunk on its own");
         tx.send(b"b".to_vec()).expect("pump is live");
         drop(tx);
 
-        let events = handle.join().expect("pump thread finishes");
-        assert_eq!(events, vec![b"a".to_vec(), b"b".to_vec()]);
+        handle.join().expect("pump thread finishes");
+        // The sink's sender died with the pump thread, so this drains and stops.
+        let rest: Vec<Vec<u8>> = events_rx.iter().collect();
+
+        assert_eq!(first, b"a".to_vec());
+        assert_eq!(rest, vec![b"b".to_vec()]);
     }
 
     #[test]
@@ -656,10 +670,33 @@ mod tests {
 
     #[test]
     fn pump_reader_stops_when_the_receiver_is_gone() {
+        use std::sync::atomic::AtomicUsize;
+
+        /// A source that keeps yielding, so returning at all is evidence of the
+        /// send check rather than of the reader running dry. Bounded anyway, so
+        /// a regression fails the count below instead of hanging the suite.
+        struct CountingReader(Arc<AtomicUsize>);
+        impl Read for CountingReader {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                if self.0.fetch_add(1, Ordering::Relaxed) >= 8 {
+                    return Ok(0);
+                }
+                buf.fill(1);
+                Ok(buf.len())
+            }
+        }
+
+        let reads = Arc::new(AtomicUsize::new(0));
         let (tx, rx) = std::sync::mpsc::channel();
         drop(rx);
 
         // Returns rather than spinning on a dead channel.
-        pump_reader(std::io::Cursor::new(vec![1u8; READ_BUF * 2]), tx);
+        pump_reader(CountingReader(Arc::clone(&reads)), tx);
+
+        assert_eq!(
+            reads.load(Ordering::Relaxed),
+            1,
+            "the first failed send must end the pump, not the end of the source"
+        );
     }
 }
