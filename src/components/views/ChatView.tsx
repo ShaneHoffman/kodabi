@@ -133,8 +133,13 @@ export function ChatView() {
             <StatusMessage variant="error">
               Couldn&apos;t start chat: {chat.startError}
             </StatusMessage>
+            {/* Hedged, because `chat_open` fails for more than a missing CLI:
+                writing the MCP config, resolving the vault, and creating the
+                chat transcript all fail before the process is ever spawned, and
+                naming one cause for all of them sends a user with a working
+                install off to reinstall it. */}
             <p className="text-[11.5px] leading-relaxed text-ink-dim">
-              Nothing was lost. Chat needs the Claude Code CLI to be installed.
+              Nothing was lost. This usually means the Claude Code CLI is not installed.
             </p>
             {/* The composer lives below this early return, so without a control
                 here the screen is the app's one dead end: the same `restart`

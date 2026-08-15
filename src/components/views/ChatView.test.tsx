@@ -536,7 +536,7 @@ describe("ChatView", () => {
     // And what happens next: the composer is below this branch, so without a
     // control here the screen would be a dead end (docs/DESIGN_SYSTEM.md §3).
     expect(
-      screen.getByText(/Nothing was lost\. Chat needs the Claude Code CLI/),
+      screen.getByText(/Nothing was lost\. This usually means the Claude Code CLI/),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
