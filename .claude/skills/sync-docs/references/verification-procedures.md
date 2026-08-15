@@ -142,8 +142,9 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 ## Anchor 6 — The Grove theme ↔ docs/DESIGN_SYSTEM.md
 
 - **Source of truth:** the `@theme` block and the `.day` / `.hc` blocks in
-  `src/index.css` (the tokens, the keyframes, the two variants), plus the two Grove
-  guards in `eslint.config.js`'s `no-restricted-syntax` block.
+  `src/index.css` (the tokens, the keyframes, the two variants), plus the three Grove
+  guards and the copy guard in `eslint.config.js`'s `no-restricted-syntax` block
+  (colour literals, `.css` imports, the reduced-motion partner, the em dash).
 - **Mirror:** `docs/DESIGN_SYSTEM.md` — the type table in §1, the radius ladder in §5,
   the motion vocabulary and the reduced-motion swap table in §4, the measured contrast
   tables in §6, and the enforcement claims in §7. Also `docs/UI_CONVENTIONS.md` §3,
@@ -172,9 +173,15 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   table is *missing*, which is the argument §6 makes for `switch-on` (a switch's track
   reports a state and clears 3:1 at no alpha that belongs on a card, so the knob's
   travel is the readout and the fill is a hint worth strengthening).
-- **Nothing here is machine-checked, unlike the pre-Grove anchor.** The old token
-  guard asserted theme-block coverage in `pnpm test`; Grove retired it along with the
-  stylesheets it scanned. Every check above is this auditor's job in full.
+- **Almost nothing here is machine-checked, unlike the pre-Grove anchor.** The old
+  token guard asserted theme-block coverage in `pnpm test`; Grove retired it along with
+  the stylesheets it scanned. The one exception is half of verify-item 1:
+  `src/motionGuardParity.test.ts` pins the *moving* column of §4's swap table to the
+  eslint motion guard's token list, in both directions, so a moving animation added to
+  the table without a guard (or vice versa) fails `pnpm test`. It says nothing about
+  the partner column, nothing about the opacity-only tokens, and nothing about
+  `@keyframes`-to-`--animate-*` coverage — so item 1's other halves, and every check
+  above, are still this auditor's job in full.
 - **`src/index.css` should be the only stylesheet in the repo.** The pre-Grove layer
   (`design/tokens.css`, the `@theme inline` bridge, the per-component `*.css` files,
   `src/fonts.ts` and the `@fontsource` dependencies) was deleted by the Grove cleanup.

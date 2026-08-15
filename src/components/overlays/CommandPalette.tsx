@@ -48,8 +48,7 @@ const PALETTE_SURFACE = clsx(
   "glass-palette fixed inset-x-0 top-[12%] mx-auto h-fit w-[min(480px,calc(100vw-2rem))]",
   "origin-top p-2 font-ui outline-hidden",
   "animate-[materialize_200ms_var(--ease-out-strong)] motion-reduce:animate-[fade-in_200ms_ease_both]",
-  "data-ending-style:animate-[dissolve_110ms_ease_forwards]",
-  "motion-reduce:data-ending-style:animate-[fade-out_110ms_ease_forwards]",
+  "data-ending-style:animate-[dissolve_110ms_ease_forwards] motion-reduce:data-ending-style:animate-[fade-out_110ms_ease_forwards]",
 );
 
 /** A row. `data-[selected=true]` and not `data-selected`, because cmdk writes

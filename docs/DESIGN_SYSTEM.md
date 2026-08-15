@@ -575,6 +575,22 @@ What remains machine-checked, in `pnpm exec eslint . --max-warnings=0`:
   one. A new import is possible, but it has to be argued in a comment. Keeping the count at one is
   also what keeps the token-shadowing trap closed — `@theme` emits into `@layer theme`, and an
   unlayered declaration of the same name would silently win (UI_CONVENTIONS §6).
+- **No moving animation without its `motion-reduce:` partner in the same class string.** The token
+  list is the moving column of §4's swap table above, and it is checked against that table by
+  `pnpm test` (below) rather than copied by hand. It reads the four shapes a class string is written
+  in — a `className` literal, a `className` template, a `*_CLASS` const, and a `clsx()` / `cva()`
+  call — in both the utility and arbitrary-value spellings, so `animate-[dissolve_110ms_ease_forwards]`
+  counts and `animate-halo-still` correctly does not. **What it cannot see is most of the rule.** It
+  does not know whether the partner you wrote is the *right* one, whether it survives specificity
+  (UI_CONVENTIONS §3 — the failure that leaves a live swap silently dead), or that `breathe`, `halo`
+  and the two `drift`s are applied from `src/index.css` rather than a className and are reached by no
+  selector at all. It holds one fact: a movement in a class string is accompanied by something for
+  reduced motion. That is the fact that shipped wrong.
+- **No em dashes in copy the user reads.** `.claude/rules/copy-style.md`, as JSX text and string
+  literals under `src/`. Its scope is that rule's scope: the test harness and the dev-only gallery
+  are exempt (a `describe()` title is not language the user reads), and comments are out of reach by
+  construction, since a comment is not an AST node. Repo docs — this file included — were never in
+  scope.
 
 And in `pnpm test`:
 
@@ -584,6 +600,10 @@ And in `pnpm test`:
   window at night.
 - **[`src/contrast.test.ts`](../src/contrast.test.ts)** pins that `.hc` is the OR of the two requests,
   which is what makes the switch additive.
+- **[`src/motionGuardParity.test.ts`](../src/motionGuardParity.test.ts)** pins the swap table above
+  to the eslint guard's token list, in both directions. The guard cannot read this document, so a
+  row added here — or retired from here — would otherwise leave it checking a set the doctrine no
+  longer holds, silently and forever. It pins the *list*, never which partner is correct.
 - **[`PrimitiveGallery.test.tsx`](../src/components/dev/PrimitiveGallery.test.tsx)** renders every
   Grove **control** under all four grounds (night, day, `.hc`, `.hc.day`). Controls, not all ten of
   UI_CONVENTIONS §4's primitives: `ViewFrame` is a page scaffold with nothing to show in a catalogue
