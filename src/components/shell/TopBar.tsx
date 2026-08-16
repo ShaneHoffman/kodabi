@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { CAPTURE_TOGGLE_SHORTCUT } from "../../captureControl";
 import { captureLabel, markMode } from "../../captureLabel";
 import { isCaptureActive, useCaptureState } from "../../useCaptureState";
 import { PALETTE_SHORTCUT_LABEL } from "../../useCommandPalette";
@@ -142,6 +143,15 @@ export function TopBar({ onOpenPalette }: Props) {
   const { state: models } = useModelStatus();
   const modelsDetail = isTranscriptionReady(models) ? null : "Transcription not ready yet";
 
+  // The one place in the main window that teaches the capture chord, and the
+  // reason it is here rather than on a first-run banner: it sits on the very
+  // indicator the chord operates, so the lesson and the thing it is about are
+  // the same object. Permanent on every idle pill by design, the way an editor
+  // keeps its shortcut in the placeholder rather than retiring it once — the
+  // pill hides its detail while live, so the hint is gone exactly when it stops
+  // being true.
+  const shortcutHint = `${CAPTURE_TOGGLE_SHORTCUT} starts a capture`;
+
   const maximized = useWindowMaximized();
 
   return (
@@ -186,7 +196,13 @@ export function TopBar({ onOpenPalette }: Props) {
         // and it only reaches an idle pill anyway — the detail slot is hidden
         // while live, which is exactly right here. Nothing is wrong during the
         // recording; it is the transcription afterwards that is waiting.
-        detail={label.detail ?? modelsDetail}
+        //
+        // The chord hint is the last rung, so the chain reads failure, then
+        // models, then teaching: something wrong always outranks something to
+        // learn. That ordering is also what keeps first run right — while the
+        // models download, the more urgent fact holds the slot, and the hint
+        // takes over the moment transcription is ready.
+        detail={label.detail ?? modelsDetail ?? shortcutHint}
         elapsedSeconds={elapsedSeconds}
       />
 

@@ -21,6 +21,20 @@ import { invoke } from "@tauri-apps/api/core";
  * value, not to a placeholder nobody reads.
  */
 
+/**
+ * The OS-global chord that toggles capture, mirroring `DEFAULT_TOGGLE_SHORTCUT`
+ * in `src-tauri/src/capture_control.rs`. The backend registers it at startup and
+ * offers no rebinding command, so this is a claim about a real accelerator
+ * rather than a suggestion: every surface that teaches the chord reads it from
+ * here, and the spelling is the accelerator's own (unspaced), matching how the
+ * palette prints `Ctrl+Alt+Space`.
+ *
+ * It *toggles* — the same press stops a running capture — which is why the
+ * surfaces that print it have to stay honest about what a press would do right
+ * now.
+ */
+export const CAPTURE_TOGGLE_SHORTCUT = "Ctrl+Shift+K";
+
 /** Begin a capture. Resolves once the backend has accepted the request; the
  * phase reaching `listening` arrives separately on `capture:state`. */
 export function startCapture(): Promise<void> {

@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { CAPTURE_TOGGLE_SHORTCUT } from "../../captureControl";
 import { backendCopy } from "../../errorCopy";
 import {
   buildRetentionPolicy,
@@ -31,13 +32,6 @@ import { Select } from "../ui/Select";
 import { StatusMessage } from "../ui/StatusMessage";
 import { Switch } from "../ui/Switch";
 import { ViewFrame } from "../ui/ViewFrame";
-
-/** The capture toggle's global shortcut, mirroring `DEFAULT_TOGGLE_SHORTCUT`
- * in `src-tauri/src/capture_control.rs`. Rendered rather than editable: the
- * backend registers it at startup and offers no rebinding command yet, and a
- * field that silently fails to save is worse than a value that plainly is
- * what it is. */
-const CAPTURE_SHORTCUT = "Ctrl + Shift + K";
 
 /** How long a "that worked" line stays on screen.
  *
@@ -748,9 +742,14 @@ export function SettingsView() {
           <Card title="Capture">
             <Row label="Global shortcut" hint="Starts and stops a capture from anywhere.">
               {/* Mono, because it is a key sequence — the same voice the
-                  palette hint and every path in the app uses. */}
+                  palette hint and every path in the app uses.
+
+                  Rendered rather than editable: the backend registers the chord
+                  at startup and offers no rebinding command yet, and a field
+                  that silently fails to save is worse than a value that plainly
+                  is what it is. */}
               <span className="font-data text-[12.5px] text-ink-read">
-                {CAPTURE_SHORTCUT}
+                {CAPTURE_TOGGLE_SHORTCUT}
               </span>
             </Row>
 

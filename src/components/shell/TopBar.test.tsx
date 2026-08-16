@@ -201,6 +201,86 @@ describe("TopBar", () => {
     expect(screen.getByRole("status")).not.toHaveTextContent("Transcription not ready");
   });
 
+  it("teaches the capture chord on an idle pill with nothing else to say", async () => {
+    // The one surface in the main window that names the hotkey, so a first-run
+    // user meets it on the indicator the hotkey operates rather than only in a
+    // Settings row they have no reason to open.
+    serveVault();
+    onCommand("model_status", () => ({
+      ready: true,
+      bytesRequired: 0,
+      bytesPresent: 0,
+      sets: [],
+      downloading: false,
+      modelsDir: "C:\\app\\.models",
+    }));
+    renderShell();
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("Ctrl+Shift+K starts a capture");
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("Not listening");
+  });
+
+  it("drops the chord hint once the capture it teaches is running", async () => {
+    // Teaching outranks nothing: the detail slot closes while live, so the hint
+    // is gone exactly when pressing the chord would stop a capture rather than
+    // start one.
+    serveVault();
+    onCommand("model_status", () => ({
+      ready: true,
+      bytesRequired: 0,
+      bytesPresent: 0,
+      sets: [],
+      downloading: false,
+      modelsDir: "C:\\app\\.models",
+    }));
+    renderShell();
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("Ctrl+Shift+K starts a capture");
+    });
+
+    act(() => {
+      emitFromBackend(CAPTURE_STATE_EVENT, {
+        phase: "listening",
+        sources: { loopback: "live", microphone: "live" },
+      });
+    });
+
+    expect(screen.getByRole("status")).not.toHaveTextContent("Ctrl+Shift+K");
+  });
+
+  it("keeps a real problem ahead of the chord hint", async () => {
+    // The detail slot holds one line, so the chain has to rank: something wrong
+    // always outranks something to learn.
+    serveVault();
+    onCommand("model_status", () => ({
+      ready: true,
+      bytesRequired: 0,
+      bytesPresent: 0,
+      sets: [],
+      downloading: false,
+      modelsDir: "C:\\app\\.models",
+    }));
+    renderShell();
+    expect(await screen.findByRole("status")).toHaveTextContent("Not listening");
+
+    act(() => {
+      emitFromBackend(CAPTURE_STATE_EVENT, {
+        phase: "idle",
+        sources: { loopback: "failed", microphone: "failed" },
+      });
+    });
+
+    await waitFor(
+      () => {
+        expect(screen.getByRole("status")).toHaveTextContent("Capture failed to start");
+      },
+      { timeout: 2000 },
+    );
+    expect(screen.getByRole("status")).not.toHaveTextContent("Ctrl+Shift+K");
+  });
+
   it("minimizes, and closes to the tray", async () => {
     const user = userEvent.setup();
     serveVault();

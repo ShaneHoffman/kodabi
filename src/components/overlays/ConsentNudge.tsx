@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { startCapture } from "../../captureControl";
 import { backendCopy } from "../../errorCopy";
 import {
   acknowledgeConsent,
@@ -64,7 +64,7 @@ export function ConsentNudge({ onClose }: Props) {
       return;
     }
     try {
-      await invoke("start_capture");
+      await startCapture();
       onClose();
     } catch (err) {
       setError(
