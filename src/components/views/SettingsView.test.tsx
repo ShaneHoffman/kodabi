@@ -7,6 +7,7 @@ import { NavigationProvider } from "../providers/NavigationProvider";
 import { NavigationContext } from "../../useNavigation";
 import { UpdaterProvider } from "../providers/UpdaterProvider";
 import type { OverlaySettings, Settings } from "../../useSettings";
+import { CAPTURE_TOGGLE_SHORTCUT, type ShortcutStatus } from "../../captureControl";
 import { INDEX_STATE_EVENT } from "../../events";
 import {
   emitFromBackend,
@@ -68,6 +69,9 @@ function settingsWith(overlay: OverlaySettings): Settings {
   return { ...DEFAULTS, overlay };
 }
 
+/** Both shortcuts bound, which is what a machine with no clash reports. */
+const SHORTCUTS_BOUND: ShortcutStatus = { captureToggle: true, quickCapture: true };
+
 /**
  * Render with `get_settings` seeded and wait for the load to land.
  *
@@ -75,9 +79,18 @@ function settingsWith(overlay: OverlaySettings): Settings {
  * so every control is reachable the moment the settings arrive. The wait is on
  * a card rather than the view's own heading, because the heading renders before
  * `get_settings` resolves and would let an assertion run against an empty page.
+ *
+ * `shortcut_status` is seeded to the everything-worked answer rather than left
+ * unrouted: the hook swallows a rejection either way, so both keep the rest of
+ * this file green, but an unrouted command would leave every test asserting
+ * against a status the real app never shows.
  */
-async function renderSeeded(settings: Settings = DEFAULTS) {
+async function renderSeeded(
+  settings: Settings = DEFAULTS,
+  shortcuts: ShortcutStatus = SHORTCUTS_BOUND,
+) {
   onCommand("get_settings", () => settings);
+  onCommand("shortcut_status", () => shortcuts);
   const result = render(
     // NavigationProvider because the Glossary card's Manage row navigates: in
     // the app this view is always mounted inside it, under MainContent.
@@ -226,6 +239,62 @@ describe("SettingsView capture overlay", () => {
       expect(screen.getByRole("switch", { name: label })).toBeInTheDocument();
       expect(screen.getByText(label)).toBeInTheDocument();
     }
+  });
+});
+
+describe("SettingsView global shortcut", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  it("says so when the chord never bound, and names the way that works", async () => {
+    // The failure this row exists for: registration is best-effort at startup,
+    // so another app holding the chord leaves the key dead while this screen —
+    // the one place a user would look — went on printing it as fact.
+    await renderSeeded(DEFAULTS, { captureToggle: false, quickCapture: true });
+
+    expect(await within(card("Capture")).findByRole("alert")).toHaveTextContent(
+      "Unavailable: another app is using this shortcut. Use the tray icon to start a capture.",
+    );
+  });
+
+  it("keeps showing the chord it could not bind", async () => {
+    // Naming the taken chord is what tells someone where to go looking, so the
+    // failure is additive: the row says which key, and the foot says it is not
+    // answering.
+    await renderSeeded(DEFAULTS, { captureToggle: false, quickCapture: true });
+
+    expect(within(card("Capture")).getByText(CAPTURE_TOGGLE_SHORTCUT)).toBeInTheDocument();
+  });
+
+  it("stays quiet when the chord bound", async () => {
+    await renderSeeded(DEFAULTS, SHORTCUTS_BOUND);
+
+    expect(within(card("Capture")).getByText(CAPTURE_TOGGLE_SHORTCUT)).toBeInTheDocument();
+    expect(within(card("Capture")).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("says nothing when it could not find out", async () => {
+    // A read that failed is not evidence the chord is broken. Warning here
+    // would put a scare in front of every user whose status read hiccuped, on
+    // the strength of nothing.
+    onCommand("get_settings", () => DEFAULTS);
+    onCommand("shortcut_status", () => {
+      throw "unreachable";
+    });
+    render(
+      <NavigationProvider>
+        <UpdaterProvider>
+          <ModelStatusProvider>
+            <SettingsView />
+          </ModelStatusProvider>
+        </UpdaterProvider>
+      </NavigationProvider>,
+    );
+    await screen.findByRole("region", { name: "Privacy" });
+
+    expect(within(card("Capture")).getByText(CAPTURE_TOGGLE_SHORTCUT)).toBeInTheDocument();
+    expect(within(card("Capture")).queryByRole("alert")).not.toBeInTheDocument();
   });
 });
 

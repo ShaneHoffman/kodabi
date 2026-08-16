@@ -18,6 +18,7 @@ import {
   type Theme,
 } from "../../useSettings";
 import { useNavigation } from "../../useNavigation";
+import { useShortcutStatus } from "../../useShortcutStatus";
 import { applyContrast, readContrast } from "../../contrast";
 import { applyReduceMotion, readReduceMotion } from "../../reduceMotion";
 import { INDEX_STATE_EVENT } from "../../events";
@@ -421,6 +422,7 @@ export function SettingsView() {
   const {
     state: { appVersion },
   } = useUpdaterStatus();
+  const shortcutStatus = useShortcutStatus();
 
   // Raw input string so the field can be cleared mid-edit rather than snapping
   // to 0; `buildRetentionPolicy` parses and clamps it on apply.
@@ -743,14 +745,37 @@ export function SettingsView() {
           </Card>
 
           <Card title="Capture">
-            <Row label="Global shortcut" hint="Starts and stops a capture from anywhere.">
+            <Row
+              label="Global shortcut"
+              hint="Starts and stops a capture from anywhere."
+              // Registration is best-effort at startup, so this row is the one
+              // place a refused chord can stop being a silent lie: the key does
+              // nothing, and without this the screen a user would check to find
+              // that out says it works. Withheld while the status is unknown
+              // (the read has not landed, or failed) — `useShortcutStatus`
+              // explains why no evidence must not read as bad news.
+              foot={
+                shortcutStatus !== null &&
+                !shortcutStatus.captureToggle && (
+                  <StatusMessage variant="error" compact>
+                    Unavailable: another app is using this shortcut. Use the tray icon to
+                    start a capture.
+                  </StatusMessage>
+                )
+              }
+            >
               {/* Mono, because it is a key sequence — the same voice the
                   palette hint and every path in the app uses.
 
                   Rendered rather than editable: the backend registers the chord
                   at startup and offers no rebinding command yet, and a field
                   that silently fails to save is worse than a value that plainly
-                  is what it is. */}
+                  is what it is.
+
+                  Shown unchanged even when the bind failed: it names *which*
+                  chord is spoken for, which is what tells the user where to
+                  look. The foot carries the state — fading or striking the
+                  chord would put that claim in the metadata register. */}
               <span className="font-data text-[12.5px] text-ink-read">
                 {CAPTURE_TOGGLE_SHORTCUT}
               </span>

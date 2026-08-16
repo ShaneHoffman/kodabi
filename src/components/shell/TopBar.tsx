@@ -7,6 +7,7 @@ import { useDebouncedValue } from "../../useDebouncedValue";
 import { useElapsed } from "../../useElapsed";
 import { useModelStatus, isTranscriptionReady } from "../../useModelStatus";
 import { useNavigation } from "../../useNavigation";
+import { useShortcutStatus } from "../../useShortcutStatus";
 import { useWindowMaximized } from "../../useWindowMaximized";
 import { closeWindow, minimizeWindow, toggleMaximizeWindow } from "../../windowControls";
 import { ListenPill } from "./ListenPill";
@@ -161,10 +162,20 @@ export function TopBar({ onOpenPalette }: Props) {
   // Both clocks are read — the live state and the debounced one the headline
   // beside it speaks from — so the hint can neither outlive a capture's last
   // engaged moment nor appear next to a headline still saying one is running.
+  //
+  // Withheld a second way: the chord only binds if the OS granted it at
+  // startup, and teaching a key that does nothing is worse than teaching
+  // nothing. When it was refused the slot keeps its job and names the path that
+  // does work, which is the same fallback Settings points at. An unknown status
+  // (the read has not landed, or failed) keeps the chord — see
+  // `useShortcutStatus` on why silence is not evidence.
+  const shortcutBound = useShortcutStatus()?.captureToggle ?? true;
   const shortcutHint =
     engaged || isCaptureActive(settledCapture.phase)
       ? null
-      : `${CAPTURE_TOGGLE_SHORTCUT} starts a capture`;
+      : shortcutBound
+        ? `${CAPTURE_TOGGLE_SHORTCUT} starts a capture`
+        : "The tray icon starts a capture";
 
   const maximized = useWindowMaximized();
 

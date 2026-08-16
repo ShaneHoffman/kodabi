@@ -222,6 +222,47 @@ describe("TopBar", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Not listening");
   });
 
+  it("teaches the tray instead when the chord never bound", async () => {
+    // Registration is best-effort at startup, so the chord is a claim the OS
+    // can have refused. The teaching slot keeps teaching either way: what
+    // changes is which path it points at, since a key that does nothing is a
+    // worse lesson than none.
+    serveVault();
+    onCommand("shortcut_status", () => ({ captureToggle: false, quickCapture: true }));
+    onCommand("model_status", () => ({
+      ready: true,
+      bytesRequired: 0,
+      bytesPresent: 0,
+      sets: [],
+      downloading: false,
+      modelsDir: "C:\\app\\.models",
+    }));
+    renderShell();
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("The tray icon starts a capture");
+    });
+    expect(screen.getByRole("status")).not.toHaveTextContent("Ctrl+Shift+K");
+  });
+
+  it("keeps the chord when the bind is confirmed", async () => {
+    serveVault();
+    onCommand("shortcut_status", () => ({ captureToggle: true, quickCapture: true }));
+    onCommand("model_status", () => ({
+      ready: true,
+      bytesRequired: 0,
+      bytesPresent: 0,
+      sets: [],
+      downloading: false,
+      modelsDir: "C:\\app\\.models",
+    }));
+    renderShell();
+
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("Ctrl+Shift+K starts a capture");
+    });
+  });
+
   it("drops the chord hint once the capture it teaches is running", async () => {
     // Teaching outranks nothing, but only while the teaching is true: the hint
     // is withheld on every engaged pill, and a recording one is the plainest
