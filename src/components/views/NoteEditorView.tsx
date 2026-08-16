@@ -520,6 +520,12 @@ function Tool({
       onClick={(event) => {
         if (event.detail === 0) onApply();
       }}
+      // `focus-ring-inset` on a control that does *not* fill its container, so
+      // it is an argued exception to §2's rule rather than the case that rule
+      // names. The toolbar is `p-1`, 4px, and these buttons sit 2px apart: an
+      // outward ring at +2px would cross the gap onto its neighbour and hang
+      // over the glass edge, which is the same clipping the inset exists to
+      // avoid, only in miniature. Inset keeps the ring on the button.
       className={clsx(
         "focus-ring-inset rounded-[6px] px-2 py-1 font-ui text-[12px] leading-none text-ink",
         "transition-colors duration-140 ease-out-strong hover:bg-wash active:bg-wash-hover",
