@@ -336,9 +336,10 @@ those two utilities on a row exactly as `Menu.test.tsx` counts these.
   carrying both the Grove chrome and base-ui's wiring, not a button inside a button.
 - **`DestructiveConfirmDialog` is presentational and never closes itself.** The caller owns the async
   handler, `busy` / `error` state, and what success means. Being mounted is being open: every caller
-  renders it conditionally. Cancel holds initial focus; the confirm is the `danger` box, which is
-  the one place in the app that red is allowed — on the confirm inside a confirmation, never on the
-  button that opens one.
+  renders it conditionally. Cancel holds initial focus; the confirm is the `danger` box: red belongs
+  on the confirm inside a confirmation, never on the button that opens one. (The title bar's close
+  button on hover is the one argued exception to red's scope, and DESIGN_SYSTEM §2 owns that
+  argument — it is not a licence for a second one.)
 - **Its copy is a structure, not prose.** Title asks the question ("Delete this note?"); `subject`
   names the thing in its own truncating strip; `children` is one short consequence line; the
   permanence warning is the dialog's OWN line in the danger tint, so no caller can forget it; the
@@ -410,16 +411,32 @@ moving where things live. The one addition is the transport bar below.*
 
 ### The shell is a transport bar over two regions, and a view fills one
 
-`AppShell` renders a transport bar above the dock and a single `<main>`, with the capture toast, the
-command palette and the consent nudge overlaid on top rather than docked beside. `MainContent` is a
-flat switch and every destination renders into that one main slot. **There is no inspector, no split,
-and no third rail.** A view that needs more room takes depth, not width.
+`AppShell` renders a transport bar above the dock and a single `<main>`, with everything else
+overlaid on top rather than docked beside: the command palette, the consent nudge, the model-download
+nudge, and a **notice corner** pinned bottom right that stacks the update notice above the capture
+toast. That corner is one container rather than two independently-positioned overlays, because "rare"
+is not "never simultaneous" and a failed capture can coincide with a waiting release; it is empty and
+zero-size when neither has anything to say, so it never eats a click. `MainContent` is a flat switch
+and every destination renders into that one main slot. **There is no inspector, no split, and no
+third rail.** A view that needs more room takes depth, not width.
 
-The transport bar holds what belongs to the WINDOW rather than to any view: the wordmark (which is
-also the way home), the listening pill, and the two pieces of chrome (Commands, Settings). It is not
-a third region and no view draws into it. The listening pill lives there for one reason: it is the
-app's on-air surface, and it must never move. Below, in a dock that grows, it shared a rail with
-destinations and sat under a list whose length it depended on.
+The transport bar holds what belongs to the WINDOW rather than to any view, and the list is closed:
+the wordmark (which is also the way home), the listening pill, and a right-hand cluster of two
+groups with a short hairline rule between them — the app's chrome (Commands, Settings, inside an
+`App` nav landmark) and then, outside it, the window's own caption buttons (minimize,
+maximize/restore, close). It is not a third region and no view draws into it.
+
+**The caption buttons are there because the main window is undecorated.** This bar *is* the title
+bar: it carries `data-tauri-drag-region` on its own element, so the background drags the window and
+double-click maximizes it while every child keeps its own pointer behaviour, and the three buttons
+Windows would have drawn are drawn here instead (`TopBar.tsx`). That is also why the shape no longer
+says which controls belong to the app and which to the window — the five sit in one uniform, quiet
+and square, so the rule between them has to carry the whole separation. Only one of the five breaks
+that uniform, and only on hover: the close button's red is DESIGN_SYSTEM §2's one argued exception.
+
+The listening pill lives here for one reason: it is the app's on-air surface, and it must never
+move. Below, in a dock that grows, it shared a rail with destinations and sat under a list whose
+length it depended on.
 
 The dock therefore holds destinations only, in three groups: the vault-wide three (Inbox, Needs
 attention, Search), the folders, and the two tools under a hairline (Chat, Terminal).
