@@ -254,7 +254,7 @@ describe("SettingsView global shortcut", () => {
     await renderSeeded(DEFAULTS, { captureToggle: false, quickCapture: true });
 
     expect(await within(card("Capture")).findByRole("alert")).toHaveTextContent(
-      "Unavailable: another app is using this shortcut. Use the tray icon to start a capture.",
+      "Unavailable: another app is using this shortcut. Use the tray menu to start a capture.",
     );
   });
 

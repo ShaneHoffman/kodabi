@@ -754,11 +754,17 @@ export function SettingsView() {
               // that out says it works. Withheld while the status is unknown
               // (the read has not landed, or failed) — `useShortcutStatus`
               // explains why no evidence must not read as bad news.
+              //
+              // The fallback is the tray *menu*, matching the TopBar's hint:
+              // the icon's left click shows the main window and its menu is
+              // right-click only (`show_menu_on_left_click(false)` in
+              // `capture_control.rs`), so naming the icon would replace one
+              // dead instruction with another.
               foot={
                 shortcutStatus !== null &&
                 !shortcutStatus.captureToggle && (
                   <StatusMessage variant="error" compact>
-                    Unavailable: another app is using this shortcut. Use the tray icon to
+                    Unavailable: another app is using this shortcut. Use the tray menu to
                     start a capture.
                   </StatusMessage>
                 )

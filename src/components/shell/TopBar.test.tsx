@@ -240,7 +240,7 @@ describe("TopBar", () => {
     renderShell();
 
     await waitFor(() => {
-      expect(screen.getByRole("status")).toHaveTextContent("The tray icon starts a capture");
+      expect(screen.getByRole("status")).toHaveTextContent("The tray menu starts a capture");
     });
     expect(screen.getByRole("status")).not.toHaveTextContent("Ctrl+Shift+K");
   });

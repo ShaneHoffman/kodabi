@@ -169,13 +169,18 @@ export function TopBar({ onOpenPalette }: Props) {
   // does work, which is the same fallback Settings points at. An unknown status
   // (the read has not landed, or failed) keeps the chord — see
   // `useShortcutStatus` on why silence is not evidence.
+  //
+  // The tray *menu*, not the tray icon: the icon is built with
+  // `show_menu_on_left_click(false)` and its left click shows the main window
+  // (`capture_control.rs`), so "the tray icon starts a capture" would swap one
+  // dead instruction for another. Only the menu's Start capture item does it.
   const shortcutBound = useShortcutStatus()?.captureToggle ?? true;
   const shortcutHint =
     engaged || isCaptureActive(settledCapture.phase)
       ? null
       : shortcutBound
         ? `${CAPTURE_TOGGLE_SHORTCUT} starts a capture`
-        : "The tray icon starts a capture";
+        : "The tray menu starts a capture";
 
   const maximized = useWindowMaximized();
 
