@@ -91,14 +91,15 @@ export function AppShell() {
               so it never eats a click. */}
           <div className="fixed right-6 bottom-6 z-50 flex flex-col items-end gap-3">
             {/* Furthest from the corner: it is the least urgent thing here.
-                Deliberately NOT gated on `modelNudgeDismissed`. That flag is
-                not "the model nudge is off screen" — the nudge arms its own
-                confirmation timer before its early returns, so on every launch
-                whose models are already installed it fires `onClose` a couple
-                of seconds in without ever having rendered. Reading it here once
-                hid this notice on the common path, seconds after startup and
-                usually before the release check had even answered. `consentOpen`
-                is a genuine is-open signal and does belong. */}
+                Deliberately NOT gated on `modelNudgeDismissed`. That flag means
+                "the user closed the model nudge", which is not the same as "the
+                model nudge is off screen" — on every launch whose models are
+                already installed the nudge renders nothing at all and never
+                fires `onClose`, so the flag stays false for a dialog that was
+                never there. Either way it is an unrelated dialog, and tying this
+                notice to it once hid the release check behind a decision about
+                model downloads. `consentOpen` is a genuine is-open signal and
+                does belong. */}
             {!consentOpen && !updateNoticeDismissed && (
               <UpdateNotice onClose={() => setUpdateNoticeDismissed(true)} />
             )}

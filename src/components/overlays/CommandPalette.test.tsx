@@ -4,6 +4,7 @@ import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CommandPalette } from "./CommandPalette";
 import { NavigationProvider } from "../providers/NavigationProvider";
+import { NavigationContext } from "../../useNavigation";
 import { onCommand, resetTauriMocks } from "../../test/tauri";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
@@ -134,15 +135,15 @@ describe("CommandPalette", () => {
     const user = userEvent.setup();
     await renderPalette();
     const options = screen.getAllByRole("option");
-    // Inbox, Search notes, Open chat, Open terminal, Settings |
+    // Inbox, Search notes, Open chat, Open terminal, Vault glossary, Settings |
     // briarwood-golf | New note, Quick capture
-    expect(options).toHaveLength(8);
+    expect(options).toHaveLength(9);
     expect(selectedOption()).toHaveTextContent("Inbox");
 
-    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}");
+    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}");
 
-    // The sixth row is the first folder, reached with no extra keypress for the
-    // separator in between.
+    // The seventh row is the first folder, reached with no extra keypress for
+    // the separator in between.
     expect(selectedOption()).toHaveTextContent("briarwood-golf");
   });
 
@@ -182,6 +183,30 @@ describe("CommandPalette", () => {
     expect(screen.getAllByRole("option")).toHaveLength(1);
     expect(fallback).toHaveTextContent("Search for “zzzz”");
     expect(fallback).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("offers the vault glossary, which has no other way in but Settings", async () => {
+    // The glossary that biases transcription for every capture belongs to no
+    // folder, so nothing in the sidebar leads to it. Without this row a user has
+    // to already know it lives in Settings.
+    const user = userEvent.setup();
+    const navigate = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <NavigationContext.Provider value={{ view: { kind: "inbox" }, navigate }}>
+        <CommandPalette open onClose={onClose} />
+      </NavigationContext.Provider>,
+    );
+    await screen.findByRole("option", { name: /briarwood-golf/ });
+
+    expect(screen.getByRole("option", { name: /Vault glossary/ })).toHaveTextContent("navigate");
+
+    await user.type(input(), "glossary");
+    await user.keyboard("{Enter}");
+
+    // `slug: null` is the vault-wide one; a slug would be a project's.
+    expect(navigate).toHaveBeenCalledWith({ kind: "glossary", slug: null });
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("runs the selected command and closes", async () => {
