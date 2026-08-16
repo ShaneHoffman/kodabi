@@ -256,6 +256,16 @@ pub fn reap(app: &AppHandle) {
 /// Spawns the PTY, writes the generated MCP config + settings, launches `claude`
 /// wired to them, and starts the reader + coalescer threads.
 fn spawn_session(app: &AppHandle) -> Result<TerminalSession, String> {
+    // Pre-flight, because this is the one `claude` launch whose spawn cannot
+    // report a missing binary: on Windows `base_command` goes through
+    // `cmd.exe /C`, which spawns fine and then prints a shell error into the
+    // PTY, so the view would show "exited" over raw scrollback. Checking PATH
+    // first turns that into a rejection carrying the prerequisite message, on
+    // every platform alike.
+    if !kodabi_llm::program_resolves(&claude_program()) {
+        return Err(kodabi_core::llm::CLAUDE_MISSING_MESSAGE.to_owned());
+    }
+
     let (mcp_path, settings_path) = write_config_files(app)?;
     let kb_root = crate::transcribe::knowledge_base_dir(app)?;
 

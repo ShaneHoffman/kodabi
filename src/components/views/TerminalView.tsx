@@ -20,6 +20,7 @@ const STATUS_LINE: Record<TerminalStatus, string> = {
   running: "claude · kodabi mcp connected",
   exited: "claude · exited",
   failed: "claude · could not start",
+  missing: "claude · not installed",
 };
 
 /**
@@ -71,29 +72,38 @@ export function TerminalView() {
           (docs/UI_CONVENTIONS.md §5 — Restart belongs to the block, not to the
           frame). Gated on `status`, not on `exit`: a session that never started
           has no exit code, and gating on one left the failed path raising
-          nothing at all — no announcement, and no way back.
+          nothing at all — no announcement, and no way back. `status` is one
+          value, so "missing", "failed", and "exited" are already mutually
+          exclusive — a restart that finds no CLI clears the stale `exit` it
+          inherited (`useXterm`), so there is never a second, contradicting row
+          underneath.
 
           `StatusMessage` rather than a hand-rolled row, so the ARIA role comes
           from the variant (UI_CONVENTIONS §4): a failure is assertive, because
-          the user did not ask for it, and an ordinary exit is polite.
+          the user did not ask for it, and an ordinary exit is polite. "missing"
+          keeps its own key and button: it is the one terminal failure with a
+          fix the user can go and act on, and the backend already words it with
+          the remedy — installing the CLI — so its button reads "Try again"
+          rather than "Restart", since nothing here ever ran.
 
-          The keys are what make that second half true. Both branches render the
-          same component at the same position, so without them React reconciles
-          the exited row INTO the failed one: one `<p>` whose `role` mutates from
-          "status" to "alert" in place. A live region is registered with the
-          assistive tech when its node is inserted, so swapping the attribute
-          afterwards downgrades a restart failure to the polite announcement the
-          node was registered with. Distinct keys remount it, which is the only
-          way the assertive role is the one actually in force. */}
+          The keys are what make the role half true. All three states render
+          the same component at the same position, so without them React
+          reconciles a status swap INTO the previous row: one `<p>` whose `role`
+          mutates in place. A live region is registered with the assistive tech
+          when its node is inserted, so swapping the attribute afterwards
+          downgrades a restart failure to the polite announcement the node was
+          registered with. Distinct keys remount it, which is the only way the
+          right role is the one actually in force. */}
       {status !== "running" && (
         <div className="flex items-center gap-2.5 pt-2">
           {/* `startError` is a whole sentence when there is one (`useXterm`
               words it, naming the Restart button beside this line), so it is
-              rendered as-is rather than behind a prefix. The fallback covers
-              the one case that has no message to show: a failure raised
-              without one. */}
-          {status === "failed" ? (
-            <StatusMessage key="failed" variant="error" compact>
+              rendered as-is rather than behind a prefix — for "missing" it is
+              the backend's own prerequisite message, install URL included.
+              The fallback covers the one case that has no message to show: a
+              failure raised without one. */}
+          {status === "missing" || status === "failed" ? (
+            <StatusMessage key={status} variant="error" compact>
               {startError ?? "Couldn't start Claude Code. Restart to try again."}
             </StatusMessage>
           ) : (
@@ -102,7 +112,7 @@ export function TerminalView() {
               {exit?.code != null && exit.code !== 0 ? ` (exit ${exit.code})` : ""}.
             </StatusMessage>
           )}
-          <Button onClick={restart}>Restart</Button>
+          <Button onClick={restart}>{status === "missing" ? "Try again" : "Restart"}</Button>
         </div>
       )}
     </ViewFrame>

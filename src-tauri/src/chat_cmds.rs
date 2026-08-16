@@ -652,8 +652,11 @@ fn spawn_session(app: &AppHandle) -> Result<ChatSessionState, String> {
         })
         .map_err(|err| crate::user_errors::reported("chat_open", err, CHAT_START_FAILED))?;
 
-    let (child, events) = spawn_chat(&config, &mcp_path, &chat_id, &kb_root)
-        .map_err(|err| crate::user_errors::reported("chat_open", err, CHAT_START_FAILED))?;
+    let (child, events) = spawn_chat(&config, &mcp_path, &chat_id, &kb_root).map_err(|err| {
+        // A genuinely missing CLI passes through as the prerequisite message
+        // (already the user's words); every other spawn failure is replaced.
+        crate::user_errors::reported_or_claude_missing("chat_open", err, CHAT_START_FAILED)
+    })?;
     let child = Arc::new(child);
 
     let shared = Arc::new(SharedChat {

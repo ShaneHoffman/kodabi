@@ -67,6 +67,7 @@ import {
   onCommand,
   resetTauriMocks,
 } from "../../test/tauri";
+import { CLAUDE_MISSING_MESSAGE } from "../../test/claudeMissing";
 import { TerminalView } from "./TerminalView";
 
 const SNAPSHOT = { running: true, scrollback: "", cols: 80, rows: 24 };
@@ -156,6 +157,42 @@ describe("TerminalView", () => {
     expect(term.writes.length).toBeGreaterThan(before);
   });
 
+  it("names the missing prerequisite in the header, the pane, and the retry", async () => {
+    // The backend pre-flights PATH, so a machine without the CLI rejects
+    // `terminal_open` rather than opening a PTY that prints a shell error.
+    // Nothing here should read as the session having run and died.
+    onCommand("terminal_open", () => {
+      throw CLAUDE_MISSING_MESSAGE;
+    });
+    render(<TerminalView />);
+
+    expect(
+      await screen.findByText("claude · not installed"),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Claude Code isn't installed/)).toHaveTextContent(
+      /docs\.claude\.com/,
+    );
+    const written = latestTerminal().writes.join("");
+    expect(written).toContain("Claude Code isn't installed");
+    expect(written).not.toContain("Could not start Claude Code:");
+    expect(screen.queryByText(/session ended/i)).not.toBeInTheDocument();
+  });
+
+  it("retries the session once the CLI is installed", async () => {
+    onCommand("terminal_open", () => {
+      throw CLAUDE_MISSING_MESSAGE;
+    });
+    render(<TerminalView />);
+    await screen.findByText("claude · not installed");
+
+    await userEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(invokedCommands()).toContain("terminal_restart");
+    await waitFor(() =>
+      expect(screen.getByText("claude · kodabi mcp connected")).toBeInTheDocument(),
+    );
+    expect(screen.queryByText(/Claude Code isn't installed/)).not.toBeInTheDocument();
+  });
+
   it("offers a restart after the session exits", async () => {
     render(<TerminalView />);
     act(() => {
@@ -169,6 +206,29 @@ describe("TerminalView", () => {
       expect(screen.queryByText(/session ended/i)).not.toBeInTheDocument(),
     );
     expect(screen.getByText("claude · kodabi mcp connected")).toBeInTheDocument();
+  });
+
+  it("drops the exit row when the restart finds no CLI to run", async () => {
+    // The CLI goes off PATH while a session is up, so the exit the view is
+    // holding is real but stale. One account of the state, not two: the
+    // prerequisite row owns the retry from here.
+    render(<TerminalView />);
+    act(() => {
+      emitFromBackend("terminal:exit", { code: 0 });
+    });
+    expect(screen.getByText(/session ended/i)).toBeInTheDocument();
+
+    onCommand("terminal_restart", () => {
+      throw CLAUDE_MISSING_MESSAGE;
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Restart" }));
+
+    await screen.findByText("claude · not installed");
+    expect(screen.queryByText(/session ended/i)).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Restart" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
 
   // The bug this pins: the failed-to-start path set `status` but left `exit`

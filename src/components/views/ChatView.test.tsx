@@ -12,6 +12,7 @@ import {
   onCommand,
   resetTauriMocks,
 } from "../../test/tauri";
+import { CLAUDE_MISSING_MESSAGE } from "../../test/claudeMissing";
 import type { ChatEntry, ChatNoteRef, ChatSnapshot } from "../../chat";
 import { citationsFor } from "../../chatCitations";
 import { NavigationContext, type View } from "../../useNavigation";
@@ -569,6 +570,34 @@ describe("ChatView", () => {
     await user.click(screen.getByRole("button", { name: "Try again" }));
 
     await waitFor(() => expect(restarts).toBe(1));
+  });
+
+  it("names the missing prerequisite, and offers the retry that follows installing it", async () => {
+    const user = userEvent.setup();
+    // A string, as the command boundary sends it: `chat_cmds` passes the
+    // prerequisite message through whole (`user_errors`), the spawn error's
+    // Display prefix already stripped on the Rust side.
+    onCommand("chat_open", () => {
+      throw CLAUDE_MISSING_MESSAGE;
+    });
+    render(
+      <NavigationContext.Provider value={{ view: { kind: "chat" }, navigate }}>
+        <ChatView />
+      </NavigationContext.Provider>,
+    );
+
+    const message = await screen.findByText(/Claude Code isn't installed/);
+    expect(message).toHaveTextContent(/docs\.claude\.com/);
+    // The spawn error itself has no place on screen: it names a file the user
+    // never asked about, and the sentence above already names the remedy.
+    expect(screen.queryByText(/failed to spawn/)).not.toBeInTheDocument();
+
+    // Installing it is done outside the app, so the way back in is a retry
+    // rather than a restart of something that never ran.
+    onCommand("chat_restart", () => snapshot());
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    expect(invokedCommands()).toContain("chat_restart");
+    await screen.findByRole("region", { name: "Chat" });
   });
 
   // ---------- citations ----------

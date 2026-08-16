@@ -15,11 +15,20 @@
 //! e.g. `--bare`, which is deliberately never used here since it would
 //! silently break subscription login).
 //!
-//! On Windows, an npm-installed `claude` is typically a `.cmd` shim.
-//! `std::process::Command` resolves and invokes it safely on its own
-//! (Rust >= 1.77.2 shells `.cmd`/`.bat` targets through `cmd.exe` internally
-//! with correct escaping — the fix for CVE-2024-24576), so no manual
-//! `cmd /C` wrapping is needed here.
+//! On Windows, an npm-installed `claude` is typically a `.cmd` shim, and that
+//! is the one install shape this crate cannot spawn: the PATH search behind
+//! `std::process::Command` appends only `.exe` to a bare name, so a machine
+//! whose only `claude` is `claude.cmd` fails here with `ErrorKind::NotFound`
+//! while having Claude Code installed. (Rust >= 1.77.2 does *invoke* a
+//! `.cmd`/`.bat` safely, shelling it through `cmd.exe` with correct escaping —
+//! the fix for CVE-2024-24576 — but that is about invocation once the name has
+//! resolved, not about resolving a bare name to it. The embedded terminal hits
+//! neither problem: it runs `cmd.exe /C claude`, which honours `PATHEXT`.)
+//!
+//! No manual `cmd /C` wrapping here, so on such a machine the headless passes
+//! fail. What must not follow is telling the user Claude Code is missing when
+//! it is not — see [`is_missing_claude`], which confirms absence against
+//! `PATHEXT` before the prerequisite message is used.
 
 pub mod chat;
 
@@ -179,7 +188,7 @@ fn invoke(config: &ClaudeConfig, request: &LlmRequest) -> Result<String, LlmRunE
         .clone()
         .unwrap_or_else(|| PathBuf::from("claude"));
 
-    let mut command = hidden_command(program);
+    let mut command = hidden_command(program.clone());
     command
         .arg("-p")
         .arg("--output-format")
@@ -204,9 +213,19 @@ fn invoke(config: &ClaudeConfig, request: &LlmRequest) -> Result<String, LlmRunE
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let child = command
-        .spawn()
-        .map_err(|err| LlmRunError::Spawn(err.to_string()))?;
+    // A missing `claude` is the one spawn failure with a remedy the user can
+    // act on, and it is what a fresh install hits first (the CLI is a
+    // user-installed prerequisite), so it gets its own variant here rather
+    // than reaching the toast as an OS error string. Only *this* spawn site
+    // maps it: the other `Spawn` producers below (empty stdout, wait failure,
+    // timeout) are all cases where the binary was found and ran.
+    let child = command.spawn().map_err(|err| {
+        if is_missing_claude(&err, &program) {
+            LlmRunError::ClaudeMissing
+        } else {
+            LlmRunError::Spawn(err.to_string())
+        }
+    })?;
 
     let output = wait_with_timeout(child, &request.prompt, config.timeout)?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -316,6 +335,89 @@ fn hide_console_window(command: &mut Command) {
 
 #[cfg(not(windows))]
 fn hide_console_window(_command: &mut Command) {}
+
+/// Whether the spawn failure `err` means Claude Code is genuinely absent, and
+/// so may be reported with `CLAUDE_MISSING_MESSAGE`.
+///
+/// `ErrorKind::NotFound` is necessary but **not sufficient**, which is the
+/// whole reason this exists: per the module docs, a bare `claude` that only
+/// exists as an npm `claude.cmd` fails that way on Windows while being
+/// installed. Claiming "Claude Code isn't installed" there would be flatly
+/// wrong — the same machine runs `claude` in the embedded terminal — so
+/// absence is confirmed against `PATHEXT` via [`program_resolves`] before the
+/// prerequisite message is used, and anything else stays the OS error it is.
+pub(crate) fn is_missing_claude(err: &std::io::Error, program: &std::path::Path) -> bool {
+    err.kind() == std::io::ErrorKind::NotFound && !program_resolves(program.as_os_str())
+}
+
+/// Whether `program` would resolve at spawn time, reading `PATH` (and, on
+/// Windows, `PATHEXT`) from the environment.
+///
+/// Two callers, for two different reasons. The embedded terminal **cannot**
+/// learn this from its spawn at all: it launches through `cmd.exe /C claude`
+/// on Windows (portable-pty's `CommandBuilder` executes the program directly
+/// and so cannot run a `.cmd` shim), so a missing `claude` spawns `cmd.exe`
+/// *successfully* and only surfaces as a shell error inside the PTY. The spawn
+/// sites in this crate do get `ErrorKind::NotFound` directly, but that error
+/// over-reports absence on Windows, so they read this through
+/// [`is_missing_claude`] to tell the two apart.
+pub fn program_resolves(program: &std::ffi::OsStr) -> bool {
+    let dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|path| std::env::split_paths(&path).collect())
+        .unwrap_or_default();
+    resolve_program(program, &dirs, &path_extensions()).is_some()
+}
+
+/// The suffixes a bare program name may carry. `""` (the name as given) always
+/// leads; on Windows `PATHEXT` supplies the rest, since an npm-installed
+/// `claude` is a `claude.cmd` that `PATH` alone never matches.
+fn path_extensions() -> Vec<String> {
+    let mut extensions = vec![String::new()];
+    if cfg!(windows) {
+        let raw = std::env::var("PATHEXT").unwrap_or_else(|_| ".COM;.EXE;.BAT;.CMD".to_owned());
+        extensions.extend(
+            raw.split(';')
+                .map(str::trim)
+                .filter(|ext| !ext.is_empty())
+                .map(str::to_owned),
+        );
+    }
+    extensions
+}
+
+/// The pure half of [`program_resolves`]: looks `program` up against explicit
+/// `dirs` and `exts` instead of the environment, so it is testable anywhere.
+///
+/// A name carrying a separator (`C:\tools\claude.exe`, `./claude`) is an
+/// explicit path and is checked as one, never searched — matching how the OS
+/// treats it at spawn. Existence, not executability, is the test: this is a
+/// pre-flight, and the real spawn stays the authority on whether the file runs.
+pub fn resolve_program(
+    program: &std::ffi::OsStr,
+    dirs: &[PathBuf],
+    exts: &[String],
+) -> Option<PathBuf> {
+    let as_path = std::path::Path::new(program);
+    if as_path.components().count() > 1 {
+        return first_existing(as_path, exts);
+    }
+    dirs.iter()
+        .find_map(|dir| first_existing(&dir.join(as_path), exts))
+}
+
+/// The first of `candidate` + each extension that exists as a file.
+fn first_existing(candidate: &std::path::Path, exts: &[String]) -> Option<PathBuf> {
+    exts.iter().find_map(|ext| {
+        let path = if ext.is_empty() {
+            candidate.to_path_buf()
+        } else {
+            let mut name = candidate.as_os_str().to_os_string();
+            name.push(ext);
+            PathBuf::from(name)
+        };
+        path.is_file().then_some(path)
+    })
+}
 
 /// Envelope shape from `claude -p --output-format json`. On failure, the
 /// message lands in `result` itself (there is no separate `error` field);
@@ -477,5 +579,171 @@ mod tests {
         let err = parse_envelope("not json").unwrap_err();
 
         assert!(matches!(err, LlmRunError::ClaudeError(_)));
+    }
+
+    #[test]
+    fn a_missing_binary_is_reported_as_the_prerequisite_it_is() {
+        // An explicit path that cannot exist yields `ErrorKind::NotFound` on
+        // every platform, which is the same error a bare `claude` missing from
+        // PATH produces.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = ClaudeConfig {
+            binary: Some(dir.path().join("no-such-claude")),
+            ..ClaudeConfig::default()
+        };
+
+        let err = invoke(
+            &config,
+            &LlmRequest {
+                system_prompt: "sys".to_owned(),
+                prompt: "hi".to_owned(),
+            },
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, LlmRunError::ClaudeMissing), "got {err:?}");
+    }
+
+    #[test]
+    fn a_not_found_spawn_of_a_program_that_exists_is_not_called_missing() {
+        // The npm-shim case, which is the reason `NotFound` alone can't decide
+        // this: on Windows the PATH search behind `std::process::Command`
+        // appends only `.exe`, so a machine whose only `claude` is a `.cmd`
+        // gets `NotFound` while Claude Code is installed and the embedded
+        // terminal runs it. Telling that user to go install it is worse than
+        // the OS error was.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let shim = dir.path().join("claude.cmd");
+        std::fs::write(&shim, "").expect("write");
+        let not_found = std::io::Error::new(std::io::ErrorKind::NotFound, "program not found");
+
+        assert!(
+            !is_missing_claude(&not_found, &shim),
+            "a program on disk is not a missing prerequisite"
+        );
+        assert!(is_missing_claude(
+            &not_found,
+            &dir.path().join("no-such-claude")
+        ));
+    }
+
+    #[test]
+    fn a_spawn_failure_that_is_not_not_found_is_never_called_missing() {
+        // Permission denied, ENOEXEC, a full process table: the binary was
+        // found, so whatever went wrong, it wasn't absent.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let denied = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "denied");
+
+        assert!(!is_missing_claude(
+            &denied,
+            &dir.path().join("no-such-claude")
+        ));
+    }
+
+    #[test]
+    fn a_bare_name_resolves_through_a_path_directory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("claude"), "").expect("write");
+
+        let found = resolve_program(
+            std::ffi::OsStr::new("claude"),
+            &[dir.path().to_path_buf()],
+            &[String::new()],
+        );
+
+        assert_eq!(found, Some(dir.path().join("claude")));
+    }
+
+    #[test]
+    fn a_bare_name_resolves_through_an_extension() {
+        // The npm-installed Windows case: only `claude.cmd` is on disk, so the
+        // bare name matches nothing and the extension is what finds it.
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("claude.cmd"), "").expect("write");
+
+        let found = resolve_program(
+            std::ffi::OsStr::new("claude"),
+            &[dir.path().to_path_buf()],
+            &[String::new(), ".CMD".to_owned()],
+        )
+        .expect("should resolve through the extension");
+
+        // Compared case-insensitively: the resolved path carries the casing of
+        // the extension that matched (`.CMD`), which on a case-insensitive
+        // filesystem need not be the casing on disk.
+        assert_eq!(
+            found.to_string_lossy().to_lowercase(),
+            dir.path()
+                .join("claude.cmd")
+                .to_string_lossy()
+                .to_lowercase()
+        );
+    }
+
+    #[test]
+    fn a_name_absent_from_every_directory_does_not_resolve() {
+        let dir = tempfile::tempdir().expect("tempdir");
+
+        let found = resolve_program(
+            std::ffi::OsStr::new("claude"),
+            &[dir.path().to_path_buf()],
+            &[String::new(), ".CMD".to_owned()],
+        );
+
+        assert_eq!(found, None);
+    }
+
+    #[test]
+    fn an_explicit_path_is_checked_rather_than_searched() {
+        // A path with separators must not be looked up in the PATH dirs, even
+        // when a file of the same name sits in one of them.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let elsewhere = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("claude"), "").expect("write");
+        let explicit = elsewhere.path().join("claude");
+
+        let dirs = [dir.path().to_path_buf()];
+        assert_eq!(
+            resolve_program(explicit.as_os_str(), &dirs, &[String::new()]),
+            None
+        );
+
+        std::fs::write(&explicit, "").expect("write");
+        assert_eq!(
+            resolve_program(explicit.as_os_str(), &dirs, &[String::new()]),
+            Some(explicit)
+        );
+    }
+
+    #[test]
+    fn a_directory_is_not_a_resolved_program() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(dir.path().join("claude")).expect("mkdir");
+
+        let found = resolve_program(
+            std::ffi::OsStr::new("claude"),
+            &[dir.path().to_path_buf()],
+            &[String::new()],
+        );
+
+        assert_eq!(found, None);
+    }
+
+    #[test]
+    fn a_program_that_is_really_installed_resolves_against_the_real_path() {
+        // The failure this guards is the expensive direction: the terminal
+        // pre-flights with `program_resolves`, so a wrapper that read PATH or
+        // PATHEXT wrongly would refuse to open a session on machines where
+        // `claude` IS installed. A bare name found only through an extension
+        // (`cmd` -> `cmd.exe`) exercises the same lookup `claude.cmd` needs.
+        let installed = if cfg!(windows) { "cmd" } else { "sh" };
+
+        assert!(
+            program_resolves(std::ffi::OsStr::new(installed)),
+            "{installed} should resolve on PATH"
+        );
+        assert!(!program_resolves(std::ffi::OsStr::new(
+            "kodabi-no-such-program"
+        )));
     }
 }

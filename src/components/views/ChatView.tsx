@@ -124,17 +124,20 @@ export function ChatView() {
     });
 
   // Loading renders nothing (docs/DESIGN_SYSTEM.md §3) — but a session that
-  // could not start at all must still say so.
+  // could not start at all must still say so. A missing `claude` is named
+  // rather than echoed: it is the likeliest reason chat never opens on a fresh
+  // machine, and unlike every other start failure the user can fix it.
   if (!chat.ready) {
     return (
       <ChatFrame>
         {chat.startError && (
           <div className="flex flex-col items-start gap-2">
             {/* The whole sentence, unprefixed: `chat_cmds` words each start
-                failure (`user_errors`), and it hedges for the same reason a
-                second line used to here. `chat_open` fails for more than a
-                missing CLI, so the copy names the CLI as the likely cause
-                without claiming it is the only one. */}
+                failure (`user_errors`). A genuinely missing CLI arrives as
+                the certain prerequisite message, passed through because it is
+                already the user's words; every other failure gets the hedged
+                sentence, which names the CLI as the likely cause without
+                claiming it is the only one. */}
             <StatusMessage variant="error">{chat.startError}</StatusMessage>
             {/* The composer lives below this early return, so without a control
                 here the screen is the app's one dead end: the same `restart`

@@ -433,8 +433,11 @@ fn run(app: &AppHandle, session_path: &Path) -> Result<PathBuf, DistillFailure> 
         },
         // Every remaining variant is a machine fact (a read error carrying a
         // path, a headless-Claude failure, a chunk-limit arithmetic), and this
-        // string is rendered, not logged: the raw goes to stderr instead.
-        other => DistillFailure::Other(crate::user_errors::reported(
+        // string is rendered, not logged: the raw goes to stderr instead. The
+        // one exception is a genuinely missing `claude`, whose message is
+        // already the user's words and passes through whole, so the capture
+        // toast and Needs attention can name the prerequisite.
+        other => DistillFailure::Other(crate::user_errors::reported_or_claude_missing(
             "distill",
             other,
             DISTILL_FAILED,

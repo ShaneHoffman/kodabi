@@ -38,6 +38,26 @@ pub(crate) fn reported(cmd: &str, err: impl std::fmt::Display, sentence: &str) -
     sentence.to_string()
 }
 
+/// [`reported`], except for the one core failure that is already the user's
+/// words: a genuinely missing `claude` CLI.
+///
+/// `kodabi_core::llm::CLAUDE_MISSING_MESSAGE` is finished copy by design — the
+/// frontend recognises the case by the marker phrase inside it
+/// (`src/claudeMissing.ts`) — so when `err`'s `Display` carries it, however
+/// many wrapper prefixes deep, the sentence itself is what the user reads.
+/// Everything else is replaced by `sentence` exactly as [`reported`] would.
+pub(crate) fn reported_or_claude_missing(
+    cmd: &str,
+    err: impl std::fmt::Display,
+    sentence: &str,
+) -> String {
+    let raw = err.to_string();
+    if raw.contains(kodabi_core::llm::CLAUDE_MISSING_MESSAGE) {
+        return reported(cmd, raw, kodabi_core::llm::CLAUDE_MISSING_MESSAGE);
+    }
+    reported(cmd, raw, sentence)
+}
+
 /// Renders a core validation detail as a sentence: capitalized, and terminated.
 ///
 /// Core writes these lowercase and unterminated because they read as a clause
@@ -174,6 +194,25 @@ mod tests {
         assert!(message.starts_with("Two files in your vault claim this note."));
         assert!(!message.contains(r"C:\"));
         assert!(!message.contains('['));
+    }
+
+    /// The missing-CLI message is the one core error that is already the
+    /// user's words, so it passes through whatever wrapper `Display` carries
+    /// it — as the bare sentence, prefix stripped. Anything else is replaced.
+    #[test]
+    fn claude_missing_passes_through_without_its_wrapper_prefix() {
+        let wrapped = format!(
+            "failed to spawn headless Claude Code for chat: {}",
+            kodabi_core::llm::CLAUDE_MISSING_MESSAGE
+        );
+        assert_eq!(
+            reported_or_claude_missing("chat_open", wrapped, "replaced"),
+            kodabi_core::llm::CLAUDE_MISSING_MESSAGE
+        );
+        assert_eq!(
+            reported_or_claude_missing("chat_open", "exit status 1", "replaced"),
+            "replaced"
+        );
     }
 
     /// Validation detail is the user's own input described back to them, so it
