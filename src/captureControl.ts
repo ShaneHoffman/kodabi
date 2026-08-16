@@ -21,6 +21,38 @@ import { invoke } from "@tauri-apps/api/core";
  * value, not to a placeholder nobody reads.
  */
 
+/**
+ * The OS-global chord that toggles capture, mirroring `DEFAULT_TOGGLE_SHORTCUT`
+ * in `src-tauri/src/capture_control.rs`. The backend registers it at startup and
+ * offers no rebinding command, so this is a claim about a real accelerator
+ * rather than a suggestion: every surface that teaches the chord reads it from
+ * here, and the spelling is the accelerator's own (unspaced), matching how the
+ * palette prints `Ctrl+Alt+Space`.
+ *
+ * It *toggles* — the same press stops a running capture — which is why the
+ * surfaces that print it have to stay honest about what a press would do right
+ * now.
+ */
+export const CAPTURE_TOGGLE_SHORTCUT = "Ctrl+Shift+K";
+
+/**
+ * Mirrors `ShortcutStatus` in `src-tauri/src/lib.rs`: whether each OS-global
+ * shortcut actually bound at startup. Registration is best-effort so a chord
+ * another app owns cannot block launch, which means the constant above is a
+ * claim the OS is free to have refused.
+ *
+ * Immutable for the app's lifetime, so there is no event to pair with it.
+ */
+export type ShortcutStatus = {
+  captureToggle: boolean;
+  quickCapture: boolean;
+};
+
+/** Read whether the startup shortcut registrations landed. */
+export function fetchShortcutStatus(): Promise<ShortcutStatus> {
+  return invoke<ShortcutStatus>("shortcut_status");
+}
+
 /** Begin a capture. Resolves once the backend has accepted the request; the
  * phase reaching `listening` arrives separately on `capture:state`. */
 export function startCapture(): Promise<void> {

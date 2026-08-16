@@ -2,7 +2,8 @@
 //! Scope resolution, validation, conflict and rename semantics, and the atomic
 //! file write all live in `kodabi-core`; these commands only own the serde IPC
 //! DTOs, resolve the knowledge-base root, and broadcast the vault refresh.
-//! Errors collapse to a message string, the convention `note_cmds` uses.
+//! Errors cross IPC as user-facing copy (see `user_errors`), with the raw
+//! detail going to stderr, the convention `note_cmds` uses.
 //!
 //! A glossary has two scopes, and `project: None` is not "no scope" but the
 //! **vault-wide** one: the `_glossary.yml` at the knowledge-base root, which is
@@ -16,6 +17,11 @@ use tauri::{AppHandle, Emitter};
 
 use crate::events::VAULT_CHANGED_EVENT;
 use crate::transcribe::knowledge_base_dir;
+use crate::user_errors::glossary_error;
+
+/// The I/O sentence for the three writing commands. A failed write leaves
+/// `_glossary.yml` exactly as it was, which is the reassurance worth carrying.
+const WRITE_FAILED: &str = "Couldn't save the glossary. The file is unchanged; try again.";
 
 /// Broadcasts `vault:changed` after a glossary write. The file watcher filters
 /// non-Markdown paths, so `_glossary.yml` never triggers a reconcile of its own
@@ -115,8 +121,14 @@ pub async fn list_glossary_terms(
     project: Option<String>,
 ) -> Result<GlossaryListingDto, String> {
     let kb = knowledge_base_dir(&app)?;
-    let listing =
-        vault::list_glossary_terms(&kb, project.as_deref()).map_err(|err| err.to_string())?;
+    let listing = vault::list_glossary_terms(&kb, project.as_deref()).map_err(|err| {
+        glossary_error(
+            "list_glossary_terms",
+            err,
+            "Couldn't read the glossary file. The file is untouched; reopen this view to try \
+             again.",
+        )
+    })?;
     Ok(listing.into())
 }
 
@@ -134,7 +146,7 @@ pub async fn add_glossary_term(
     let project = input.project.clone();
     let write =
         vault::upsert_glossary_term(&kb, project.as_deref(), input.into(), OnConflict::Error)
-            .map_err(|err| err.to_string())?;
+            .map_err(|err| glossary_error("add_glossary_term", err, WRITE_FAILED))?;
     broadcast_vault_changed(&app);
     Ok(write.into())
 }
@@ -158,7 +170,7 @@ pub async fn update_glossary_term(
         &input.original_term,
         replacement,
     )
-    .map_err(|err| err.to_string())?;
+    .map_err(|err| glossary_error("update_glossary_term", err, WRITE_FAILED))?;
     broadcast_vault_changed(&app);
     Ok(write.into())
 }
@@ -172,7 +184,7 @@ pub async fn delete_glossary_term(
 ) -> Result<GlossaryTermDto, String> {
     let kb = knowledge_base_dir(&app)?;
     let write = vault::remove_glossary_term(&kb, project.as_deref(), &term)
-        .map_err(|err| err.to_string())?;
+        .map_err(|err| glossary_error("delete_glossary_term", err, WRITE_FAILED))?;
     broadcast_vault_changed(&app);
     Ok(write.into())
 }

@@ -43,12 +43,18 @@ type Props = {
    */
   label: string;
   /**
-   * What is wrong, when something is (`captureLabel().detail`). Shown only
-   * while NOT live, because that is the case the headline cannot carry on its
-   * own: a start whose every source failed reads as a bare "Not listening",
-   * which is indistinguishable from never having pressed anything. Live, the
-   * headline already names what is recording ("Mic only") and the clock has
-   * the slot.
+   * The one line beside the headline: what is wrong when something is
+   * (`captureLabel().detail`), or whatever else the caller ranks in behind it.
+   * Shown only while NOT live, because that is the case the headline cannot
+   * carry on its own: a start whose every source failed reads as a bare "Not
+   * listening", which is indistinguishable from never having pressed anything.
+   * Live, the headline already names what is recording ("Mic only") and the
+   * clock has the slot.
+   *
+   * Note what "live" is and isn't: it means audio is reaching disk, NOT that a
+   * capture is engaged. `starting` and `reconnecting` are engaged and still
+   * render this line, so a caller whose copy is only true of an idle pill has
+   * to gate on the phase itself — TopBar's chord hint does exactly that.
    */
   detail?: string | null;
   /** Whole seconds recorded, from useElapsed. Shown only while live. */

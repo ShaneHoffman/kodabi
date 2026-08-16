@@ -19,10 +19,20 @@ The layers, each with its real home:
    if a command grows a body, the body belongs in kodabi-core).
 2. **Thin `#[tauri::command]` wrapper** — in `src-tauri/src/*_cmds.rs`. It owns
    only the serde IPC DTOs, resolves managed state / paths, calls one core
-   function, and maps the result to a message string:
-   `Result<T, String>` via `.map_err(|e| e.to_string())`. The `note_cmds.rs`
-   module doc is the standard to match ("these commands only own the serde IPC
-   DTOs … Errors collapse to a message string").
+   function, and maps the result to `Result<T, String>` — where the `String` is
+   **user-facing copy**, not the core error's `Display`. The wrapper translates
+   each failure into a sentence naming what failed and what happens next
+   (`docs/DESIGN_SYSTEM.md` §3), passes core validation detail through where it
+   already is the user's words, and logs the raw error to stderr first. The
+   helpers are `src-tauri/src/user_errors.rs` (`reported`, `note_error`,
+   `glossary_error`); a bare `.map_err(|e| e.to_string())` on a command result
+   is a finding. The `note_cmds.rs` module doc is the standard to match.
+
+   This is a boundary the frontend relies on: `src/errorCopy.ts`'s
+   `backendCopy` renders a string rejection verbatim precisely because it is
+   finished copy, so an untranslated wrapper leaks straight to the screen.
+   Core `Display` strings stay developer-facing on purpose — the MCP server
+   reuses them, and its caller wants the path and the OS error.
 3. **Registration** — one entry in the single
    `tauri::generate_handler![…]` list in `src-tauri/src/lib.rs`. An unregistered
    command compiles fine and fails only when the frontend invokes it.

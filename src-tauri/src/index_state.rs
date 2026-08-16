@@ -325,7 +325,9 @@ fn run_rebuild(
         let _ = app.emit(
             INDEX_STATE_EVENT,
             IndexStateEvent::Error {
-                message: "the knowledge base folder could not be resolved".to_string(),
+                message: "Kodabi couldn't find its data folder, so the index wasn't rebuilt. \
+                          Restart the app; your notes on disk are untouched."
+                    .to_string(),
             },
         );
         return;
@@ -350,10 +352,18 @@ fn run_rebuild(
             let _ = app.emit(VAULT_CHANGED_EVENT, ());
         }
         Err(err) => {
+            // This message renders in Settings, so it is copy: the rusqlite
+            // detail behind it goes to the log instead. A failed rebuild leaves
+            // the previous index in place, and the notes were never at risk.
             let _ = app.emit(
                 INDEX_STATE_EVENT,
                 IndexStateEvent::Error {
-                    message: err.to_string(),
+                    message: crate::user_errors::reported(
+                        "rebuild_index",
+                        err,
+                        "Couldn't rebuild the index. Search may be stale but your notes are \
+                         unaffected; try again from here.",
+                    ),
                 },
             );
         }
@@ -514,10 +524,17 @@ pub(crate) fn index_db_path(app: &AppHandle) -> Result<PathBuf, String> {
     if let Some(value) = std::env::var_os(INDEX_DB_ENV).filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(value));
     }
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|err| format!("failed to resolve app data dir for the note index: {err}"))?;
+    // Not internal-only: `terminal_cmds::write_mcp_config` and `chat_cmds`
+    // both resolve this while starting a session, so this string can reach the
+    // terminal pane and the chat view.
+    let dir = app.path().app_data_dir().map_err(|err| {
+        crate::user_errors::reported(
+            "index_db_path",
+            err,
+            "Kodabi couldn't find its data folder. Restart the app; your notes on disk are \
+             untouched.",
+        )
+    })?;
     Ok(dir.join("index.db"))
 }
 

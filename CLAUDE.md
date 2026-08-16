@@ -37,7 +37,7 @@ response never echoes the branch, so verify with
 
 ## Board flow
 
-`Ready → Planning → Executing → Code Review → Open PR → Done`
+`Ready → Planning → Executing → Code Review → Open PR → Merge PR → Done`
 
 (Two column names differ from the stage names used below — pass the **board** name to any
 `kangentic_move_task` call: the To Do lane is **"Ready"**, and the Executing column is literally
@@ -51,7 +51,12 @@ named **"Write Me Code"**.)
   **commits on the task branch — but never pushes.** Findings too large to fix during review are
   reported as skips for the human gate.
 - **Open PR** runs the `/pull-request` skill: push → `gh pr create --base main` → `kangentic_link_pr`.
-  **It never merges** — a human merges on GitHub, then drags the card to Done.
+  **It never merges** — a human reviews the green PR on GitHub, then drags the card to Merge PR.
+- **Merge PR** runs the `/merge-pr` skill: verify the PR is green and mergeable, then
+  `gh pr merge --merge --admin` and delete the remote branch. The `--admin` covers only the
+  ruleset's un-satisfiable one-approval rule, **never** failing checks — a red or conflicted PR is
+  reported and sent back, not fixed here. The drag into the column *is* the merge approval; the
+  skill never moves the card — a human drags it to Done.
 - **Never drag a card back to Ready** — that kills the session and removes its worktree.
   "Request changes" from Code Review goes back to **Executing**.
 
@@ -239,6 +244,8 @@ Task-shaped workflows live under `.claude/skills/`:
 - `frontmatter-validator` — validate a note's YAML frontmatter against the schema.
 - `preview` — launch Tauri dev and smoke-test the app.
 - `pull-request` — open a PR against main (Open PR board column; never merges).
+- `merge-pr` — merge the branch's reviewed, green PR into main (Merge PR board column; merge
+  commit + `--admin` for the approval gap only).
 - `release` — cut a tagged release: bump both version fields, land them, tag main, watch the
   signed build (human-invoked; never publishes the draft Release).
 - `add-tauri-command` — scaffold a command across all layers, then audit parity.

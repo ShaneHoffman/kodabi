@@ -165,4 +165,5 @@ Once the PR is open (and mergeable), hand the human a green PR rather than a pen
   "skip checks" path are out of bounds; your job is a green PR, not a merged one.
 
 ## 12. Stop
-Report the PR URL and a one-line summary of what shipped. Do not merge — a human reviews and merges.
+Report the PR URL and a one-line summary of what shipped. Do not merge — a human reviews the green
+PR and drags the card to **Merge PR**, whose `/merge-pr` skill does the merging.

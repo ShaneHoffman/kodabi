@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { deleteNote } from "../../useNotes";
+import { backendCopy } from "../../errorCopy";
 import { DestructiveConfirmDialog } from "../ui/DestructiveConfirmDialog";
 
 type Props = {
@@ -42,7 +43,9 @@ export function DeleteNoteDialog({ id, noteTitle, sessionBacked, onClose, onDele
       await deleteNote(id);
       onDeleted();
     } catch (err) {
-      setError(`Couldn't delete the note: ${String(err)}`);
+      setError(
+        backendCopy(err, "Couldn't delete the note. It is untouched; try again."),
+      );
       setDeleting(false);
     }
   };
@@ -55,7 +58,6 @@ export function DeleteNoteDialog({ id, noteTitle, sessionBacked, onClose, onDele
       busyLabel="Deleting…"
       busy={deleting}
       error={error}
-      errorHint="The note is still in your vault. You can try again or cancel."
       onConfirm={confirm}
       onClose={onClose}
     >

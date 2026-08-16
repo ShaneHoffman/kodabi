@@ -1,5 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { CAPTURE_TOGGLE_SHORTCUT } from "../../captureControl";
+import { backendCopy } from "../../errorCopy";
 import {
   buildRetentionPolicy,
   DEFAULT_KEEP_DAYS,
@@ -16,10 +18,12 @@ import {
   type Theme,
 } from "../../useSettings";
 import { useNavigation } from "../../useNavigation";
+import { useShortcutStatus } from "../../useShortcutStatus";
 import { applyContrast, readContrast } from "../../contrast";
 import { applyReduceMotion, readReduceMotion } from "../../reduceMotion";
 import { INDEX_STATE_EVENT } from "../../events";
 import { formatMegabytes } from "../../models";
+import { QUICK_CAPTURE_SHORTCUT } from "../../quickCapture";
 import { useModelStatus } from "../../useModelStatus";
 import { useUpdaterStatus } from "../../useUpdaterStatus";
 import { useTauriEvent } from "../../useTauriEvent";
@@ -30,13 +34,6 @@ import { Select } from "../ui/Select";
 import { StatusMessage } from "../ui/StatusMessage";
 import { Switch } from "../ui/Switch";
 import { ViewFrame } from "../ui/ViewFrame";
-
-/** The capture toggle's global shortcut, mirroring `DEFAULT_TOGGLE_SHORTCUT`
- * in `src-tauri/src/capture_control.rs`. Rendered rather than editable: the
- * backend registers it at startup and offers no rebinding command yet, and a
- * field that silently fails to save is worse than a value that plainly is
- * what it is. */
-const CAPTURE_SHORTCUT = "Ctrl + Shift + K";
 
 /** How long a "that worked" line stays on screen.
  *
@@ -135,15 +132,16 @@ function Row({
   );
 }
 
-/** A row's "that worked" line: an ANNOUNCEMENT, not a label, which is why it
- * reads in the data face at the quietest step and why every one of them is on
- * a timer somewhere above. `role="status"` is polite — it accompanies something
- * the user started, so it waits its turn rather than interrupting. */
+/** A row's "that worked" line: an ANNOUNCEMENT, not a label, which is why every
+ * one of them is on a timer somewhere above. It is `StatusMessage`'s `status`
+ * variant — the primitive owns the polite `role="status"`, which waits its turn
+ * rather than interrupting because it accompanies something the user started —
+ * wrapped here only to keep the four call sites on one measure and one offset. */
 function ConfirmLine({ children }: { children: ReactNode }) {
   return (
-    <p role="status" className="mt-1.5 max-w-[56ch] font-data text-[11px] text-ink-dim">
+    <StatusMessage variant="status" compact className="mt-1.5 max-w-[56ch]">
       {children}
-    </p>
+    </StatusMessage>
   );
 }
 
@@ -161,11 +159,14 @@ function micCheckSummary(result: MicCheckResult): string {
 }
 
 /**
- * The way into the vault-wide glossary, which has no other home: every project
- * glossary is reachable from its own project, but the vault one belongs to no
- * folder — and it is the one that matters most, since transcription biases
- * against it for every capture (a session is transcribed before routing has
- * picked a project).
+ * Settings' way into the vault-wide glossary, which has no home of its own:
+ * every project glossary is reachable from its own project, but the vault one
+ * belongs to no folder — and it is the one that matters most, since
+ * transcription biases against it for every capture (a session is transcribed
+ * before routing has picked a project). It is the permanent way in rather than
+ * the only one: the palette's "Vault glossary" command (`useCommands`) is the
+ * front door for someone who does not already know it lives here, and the model
+ * nudge's ready beat points a first-run user at it once.
  *
  * A link, not an editor. Settings rows are label-left / control-right and hold
  * one value each; a list you add to and delete from is a view, so this row
@@ -212,7 +213,13 @@ function RebuildIndexControl() {
     } catch (err) {
       // A command-level failure (index unavailable this session) never emits an
       // event, so surface it here.
-      setState({ status: "error", message: String(err) });
+      setState({
+        status: "error",
+        message: backendCopy(
+          err,
+          "Couldn't start the rebuild. Search may be stale but your notes are unaffected; try again.",
+        ),
+      });
     }
   };
 
@@ -229,7 +236,7 @@ function RebuildIndexControl() {
           )}
           {state.status === "error" && (
             <StatusMessage variant="error" compact>
-              Couldn&apos;t rebuild the index: {state.message}
+              {state.message}
             </StatusMessage>
           )}
         </>
@@ -270,7 +277,7 @@ function ModelsControl() {
           )}
           {state.status === "error" && (
             <StatusMessage variant="error" compact>
-              Couldn&apos;t finish the download: {state.message}
+              {state.message}
             </StatusMessage>
           )}
         </>
@@ -363,11 +370,7 @@ function UpdateControl() {
           {confirmed && <ConfirmLine>You are on the latest version.</ConfirmLine>}
           {phase.status === "error" && (
             <StatusMessage variant="error" compact>
-              {phase.step === "check"
-                ? `Couldn't check for updates: ${phase.message}`
-                : phase.step === "download"
-                  ? `Couldn't download the update: ${phase.message}`
-                  : `Couldn't install the update: ${phase.message}`}
+              {phase.message}
             </StatusMessage>
           )}
         </>
@@ -420,6 +423,7 @@ export function SettingsView() {
   const {
     state: { appVersion },
   } = useUpdaterStatus();
+  const shortcutStatus = useShortcutStatus();
 
   // Raw input string so the field can be cleared mid-edit rather than snapping
   // to 0; `buildRetentionPolicy` parses and clamps it on apply.
@@ -479,7 +483,12 @@ export function SettingsView() {
     try {
       setSettings(await runMicTest());
     } catch (err) {
-      setMicTestError(String(err));
+      setMicTestError(
+        backendCopy(
+          err,
+          "The mic test didn't finish. Check that your microphone is connected, then run it again.",
+        ),
+      );
     } finally {
       setRunningMicTest(false);
     }
@@ -511,7 +520,12 @@ export function SettingsView() {
         setDaysSavedTick((tick) => tick + 1);
       }
     } catch (err) {
-      setSaveError(String(err));
+      setSaveError(
+        backendCopy(
+          err,
+          "Couldn't save the retention policy. The previous policy still applies; try again.",
+        ),
+      );
       setDaysSaved(false);
     } finally {
       setSavingRetention(false);
@@ -533,7 +547,12 @@ export function SettingsView() {
       const updated = await setCaptureOverlay({ ...settings.overlay, ...change });
       setSettings(updated);
     } catch (err) {
-      setOverlayError(String(err));
+      setOverlayError(
+        backendCopy(
+          err,
+          "Couldn't save the capture pill setting. The previous setting still applies; try again.",
+        ),
+      );
     } finally {
       setSavingOverlay(false);
     }
@@ -548,7 +567,12 @@ export function SettingsView() {
     try {
       setSettings(await setAppearance({ theme }));
     } catch (err) {
-      setAppearanceError(String(err));
+      setAppearanceError(
+        backendCopy(
+          err,
+          "Couldn't save the theme. The previous theme still applies; try again.",
+        ),
+      );
     } finally {
       setSavingAppearance(false);
     }
@@ -557,14 +581,7 @@ export function SettingsView() {
   return (
     <ViewFrame variant="panel" eyebrow="System" title="Settings">
       {error && (
-        <div className="flex flex-col gap-2">
-          <StatusMessage variant="error">Couldn&apos;t load settings: {error}</StatusMessage>
-          {/* Every row below is gated on `settings`, so this failure blanks the
-              screen: it has to say the file survived and how to get back. */}
-          <p className="text-[11.5px] leading-relaxed text-ink-dim">
-            Your settings file is untouched. Leave Settings and come back to try again.
-          </p>
-        </div>
+        <StatusMessage variant="error">{error}</StatusMessage>
       )}
 
       {settings && (
@@ -612,18 +629,9 @@ export function SettingsView() {
                 <>
                   {daysSaved && kind === "keep_days" && <ConfirmLine>Saved.</ConfirmLine>}
                   {saveError && (
-                    <>
-                      <StatusMessage variant="error" compact>
-                        Couldn&apos;t save the retention policy: {saveError}
-                      </StatusMessage>
-                      {/* A failed save leaves the control showing what the user
-                          picked, so the next step has to say which value is
-                          actually in force. The foot spaces its lines by their
-                          own margin, like `ConfirmLine`, not by a flex gap. */}
-                      <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
-                        Your previous setting is still in effect. Change it again to retry.
-                      </p>
-                    </>
+                    <StatusMessage variant="error" compact>
+                      {saveError}
+                    </StatusMessage>
                   )}
                 </>
               }
@@ -688,14 +696,9 @@ export function SettingsView() {
               }
               foot={
                 appearanceError && (
-                  <>
-                    <StatusMessage variant="error" compact>
-                      Couldn&apos;t save the theme: {appearanceError}
-                    </StatusMessage>
-                    <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
-                      Your previous setting is still in effect. Change it again to retry.
-                    </p>
-                  </>
+                  <StatusMessage variant="error" compact>
+                    {appearanceError}
+                  </StatusMessage>
                 )
               }
             >
@@ -743,11 +746,62 @@ export function SettingsView() {
           </Card>
 
           <Card title="Capture">
-            <Row label="Global shortcut" hint="Starts and stops a capture from anywhere.">
+            <Row
+              label="Global shortcut"
+              hint="Starts and stops a capture from anywhere."
+              // Registration is best-effort at startup, so this row is the one
+              // place a refused chord can stop being a silent lie: the key does
+              // nothing, and without this the screen a user would check to find
+              // that out says it works. Withheld while the status is unknown
+              // (the read has not landed, or failed) — `useShortcutStatus`
+              // explains why no evidence must not read as bad news.
+              //
+              // The fallback is the tray *menu*, matching the TopBar's hint:
+              // the icon's left click shows the main window and its menu is
+              // right-click only (`show_menu_on_left_click(false)` in
+              // `capture_control.rs`), so naming the icon would replace one
+              // dead instruction with another.
+              foot={
+                shortcutStatus !== null &&
+                !shortcutStatus.captureToggle && (
+                  <StatusMessage variant="error" compact>
+                    Unavailable: another app is using this shortcut. Use the tray menu to
+                    start a capture.
+                  </StatusMessage>
+                )
+              }
+            >
               {/* Mono, because it is a key sequence — the same voice the
-                  palette hint and every path in the app uses. */}
+                  palette hint and every path in the app uses.
+
+                  Rendered rather than editable: the backend registers the chord
+                  at startup and offers no rebinding command yet, and a field
+                  that silently fails to save is worse than a value that plainly
+                  is what it is.
+
+                  Shown unchanged even when the bind failed: it names *which*
+                  chord is spoken for, which is what tells the user where to
+                  look. The foot carries the state — fading or striking the
+                  chord would put that claim in the metadata register. */}
               <span className="font-data text-[12.5px] text-ink-read">
-                {CAPTURE_SHORTCUT}
+                {CAPTURE_TOGGLE_SHORTCUT}
+              </span>
+            </Row>
+
+            {/* The second of the two global chords, and the reason this card is
+                the app's shortcut reference rather than a page about recording.
+                Quick capture's chord is learned once and then only ever
+                forgotten, and until this row it was written down nowhere a user
+                would think to look: the palette prints it as a hint on a row you
+                have to already be in the palette to see, and the tray item
+                carries no accelerator text at all.
+
+                Same recipe as the row above, deliberately — mono for a key
+                sequence, rendered rather than editable because the backend
+                registers this one at startup too. */}
+            <Row label="Quick capture" hint="Opens the quick capture box from anywhere.">
+              <span className="font-data text-[12.5px] text-ink-read">
+                {QUICK_CAPTURE_SHORTCUT}
               </span>
             </Row>
 
@@ -777,14 +831,9 @@ export function SettingsView() {
               // error, so the two switches are the unit that fails.
               foot={
                 overlayError && (
-                  <>
-                    <StatusMessage variant="error" compact>
-                      Couldn&apos;t save the capture pill setting: {overlayError}
-                    </StatusMessage>
-                    <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
-                      Your previous setting is still in effect. Change it again to retry.
-                    </p>
-                  </>
+                  <StatusMessage variant="error" compact>
+                    {overlayError}
+                  </StatusMessage>
                 )
               }
             >
@@ -811,16 +860,9 @@ export function SettingsView() {
                     </ConfirmLine>
                   )}
                   {micTestError && (
-                    <>
-                      <StatusMessage variant="error" compact>
-                        Couldn&apos;t run the mic test: {micTestError}
-                      </StatusMessage>
-                      {/* The likeliest cause is hardware rather than Kodabi, so
-                          the next step points at the device first. */}
-                      <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
-                        Check that your microphone is connected, then run the test again.
-                      </p>
-                    </>
+                    <StatusMessage variant="error" compact>
+                      {micTestError}
+                    </StatusMessage>
                   )}
                 </>
               }

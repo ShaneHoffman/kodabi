@@ -22,6 +22,7 @@ mod terminal_cmds;
 mod transcribe;
 mod tray_promotion;
 mod updater_cmds;
+mod user_errors;
 
 use kodabi_core::device::DeviceId;
 use tauri::Manager;
@@ -35,6 +36,27 @@ const LEGACY_CONFIG_DIR: &str = "com.kodama.app";
 #[tauri::command]
 fn device_id(state: tauri::State<'_, DeviceId>) -> String {
     state.as_str().to_string()
+}
+
+/// Whether each OS-global shortcut actually bound at startup. Registration is
+/// best-effort — a chord another app already owns must never block launch — so
+/// this records the outcome instead of failing, and Settings can stop
+/// presenting a chord the OS refused. Written once in [`run`]'s setup and
+/// immutable after, hence `Copy` and no lock.
+///
+/// Booleans rather than the plugin's error text: that text is developer-facing
+/// (it stays on stderr, where the `eprintln`s put it), and the copy the user
+/// reads is the same sentence whatever the OS said.
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ShortcutStatus {
+    capture_toggle: bool,
+    quick_capture: bool,
+}
+
+#[tauri::command]
+fn shortcut_status(state: tauri::State<'_, ShortcutStatus>) -> ShortcutStatus {
+    *state
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -182,12 +204,29 @@ pub fn run() {
             // shortcuts register independently: one clashing must not sink the
             // other, and the tray items (capture toggle, Quick capture) remain
             // as fallbacks for whichever failed.
-            if let Err(err) = app.global_shortcut().register(toggle_shortcut) {
-                eprintln!("failed to register global capture-toggle shortcut: {err}");
-            }
-            if let Err(err) = app.global_shortcut().register(quick_capture_shortcut) {
-                eprintln!("failed to register global quick-capture shortcut: {err}");
-            }
+            //
+            // The outcome is kept (not just printed) because the surfaces that
+            // teach the chord — Settings' shortcut row, the TopBar's idle hint —
+            // would otherwise go on promising a key that does nothing, leaving
+            // the tray fallback for the user to guess. See `ShortcutStatus`.
+            let capture_toggle = match app.global_shortcut().register(toggle_shortcut) {
+                Ok(()) => true,
+                Err(err) => {
+                    eprintln!("failed to register global capture-toggle shortcut: {err}");
+                    false
+                }
+            };
+            let quick_capture = match app.global_shortcut().register(quick_capture_shortcut) {
+                Ok(()) => true,
+                Err(err) => {
+                    eprintln!("failed to register global quick-capture shortcut: {err}");
+                    false
+                }
+            };
+            app.manage(ShortcutStatus {
+                capture_toggle,
+                quick_capture,
+            });
 
             // Start the retention schedule (an immediate sweep, then periodic)
             // now that the settings state it reads is managed.
@@ -220,6 +259,7 @@ pub fn run() {
         .manage(models_cmds::ModelsState::default())
         .invoke_handler(tauri::generate_handler![
             device_id,
+            shortcut_status,
             audio_cmds::start_capture,
             audio_cmds::stop_capture,
             audio_cmds::capture_status,
@@ -320,5 +360,23 @@ mod tests {
     #[test]
     fn depends_on_core() {
         assert!(!kodabi_core::version().is_empty());
+    }
+
+    // The command hands this struct straight to the frontend, whose
+    // `ShortcutStatus` type in `src/captureControl.ts` mirrors it by hand. A
+    // `tauri::State` needs a running App, so the field names on the wire are
+    // the part of the contract a unit test can hold.
+    #[test]
+    fn shortcut_status_serializes_as_camel_case() {
+        let json = serde_json::to_value(super::ShortcutStatus {
+            capture_toggle: false,
+            quick_capture: true,
+        })
+        .expect("ShortcutStatus serializes");
+
+        assert_eq!(
+            json,
+            serde_json::json!({ "captureToggle": false, "quickCapture": true })
+        );
     }
 }

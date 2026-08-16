@@ -13,6 +13,7 @@ import {
 import { folderHue, useProjects, type FolderHue } from "../../useProjects";
 import { isSessionSource, useSessionArtifacts, type SessionArtifacts } from "../../useSessions";
 import { applyMarkup, selectionAnchor } from "../../textareaCaret";
+import { backendCopy } from "../../errorCopy";
 import { DeleteNoteDialog } from "../dialogs/DeleteNoteDialog";
 import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
@@ -189,15 +190,7 @@ function OpenedNote({
   if (error) {
     return (
       <NoteFrame label="Note">
-        <div className="flex flex-col gap-2">
-          <StatusMessage variant="error">Couldn&apos;t open this note: {error}</StatusMessage>
-          {/* This branch replaces the whole note, so the one thing worth
-              saying is that the file behind it survived the failed read. */}
-          <p className="text-[11.5px] leading-relaxed text-ink-dim">
-            The note file is still on disk. Go back and open it again, or fix the file in a text
-            editor.
-          </p>
-        </div>
+        <StatusMessage variant="error">{error}</StatusMessage>
       </NoteFrame>
     );
   }
@@ -658,7 +651,12 @@ function EditNote({
       .then((result) => onDone(result))
       .catch((err: unknown) => {
         setSaving(false);
-        setError(String(err));
+        setError(
+          backendCopy(
+            err,
+            "Couldn't save your changes. Your edits are still in the editor; try again.",
+          ),
+        );
       });
   };
 
@@ -859,15 +857,7 @@ function EditNote({
         </div>
 
         {error && (
-          <div className="flex flex-col gap-2">
-            <StatusMessage variant="error">Couldn&apos;t save this note: {error}</StatusMessage>
-            {/* A failed save is the moment a user assumes their typing is
-                gone. It is not: the form keeps the draft and the file is
-                whatever it was before. */}
-            <p className="text-[11.5px] leading-relaxed text-ink-dim">
-              Your edits are still here and the file on disk is unchanged. Save again to retry.
-            </p>
-          </div>
+          <StatusMessage variant="error">{error}</StatusMessage>
         )}
       </form>
     </NoteFrame>
@@ -929,7 +919,12 @@ function CreateNote({ initialProject }: { initialProject: string | null }) {
       })
       .catch((err: unknown) => {
         setSubmitting(false);
-        setError(String(err));
+        setError(
+          backendCopy(
+            err,
+            "Couldn't create the note. Your text is still in the editor; try again.",
+          ),
+        );
       });
   };
 
@@ -1006,12 +1001,7 @@ function CreateNote({ initialProject }: { initialProject: string | null }) {
         </div>
 
         {error && (
-          <div className="flex flex-col gap-2">
-            <StatusMessage variant="error">Couldn&apos;t create this note: {error}</StatusMessage>
-            <p className="text-[11.5px] leading-relaxed text-ink-dim">
-              Nothing was created and your draft is still here. Press Create again to retry.
-            </p>
-          </div>
+          <StatusMessage variant="error">{error}</StatusMessage>
         )}
       </form>
     </NoteFrame>

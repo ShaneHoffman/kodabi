@@ -152,6 +152,11 @@ export function useSessionArtifacts(source: string): {
       () => invoke<SessionArtifacts>("read_session_artifacts", { source }),
       [source],
     ),
+    // Fixed, not the backend's copy: `SessionPanel` renders this as its entire
+    // error, so it has to read as a whole sentence whatever failed underneath.
+    // The panel is also the one place a failure says something reassuring that
+    // is always true here, since the note is already on screen behind it.
+    "Couldn't read this note's session files. The note itself is fine; reopen it to try again.",
   );
   return { artifacts: data, loading, error };
 }

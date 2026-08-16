@@ -32,7 +32,10 @@ in `eslint.config.js` fail any non-blessed file at the
   lifecycle of `@tauri-apps/plugin-updater`, and this build's own version),
   `useWindowMaximized` (the undecorated main window's maximize state, for the
   TopBar's caption glyph: an `isMaximized()` seed plus an `onResized`
-  subscription that re-reads it).
+  subscription that re-reads it),
+  `useShortcutStatus` (whether the startup global-shortcut registrations bound:
+  one `shortcut_status` read on mount, with no event to follow it because the
+  backend records the outcome once and never revises it).
   DOM: `useCommandPalette` (global ⌘K/Ctrl-K keydown),
   `useScrollIntoView` (active-descendant row visibility),
   `useOutsidePointerDown` (dismiss on outside press), `useXterm` (the embedded

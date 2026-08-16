@@ -1,14 +1,11 @@
 import { useRef, useState } from "react";
 import { formatMegabytes } from "../../models";
 import { useModelStatus } from "../../useModelStatus";
-import { useTimeout } from "../../useTimeout";
+import { useNavigation } from "../../useNavigation";
 import { Button } from "../ui/Button";
 import { Dialog } from "../ui/Dialog";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ModelDownloadProgress } from "../models/ModelDownloadProgress";
-
-/** How long "Models ready." stays before the dialog closes itself. */
-const CONFIRMATION_MS = 2500;
 
 type Props = {
   onClose: () => void;
@@ -29,9 +26,19 @@ type Props = {
  * The download starts on a click and never on its own. 760 MB is the user's
  * decision to make, and an app that fetched it unasked would be at odds with
  * everything else Kodabi promises about staying on your machine.
+ *
+ * The ready beat is the app's one onboarding moment for the vault glossary
+ * (docs/ROADMAP.md's Phase 4 "glossary seeding"): the user has just watched
+ * transcription become possible and has not yet recorded anything, which is the
+ * only instant where seeding the terms it should spell right is still ahead of
+ * the first meeting rather than behind it. That is why this beat no longer
+ * clears itself after a couple of seconds the way a bare confirmation would —
+ * it now poses a choice, and a dialog that vanished as the user reached for it
+ * would be worse than one that waits. Close, Escape and the scrim all dismiss.
  */
 export function ModelDownloadNudge({ onClose }: Props) {
   const { state, start, cancel } = useModelStatus();
+  const { navigate } = useNavigation();
   const primaryRef = useRef<HTMLButtonElement>(null);
 
   // Whether this session has watched a download run. It is what separates the
@@ -45,8 +52,6 @@ export function ModelDownloadNudge({ onClose }: Props) {
   }
 
   const ready = state.status === "ready";
-  // Success clears itself; errors never do (docs/DESIGN_SYSTEM.md §3).
-  useTimeout(onClose, ready ? CONFIRMATION_MS : null);
 
   // `unknown` is the pre-seed beat: showing anything then would flash an ask at
   // every returning user for as long as the status invoke takes to answer.
@@ -66,9 +71,18 @@ export function ModelDownloadNudge({ onClose }: Props) {
       </h2>
 
       {ready && (
-        <p className="text-[13px] leading-relaxed text-ink-read">
-          Transcription and search are fully available.
-        </p>
+        <div className="flex flex-col gap-2.5 text-[13px] leading-relaxed text-ink-read">
+          <p>Transcription and search are fully available.</p>
+          {/* The one place the vault glossary is introduced. Named terms are
+              what transcription gets wrong most often, and the fix only helps
+              for captures made after it, so the ask belongs here rather than
+              after the first meeting has already misspelled them. */}
+          <p>
+            Before your first meeting, add the names and jargon it should spell
+            right to the vault glossary. Every capture is transcribed against
+            it.
+          </p>
+        </div>
       )}
 
       {state.status === "missing" && (
@@ -98,11 +112,12 @@ export function ModelDownloadNudge({ onClose }: Props) {
       {state.status === "error" && (
         <div className="flex flex-col gap-2">
           <StatusMessage variant="error" compact>
-            Couldn&apos;t finish the download: {state.message}
+            {state.message}
           </StatusMessage>
+          {/* The message above now carries what was unaffected and what a retry
+              does (`models_cmds`), so this only adds the other way in. */}
           <p className="text-[12px] text-ink-dim">
-            Nothing else was affected. Trying again picks up where it stopped,
-            and you can also start it from Settings.
+            You can also start it from Settings.
           </p>
         </div>
       )}
@@ -119,9 +134,24 @@ export function ModelDownloadNudge({ onClose }: Props) {
           </>
         )}
         {ready && (
-          <Button ref={primaryRef} variant="quiet" onClick={onClose}>
-            Close
-          </Button>
+          <>
+            <Button variant="quiet" onClick={onClose}>
+              Close
+            </Button>
+            {/* The primary, and so where focus opens: the models are already
+                ready, so the only thing left to decide here is whether to seed
+                the glossary. The view it lands on carries the rest with its own
+                empty state. */}
+            <Button
+              ref={primaryRef}
+              onClick={() => {
+                navigate({ kind: "glossary", slug: null });
+                onClose();
+              }}
+            >
+              Add glossary terms
+            </Button>
+          </>
         )}
         {(state.status === "missing" || state.status === "error") && (
           <>

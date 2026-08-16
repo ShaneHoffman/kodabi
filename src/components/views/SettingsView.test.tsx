@@ -2,6 +2,8 @@ import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsView } from "./SettingsView";
+import { CAPTURE_TOGGLE_SHORTCUT, type ShortcutStatus } from "../../captureControl";
+import { QUICK_CAPTURE_SHORTCUT } from "../../quickCapture";
 import { ModelStatusProvider } from "../providers/ModelStatusProvider";
 import { NavigationProvider } from "../providers/NavigationProvider";
 import { NavigationContext } from "../../useNavigation";
@@ -68,6 +70,9 @@ function settingsWith(overlay: OverlaySettings): Settings {
   return { ...DEFAULTS, overlay };
 }
 
+/** Both shortcuts bound, which is what a machine with no clash reports. */
+const SHORTCUTS_BOUND: ShortcutStatus = { captureToggle: true, quickCapture: true };
+
 /**
  * Render with `get_settings` seeded and wait for the load to land.
  *
@@ -75,9 +80,18 @@ function settingsWith(overlay: OverlaySettings): Settings {
  * so every control is reachable the moment the settings arrive. The wait is on
  * a card rather than the view's own heading, because the heading renders before
  * `get_settings` resolves and would let an assertion run against an empty page.
+ *
+ * `shortcut_status` is seeded to the everything-worked answer rather than left
+ * unrouted: the hook swallows a rejection either way, so both keep the rest of
+ * this file green, but an unrouted command would leave every test asserting
+ * against a status the real app never shows.
  */
-async function renderSeeded(settings: Settings = DEFAULTS) {
+async function renderSeeded(
+  settings: Settings = DEFAULTS,
+  shortcuts: ShortcutStatus = SHORTCUTS_BOUND,
+) {
   onCommand("get_settings", () => settings);
+  onCommand("shortcut_status", () => shortcuts);
   const result = render(
     // NavigationProvider because the Glossary card's Manage row navigates: in
     // the app this view is always mounted inside it, under MainContent.
@@ -214,6 +228,24 @@ describe("SettingsView capture overlay", () => {
     expect(screen.queryByRole("group", { name: "Capture pill" })).not.toBeInTheDocument();
   });
 
+  it("writes down both global chords, not just the capture toggle", async () => {
+    await renderSeeded(DEFAULTS);
+
+    // This card is the one place the app documents its shortcuts, so both of
+    // them belong in it or neither does. Quick capture's chord used to appear
+    // only as a hint on a command-palette row, which is no help to the person
+    // who needs it: someone who has forgotten the chord is looking for where it
+    // is written down, not for the palette entry that duplicates it.
+    const capture = within(card("Capture"));
+    expect(capture.getByText(CAPTURE_TOGGLE_SHORTCUT)).toBeInTheDocument();
+    expect(capture.getByText(QUICK_CAPTURE_SHORTCUT)).toBeInTheDocument();
+
+    // Both are read-only by design: the backend registers each at startup and
+    // offers no rebinding command, so neither may render as a field that would
+    // take an edit and drop it.
+    expect(capture.queryByRole("textbox")).not.toBeInTheDocument();
+  });
+
   it("gives each toggle the same accessible name as the row you can see", async () => {
     await renderSeeded(DEFAULTS);
 
@@ -226,6 +258,62 @@ describe("SettingsView capture overlay", () => {
       expect(screen.getByRole("switch", { name: label })).toBeInTheDocument();
       expect(screen.getByText(label)).toBeInTheDocument();
     }
+  });
+});
+
+describe("SettingsView global shortcut", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  it("says so when the chord never bound, and names the way that works", async () => {
+    // The failure this row exists for: registration is best-effort at startup,
+    // so another app holding the chord leaves the key dead while this screen —
+    // the one place a user would look — went on printing it as fact.
+    await renderSeeded(DEFAULTS, { captureToggle: false, quickCapture: true });
+
+    expect(await within(card("Capture")).findByRole("alert")).toHaveTextContent(
+      "Unavailable: another app is using this shortcut. Use the tray menu to start a capture.",
+    );
+  });
+
+  it("keeps showing the chord it could not bind", async () => {
+    // Naming the taken chord is what tells someone where to go looking, so the
+    // failure is additive: the row says which key, and the foot says it is not
+    // answering.
+    await renderSeeded(DEFAULTS, { captureToggle: false, quickCapture: true });
+
+    expect(within(card("Capture")).getByText(CAPTURE_TOGGLE_SHORTCUT)).toBeInTheDocument();
+  });
+
+  it("stays quiet when the chord bound", async () => {
+    await renderSeeded(DEFAULTS, SHORTCUTS_BOUND);
+
+    expect(within(card("Capture")).getByText(CAPTURE_TOGGLE_SHORTCUT)).toBeInTheDocument();
+    expect(within(card("Capture")).queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("says nothing when it could not find out", async () => {
+    // A read that failed is not evidence the chord is broken. Warning here
+    // would put a scare in front of every user whose status read hiccuped, on
+    // the strength of nothing.
+    onCommand("get_settings", () => DEFAULTS);
+    onCommand("shortcut_status", () => {
+      throw "unreachable";
+    });
+    render(
+      <NavigationProvider>
+        <UpdaterProvider>
+          <ModelStatusProvider>
+            <SettingsView />
+          </ModelStatusProvider>
+        </UpdaterProvider>
+      </NavigationProvider>,
+    );
+    await screen.findByRole("region", { name: "Privacy" });
+
+    expect(within(card("Capture")).getByText(CAPTURE_TOGGLE_SHORTCUT)).toBeInTheDocument();
+    expect(within(card("Capture")).queryByRole("alert")).not.toBeInTheDocument();
   });
 });
 
@@ -301,7 +389,7 @@ describe("SettingsView failures", () => {
     // is the one error here with nothing else left to look at
     // (docs/DESIGN_SYSTEM.md §3).
     onCommand("get_settings", () => {
-      throw "settings.json is malformed";
+      throw new Error("settings.json is malformed");
     });
     render(
       <NavigationProvider>
@@ -314,10 +402,10 @@ describe("SettingsView failures", () => {
     );
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Couldn't load settings: settings.json is malformed");
-    expect(
-      screen.getByText("Your settings file is untouched. Leave Settings and come back to try again."),
-    ).toBeInTheDocument();
+    expect(alert).toHaveTextContent(
+      "Couldn't load your settings. They are still saved; reopen this view to try again.",
+    );
+    expect(screen.queryByText(/settings\.json is malformed/)).toBeNull();
   });
 
 });
@@ -395,22 +483,19 @@ describe("SettingsView appearance", () => {
   it("keeps the stored theme showing when the save fails", async () => {
     const user = userEvent.setup();
     onCommand("set_appearance", () => {
-      throw "the settings file is read only";
+      throw "Couldn't save the theme. The previous theme still applies; try again.";
     });
     await renderSeeded(DEFAULTS);
 
     await user.click(screen.getByRole("combobox", { name: /Theme/ }));
     await user.click(screen.getByRole("option", { name: "Dark" }));
 
+    // The sentence says which value is actually in force, and the row below
+    // proves it: not flipped optimistically, still showing what is on disk
+    // (docs/DESIGN_SYSTEM.md §3).
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      /the settings file is read only/,
+      "Couldn't save the theme. The previous theme still applies; try again.",
     );
-    // Not flipped optimistically: the control still shows what is on disk. The
-    // next-step line is what says so in words, since the row alone leaves "did
-    // that stick?" open (docs/DESIGN_SYSTEM.md §3).
-    expect(
-      screen.getByText("Your previous setting is still in effect. Change it again to retry."),
-    ).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: /Theme/ })).toHaveTextContent(
       "Match the system",
     );
@@ -777,11 +862,20 @@ describe("SettingsView About card", () => {
   it("reports a failed manual check here, which is the one place that does", async () => {
     // The corner notice deliberately stays quiet about check failures; a check
     // someone clicked has to answer for itself.
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     failCheck("no route to host");
     const user = userEvent.setup();
     await renderSeeded();
 
     await user.click(within(about()).getByRole("button", { name: "Check for updates" }));
-    expect(await within(about()).findByText(/no route to host/)).toBeInTheDocument();
+    // The plugin's transport error stays in the log; the card says what failed
+    // and what happens next.
+    expect(
+      await within(about()).findByText(
+        "Couldn't check for updates. Kodabi will try again next launch.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(about()).queryByText(/no route to host/)).toBeNull();
+    logged.mockRestore();
   });
 });

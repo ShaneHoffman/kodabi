@@ -1,0 +1,44 @@
+name: Feature request
+description: Suggest an idea or an improvement for Kodabi.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Kodabi is pre-alpha, and the planned direction lives in
+        [docs/ROADMAP.md](https://github.com/ShaneHoffman/kodabi/blob/main/docs/ROADMAP.md).
+        Worth a quick look first: the thing you want may already be on it.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve
+      description: The situation you are in and why it is awkward today. Describe the problem rather than the solution, so there is room to solve it a different way.
+      placeholder: "When I ..., I have to ..., which means ..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: What you would like to happen
+      description: Your proposed solution, as concretely as you can put it.
+    validations:
+      required: false
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you have considered
+      description: Other ways to solve it, including anything you already do to work around it.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: Sketches, screenshots, or examples from other tools that get this right.
+    validations:
+      required: false

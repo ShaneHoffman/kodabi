@@ -12,7 +12,7 @@ import {
   onCommand,
   resetTauriMocks,
 } from "../../test/tauri";
-import { CHAT_CLAUDE_MISSING_ERROR } from "../../test/claudeMissing";
+import { CLAUDE_MISSING_MESSAGE } from "../../test/claudeMissing";
 import type { ChatEntry, ChatNoteRef, ChatSnapshot } from "../../chat";
 import { citationsFor } from "../../chatCitations";
 import { NavigationContext, type View } from "../../useNavigation";
@@ -483,14 +483,18 @@ describe("ChatView", () => {
     expect(screen.getByRole("button", { name: "Send" })).toBeInTheDocument();
   });
 
-  it("surfaces a failed turn as a prefixed error line", async () => {
+  it("surfaces a failed turn as the sentence the backend worded", async () => {
+    // The prefix moved to `chat_cmds`, which words this once for both the live
+    // event and the entry a restored snapshot replays. The view renders it
+    // verbatim; wording it here as well is what used to make one failure read
+    // two different ways.
     await renderChat();
     act(() => {
       emitFromBackend("chat:event", {
         type: "turn_done",
         chat_id: CHAT_ID,
         stopped: false,
-        error: "usage limit reached",
+        error: "Couldn't finish the answer: usage limit reached",
       });
     });
     expect(screen.getByRole("alert")).toHaveTextContent(
@@ -523,7 +527,9 @@ describe("ChatView", () => {
 
   it("says what failed when the session cannot start", async () => {
     onCommand("chat_open", () => {
-      throw new Error("claude not found");
+      // A string, like the real wire: a command rejection is the backend's own
+      // user copy (`src-tauri/src/user_errors.rs`), which the view renders whole.
+      throw "Couldn't start the chat. Check that the claude command is installed, then press Try again.";
     });
     render(
       <NavigationContext.Provider value={{ view: { kind: "chat" }, navigate }}>
@@ -532,12 +538,9 @@ describe("ChatView", () => {
     );
 
     expect(
-      await screen.findByText(/Couldn't start chat: .*claude not found/),
-    ).toBeInTheDocument();
-    // And what happens next: the composer is below this branch, so without a
-    // control here the screen would be a dead end (docs/DESIGN_SYSTEM.md §3).
-    expect(
-      screen.getByText(/Nothing was lost\. Restarting tries the connection again\./),
+      await screen.findByText(
+        "Couldn't start the chat. Check that the claude command is installed, then press Try again.",
+      ),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
   });
@@ -571,8 +574,11 @@ describe("ChatView", () => {
 
   it("names the missing prerequisite, and offers the retry that follows installing it", async () => {
     const user = userEvent.setup();
+    // A string, as the command boundary sends it: `chat_cmds` passes the
+    // prerequisite message through whole (`user_errors`), the spawn error's
+    // Display prefix already stripped on the Rust side.
     onCommand("chat_open", () => {
-      throw new Error(CHAT_CLAUDE_MISSING_ERROR);
+      throw CLAUDE_MISSING_MESSAGE;
     });
     render(
       <NavigationContext.Provider value={{ view: { kind: "chat" }, navigate }}>

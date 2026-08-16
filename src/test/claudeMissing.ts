@@ -9,7 +9,3 @@
  */
 export const CLAUDE_MISSING_MESSAGE =
   "Kodabi's AI features run through Claude Code, and Claude Code isn't installed on this computer. Install the claude CLI from docs.claude.com/en/docs/claude-code/overview, then try again.";
-
-/** The same failure as it reaches the chat view: `ChatSpawnError`'s Display
- * prefix, then `String(error)` on the rejection. */
-export const CHAT_CLAUDE_MISSING_ERROR = `failed to spawn headless Claude Code for chat: ${CLAUDE_MISSING_MESSAGE}`;

@@ -3,7 +3,8 @@
 //! raw transcript and retained recording, and revealing that recording in
 //! Explorer. Validation and artifact resolution live in `kodabi-core`; these
 //! commands only own the serde IPC DTOs, resolve the knowledge-base root, and
-//! map results to a message string — the same convention `note_cmds` uses.
+//! map results to user-facing copy (see `user_errors`), with the raw detail
+//! going to stderr — the same convention `note_cmds` uses.
 
 use std::path::{Component, Path, PathBuf};
 
@@ -11,6 +12,14 @@ use kodabi_core::transcription::Channel;
 use tauri::AppHandle;
 
 use crate::transcribe::knowledge_base_dir;
+use crate::user_errors::reported;
+
+/// Every rejection from [`validate_audio_path`] says the same thing to the
+/// reader: the press did nothing, and the recording is still where it was. The
+/// specific lexical rule that failed is a fact about our own IPC, so it goes to
+/// the log.
+const AUDIO_PATH_REJECTED: &str = "Kodabi couldn't verify the recording's location, so it wasn't \
+                                   opened. Reopen the note and try again.";
 
 /// One transcript segment, in the shape the frontend renders. Mirrors
 /// `kodabi_core::raw_session::TranscriptSegment` (and the MCP
@@ -48,8 +57,14 @@ pub async fn read_session_artifacts(
     source: String,
 ) -> Result<SessionArtifactsDto, String> {
     let kb = knowledge_base_dir(&app)?;
-    let artifacts =
-        kodabi_core::sessions::read_session_artifacts(&kb, &source).map_err(|e| e.to_string())?;
+    let artifacts = kodabi_core::sessions::read_session_artifacts(&kb, &source).map_err(|err| {
+        reported(
+            "read_session_artifacts",
+            err,
+            "Couldn't read this note's session files. The note itself is fine; reopen it to try \
+             again.",
+        )
+    })?;
     Ok(SessionArtifactsDto {
         transcript_available: artifacts.transcript_available,
         segments: artifacts
@@ -78,7 +93,11 @@ pub fn reveal_session_audio(app: AppHandle, audio_path: String) -> Result<(), St
     let path = validate_audio_path(&kb, &audio_path)?;
     if !path.is_file() {
         // Retention may have discarded it since the note view resolved it.
-        return Err("The recording file is missing.".to_string());
+        return Err(
+            "The recording file is missing. Retention may have discarded it; the note itself is \
+             unaffected."
+                .to_string(),
+        );
     }
     reveal_in_explorer(&path)
 }
@@ -90,21 +109,31 @@ pub fn reveal_session_audio(app: AppHandle, audio_path: String) -> Result<(), St
 fn validate_audio_path(kb: &Path, raw: &str) -> Result<PathBuf, String> {
     let path = PathBuf::from(raw);
     if path.extension().and_then(|ext| ext.to_str()) != Some("wav") {
-        return Err(format!("not a .wav recording file: {raw}"));
+        return Err(reported(
+            "validate_audio_path",
+            format!("not a .wav recording file: {raw}"),
+            AUDIO_PATH_REJECTED,
+        ));
     }
     if path
         .components()
         .any(|c| matches!(c, Component::ParentDir | Component::CurDir))
     {
-        return Err(format!(
-            "recording path must not contain '.' or '..' segments: {raw}"
+        return Err(reported(
+            "validate_audio_path",
+            format!("recording path must not contain '.' or '..' segments: {raw}"),
+            AUDIO_PATH_REJECTED,
         ));
     }
     let sessions = kb.join("sessions");
     if path.parent() != Some(sessions.as_path()) {
-        return Err(format!(
-            "recording path must be directly inside {}",
-            sessions.display()
+        return Err(reported(
+            "validate_audio_path",
+            format!(
+                "recording path must be directly inside {}",
+                sessions.display()
+            ),
+            AUDIO_PATH_REJECTED,
         ));
     }
     Ok(path)
@@ -121,7 +150,13 @@ fn reveal_in_explorer(path: &Path) -> Result<(), String> {
     std::process::Command::new("explorer.exe")
         .raw_arg(format!("/select,\"{}\"", path.display()))
         .spawn()
-        .map_err(|err| format!("failed to open Explorer: {err}"))?;
+        .map_err(|err| {
+            reported(
+                "reveal_in_explorer",
+                err,
+                "Couldn't open Explorer. The recording is still in your vault's sessions folder.",
+            )
+        })?;
     Ok(())
 }
 

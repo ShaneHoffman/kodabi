@@ -172,14 +172,7 @@ export function ProjectView({ slug }: Props) {
       }
     >
       {error ? (
-        <div className="flex flex-col gap-2">
-          <StatusMessage variant="error">Couldn&apos;t load notes: {error}</StatusMessage>
-          {/* The read is the only thing that failed, and it runs again on the
-              next vault change or the next time this view opens. */}
-          <p className="text-[11.5px] leading-relaxed text-ink-dim">
-            Your notes are still on disk. Reopen this view to try again.
-          </p>
-        </div>
+        <StatusMessage variant="error">{error}</StatusMessage>
       ) : notes.length === 0 ? (
         // Gated on !loading as well, so a cold start shows nothing rather than
         // flashing the empty state before the first read lands.

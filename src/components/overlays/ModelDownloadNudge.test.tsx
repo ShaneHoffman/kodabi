@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ModelDownloadNudge } from "./ModelDownloadNudge";
 import { ModelStatusProvider } from "../providers/ModelStatusProvider";
 import { MODELS_STATE_EVENT } from "../../events";
+import { NavigationContext } from "../../useNavigation";
 import {
   emitFromBackend,
   invokedCommands,
@@ -27,11 +28,18 @@ const READY = { ...MISSING, ready: true, bytesRequired: 0 };
 
 function renderNudge(status: unknown = MISSING, onClose = () => {}) {
   onCommand("model_status", () => status);
-  return render(
-    <ModelStatusProvider>
-      <ModelDownloadNudge onClose={onClose} />
-    </ModelStatusProvider>,
-  );
+  // The ready beat offers the vault glossary, so the nudge reads navigation.
+  const navigate = vi.fn();
+  return {
+    navigate,
+    ...render(
+      <NavigationContext.Provider value={{ view: { kind: "inbox" }, navigate }}>
+        <ModelStatusProvider>
+          <ModelDownloadNudge onClose={onClose} />
+        </ModelStatusProvider>
+      </NavigationContext.Provider>,
+    ),
+  };
 }
 
 /** Pretend Rust reported download progress. */
@@ -84,9 +92,11 @@ describe("ModelDownloadNudge", () => {
   it("shows nothing before the seed lands, so no ask flashes on every launch", () => {
     onCommand("model_status", () => MISSING);
     const { container } = render(
-      <ModelStatusProvider>
-        <ModelDownloadNudge onClose={() => {}} />
-      </ModelStatusProvider>,
+      <NavigationContext.Provider value={{ view: { kind: "inbox" }, navigate: vi.fn() }}>
+        <ModelStatusProvider>
+          <ModelDownloadNudge onClose={() => {}} />
+        </ModelStatusProvider>
+      </NavigationContext.Provider>,
     );
     expect(container).toBeEmptyDOMElement();
   });
@@ -153,7 +163,10 @@ describe("ModelDownloadNudge", () => {
     expect(invokedCommands().filter((name) => name === "download_models")).toHaveLength(2);
   });
 
-  it("confirms a download it watched finish, then closes itself", async () => {
+  it("confirms a download it watched finish, and waits rather than clearing itself", async () => {
+    // The beat used to close itself after 2.5s, which a bare confirmation may
+    // do. This one is not bare: it carries the glossary ask, so vanishing as
+    // the user reaches for it would be worse than waiting to be dismissed.
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
     const onClose = vi.fn();
@@ -168,11 +181,39 @@ describe("ModelDownloadNudge", () => {
     });
 
     await waitFor(() => expect(screen.getByText("Models ready.")).toBeInTheDocument());
-    expect(onClose).not.toHaveBeenCalled();
 
     act(() => {
-      vi.advanceTimersByTime(2500);
+      vi.advanceTimersByTime(10_000);
     });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(screen.getByText("Models ready.")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it("points a first-run user at the vault glossary once the models land", async () => {
+    // The one onboarding moment for glossary seeding: transcription has just
+    // become possible and nothing has been recorded yet, so the terms it should
+    // spell right can still be seeded ahead of the first meeting.
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    const { navigate } = renderNudge(MISSING, onClose);
+    onCommand("download_models", () => null);
+    await user.click(await screen.findByRole("button", { name: "Download 762 MB" }));
+
+    onCommand("model_status", () => READY);
+    act(() => {
+      emitFromBackend(MODELS_STATE_EVENT, { status: "ready" });
+    });
+
+    const seed = await screen.findByRole("button", { name: "Add glossary terms" });
+    expect(screen.getByText(/vault glossary/)).toBeInTheDocument();
+
+    await user.click(seed);
+    // Vault-wide (slug null), not a project's: this is the glossary every
+    // capture is transcribed against.
+    expect(navigate).toHaveBeenCalledWith({ kind: "glossary", slug: null });
     expect(onClose).toHaveBeenCalled();
   });
 

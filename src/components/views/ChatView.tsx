@@ -8,7 +8,6 @@ import {
 } from "react";
 import { clsx } from "clsx";
 import type { ChatEntry, ChatNoteRef, PendingPermission } from "../../chat";
-import { CLAUDE_INSTALL_URL, isClaudeMissingMessage } from "../../claudeMissing";
 import { citationsFor } from "../../chatCitations";
 import { useChatSession } from "../../useChatSession";
 import { useNavigation } from "../../useNavigation";
@@ -131,44 +130,24 @@ export function ChatView() {
   if (!chat.ready) {
     return (
       <ChatFrame>
-        {chat.startError &&
-          (isClaudeMissingMessage(chat.startError) ? (
-            // Detected with certainty, so the message already carries the
-            // remedy: no hedge sentence needed under it, unlike the fallback
-            // below.
-            <div className="flex flex-col items-start gap-2">
-              <StatusMessage variant="error">
-                Couldn&apos;t start chat: Kodabi&apos;s chat runs through Claude
-                Code, and Claude Code isn&apos;t installed on this computer.
-                Install the claude CLI from {CLAUDE_INSTALL_URL}, then try
-                again.
-              </StatusMessage>
-              <Button className="mt-1" onClick={chat.restart}>
-                Try again
-              </Button>
-            </div>
-          ) : (
-            <div className="flex flex-col items-start gap-2">
-              <StatusMessage variant="error">
-                Couldn&apos;t start chat: {chat.startError}
-              </StatusMessage>
-              {/* Every other `chat_open` failure: writing the MCP config,
-                  resolving the vault, and creating the chat transcript can all
-                  fail before the process is ever spawned. The branch above
-                  already ruled out a missing CLI, so this no longer guesses at
-                  that cause the way it once did. */}
-              <p className="text-[11.5px] leading-relaxed text-ink-dim">
-                Nothing was lost. Restarting tries the connection again.
-              </p>
-              {/* The composer lives below this early return, so without a
-                  control here the screen is the app's one dead end: the same
-                  `restart` the exited state offers is the way out
-                  (DESIGN_SYSTEM §3 leaves the data reachable). */}
-              <Button className="mt-1" onClick={chat.restart}>
-                Try again
-              </Button>
-            </div>
-          ))}
+        {chat.startError && (
+          <div className="flex flex-col items-start gap-2">
+            {/* The whole sentence, unprefixed: `chat_cmds` words each start
+                failure (`user_errors`). A genuinely missing CLI arrives as
+                the certain prerequisite message, passed through because it is
+                already the user's words; every other failure gets the hedged
+                sentence, which names the CLI as the likely cause without
+                claiming it is the only one. */}
+            <StatusMessage variant="error">{chat.startError}</StatusMessage>
+            {/* The composer lives below this early return, so without a control
+                here the screen is the app's one dead end: the same `restart`
+                the exited state offers is the way out (DESIGN_SYSTEM §3 leaves
+                the data reachable). */}
+            <Button className="mt-1" onClick={chat.restart}>
+              Try again
+            </Button>
+          </div>
+        )}
       </ChatFrame>
     );
   }
@@ -240,10 +219,15 @@ export function ChatView() {
           />
         )}
         {chat.exited && (
-          <div className="flex items-baseline gap-3" role="status">
-            <p className="text-[13.5px] text-ink-dim">
+          // The region is the sentence, not the row: the variant carries the
+          // `role="status"` this div used to hold by hand, and the restart
+          // control stays outside it. Full size rather than `compact`, to sit
+          // in the same register as the empty state above it — both are the
+          // conversation column speaking about the session, not a row's line.
+          <div className="flex items-baseline gap-3">
+            <StatusMessage variant="status">
               Claude Code exited. Start a new chat to continue.
-            </p>
+            </StatusMessage>
             <Button onClick={chat.restart}>Start a new chat</Button>
           </div>
         )}

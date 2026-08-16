@@ -36,6 +36,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 use kodabi_core::terminal;
 
+use crate::user_errors::reported;
+
 /// Live PTY output, base64-encoded raw bytes (a per-chunk UTF-8 decode would
 /// corrupt multibyte sequences split across reads). Mirrors `OutputPayload`.
 pub const TERMINAL_OUTPUT_EVENT: &str = "terminal:output";
@@ -45,7 +47,24 @@ pub const TERMINAL_EXIT_EVENT: &str = "terminal:exit";
 
 const DEFAULT_COLS: u16 = 80;
 const DEFAULT_ROWS: u16 = 24;
-const POISONED: &str = "terminal state lock poisoned";
+/// A poisoned lock means a previous holder panicked. Unlike the guards in
+/// `audio_cmds`, this one does not recover with `into_inner()`, and a poisoned
+/// `Mutex` stays poisoned for the life of the process: Restart re-enters
+/// `terminal_restart`, which takes the same lock and fails the same way. So the
+/// copy names the only thing that does work. The raw condition is a Rust fact
+/// with no user-visible cause, so it is not logged through `user_errors` (there
+/// is nothing to log beyond this sentence).
+const POISONED: &str = "The terminal hit an internal error. Restart Kodabi to continue.";
+
+/// The two ways a live session stops responding: the writer or the PTY resize
+/// failed. Both mean the pane is talking to a process that is no longer there.
+const TERMINAL_DISCONNECTED: &str =
+    "The terminal lost its connection to Claude Code. Press Restart to try again.";
+
+/// Spawning failed. Naming `claude` is the actionable half: the usual cause is
+/// that it isn't installed or isn't on PATH.
+const TERMINAL_START_FAILED: &str =
+    "Couldn't start Claude Code. Check that the claude command is installed, then press Restart to try again.";
 
 /// The one live terminal session, or none. Managed at builder level like
 /// `CaptureState`. The `Mutex` makes the whole thing `Sync`; the session itself
@@ -161,8 +180,11 @@ pub fn terminal_write(state: State<'_, TerminalState>, data: String) -> Result<(
             session
                 .writer
                 .write_all(data.as_bytes())
-                .map_err(|e| e.to_string())?;
-            session.writer.flush().map_err(|e| e.to_string())?;
+                .map_err(|err| reported("terminal_write", err, TERMINAL_DISCONNECTED))?;
+            session
+                .writer
+                .flush()
+                .map_err(|err| reported("terminal_write", err, TERMINAL_DISCONNECTED))?;
         }
     }
     Ok(())
@@ -189,7 +211,7 @@ pub fn terminal_resize(
                 pixel_width: 0,
                 pixel_height: 0,
             })
-            .map_err(|e| e.to_string())?;
+            .map_err(|err| reported("terminal_resize", err, TERMINAL_DISCONNECTED))?;
         session.cols = cols;
         session.rows = rows;
     }
@@ -254,20 +276,26 @@ fn spawn_session(app: &AppHandle) -> Result<TerminalSession, String> {
             pixel_width: 0,
             pixel_height: 0,
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(|err| reported("terminal_spawn", err, TERMINAL_START_FAILED))?;
 
     let command = build_command(&mcp_path, &settings_path, &kb_root);
     let child = pair
         .slave
         .spawn_command(command)
-        .map_err(|e| e.to_string())?;
+        .map_err(|err| reported("terminal_spawn", err, TERMINAL_START_FAILED))?;
     let pid = child.process_id();
     // The slave is only needed to spawn against; dropping it now means the PTY
     // reports EOF once the child exits.
     drop(pair.slave);
 
-    let reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
-    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+    let reader = pair
+        .master
+        .try_clone_reader()
+        .map_err(|err| reported("terminal_spawn", err, TERMINAL_START_FAILED))?;
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|err| reported("terminal_spawn", err, TERMINAL_START_FAILED))?;
     let master = pair.master;
 
     let stream = terminal::SessionStream::new();
@@ -374,12 +402,15 @@ pub(crate) fn write_mcp_config(app: &AppHandle) -> Result<PathBuf, String> {
         index_db,
         kb_root,
     };
-    let mcp_json = terminal::mcp_config_json(&paths).map_err(|e| e.to_string())?;
+    let mcp_json = terminal::mcp_config_json(&paths)
+        .map_err(|err| reported("terminal_wiring", err, TERMINAL_START_FAILED))?;
 
     let wiring_dir = config_dir.join(WIRING_DIR);
-    fs::create_dir_all(&wiring_dir).map_err(|e| e.to_string())?;
+    fs::create_dir_all(&wiring_dir)
+        .map_err(|err| reported("terminal_wiring", err, TERMINAL_START_FAILED))?;
     let mcp_path = wiring_dir.join("kodabi.mcp.json");
-    fs::write(&mcp_path, mcp_json).map_err(|e| e.to_string())?;
+    fs::write(&mcp_path, mcp_json)
+        .map_err(|err| reported("terminal_wiring", err, TERMINAL_START_FAILED))?;
     Ok(mcp_path)
 }
 
@@ -390,9 +421,11 @@ fn write_config_files(app: &AppHandle) -> Result<(PathBuf, PathBuf), String> {
     let mcp_path = write_mcp_config(app)?;
     let config_dir = crate::sandbox::config_dir(app)?;
 
-    let settings_json = terminal::settings_json().map_err(|e| e.to_string())?;
+    let settings_json = terminal::settings_json()
+        .map_err(|err| reported("terminal_wiring", err, TERMINAL_START_FAILED))?;
     let settings_path = config_dir.join(WIRING_DIR).join("terminal-settings.json");
-    fs::write(&settings_path, settings_json).map_err(|e| e.to_string())?;
+    fs::write(&settings_path, settings_json)
+        .map_err(|err| reported("terminal_wiring", err, TERMINAL_START_FAILED))?;
     Ok((mcp_path, settings_path))
 }
 
@@ -447,8 +480,16 @@ fn resolve_mcp_binary(app: &AppHandle) -> Result<PathBuf, String> {
             return Ok(bundled);
         }
     }
-    Err(format!(
-        "could not locate {MCP_BINARY_NAME}; build it (cargo build -p kodabi-mcp) or set KODABI_MCP_BINARY"
+    // The developer half of this (build it, or point the env var at it) is real
+    // advice, but only in a dev tree: keep it in the log, where a developer is
+    // already looking, and tell an installed user the thing they can act on.
+    Err(reported(
+        "resolve_mcp_binary",
+        format!(
+            "could not locate {MCP_BINARY_NAME}; build it (cargo build -p kodabi-mcp) or set KODABI_MCP_BINARY"
+        ),
+        "Kodabi's helper program (kodabi-mcp) is missing from this install. Reinstall Kodabi to \
+         restore it.",
     ))
 }
 

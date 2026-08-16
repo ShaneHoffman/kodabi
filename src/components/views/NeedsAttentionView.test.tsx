@@ -219,9 +219,10 @@ describe("NeedsAttentionView", () => {
     });
   });
 
-  it("names the missing prerequisite instead of echoing it under the row", async () => {
-    // Retry cannot fix this one, so the row has to say what will: the raw
-    // message is an account of the failure, not of the remedy.
+  it("names the missing prerequisite under the row", async () => {
+    // Retry cannot fix this one, so the row has to say what will. The backend
+    // words the sentence (`CLAUDE_MISSING_MESSAGE` passes through `user_errors`
+    // with the remedy included), and the row renders it verbatim.
     const teamSync = makeSession("team-sync");
     serveSessions([teamSync]);
     renderView();
@@ -235,16 +236,20 @@ describe("NeedsAttentionView", () => {
       });
     });
 
-    expect(await screen.findByText(/Retry needs Claude Code/)).toBeInTheDocument();
-    expect(screen.getByText(/docs\.claude\.com/)).toBeInTheDocument();
+    expect(await screen.findByText(/Claude Code isn't installed/)).toHaveTextContent(
+      /docs\.claude\.com/,
+    );
     expect(screen.queryByText(/Retry failed:/)).not.toBeInTheDocument();
   });
 
   it("clears the pending row and says so when the retry call itself fails", async () => {
     const user = userEvent.setup();
     serveSessions([makeSession("team-sync")]);
+    // An `Error`, not a string: a non-string rejection did not come from the
+    // command boundary, so this pins the view's own fallback and the absence
+    // of the exception text (docs/DESIGN_SYSTEM.md §3).
     onCommand("distill_session", () => {
-      throw "no capture session at that path";
+      throw new Error("no capture session at that path");
     });
     renderView();
     await screen.findByText("team sync");
@@ -252,13 +257,13 @@ describe("NeedsAttentionView", () => {
     await user.click(screen.getByTestId("retry-distill"));
 
     // Named in the same register as every other failure on this screen, which
-    // "Retry failed:" was not.
+    // "Retry failed:" was not, and complete in one sentence.
     expect(
-      await screen.findByText(/Couldn't retry this capture: no capture session at that path/),
+      await screen.findByText(
+        "Couldn't start the retry. The recording and transcript are safe; try again.",
+      ),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("The capture is unchanged and still listed. You can try again."),
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/no capture session at that path/)).toBeNull();
     // Still actionable: the button is back, not stuck on "Retrying…".
     expect(screen.getByTestId("retry-distill")).toHaveAccessibleName("Retry");
   });
@@ -369,7 +374,7 @@ describe("NeedsAttentionView", () => {
     const user = userEvent.setup();
     serveSessions([makeSession("team-sync")]);
     onCommand("dismiss_session", () => {
-      throw "marker write failed";
+      throw "Couldn't update this capture. The recording and transcript are untouched; try again.";
     });
     renderView();
     await screen.findByText("team sync");
@@ -377,12 +382,9 @@ describe("NeedsAttentionView", () => {
     await user.click(screen.getByRole("button", { name: "Dismiss" }));
 
     expect(
-      await screen.findByText(/Couldn't dismiss this capture: marker write failed/),
-    ).toBeInTheDocument();
-    // And what happens next, which is the half the message used to omit
-    // (docs/DESIGN_SYSTEM.md §3).
-    expect(
-      screen.getByText("The capture is unchanged and still listed. You can try again."),
+      await screen.findByText(
+        "Couldn't update this capture. The recording and transcript are untouched; try again.",
+      ),
     ).toBeInTheDocument();
     // Still listed, still actionable.
     expect(screen.getByTestId("retry-distill")).toBeInTheDocument();
@@ -456,7 +458,7 @@ describe("NeedsAttentionView", () => {
     const user = userEvent.setup();
     serveSessions([makeSession("team-sync", true)]);
     onCommand("delete_session", () => {
-      throw "session is locked";
+      throw "Couldn't delete this capture. Its files are untouched; try again.";
     });
     renderView();
 
@@ -467,11 +469,8 @@ describe("NeedsAttentionView", () => {
     await user.click(within(dialog).getByRole("button", { name: "Delete capture" }));
 
     expect(
-      await within(dialog).findByText("Couldn't delete the capture: session is locked"),
-    ).toBeInTheDocument();
-    expect(
-      within(dialog).getByText(
-        "The capture and its recording are still on disk. You can try again or cancel.",
+      await within(dialog).findByText(
+        "Couldn't delete this capture. Its files are untouched; try again.",
       ),
     ).toBeInTheDocument();
     // The modal stays open so the delete can be retried or cancelled.
@@ -480,18 +479,17 @@ describe("NeedsAttentionView", () => {
 
   it("surfaces a failed listing instead of claiming all clear", async () => {
     onCommand("list_failed_sessions", () => {
-      throw "the sessions folder is unreadable";
+      throw "Couldn't read the captured sessions. The recordings on disk are untouched; reopen this view to try again.";
     });
 
     renderView();
 
-    expect(
-      await screen.findByText(/the sessions folder is unreadable/),
-    ).toBeInTheDocument();
     // Nothing here retries on its own, so the recordings surviving is the
-    // load-bearing half of the message.
+    // load-bearing half, and `list_failed_sessions` says it in the sentence.
     expect(
-      screen.getByText("Your captures are still on disk. Reopen this view to try again."),
+      await screen.findByText(
+        "Couldn't read the captured sessions. The recordings on disk are untouched; reopen this view to try again.",
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/All clear/)).not.toBeInTheDocument();
   });

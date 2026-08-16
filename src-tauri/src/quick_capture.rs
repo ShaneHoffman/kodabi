@@ -168,8 +168,19 @@ fn submit_impl(app: &AppHandle, text: &str) -> Result<QuickCaptureOutcome, Strin
     // is no meaningful clock time for a quick capture.
     let date = chrono::Local::now().format("%Y-%m-%d").to_string();
 
-    let captured = quick_capture(&kb, text, &date, &routing_config_from_env())
-        .map_err(|err| err.to_string())?;
+    let captured = quick_capture(&kb, text, &date, &routing_config_from_env()).map_err(|err| {
+        match err {
+            // The one case the reader caused, and the one with an obvious fix.
+            kodabi_core::capture::QuickCaptureError::EmptyBody => {
+                "Nothing to file yet. Type a thought first.".to_string()
+            }
+            other => crate::user_errors::reported(
+                "quick_capture_submit",
+                other,
+                "Couldn't file this. Your text is still here; try again.",
+            ),
+        }
+    })?;
 
     // A broken signal file is contained to its own project (routing still ran);
     // log it so the user can fix the file. The capture itself succeeded.
@@ -196,8 +207,15 @@ pub async fn quick_capture_route_preview(
     text: String,
 ) -> Result<QuickCaptureRoutePreview, String> {
     let kb = knowledge_base_dir(&app)?;
-    let preview =
-        route_preview(&kb, &text, &routing_config_from_env()).map_err(|err| err.to_string())?;
+    // The caller swallows this (a failed guess just shows no guess), but it
+    // crosses IPC like any other, so it carries copy like any other.
+    let preview = route_preview(&kb, &text, &routing_config_from_env()).map_err(|err| {
+        crate::user_errors::reported(
+            "quick_capture_route_preview",
+            err,
+            "Couldn't work out where this would file. You can still file it.",
+        )
+    })?;
     Ok(preview_dto(&preview.routing))
 }
 

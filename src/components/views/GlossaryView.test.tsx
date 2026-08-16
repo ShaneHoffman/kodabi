@@ -178,19 +178,21 @@ describe("GlossaryView listing", () => {
     const user = userEvent.setup();
     serveVault([]);
     onCommand("list_glossary_terms", () => {
-      throw 'glossary at _glossary.yml has duplicate term "MERIDIAN"';
+      // The backend now names both halves: what is wrong with the file and
+      // where the reader fixes it (`user_errors::glossary_error`), so the view
+      // no longer appends a guidance line of its own.
+      throw 'This glossary lists "MERIDIAN" twice. Fix the file in a text editor, then reopen this view.';
     });
 
     await openVaultGlossary(user);
 
     expect(
       await screen.findByText(
-        /Couldn't load the glossary: glossary at _glossary.yml has duplicate term "MERIDIAN"/,
+        'This glossary lists "MERIDIAN" twice. Fix the file in a text editor, then reopen this view.',
       ),
     ).toBeInTheDocument();
-    expect(
-      screen.getByText("Fix the file in a text editor, then reopen this view."),
-    ).toBeInTheDocument();
+    // The path is not on screen: it was in the core error and stays in the log.
+    expect(screen.queryByText(/_glossary\.yml/)).toBeNull();
   });
 });
 
@@ -380,7 +382,7 @@ describe("GlossaryView delete", () => {
     const user = userEvent.setup();
     serveVault([term("MERIDIAN", "A systems-migration project.")]);
     onCommand("delete_glossary_term", () => {
-      throw "file is read-only";
+      throw "Couldn't save the glossary. The file is unchanged; try again.";
     });
     await openVaultGlossary(user);
 
@@ -389,11 +391,9 @@ describe("GlossaryView delete", () => {
     await user.click(within(dialog).getByRole("button", { name: "Delete term" }));
 
     expect(
-      await within(dialog).findByText("Couldn't delete the term: file is read-only"),
-    ).toBeInTheDocument();
-    // And the half that says where to go from here (docs/DESIGN_SYSTEM.md §3).
-    expect(
-      within(dialog).getByText("The term is still in your glossary. You can try again or cancel."),
+      await within(dialog).findByText(
+        "Couldn't save the glossary. The file is unchanged; try again.",
+      ),
     ).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Delete this term?" })).toBeInTheDocument();
   });

@@ -2,10 +2,7 @@ import { readFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 import { isClaudeMissingMessage } from "./claudeMissing";
-import {
-  CHAT_CLAUDE_MISSING_ERROR,
-  CLAUDE_MISSING_MESSAGE,
-} from "./test/claudeMissing";
+import { CLAUDE_MISSING_MESSAGE } from "./test/claudeMissing";
 
 /**
  * The cross-language pin, and it has to actually cross: the detection is a
@@ -50,12 +47,13 @@ describe("isClaudeMissingMessage", () => {
     expect(isClaudeMissingMessage(CLAUDE_MISSING_MESSAGE)).toBe(true);
   });
 
-  it("recognises it through the chat path's Display prefix", () => {
-    // `ChatSpawnError` renders as "failed to spawn ...: <message>", and the
-    // rejection reaches the view through String(error) on top of that.
-    expect(isClaudeMissingMessage(`Error: ${CHAT_CLAUDE_MISSING_ERROR}`)).toBe(
-      true,
-    );
+  it("recognises it inside a wrapping Display prefix", () => {
+    // The chat path now strips its own prefix in Rust (`user_errors` passes
+    // the sentence through bare), but the match deliberately stays a
+    // substring test: a channel that wraps the message stays recognisable.
+    expect(
+      isClaudeMissingMessage(`Error: some wrapper: ${CLAUDE_MISSING_MESSAGE}`),
+    ).toBe(true);
   });
 
   it("leaves every other backend failure to the generic copy", () => {

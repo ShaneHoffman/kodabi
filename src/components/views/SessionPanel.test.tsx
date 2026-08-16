@@ -251,8 +251,11 @@ describe("SessionPanel", () => {
   it("surfaces a failed reveal beside the control", async () => {
     serveNote();
     serveArtifacts();
+    // The real wire shape: `reveal_session_audio` answers the retention race
+    // itself, so the whole sentence arrives from the backend and the view
+    // renders it unprefixed and unaccompanied.
     onCommand("reveal_session_audio", () => {
-      throw "The recording file is missing.";
+      throw "The recording file is missing. Retention may have discarded it; the note itself is unaffected.";
     });
     renderNote();
 
@@ -260,13 +263,9 @@ describe("SessionPanel", () => {
     await userEvent.click(screen.getByTestId("reveal-recording"));
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Couldn't reveal the recording:");
-    expect(alert).toHaveTextContent("The recording file is missing.");
-    // Retention racing an open note is the likeliest cause, and it is a
-    // different answer from "press it again" (docs/DESIGN_SYSTEM.md §3).
-    expect(
-      screen.getByText("Retention may have already removed this recording. Otherwise, try again."),
-    ).toBeInTheDocument();
+    expect(alert).toHaveTextContent(
+      "The recording file is missing. Retention may have discarded it; the note itself is unaffected.",
+    );
   });
 
   it("does not carry a failed reveal across closing the chip", async () => {
@@ -309,21 +308,34 @@ describe("SessionPanel", () => {
     expect(screen.getByTestId("source-panel")).toHaveAttribute("id", controls);
   });
 
-  it("surfaces a failed artifact read as an error", async () => {
+  it("surfaces a failed artifact read as an error, without the exception behind it", async () => {
+    // The leak pin for this surface. `SessionPanel` renders its error as the
+    // ENTIRE message, with no sentence of its own around it, so whatever
+    // arrives here is what the reader sees — which is why the hook supplies a
+    // fixed sentence and discards the rejection (docs/DESIGN_SYSTEM.md §3:
+    // "never leaks an exception string").
+    //
+    // The thrown value is shaped like the developer-facing string a wrapper
+    // would produce if someone reverted the translation in `user_errors.rs`:
+    // an absolute path and an OS error. Asserting on its ABSENCE (rather than
+    // on the sentence alone) is what makes this a regression test.
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     serveNote();
     onCommand("read_session_artifacts", () => {
-      throw "not a session source: sessions/nope.jsonl";
+      throw "note I/O failed at C:\\Users\\someone\\kb\\sessions\\a.jsonl: Access is denied. (os error 5)";
     });
     renderNote();
 
-    // Named, not bare: this used to render the raw backend string as the whole
-    // message, with nothing saying what had failed or what to do about it.
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Couldn't read this session's files:");
-    expect(alert).toHaveTextContent("not a session source");
-    expect(
-      screen.getByText("The note itself is unaffected. Reopen it to try again."),
-    ).toBeInTheDocument();
+    expect(alert).toHaveTextContent(
+      "Couldn't read this note's session files. The note itself is fine; reopen it to try again.",
+    );
+    expect(screen.queryByText(/os error|C:\\|\.jsonl/)).toBeNull();
+    // Discarded from the screen, not from the record: a hook with a fixed
+    // sentence is the only place a rejection would otherwise vanish entirely,
+    // and the console is all there is to catch it.
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
     // The panel exists even when the fetch failed: the testid means "this note
     // has a session", which is the claim a keyword-sourced note has to fail.
     expect(screen.getByTestId("session-artifacts")).toBeInTheDocument();

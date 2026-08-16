@@ -1,11 +1,12 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal, type ITheme } from "@xterm/xterm";
+import { backendCopy } from "./errorCopy";
 // xterm.js ships its own required stylesheet — the terminal does not render
 // without it, and it is a vendor file we neither write nor migrate.
 // eslint-disable-next-line no-restricted-syntax -- third-party stylesheet, not ours to replace
 import "@xterm/xterm/css/xterm.css";
-import { CLAUDE_INSTALL_URL, isClaudeMissingMessage } from "./claudeMissing";
+import { isClaudeMissingMessage } from "./claudeMissing";
 import { TERMINAL_EXIT_EVENT, TERMINAL_OUTPUT_EVENT } from "./events";
 import {
   openTerminal,
@@ -39,7 +40,8 @@ export type XtermHandle = {
   exit: TerminalExit | null;
   /**
    * Why the session could not start, whenever `status` is "failed" or
-   * "missing" — the backend's raw message, for the view's error state.
+   * "missing" — the worded sentence for the view's error state, never the
+   * raw rejection.
    *
    * The failure is painted into the xterm buffer in red as well, but buffer
    * text is not a view state: it is not in the accessibility tree, so it is
@@ -53,23 +55,6 @@ export type XtermHandle = {
   /** Reap the exited/old session and spawn a fresh one, clearing the screen. */
   restart: () => void;
 };
-
-/**
- * What the pane says when a session will not start.
- *
- * The missing-CLI case is written out rather than echoed: the raw form of it
- * arrives as an OS error, and this pane is where a first-time user is most
- * likely to be looking when they meet it.
- */
-function startFailureMessage(error: unknown, verb: "start" | "restart" = "start"): string {
-  const raw = String(error);
-  if (isClaudeMissingMessage(raw)) {
-    return `Kodabi's AI features run through Claude Code, and Claude Code isn't installed on this computer. Install the claude CLI from ${CLAUDE_INSTALL_URL}, then try again.`;
-  }
-  return verb === "start"
-    ? `Could not start Claude Code: ${raw}`
-    : `Could not restart Claude Code: ${raw}`;
-}
 
 /** The terminal's size, in the number xterm wants rather than a CSS length.
  * Grove sets type sizes at the call site rather than in tokens, and this is
@@ -256,17 +241,25 @@ export function useXterm(container: RefObject<HTMLDivElement | null>): XtermHand
       .catch((error: unknown) => {
         // A spawn failure rejects the command; show it in the pane rather than
         // leaving a blank terminal. \x1b[31m…\x1b[0m is the ANSI red the
-        // terminal already renders. `startFailureMessage` decides what the
-        // pane says: the missing-CLI case gets the full explanation written
-        // out, since this pane is where a first-time user is most likely to be
-        // looking; every other failure keeps the OS error.
+        // terminal already renders.
         //
         // The buffer line is the detail, not the state: `startError` is what
         // the view raises and a screen reader hears (see `XtermHandle`).
         if (!active) return;
-        term.writeln(`\x1b[31m${startFailureMessage(error)}\x1b[0m`);
-        setStartError(String(error));
-        setStatus(isClaudeMissingMessage(String(error)) ? "missing" : "failed");
+        // Worded once and used twice: the buffer line and the state a screen
+        // reader hears must be the same sentence, and neither may be the raw
+        // rejection (docs/DESIGN_SYSTEM.md §3). A genuinely missing CLI
+        // arrives as the whole prerequisite message (the backend pre-flights
+        // PATH and passes `CLAUDE_MISSING_MESSAGE` through), and it is the
+        // one failure with its own status: the view swaps Restart for Try
+        // again.
+        const message = backendCopy(
+          error,
+          "Couldn't start Claude Code. Check that the claude command is installed, then press Restart to try again.",
+        );
+        term.writeln(`\x1b[31m${message}\x1b[0m`);
+        setStartError(message);
+        setStatus(isClaudeMissingMessage(message) ? "missing" : "failed");
       });
 
     const observer = new ResizeObserver(() => {
@@ -328,12 +321,14 @@ export function useXterm(container: RefObject<HTMLDivElement | null>): XtermHand
         // `exit` is cleared with it. The old exit is stale the moment a restart
         // is attempted, and leaving it set would let the view go on reporting
         // "Session ended" over a failure that has its own thing to say.
-        termRef.current?.writeln(
-          `\x1b[31m${startFailureMessage(error, "restart")}\x1b[0m`,
+        const message = backendCopy(
+          error,
+          "Couldn't restart Claude Code. Check that the claude command is installed, then press Restart to try again.",
         );
+        termRef.current?.writeln(`\x1b[31m${message}\x1b[0m`);
         setExit(null);
-        setStartError(String(error));
-        setStatus(isClaudeMissingMessage(String(error)) ? "missing" : "failed");
+        setStartError(message);
+        setStatus(isClaudeMissingMessage(message) ? "missing" : "failed");
       });
   };
 

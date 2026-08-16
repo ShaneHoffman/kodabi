@@ -1,5 +1,4 @@
 import { useRef } from "react";
-import { CLAUDE_INSTALL_URL } from "../../claudeMissing";
 import { useXterm, type TerminalStatus } from "../../useXterm";
 import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
@@ -82,12 +81,12 @@ export function TerminalView() {
           `StatusMessage` rather than a hand-rolled row, so the ARIA role comes
           from the variant (UI_CONVENTIONS §4): a failure is assertive, because
           the user did not ask for it, and an ordinary exit is polite. "missing"
-          gets its own branch and copy: it is the one terminal failure with a
-          fix the user can go and act on, so it names the remedy — installing
-          the CLI — rather than an OS error string, and its button reads "Try
-          again" rather than "Restart", since nothing here ever ran.
+          keeps its own key and button: it is the one terminal failure with a
+          fix the user can go and act on, and the backend already words it with
+          the remedy — installing the CLI — so its button reads "Try again"
+          rather than "Restart", since nothing here ever ran.
 
-          The keys are what make the role half true. All three branches render
+          The keys are what make the role half true. All three states render
           the same component at the same position, so without them React
           reconciles a status swap INTO the previous row: one `<p>` whose `role`
           mutates in place. A live region is registered with the assistive tech
@@ -97,15 +96,15 @@ export function TerminalView() {
           right role is the one actually in force. */}
       {status !== "running" && (
         <div className="flex items-center gap-2.5 pt-2">
-          {status === "missing" ? (
-            <StatusMessage key="missing" variant="error" compact>
-              Claude Code isn&apos;t installed. Install the claude CLI from{" "}
-              {CLAUDE_INSTALL_URL}, then try again.
-            </StatusMessage>
-          ) : status === "failed" ? (
-            <StatusMessage key="failed" variant="error" compact>
-              Couldn&apos;t start Claude Code{startError ? `: ${startError}` : ""}. Restart
-              to try again.
+          {/* `startError` is a whole sentence when there is one (`useXterm`
+              words it, naming the Restart button beside this line), so it is
+              rendered as-is rather than behind a prefix — for "missing" it is
+              the backend's own prerequisite message, install URL included.
+              The fallback covers the one case that has no message to show: a
+              failure raised without one. */}
+          {status === "missing" || status === "failed" ? (
+            <StatusMessage key={status} variant="error" compact>
+              {startError ?? "Couldn't start Claude Code. Restart to try again."}
             </StatusMessage>
           ) : (
             <StatusMessage key="exited" variant="status" compact>

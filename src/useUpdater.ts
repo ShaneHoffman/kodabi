@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { invoke } from "@tauri-apps/api/core";
+import { opaqueFailure } from "./errorCopy";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { check, type DownloadEvent, type Update } from "@tauri-apps/plugin-updater";
 
@@ -117,7 +118,18 @@ export function useUpdater(options: { checkOnMount: boolean }): {
     } catch (error) {
       setState((current) => ({
         ...current,
-        phase: { status: "error", step: "check", message: String(error) },
+        phase: {
+          status: "error",
+          step: "check",
+          // `opaqueFailure`, not `backendCopy`: these come from
+          // `tauri-plugin-updater`, whose errors serialize to strings that are
+          // mostly transparent wrappers over reqwest/io ("dns error", "os error
+          // 5"). A string from here is as raw as an exception.
+          message: opaqueFailure(
+            error,
+            "Couldn't check for updates. Kodabi will try again next launch.",
+          ),
+        },
       }));
     }
   }, []);
@@ -144,7 +156,14 @@ export function useUpdater(options: { checkOnMount: boolean }): {
     } catch (error) {
       setState((current) => ({
         ...current,
-        phase: { status: "error", step: "download", message: String(error) },
+        phase: {
+          status: "error",
+          step: "download",
+          message: opaqueFailure(
+            error,
+            "Couldn't download the update. Your current version is untouched; try again.",
+          ),
+        },
       }));
     }
   }, []);
@@ -171,7 +190,14 @@ export function useUpdater(options: { checkOnMount: boolean }): {
     } catch (error) {
       setState((current) => ({
         ...current,
-        phase: { status: "error", step: "install", message: String(error) },
+        phase: {
+          status: "error",
+          step: "install",
+          message: opaqueFailure(
+            error,
+            "Couldn't install the update. Your current version is untouched; try again.",
+          ),
+        },
       }));
     }
   }, []);

@@ -11,6 +11,7 @@ import {
   type PendingPermission,
 } from "./chat";
 import { CHAT_EVENT } from "./events";
+import { backendCopy } from "./errorCopy";
 import { useTauriEvent } from "./useTauriEvent";
 
 /**
@@ -179,7 +180,9 @@ function applyEvent(
               ...state.entries,
               {
                 kind: "error",
-                message: `Couldn't finish the answer: ${payload.error}`,
+                // Verbatim: `chat_cmds` words this once, so the live event and
+                // a restored snapshot entry read identically.
+                message: payload.error,
               },
             ]
           : state.entries,
@@ -219,7 +222,13 @@ export function useChatSession(): ChatSessionValue {
       })
       .catch((error: unknown) => {
         if (active) {
-          setState((prev) => ({ ...prev, startError: String(error) }));
+          setState((prev) => ({
+            ...prev,
+            startError: backendCopy(
+              error,
+              "Couldn't start the chat. Check that the claude command is installed, then press Try again.",
+            ),
+          }));
         }
       });
     return () => {
@@ -239,7 +248,13 @@ export function useChatSession(): ChatSessionValue {
         turnActive: false,
         entries: [
           ...prev.entries,
-          { kind: "error", message: `Couldn't send the message: ${String(error)}` },
+          {
+            kind: "error",
+            message: backendCopy(
+              error,
+              "Couldn't send the message. The chat is still open; try again.",
+            ),
+          },
         ],
       }));
     });
@@ -259,7 +274,13 @@ export function useChatSession(): ChatSessionValue {
     restartChat()
       .then((snapshot) => setState(fromSnapshot(snapshot)))
       .catch((error: unknown) => {
-        setState((prev) => ({ ...prev, startError: String(error) }));
+        setState((prev) => ({
+          ...prev,
+          startError: backendCopy(
+            error,
+            "Couldn't start a new chat. Check that the claude command is installed, then try again.",
+          ),
+        }));
       });
   };
 

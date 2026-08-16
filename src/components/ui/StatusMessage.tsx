@@ -7,6 +7,8 @@ type Props = {
   compact?: boolean;
   children: ReactNode;
   className?: string;
+  /** For the few state blocks a test reaches for by hook rather than by role. */
+  "data-testid"?: string;
 };
 
 /**
@@ -23,7 +25,13 @@ type Props = {
  * not an opening here — it belongs to a destructive confirmation's confirm
  * control, not to reporting that something failed.
  */
-export function StatusMessage({ variant, compact = false, children, className = "" }: Props) {
+export function StatusMessage({
+  variant,
+  compact = false,
+  children,
+  className = "",
+  "data-testid": testId,
+}: Props) {
   // An error is assertive because the user did not ask for it and may not be
   // looking; a status is polite because it accompanies something they started.
   const role = variant === "error" ? "alert" : variant === "status" ? "status" : undefined;
@@ -37,7 +45,11 @@ export function StatusMessage({ variant, compact = false, children, className = 
   const size = compact ? "text-[12px]" : "text-[15px] leading-relaxed";
 
   return (
-    <p role={role} className={`${size} ${tone}${className ? ` ${className}` : ""}`}>
+    <p
+      role={role}
+      data-testid={testId}
+      className={`${size} ${tone}${className ? ` ${className}` : ""}`}
+    >
       {children}
     </p>
   );

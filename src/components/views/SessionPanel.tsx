@@ -8,6 +8,7 @@ import {
   type SessionArtifacts,
   type TranscriptSegment,
 } from "../../useSessions";
+import { backendCopy } from "../../errorCopy";
 
 /** The visible speaker label per wire channel, and the value tone that
  * separates the two sides of the exchange — label plus value, never hue (the
@@ -85,16 +86,13 @@ export function SessionPanel({
     // note has to fail.
     return (
       <section className="glass-card px-4 py-3.5" data-testid="session-artifacts">
-        <div className="flex flex-col gap-2">
-          <StatusMessage variant="error" compact>
-            Couldn&apos;t read this session&apos;s files: {error}
-          </StatusMessage>
-          {/* This is a side panel: the note it sits beside is still on screen
-              and still readable, which is the thing worth saying. */}
-          <p className="text-[11.5px] leading-relaxed text-ink-dim">
-            The note itself is unaffected. Reopen it to try again.
-          </p>
-        </div>
+        {/* The whole message, unprefixed and unaccompanied: `useSessionArtifacts`
+            supplies one fixed sentence for this panel, and it already carries
+            the half worth saying beside a note that is still on screen ("The
+            note itself is fine; reopen it to try again"). */}
+        <StatusMessage variant="error" compact>
+          {error}
+        </StatusMessage>
       </section>
     );
   }
@@ -179,24 +177,25 @@ export function SessionPanel({
                 onClick={() => {
                   setRevealError(null);
                   revealSessionAudio(audioPath).catch((thrown: unknown) => {
-                    setRevealError(`Couldn't reveal the recording: ${String(thrown)}`);
+                    setRevealError(
+                      backendCopy(
+                        thrown,
+                        "Couldn't reveal the recording. It is still in your vault's sessions folder.",
+                      ),
+                    );
                   });
                 }}
               >
                 Reveal in Explorer
               </Button>
               {revealError !== null && (
-                <div className="mt-2 flex flex-col gap-2">
-                  <StatusMessage variant="error" compact>
-                    {revealError}
-                  </StatusMessage>
-                  {/* The likeliest cause is the retention sweep having already
-                      taken the file (see `revealSessionAudio`), which is a
-                      different answer from "press it again". */}
-                  <p className="text-[11.5px] leading-relaxed text-ink-dim">
-                    Retention may have already removed this recording. Otherwise, try again.
-                  </p>
-                </div>
+                // One sentence, no companion line: `reveal_session_audio`
+                // already answers the likeliest cause itself ("Retention may
+                // have discarded it; the note itself is unaffected"), so a
+                // second line here would say it twice.
+                <StatusMessage variant="error" compact className="mt-2">
+                  {revealError}
+                </StatusMessage>
               )}
             </>
           )}
@@ -225,12 +224,19 @@ export function SessionPanel({
         // would do until a click if it sat behind a chip. It names only the
         // transcript even when the audio is gone too, because `audio_path: null`
         // cannot tell "pruned" from "never retained".
-        <p
-          className="mt-2.5 text-[12px] text-ink-faint"
+        //
+        // `empty`, not `status`: the variant fixes the ARIA role, and this is a
+        // standing statement about what the note has rather than something that
+        // just happened — `role="status"` would make a static sentence a live
+        // region, announced on every open (§3).
+        <StatusMessage
+          variant="empty"
+          compact
+          className="mt-2.5"
           data-testid="session-source-pruned"
         >
           The raw transcript for this note is no longer stored.
-        </p>
+        </StatusMessage>
       )}
     </section>
   );

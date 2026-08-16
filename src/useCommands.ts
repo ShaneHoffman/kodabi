@@ -2,7 +2,9 @@ import { useMemo } from "react";
 import { useNavigation } from "./useNavigation";
 import { entryView, folderHue, formatSlug, useProjects, type FolderHue } from "./useProjects";
 import { useFailedSessions } from "./useSessions";
-import { showQuickCaptureWindow } from "./quickCapture";
+import { QUICK_CAPTURE_SHORTCUT, showQuickCaptureWindow } from "./quickCapture";
+import { CAPTURE_TOGGLE_SHORTCUT, startCapture, stopCapture } from "./captureControl";
+import { isCaptureActive, useCaptureState } from "./useCaptureState";
 
 /**
  * What kind of thing a command is. The palette groups by this and prints it as
@@ -47,6 +49,11 @@ export function useCommands(): Command[] {
   const { navigate } = useNavigation();
   const { entries } = useProjects();
   const { sessions } = useFailedSessions();
+  // Narrowed to the boolean before the memo, deliberately: the capture row only
+  // changes at the idle boundary, so keying the memo on the phase itself would
+  // rebuild the whole registry on every listening↔degraded flip of a flapping
+  // device.
+  const captureEngaged = isCaptureActive(useCaptureState().phase);
 
   return useMemo(() => {
     const commands: Command[] = entries.map((entry) =>
@@ -96,16 +103,49 @@ export function useCommands(): Command[] {
         id: "open-capture",
         kind: "action",
         title: "Quick capture",
-        // The one command here with a global binding, mirroring
-        // `DEFAULT_QUICK_CAPTURE_SHORTCUT` in src-tauri/src/quick_capture.rs.
-        hint: "Ctrl+Alt+Space",
+        // The one command here with a global binding of its own.
+        hint: QUICK_CAPTURE_SHORTCUT,
         // Quick capture is its own window (#45), not a main-window view — the
         // palette action pops it, matching the global hotkey.
         run: () => {
           void showQuickCaptureWindow();
         },
       },
-      // The four below open a screen rather than doing something, so they are
+      // The main window's own way to start a capture, and the only place inside
+      // it that names the chord as a chord. It is a *pair* rather than one
+      // static row because `Ctrl+Shift+K` toggles: a row reading "Start capture"
+      // beside that hint during a live session would teach that the chord starts
+      // one at the exact moment a press would stop one, which is the false
+      // teaching the `hint` doc above forbids. Two ids rather than one
+      // "toggle-capture", so what ran is nameable.
+      //
+      // Failures are swallowed on purpose, matching the hotkey and tray paths,
+      // which have no error UI of their own either. The palette has closed by
+      // the time either promise settles (`runCommand` runs then dismisses), and
+      // both outcomes already land somewhere the user is looking: a missing
+      // consent emits `consent:required` and opens the nudge over the shell,
+      // and a start that captured nothing derives phase `idle`, which the pill
+      // reads out as "Capture failed to start".
+      captureEngaged
+        ? {
+            id: "stop-capture",
+            kind: "action",
+            title: "Stop capture",
+            hint: CAPTURE_TOGGLE_SHORTCUT,
+            run: () => {
+              void stopCapture().catch(() => {});
+            },
+          }
+        : {
+            id: "start-capture",
+            kind: "action",
+            title: "Start capture",
+            hint: CAPTURE_TOGGLE_SHORTCUT,
+            run: () => {
+              void startCapture().catch(() => {});
+            },
+          },
+      // The five below open a screen rather than doing something, so they are
       // `navigate` despite reading as verbs: the kind tag answers "where does
       // this take me", and "Open chat" takes you to the chat view.
       {
@@ -130,6 +170,17 @@ export function useCommands(): Command[] {
         run: () => navigate({ kind: "terminal" }),
       },
       {
+        // The vault-wide glossary's front door. Every project glossary is
+        // reachable from its own project, but this one belongs to no folder —
+        // and it is the glossary that matters most, since transcription biases
+        // against it for every capture. Settings kept it alive; this is the way
+        // in that does not require knowing it is in Settings.
+        id: "glossary",
+        kind: "navigate",
+        title: "Vault glossary",
+        run: () => navigate({ kind: "glossary", slug: null }),
+      },
+      {
         id: "settings",
         kind: "navigate",
         title: "Settings",
@@ -138,5 +189,5 @@ export function useCommands(): Command[] {
     );
 
     return commands;
-  }, [entries, navigate, sessions]);
+  }, [captureEngaged, entries, navigate, sessions]);
 }

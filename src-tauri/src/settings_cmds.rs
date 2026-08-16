@@ -55,14 +55,25 @@ impl SettingsState {
     /// interleave into a torn file. `pub(crate)` so `audio_cmds::run_mic_test`
     /// can persist its result through the same write-through path other
     /// settings mutations use.
-    pub(crate) fn update(&self, mutate: impl FnOnce(&mut Settings)) -> Result<Settings, String> {
+    ///
+    /// `failed` is the caller's sentence for a write that didn't land. It has to
+    /// come from the call site: `settings::save` returns a bare `io::Error`
+    /// ("Access is denied. (os error 5)") that names neither the setting nor
+    /// what still applies, and the in-memory value is left unchanged on failure,
+    /// which is the reassurance each caller words for its own row.
+    pub(crate) fn update(
+        &self,
+        failed: &str,
+        mutate: impl FnOnce(&mut Settings),
+    ) -> Result<Settings, String> {
         let mut guard = self
             .current
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let mut next = *guard;
         mutate(&mut next);
-        settings::save(&self.path, &next).map_err(|err| err.to_string())?;
+        settings::save(&self.path, &next)
+            .map_err(|err| crate::user_errors::reported("settings", err, failed))?;
         *guard = next;
         Ok(next)
     }
@@ -84,7 +95,10 @@ pub fn set_retention_policy(
     state: State<'_, SettingsState>,
     policy: RetentionPolicy,
 ) -> Result<Settings, String> {
-    let settings = state.update(|s| s.retention = policy)?;
+    let settings = state.update(
+        "Couldn't save the retention policy. The previous policy still applies; try again.",
+        |s| s.retention = policy,
+    )?;
     let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
     crate::retention::spawn_prune(&app);
     Ok(settings)
@@ -101,7 +115,10 @@ pub fn set_capture_overlay(
     state: State<'_, SettingsState>,
     overlay: OverlaySettings,
 ) -> Result<Settings, String> {
-    let settings = state.update(|s| s.overlay = overlay)?;
+    let settings = state.update(
+        "Couldn't save the capture pill setting. The previous setting still applies; try again.",
+        |s| s.overlay = overlay,
+    )?;
     let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
     crate::overlay::apply_settings_change(&app);
     Ok(settings)
@@ -119,7 +136,10 @@ pub fn set_appearance(
     state: State<'_, SettingsState>,
     appearance: AppearanceSettings,
 ) -> Result<Settings, String> {
-    let settings = state.update(|s| s.appearance = appearance)?;
+    let settings = state.update(
+        "Couldn't save the theme. The previous theme still applies; try again.",
+        |s| s.appearance = appearance,
+    )?;
     let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
     Ok(settings)
 }
@@ -133,10 +153,13 @@ pub fn acknowledge_consent(
     state: State<'_, SettingsState>,
     retention: RetentionPolicy,
 ) -> Result<Settings, String> {
-    let settings = state.update(|s| {
-        s.consent_acknowledged = true;
-        s.retention = retention;
-    })?;
+    let settings = state.update(
+        "Couldn't save your choice, so recording stays off. Try again.",
+        |s| {
+            s.consent_acknowledged = true;
+            s.retention = retention;
+        },
+    )?;
     let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
     // The chosen policy may prune immediately (e.g. KeepDays over pre-existing
     // sessions), same as an explicit policy change.
@@ -170,7 +193,9 @@ mod tests {
         let (state, path) = temp_settings_state("update");
         assert!(!state.snapshot().consent_acknowledged);
 
-        let updated = state.update(|s| s.consent_acknowledged = true).unwrap();
+        let updated = state
+            .update("unused", |s| s.consent_acknowledged = true)
+            .unwrap();
         assert!(updated.consent_acknowledged);
         assert!(state.snapshot().consent_acknowledged);
 
@@ -190,7 +215,7 @@ mod tests {
         assert_eq!(state.snapshot().overlay, OverlaySettings::default());
 
         let updated = state
-            .update(|s| {
+            .update("unused", |s| {
                 s.overlay = OverlaySettings {
                     manual_captures: true,
                     auto_captures: false,
@@ -214,7 +239,9 @@ mod tests {
         assert_eq!(state.snapshot().appearance.theme, Theme::System);
 
         let updated = state
-            .update(|s| s.appearance = AppearanceSettings { theme: Theme::Dark })
+            .update("unused", |s| {
+                s.appearance = AppearanceSettings { theme: Theme::Dark }
+            })
             .unwrap();
         assert_eq!(updated.appearance.theme, Theme::Dark);
 

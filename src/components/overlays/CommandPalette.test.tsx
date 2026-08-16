@@ -1,10 +1,11 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CommandPalette } from "./CommandPalette";
 import { NavigationProvider } from "../providers/NavigationProvider";
-import { onCommand, resetTauriMocks } from "../../test/tauri";
+import { NavigationContext } from "../../useNavigation";
+import { emitFromBackend, invokedCommands, onCommand, resetTauriMocks } from "../../test/tauri";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
@@ -24,6 +25,26 @@ function serveVault(): void {
     ],
   }));
   onCommand("list_failed_sessions", () => []);
+  // The capture row keys off the phase, so the seed the registry reads has to
+  // be routed like any other command: an unstubbed one rejects, which
+  // `useCaptureState` survives by staying idle, but then the idle row would be
+  // passing for the wrong reason.
+  onCommand("capture_phase", () => ({
+    phase: "idle",
+    sources: { loopback: "off", microphone: "off" },
+  }));
+  onCommand("start_capture", () => ({}));
+  onCommand("stop_capture", () => ({}));
+}
+
+/** Puts the backend into a running capture, as a start would. */
+function goLive(): void {
+  act(() => {
+    emitFromBackend("capture:state", {
+      phase: "listening",
+      sources: { loopback: "live", microphone: "live" },
+    });
+  });
 }
 
 async function renderPalette() {
@@ -105,6 +126,9 @@ describe("CommandPalette", () => {
     expect(screen.getByRole("option", { name: /Quick capture/ })).toHaveTextContent(
       "Ctrl+Alt+Space",
     );
+    expect(screen.getByRole("option", { name: /Start capture/ })).toHaveTextContent(
+      "Ctrl+Shift+K",
+    );
     expect(screen.getByRole("option", { name: /New note/ })).not.toHaveTextContent("Ctrl");
   });
 
@@ -134,15 +158,15 @@ describe("CommandPalette", () => {
     const user = userEvent.setup();
     await renderPalette();
     const options = screen.getAllByRole("option");
-    // Inbox, Search notes, Open chat, Open terminal, Settings |
-    // briarwood-golf | New note, Quick capture
-    expect(options).toHaveLength(8);
+    // Inbox, Search notes, Open chat, Open terminal, Vault glossary, Settings |
+    // briarwood-golf | New note, Quick capture, Start capture
+    expect(options).toHaveLength(10);
     expect(selectedOption()).toHaveTextContent("Inbox");
 
-    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}");
+    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}");
 
-    // The sixth row is the first folder, reached with no extra keypress for the
-    // separator in between.
+    // The seventh row is the first folder, reached with no extra keypress for
+    // the separator in between.
     expect(selectedOption()).toHaveTextContent("briarwood-golf");
   });
 
@@ -184,6 +208,30 @@ describe("CommandPalette", () => {
     expect(fallback).toHaveAttribute("aria-selected", "true");
   });
 
+  it("offers the vault glossary, which has no other way in but Settings", async () => {
+    // The glossary that biases transcription for every capture belongs to no
+    // folder, so nothing in the sidebar leads to it. Without this row a user has
+    // to already know it lives in Settings.
+    const user = userEvent.setup();
+    const navigate = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <NavigationContext.Provider value={{ view: { kind: "inbox" }, navigate }}>
+        <CommandPalette open onClose={onClose} />
+      </NavigationContext.Provider>,
+    );
+    await screen.findByRole("option", { name: /briarwood-golf/ });
+
+    expect(screen.getByRole("option", { name: /Vault glossary/ })).toHaveTextContent("navigate");
+
+    await user.type(input(), "glossary");
+    await user.keyboard("{Enter}");
+
+    // `slug: null` is the vault-wide one; a slug would be a project's.
+    expect(navigate).toHaveBeenCalledWith({ kind: "glossary", slug: null });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("runs the selected command and closes", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
@@ -198,6 +246,60 @@ describe("CommandPalette", () => {
     await user.keyboard("{Enter}");
 
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("starts a capture from inside the main window", async () => {
+    // The window had no start-capture control at all before this row: the pill
+    // is presentational and quick capture is a different window, so the palette
+    // is the searchable way in.
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+    render(
+      <NavigationProvider>
+        <CommandPalette open onClose={onClose} />
+      </NavigationProvider>,
+    );
+    await screen.findByRole("option", { name: /briarwood-golf/ });
+
+    await user.click(screen.getByRole("option", { name: /Start capture/ }));
+
+    expect(invokedCommands()).toContain("start_capture");
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("offers the stop half of the toggle once a capture is running", async () => {
+    // The chord toggles, so the row and its hint have to agree with what a press
+    // would actually do: printing "Start capture / Ctrl+Shift+K" over a live
+    // session would teach the chord starts one when it would stop one.
+    const user = userEvent.setup();
+    await renderPalette();
+
+    goLive();
+
+    expect(screen.queryByRole("option", { name: /Start capture/ })).not.toBeInTheDocument();
+    const stop = screen.getByRole("option", { name: /Stop capture/ });
+    expect(stop).toHaveTextContent("Ctrl+Shift+K");
+
+    await user.click(stop);
+
+    expect(invokedCommands()).toContain("stop_capture");
+  });
+
+  it("survives a capture command the backend refuses", async () => {
+    // Consent-missing is the everyday case: the backend rejects and emits
+    // `consent:required`, which opens the nudge over the shell. The palette has
+    // already closed by then, so it must not surface (or trip over) the
+    // rejection itself.
+    const user = userEvent.setup();
+    onCommand("start_capture", () => {
+      throw "Recording needs your consent first. Answer the consent prompt and capture will start.";
+    });
+    await renderPalette();
+
+    await user.click(screen.getByRole("option", { name: /Start capture/ }));
+
+    expect(invokedCommands()).toContain("start_capture");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
 
   it("hands focus back to whatever opened it", async () => {

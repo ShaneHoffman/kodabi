@@ -158,6 +158,10 @@ export function useProjectNotes(slug: string): {
 } {
   const { data, loading, error } = useVaultQuery(
     useCallback(() => invoke<NoteSummary[]>("list_notes", { project: slug }), [slug]),
+    // Fixed: every way a listing fails is the same event to the reader, and the
+    // reassurance (the files are still there) is what a failed list most needs
+    // to say.
+    "Couldn't read your notes. They are still on disk; reopen this view to try again.",
   );
   return { notes: data ?? [], loading, error };
 }
