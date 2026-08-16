@@ -110,6 +110,10 @@ export function Checkbox({
         // Indented under the LABEL rather than the box, so the text column
         // reads as one block. 25px restates the box's own 17px plus the 8px
         // gap beside it; it tracks the box, not the spacing rhythm.
+        //
+        // Faint by decision: DESIGN_SYSTEM §6 settles the control hint as a
+        // metadata-register occupant (a sentence the user MAY read, bound as a
+        // description), bounded by length — a paragraph here would be prose.
         <p
           id={hintId}
           className="pl-[25px] font-ui text-[11.5px] leading-relaxed text-ink-faint"

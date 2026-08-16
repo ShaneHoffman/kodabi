@@ -78,6 +78,11 @@ export function Field({ label, id, hint, error, className, ...rest }: Props) {
         </StatusMessage>
       )}
       {hint && (
+        // Faint by decision, not by drift: DESIGN_SYSTEM §6 settles the control
+        // hint as a metadata-register occupant, because a hint is a sentence the
+        // user MAY read (the field works unread, and this is a description
+        // rather than content). What the register excludes is announced text —
+        // which is why `error` above reads through StatusMessage at ink-dim.
         <p id={hintId} className="font-ui text-[11.5px] leading-relaxed text-ink-faint">
           {hint}
         </p>
