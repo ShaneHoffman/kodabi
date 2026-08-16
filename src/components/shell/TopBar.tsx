@@ -101,7 +101,8 @@ type Props = {
 /**
  * The window's transport bar: what the app is called, what capture is doing,
  * and the two pieces of chrome that belong to the window rather than to any
- * view.
+ * view — then, past a hairline, the three caption buttons, because this bar IS
+ * the title bar now that the main window is undecorated.
  *
  * It exists so the listening indicator can be the one thing in the app that
  * never moves. In the old sidebar foot it sat below a list that grows, and it
