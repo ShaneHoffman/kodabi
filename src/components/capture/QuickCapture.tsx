@@ -236,15 +236,25 @@ export function QuickCapture() {
             // and transcribed on a later launch, so refusing the capture would
             // lose a real meeting to protect the user from nothing. What must
             // not happen is the user believing a transcript is coming when it
-            // is not, so the hint slot says so instead. `role="status"`, not
-            // `alert`: nothing has gone wrong.
-            <span
-              role="status"
+            // is not, so the hint slot says so instead. The `status` variant,
+            // not `error`: nothing has gone wrong, so the announcement is
+            // polite rather than assertive.
+            //
+            // This is a second live region while a capture is engaged, since
+            // `RecordingStatus` below carries its own. That is the intended
+            // shape: two concerns, two regions (one region per concern,
+            // docs/DESIGN_SYSTEM.md §6). They are both polite, so they queue
+            // rather than interrupt each other, and folding the models notice
+            // into the capture label would lose it exactly when it matters
+            // most — during the recording it is reassuring about.
+            <StatusMessage
+              variant="status"
+              compact
               data-testid="quick-capture-models-notice"
-              className="min-w-0 flex-1 font-data text-[10.5px] text-ink-dim"
+              className="min-w-0 flex-1"
             >
               {modelsNotice}
-            </span>
+            </StatusMessage>
           ) : (
             <span className="min-w-0 flex-1 truncate font-data text-[10.5px] text-ink-faint">
               {engaged ? (

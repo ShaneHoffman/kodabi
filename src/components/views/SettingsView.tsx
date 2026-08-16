@@ -135,15 +135,16 @@ function Row({
   );
 }
 
-/** A row's "that worked" line: an ANNOUNCEMENT, not a label, which is why it
- * reads in the data face at the quietest step and why every one of them is on
- * a timer somewhere above. `role="status"` is polite — it accompanies something
- * the user started, so it waits its turn rather than interrupting. */
+/** A row's "that worked" line: an ANNOUNCEMENT, not a label, which is why every
+ * one of them is on a timer somewhere above. It is `StatusMessage`'s `status`
+ * variant — the primitive owns the polite `role="status"`, which waits its turn
+ * rather than interrupting because it accompanies something the user started —
+ * wrapped here only to keep the four call sites on one measure and one offset. */
 function ConfirmLine({ children }: { children: ReactNode }) {
   return (
-    <p role="status" className="mt-1.5 max-w-[56ch] font-data text-[11px] text-ink-dim">
+    <StatusMessage variant="status" compact className="mt-1.5 max-w-[56ch]">
       {children}
-    </p>
+    </StatusMessage>
   );
 }
 
