@@ -227,6 +227,7 @@ export default tseslint.config(
       "src/useRoutePreview.ts",
       "src/useScrollIntoView.ts",
       "src/useSettings.ts",
+      "src/useShortcutStatus.ts",
       "src/useTauriEvent.ts",
       "src/useTimeout.ts",
       "src/useTranscriptionState.ts",

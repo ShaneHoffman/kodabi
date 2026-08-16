@@ -35,6 +35,24 @@ import { invoke } from "@tauri-apps/api/core";
  */
 export const CAPTURE_TOGGLE_SHORTCUT = "Ctrl+Shift+K";
 
+/**
+ * Mirrors `ShortcutStatus` in `src-tauri/src/lib.rs`: whether each OS-global
+ * shortcut actually bound at startup. Registration is best-effort so a chord
+ * another app owns cannot block launch, which means the constant above is a
+ * claim the OS is free to have refused.
+ *
+ * Immutable for the app's lifetime, so there is no event to pair with it.
+ */
+export type ShortcutStatus = {
+  captureToggle: boolean;
+  quickCapture: boolean;
+};
+
+/** Read whether the startup shortcut registrations landed. */
+export function fetchShortcutStatus(): Promise<ShortcutStatus> {
+  return invoke<ShortcutStatus>("shortcut_status");
+}
+
 /** Begin a capture. Resolves once the backend has accepted the request; the
  * phase reaching `listening` arrives separately on `capture:state`. */
 export function startCapture(): Promise<void> {
