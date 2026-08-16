@@ -479,24 +479,28 @@ eyebrows, keyboard hints, and **the control hint** — the one optional line und
 wrong token.
 
 **The hint is in the register, and the word carrying that is "has to".** A hint is a sentence the
-user *may* read: the control works unread, it is bound as a description (`aria-describedby`) rather
-than as content, and it stops at a line or two — on a settings row at the 46ch measure §1 gives it,
-inside a dialog or a form column at whatever already bounds the control. What the register
+user *may* read: the control works unread; it is a description of the control rather than content,
+and on a `Field` or a `Checkbox` it is literally that, wired through `aria-describedby` (a settings
+row's is visual only — the row's control is whatever the caller passed in, so there is nothing the
+row can name); and it stops at a sentence or two — on a settings row at the 46ch measure §1 gives
+it, inside a dialog or a form column at whatever already bounds the control. What the register
 excludes is text the app is *announcing* — a status, an error, empty-state copy, the payoff of
 something the user just did. Those have to be read, so they read at `ink-dim` or above.
 `StatusMessage` is the settled far side of that line: its `status` variant used to sit here and was
 promoted, because a line the app deliberately announces through a live region is the last thing that
 should be the hardest to read.
 
-**Two bounds keep the carve-out from swallowing the rule.** A hint is *one or two lines*: a
+**Two bounds keep the carve-out from swallowing the rule.** A hint is *a sentence or two*: a
 paragraph is prose, whatever it is passed as, and prose reads at `ink-dim` (the Settings Attribution
 row is the worked example — a licensing paragraph, so it takes the row's `body` slot rather than its
-`hint`). And this is a **register** claim, not a contrast one — measured past the table, because a
-`Field`'s hint most often renders in a dialog rather than on a card: `ink-faint` reads **4.87** on
-night's composited dialog and **4.67** on its reduced-transparency solid, and 5.43 / 5.54 on day's.
-Every surface a hint lands on clears the floor in both variants. Promoting a hint buys
-no legibility; it only flattens it against the label it explains — on a `Field`, where the label is
-itself `ink-dim` at the same size, weight would be the only thing left telling the two apart.
+`hint`). The test is sentences rather than wrapped lines on purpose: several shipped settings hints
+are two sentences that run to three lines at their 46ch measure, and none of them is prose.
+And this is a **register** claim, not a contrast one — measured past the table, because a `Field`'s
+hint most often renders in a dialog rather than on a card: `ink-faint` reads **4.87** on night's
+composited dialog and **4.67** on its reduced-transparency solid, and 5.43 / 5.54 on day's. Every
+surface a hint lands on clears the floor in both variants. Promoting a hint buys no legibility; it
+only flattens it against the label it explains — on a `Field`, where the label is itself `ink-dim`
+at the same size, weight would be the only thing left telling the two apart.
 
 The one thing it colours that is not text is the spirit-mark's dormant core (`src/index.css` §3),
 and that is the same claim in another material: the mark at idle is metadata about the capture, not
