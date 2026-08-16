@@ -51,6 +51,18 @@
       "effortOverride": "high"
     },
     {
+      "id": "9af8f5f6-6c43-4f11-ba7a-6cbb4f111e32",
+      "name": "Merge PR",
+      "description": "Merges the task's reviewed, green PR into main with a merge commit (gh pr merge --merge --admin; admin covers only the self-approval gap, never failing checks) and deletes the remote branch. Dragging a card here is the merge approval. It never fixes code and never moves the card: a human drags it to Done, which removes the worktree.",
+      "icon": "git-merge",
+      "color": "#22c55e",
+      "autoSpawn": true,
+      "permissionMode": "auto",
+      "autoCommand": "/merge-pr",
+      "modelOverride": "claude-sonnet-5",
+      "effortOverride": "high"
+    },
+    {
       "id": "f0eb001f-bb69-40b2-81cb-b1b3382b7def",
       "name": "Done",
       "role": "done",
