@@ -226,7 +226,7 @@ export function useChatSession(): ChatSessionValue {
             ...prev,
             startError: backendCopy(
               error,
-              "Couldn't start the chat. Check that the claude command is installed, then reopen this view.",
+              "Couldn't start the chat. Check that the claude command is installed, then press Try again.",
             ),
           }));
         }
@@ -278,7 +278,7 @@ export function useChatSession(): ChatSessionValue {
           ...prev,
           startError: backendCopy(
             error,
-            "Couldn't start a new chat. Check that the claude command is installed, then reopen this view.",
+            "Couldn't start a new chat. Check that the claude command is installed, then try again.",
           ),
         }));
       });

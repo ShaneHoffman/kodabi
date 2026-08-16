@@ -47,21 +47,24 @@ pub const TERMINAL_EXIT_EVENT: &str = "terminal:exit";
 
 const DEFAULT_COLS: u16 = 80;
 const DEFAULT_ROWS: u16 = 24;
-/// A poisoned lock means a previous holder panicked: the session is
-/// unrecoverable, but restarting the pane builds a fresh one. The raw condition
-/// is a Rust fact with no user-visible cause, so it is not logged through
-/// `user_errors` (there is nothing to log beyond this sentence).
-const POISONED: &str = "The terminal hit an internal error. Reopen this view to continue.";
+/// A poisoned lock means a previous holder panicked. Unlike the guards in
+/// `audio_cmds`, this one does not recover with `into_inner()`, and a poisoned
+/// `Mutex` stays poisoned for the life of the process: Restart re-enters
+/// `terminal_restart`, which takes the same lock and fails the same way. So the
+/// copy names the only thing that does work. The raw condition is a Rust fact
+/// with no user-visible cause, so it is not logged through `user_errors` (there
+/// is nothing to log beyond this sentence).
+const POISONED: &str = "The terminal hit an internal error. Restart Kodabi to continue.";
 
 /// The two ways a live session stops responding: the writer or the PTY resize
 /// failed. Both mean the pane is talking to a process that is no longer there.
 const TERMINAL_DISCONNECTED: &str =
-    "The terminal lost its connection to Claude Code. Reopen this view to continue.";
+    "The terminal lost its connection to Claude Code. Press Restart to try again.";
 
 /// Spawning failed. Naming `claude` is the actionable half: the usual cause is
 /// that it isn't installed or isn't on PATH.
 const TERMINAL_START_FAILED: &str =
-    "Couldn't start Claude Code. Check that the claude command is installed, then reopen this view.";
+    "Couldn't start Claude Code. Check that the claude command is installed, then press Restart to try again.";
 
 /// The one live terminal session, or none. Managed at builder level like
 /// `CaptureState`. The `Mutex` makes the whole thing `Sync`; the session itself

@@ -129,9 +129,21 @@ export function ChatView() {
     return (
       <ChatFrame>
         {chat.startError && (
-          <StatusMessage variant="error">
-            {chat.startError}
-          </StatusMessage>
+          <div className="flex flex-col items-start gap-2">
+            {/* The whole sentence, unprefixed: `chat_cmds` words each start
+                failure (`user_errors`), and it hedges for the same reason a
+                second line used to here. `chat_open` fails for more than a
+                missing CLI, so the copy names the CLI as the likely cause
+                without claiming it is the only one. */}
+            <StatusMessage variant="error">{chat.startError}</StatusMessage>
+            {/* The composer lives below this early return, so without a control
+                here the screen is the app's one dead end: the same `restart`
+                the exited state offers is the way out (DESIGN_SYSTEM §3 leaves
+                the data reachable). */}
+            <Button className="mt-1" onClick={chat.restart}>
+              Try again
+            </Button>
+          </div>
         )}
       </ChatFrame>
     );
@@ -204,10 +216,15 @@ export function ChatView() {
           />
         )}
         {chat.exited && (
-          <div className="flex items-baseline gap-3" role="status">
-            <p className="text-[13.5px] text-ink-dim">
+          // The region is the sentence, not the row: the variant carries the
+          // `role="status"` this div used to hold by hand, and the restart
+          // control stays outside it. Full size rather than `compact`, to sit
+          // in the same register as the empty state above it — both are the
+          // conversation column speaking about the session, not a row's line.
+          <div className="flex items-baseline gap-3">
+            <StatusMessage variant="status">
               Claude Code exited. Start a new chat to continue.
-            </p>
+            </StatusMessage>
             <Button onClick={chat.restart}>Start a new chat</Button>
           </div>
         )}

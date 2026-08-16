@@ -47,9 +47,10 @@ pub const CHAT_EVENT: &str = "chat:event";
 const COALESCE_MS: u64 = 16;
 /// Flush the delta coalescer once this much text piled up regardless.
 const MAX_DELTA_BYTES: usize = 8 * 1024;
-/// Same reasoning as `terminal_cmds::POISONED`: a panicked holder leaves the
-/// session unrecoverable, and restarting the chat is the way out.
-const POISONED: &str = "Chat hit an internal error. Reopen this view to continue.";
+/// Same reasoning as `terminal_cmds::POISONED`, including why the copy sends
+/// the reader to an app restart rather than to Try again: this lock does not
+/// recover, and Try again re-enters `chat_restart`, which takes it too.
+const POISONED: &str = "Chat hit an internal error. Restart Kodabi to continue.";
 
 /// Writing the user's message to the child failed. The interrupt and
 /// permission-answer paths word their own, because what did not happen differs;
@@ -60,7 +61,7 @@ const CHAT_SEND_FAILED: &str = "Couldn't send the message. The chat is still ope
 /// Spawning or transcript setup failed. As with the terminal, naming `claude`
 /// is the actionable half.
 const CHAT_START_FAILED: &str =
-    "Couldn't start the chat. Check that the claude command is installed, then reopen this view.";
+    "Couldn't start the chat. Check that the claude command is installed, then press Try again.";
 /// The deny message the model sees when the user declines a permission card
 /// (or a stop/exit resolves the card for them).
 const DENY_MESSAGE: &str = "The user declined this action in Kodabi.";

@@ -251,16 +251,20 @@ describe("SessionPanel", () => {
   it("surfaces a failed reveal beside the control", async () => {
     serveNote();
     serveArtifacts();
+    // The real wire shape: `reveal_session_audio` answers the retention race
+    // itself, so the whole sentence arrives from the backend and the view
+    // renders it unprefixed and unaccompanied.
     onCommand("reveal_session_audio", () => {
-      throw "The recording file is missing.";
+      throw "The recording file is missing. Retention may have discarded it; the note itself is unaffected.";
     });
     renderNote();
 
     await userEvent.click(await screen.findByTestId("session-audio"));
     await userEvent.click(screen.getByTestId("reveal-recording"));
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "The recording file is missing.",
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "The recording file is missing. Retention may have discarded it; the note itself is unaffected.",
     );
   });
 

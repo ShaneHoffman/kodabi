@@ -41,6 +41,11 @@ vi.mock("@xterm/xterm", () => {
     write(data: unknown): void {
       this.writes.push(data);
     }
+    // The failure paths report into the buffer with `writeln` before setting
+    // the state the view actually raises; without it here they throw instead.
+    writeln(data: unknown): void {
+      this.writes.push(data);
+    }
     onData(callback: (data: string) => void): { dispose(): void } {
       this.onDataHandler = callback;
       return { dispose() {} };
@@ -164,5 +169,69 @@ describe("TerminalView", () => {
       expect(screen.queryByText(/session ended/i)).not.toBeInTheDocument(),
     );
     expect(screen.getByText("claude · kodabi mcp connected")).toBeInTheDocument();
+  });
+
+  // The bug this pins: the failed-to-start path set `status` but left `exit`
+  // null, and the state block was gated on `exit` alone — so a session that
+  // could not start raised nothing. No announcement, and no way back, at
+  // exactly the moment recovery is the only thing the user wants. The red line
+  // in the xterm buffer is not a substitute: it is not in the accessibility
+  // tree. `role="alert"` is asserted rather than the text alone, because being
+  // announced is the half that was missing.
+  it("announces a failure to start, and offers a way back from it", async () => {
+    // An `Error`, not a string: a non-string rejection did not come from the
+    // command boundary, so `useXterm` words the sentence and the exception text
+    // reaches neither the pane nor the announcement (docs/DESIGN_SYSTEM.md §3).
+    onCommand("terminal_open", () => {
+      throw new Error("claude is not on PATH");
+    });
+    render(<TerminalView />);
+
+    const failure = await screen.findByRole("alert");
+    expect(failure).toHaveTextContent(
+      "Couldn't start Claude Code. Check that the claude command is installed, then press Restart to try again.",
+    );
+    expect(screen.queryByText(/not on PATH/)).toBeNull();
+    expect(screen.getByText("claude · could not start")).toBeInTheDocument();
+
+    onCommand("terminal_open", () => SNAPSHOT);
+    await userEvent.click(screen.getByRole("button", { name: "Restart" }));
+    expect(invokedCommands()).toContain("terminal_restart");
+    await waitFor(() =>
+      expect(screen.queryByRole("alert")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("claude · kodabi mcp connected")).toBeInTheDocument();
+  });
+
+  // A restart that itself fails used to leave `exit` set, so the view kept
+  // reporting the old exit while the session was in fact failed — the stale
+  // half of the same gate.
+  it("replaces the exit state when the restart itself fails", async () => {
+    render(<TerminalView />);
+    act(() => {
+      emitFromBackend("terminal:exit", { code: 1 });
+    });
+    expect(screen.getByText(/session ended/i)).toBeInTheDocument();
+    const ended = screen.getByRole("status");
+
+    onCommand("terminal_restart", () => {
+      throw new Error("claude is not on PATH");
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Restart" }));
+
+    // A failed restart says so in its own words, rather than borrowing the
+    // first-start sentence: this attempt is the one that failed.
+    const failure = await screen.findByRole("alert");
+    expect(failure).toHaveTextContent(
+      "Couldn't restart Claude Code. Check that the claude command is installed, then press Restart to try again.",
+    );
+    expect(screen.queryByText(/session ended/i)).not.toBeInTheDocument();
+    // And it is a NEW element, not the exited row with its `role` rewritten.
+    // Both branches are the same component at the same position, so unkeyed
+    // they reconcile into one `<p>` that merely swaps "status" for "alert" —
+    // and a live region carries the politeness it was registered with when it
+    // was inserted, so the assertive role would never take effect. Asserting
+    // the attribute alone cannot tell the two apart; node identity can.
+    expect(failure).not.toBe(ended);
   });
 });

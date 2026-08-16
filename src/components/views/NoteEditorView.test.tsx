@@ -344,6 +344,88 @@ describe("NoteEditorView details rail", () => {
   });
 });
 
+describe("NoteEditorView failures", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  it("says what happens next when the note will not open", async () => {
+    const navigate = vi.fn();
+    onCommand("read_note", () => {
+      throw "Couldn't open this note. The file on disk is untouched; go back to the list and try again, or fix the file in a text editor.";
+    });
+    render(
+      <NavigationContext value={{ view: INITIAL_VIEW, navigate }}>
+        <NoteEditorView noteId="n_a1b2c3" project="briarwood-golf" />
+      </NavigationContext>,
+    );
+
+    // This branch replaces the whole note, so the copy has to say the file
+    // survived the failed read, and `read_note` says it in the sentence
+    // (docs/DESIGN_SYSTEM.md §3).
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Couldn't open this note. The file on disk is untouched; go back to the list and try again, or fix the file in a text editor.",
+    );
+  });
+
+  it("keeps the draft and says so when a save fails", async () => {
+    const user = userEvent.setup();
+    const note = makeNote({
+      id: "n_a1b2c3",
+      title: "Quarterly planning",
+      project: "briarwood-golf",
+    });
+    // An `Error`, not a string: this pins the editor's own fallback and that
+    // the exception text never reaches the screen.
+    onCommand("save_note", () => {
+      throw new Error("the vault is read-only");
+    });
+    renderNote("briarwood-golf", note);
+    await screen.findByRole("heading", { name: "Quarterly planning" });
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+    const titleBox = screen.getByRole("textbox", { name: "Title" });
+    await user.clear(titleBox);
+    await user.type(titleBox, "Q3 planning");
+    await user.click(screen.getByRole("button", { name: "Done" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Couldn't save your changes. Your edits are still in the editor; try again.",
+    );
+    expect(screen.queryByText(/read-only/)).toBeNull();
+    // The sentence is only true if the form really did keep the draft, so
+    // assert the thing the copy promises rather than the copy alone.
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Q3 planning");
+  });
+
+  it("keeps the draft and says so when a create fails", async () => {
+    const user = userEvent.setup();
+    const navigate = vi.fn();
+    onCommand("list_projects", () => ({ inbox_note_count: 0, projects: [] }));
+    onCommand("write_note", () => {
+      throw new Error("the vault is read-only");
+    });
+    render(
+      <NavigationContext value={{ view: INITIAL_VIEW, navigate }}>
+        <NoteEditorView noteId={null} project="briarwood-golf" />
+      </NavigationContext>,
+    );
+
+    await user.type(screen.getByRole("textbox", { name: "Title" }), "Range netting quote");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Couldn't create the note. Your text is still in the editor; try again.",
+    );
+    expect(screen.queryByText(/read-only/)).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Title" })).toHaveValue("Range netting quote");
+    expect(navigate).not.toHaveBeenCalled();
+  });
+});
+
 describe("NoteEditorView compose title", () => {
   beforeEach(() => {
     resetTauriMocks();

@@ -86,6 +86,10 @@ export function SessionPanel({
     // note has to fail.
     return (
       <section className="glass-card px-4 py-3.5" data-testid="session-artifacts">
+        {/* The whole message, unprefixed and unaccompanied: `useSessionArtifacts`
+            supplies one fixed sentence for this panel, and it already carries
+            the half worth saying beside a note that is still on screen ("The
+            note itself is fine; reopen it to try again"). */}
         <StatusMessage variant="error" compact>
           {error}
         </StatusMessage>
@@ -185,6 +189,10 @@ export function SessionPanel({
                 Reveal in Explorer
               </Button>
               {revealError !== null && (
+                // One sentence, no companion line: `reveal_session_audio`
+                // already answers the likeliest cause itself ("Retention may
+                // have discarded it; the note itself is unaffected"), so a
+                // second line here would say it twice.
                 <StatusMessage variant="error" compact className="mt-2">
                   {revealError}
                 </StatusMessage>
@@ -216,12 +224,19 @@ export function SessionPanel({
         // would do until a click if it sat behind a chip. It names only the
         // transcript even when the audio is gone too, because `audio_path: null`
         // cannot tell "pruned" from "never retained".
-        <p
-          className="mt-2.5 text-[12px] text-ink-faint"
+        //
+        // `empty`, not `status`: the variant fixes the ARIA role, and this is a
+        // standing statement about what the note has rather than something that
+        // just happened — `role="status"` would make a static sentence a live
+        // region, announced on every open (§3).
+        <StatusMessage
+          variant="empty"
+          compact
+          className="mt-2.5"
           data-testid="session-source-pruned"
         >
           The raw transcript for this note is no longer stored.
-        </p>
+        </StatusMessage>
       )}
     </section>
   );

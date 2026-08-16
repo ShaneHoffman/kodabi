@@ -173,6 +173,27 @@ describe("ProjectView delete flow", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Delete this project?" })).toBeInTheDocument();
   });
+
+  it("says what failed and what happens next when the notes listing errors", async () => {
+    const user = userEvent.setup();
+    serveVault([project("Growth", 2)]);
+    onCommand("list_notes", () => {
+      throw "vault is unreadable";
+    });
+    renderShell();
+
+    await user.click(await screen.findByRole("button", { name: /Growth/ }));
+
+    // One sentence with both halves, fixed by `useProjectNotes`: the listing
+    // reads the same to a reader whatever the backend hit.
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Couldn't read your notes. They are still on disk; reopen this view to try again.",
+    );
+    expect(screen.queryByText(/vault is unreadable/)).toBeNull();
+    // A failed read is not an empty project.
+    expect(screen.queryByText(/No notes here yet\./)).not.toBeInTheDocument();
+  });
 });
 
 describe("ProjectView glossary entry", () => {

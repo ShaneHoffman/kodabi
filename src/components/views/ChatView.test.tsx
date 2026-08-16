@@ -528,7 +528,7 @@ describe("ChatView", () => {
     onCommand("chat_open", () => {
       // A string, like the real wire: a command rejection is the backend's own
       // user copy (`src-tauri/src/user_errors.rs`), which the view renders whole.
-      throw "Couldn't start the chat. Check that the claude command is installed, then reopen this view.";
+      throw "Couldn't start the chat. Check that the claude command is installed, then press Try again.";
     });
     render(
       <NavigationContext.Provider value={{ view: { kind: "chat" }, navigate }}>
@@ -538,9 +538,37 @@ describe("ChatView", () => {
 
     expect(
       await screen.findByText(
-        "Couldn't start the chat. Check that the claude command is installed, then reopen this view.",
+        "Couldn't start the chat. Check that the claude command is installed, then press Try again.",
       ),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try again" })).toBeInTheDocument();
+  });
+
+  it("retries a failed start from the error itself", async () => {
+    const user = userEvent.setup();
+    let attempts = 0;
+    onCommand("chat_open", () => {
+      attempts += 1;
+      throw new Error("claude not found");
+    });
+    render(
+      <NavigationContext.Provider value={{ view: { kind: "chat" }, navigate }}>
+        <ChatView />
+      </NavigationContext.Provider>,
+    );
+    await screen.findByRole("button", { name: "Try again" });
+    expect(attempts).toBe(1);
+
+    // `chat_restart` is the command behind the button; the point of the test is
+    // that pressing it reaches the backend rather than sitting inert.
+    let restarts = 0;
+    onCommand("chat_restart", () => {
+      restarts += 1;
+      throw new Error("claude not found");
+    });
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+
+    await waitFor(() => expect(restarts).toBe(1));
   });
 
   // ---------- citations ----------

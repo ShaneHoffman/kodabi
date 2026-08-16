@@ -396,8 +396,8 @@ pub async fn read_note(
             note_error(
                 "read_note",
                 err,
-                "Couldn't open this note. The file on disk is untouched; go back to the list and \
-                 try again.",
+                "Couldn't open this note. The file on disk is untouched; go back to the list \
+                 and try again, or fix the file in a text editor.",
             )
         })?
         .ok_or_else(|| {

@@ -11,11 +11,13 @@ function Harness({
   onConfirm = () => {},
   busy = false,
   error = null,
+  errorHint,
   subject = "Sprinkler quotes and the 9th green rebuild",
 }: {
   onConfirm?: () => void;
   busy?: boolean;
   error?: string | null;
+  errorHint?: string;
   subject?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -32,6 +34,7 @@ function Harness({
           busyLabel="Deleting…"
           busy={busy}
           error={error}
+          errorHint={errorHint}
           onConfirm={onConfirm}
           onClose={() => setOpen(false)}
         >
@@ -150,6 +153,26 @@ describe("DestructiveConfirmDialog", () => {
 
     const alert = screen.getByRole("alert");
     expect(alert).toHaveTextContent("Couldn't delete: it is locked");
+  });
+
+  it("pairs the error with what happens next, and only then", async () => {
+    const user = userEvent.setup();
+    const hint = "The thing is still in your vault. You can try again or cancel.";
+    const { unmount } = render(<Harness error="Couldn't delete: it is locked" errorHint={hint} />);
+
+    await user.click(screen.getByRole("button", { name: "Open" }));
+
+    // The next step is a SIBLING of the alert, not part of it: the alert is
+    // announced assertively, and the guidance is there to be read after
+    // (docs/DESIGN_SYSTEM.md §3).
+    expect(screen.getByText(hint)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).not.toHaveTextContent(hint);
+    unmount();
+
+    // A hint with no error to explain says nothing, so it renders nothing.
+    render(<Harness errorHint={hint} />);
+    await user.click(screen.getByRole("button", { name: "Open" }));
+    expect(screen.queryByText(hint)).not.toBeInTheDocument();
   });
 
   it("goes inert while busy without dropping the confirm from the tab order", async () => {

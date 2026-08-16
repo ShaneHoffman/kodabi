@@ -109,6 +109,24 @@ describe("SearchView", () => {
     expect(invokedCommands()).not.toContain("search_notes");
   });
 
+  it("says what failed and what happens next when the index errors", async () => {
+    const user = userEvent.setup();
+    onCommand("search_notes", () => {
+      throw "Search hit a problem. Your notes are safe; try the search again.";
+    });
+    const field = await openSearch(user);
+
+    await user.type(field, "tournament");
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Search hit a problem. Your notes are safe; try the search again.",
+    );
+    // The retry the copy promises: the field is still there, still holding the
+    // query (docs/DESIGN_SYSTEM.md §3 leaves the data reachable).
+    expect(field).toHaveValue("tournament");
+  });
+
   it("asks the index for one page and renders the hits it returns", async () => {
     const user = userEvent.setup();
     const calls: unknown[] = [];

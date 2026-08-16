@@ -131,6 +131,9 @@ function CaptureSummary({
         </p>
       )}
       {rowError && (
+        // No companion line: every value that reaches here is a whole sentence
+        // that already names what survived, whether it came from the distill's
+        // own event or from one of this view's fallbacks.
         <StatusMessage variant="error" compact>
           {rowError}
         </StatusMessage>

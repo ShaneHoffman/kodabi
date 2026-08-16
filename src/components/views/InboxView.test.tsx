@@ -233,6 +233,25 @@ describe("InboxView", () => {
     expect(screen.getByText("Vendor follow-up")).toBeInTheDocument();
   });
 
+  it("says what failed and what happens next when the listing errors", async () => {
+    serveVault([PLANNING]);
+    onCommand("list_notes", () => {
+      throw "the vault is unreadable";
+    });
+
+    renderInbox();
+
+    // Both halves in one sentence, supplied by `useProjectNotes` rather than
+    // assembled here: the listing's failures read the same to a reader whatever
+    // the backend hit, so the hook fixes the copy and the rejection is dropped.
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Couldn't read your notes. They are still on disk; reopen this view to try again.",
+    );
+    // A failed read is not an empty inbox: the first-run copy must stay away.
+    expect(screen.queryByTestId("inbox-list")).not.toBeInTheDocument();
+  });
+
   /* The 14px between rows is not a `gap` on the list: it is an animated margin
    * on each slot, so it can collapse with the row that owns it. That makes it
    * the one piece of pure LAYOUT living inside a motion variant table, and a

@@ -221,15 +221,25 @@ describe("NeedsAttentionView", () => {
   it("clears the pending row and says so when the retry call itself fails", async () => {
     const user = userEvent.setup();
     serveSessions([makeSession("team-sync")]);
+    // An `Error`, not a string: a non-string rejection did not come from the
+    // command boundary, so this pins the view's own fallback and the absence
+    // of the exception text (docs/DESIGN_SYSTEM.md §3).
     onCommand("distill_session", () => {
-      throw "no capture session at that path";
+      throw new Error("no capture session at that path");
     });
     renderView();
     await screen.findByText("team sync");
 
     await user.click(screen.getByTestId("retry-distill"));
 
-    expect(await screen.findByText(/no capture session at that path/)).toBeInTheDocument();
+    // Named in the same register as every other failure on this screen, which
+    // "Retry failed:" was not, and complete in one sentence.
+    expect(
+      await screen.findByText(
+        "Couldn't start the retry. The recording and transcript are safe; try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/no capture session at that path/)).toBeNull();
     // Still actionable: the button is back, not stuck on "Retrying…".
     expect(screen.getByTestId("retry-distill")).toHaveAccessibleName("Retry");
   });
@@ -445,13 +455,17 @@ describe("NeedsAttentionView", () => {
 
   it("surfaces a failed listing instead of claiming all clear", async () => {
     onCommand("list_failed_sessions", () => {
-      throw "the sessions folder is unreadable";
+      throw "Couldn't read the captured sessions. The recordings on disk are untouched; reopen this view to try again.";
     });
 
     renderView();
 
+    // Nothing here retries on its own, so the recordings surviving is the
+    // load-bearing half, and `list_failed_sessions` says it in the sentence.
     expect(
-      await screen.findByText(/the sessions folder is unreadable/),
+      await screen.findByText(
+        "Couldn't read the captured sessions. The recordings on disk are untouched; reopen this view to try again.",
+      ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/All clear/)).not.toBeInTheDocument();
   });

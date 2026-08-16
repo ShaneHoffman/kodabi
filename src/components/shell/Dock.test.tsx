@@ -155,6 +155,33 @@ describe("Dock needs-attention row", () => {
   });
 });
 
+describe("Dock project listing failure", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  it("says what failed, what happens next, and keeps the vault reachable", async () => {
+    serveVault();
+    onCommand("list_projects", () => {
+      throw "Couldn't read your projects. They are still on disk; restart Kodabi if this keeps happening.";
+    });
+
+    renderShell();
+
+    // One sentence, both halves. The dock never unmounts, so "reopen this
+    // view" is not the way out here and `list_projects` does not say it
+    // (docs/DESIGN_SYSTEM.md §3).
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Couldn't read your projects. They are still on disk; restart Kodabi if this keeps happening.",
+    );
+    // Data stays reachable: a failed listing must not read as an empty vault,
+    // and the system destinations still work.
+    expect(screen.queryByText(/No projects yet\./)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Search" })).toBeInTheDocument();
+  });
+});
+
 describe("Dock layout", () => {
   beforeEach(() => {
     resetTauriMocks();

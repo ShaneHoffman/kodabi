@@ -291,6 +291,37 @@ describe("SettingsView retention", () => {
   });
 });
 
+describe("SettingsView failures", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  it("says what happens next when the settings file will not load", async () => {
+    // Every card is gated on `settings`, so this failure blanks the screen: it
+    // is the one error here with nothing else left to look at
+    // (docs/DESIGN_SYSTEM.md §3).
+    onCommand("get_settings", () => {
+      throw new Error("settings.json is malformed");
+    });
+    render(
+      <NavigationProvider>
+        <UpdaterProvider>
+          <ModelStatusProvider>
+            <SettingsView />
+          </ModelStatusProvider>
+        </UpdaterProvider>
+      </NavigationProvider>,
+    );
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Couldn't load your settings. They are still saved; reopen this view to try again.",
+    );
+    expect(screen.queryByText(/settings\.json is malformed/)).toBeNull();
+  });
+
+});
+
 describe("SettingsView layout", () => {
   beforeEach(() => {
     resetTauriMocks();
@@ -364,17 +395,19 @@ describe("SettingsView appearance", () => {
   it("keeps the stored theme showing when the save fails", async () => {
     const user = userEvent.setup();
     onCommand("set_appearance", () => {
-      throw "the settings file is read only";
+      throw "Couldn't save the theme. The previous theme still applies; try again.";
     });
     await renderSeeded(DEFAULTS);
 
     await user.click(screen.getByRole("combobox", { name: /Theme/ }));
     await user.click(screen.getByRole("option", { name: "Dark" }));
 
+    // The sentence says which value is actually in force, and the row below
+    // proves it: not flipped optimistically, still showing what is on disk
+    // (docs/DESIGN_SYSTEM.md §3).
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      /the settings file is read only/,
+      "Couldn't save the theme. The previous theme still applies; try again.",
     );
-    // Not flipped optimistically: the control still shows what is on disk.
     expect(screen.getByRole("combobox", { name: /Theme/ })).toHaveTextContent(
       "Match the system",
     );

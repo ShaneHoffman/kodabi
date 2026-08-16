@@ -32,6 +32,17 @@ export type TerminalStatus = "running" | "exited" | "failed";
 export type XtermHandle = {
   /** Non-null once `claude` has exited; the view then shows a restart affordance. */
   exit: TerminalExit | null;
+  /**
+   * Why the session could not start, whenever `status` is "failed" — the
+   * backend's message, for the view's error state.
+   *
+   * The failure is painted into the xterm buffer in red as well, but buffer
+   * text is not a view state: it is not in the accessibility tree, so it is
+   * announced to nobody, and it vanishes with a clear. This field is what lets
+   * the view raise a real one (docs/DESIGN_SYSTEM.md §3), mirroring
+   * `useChatSession`'s `startError`.
+   */
+  startError: string | null;
   /** The session's state, for the view's status line. */
   status: TerminalStatus;
   /** Reap the exited/old session and spawn a fresh one, clearing the screen. */
@@ -170,6 +181,7 @@ export function useXterm(container: RefObject<HTMLDivElement | null>): XtermHand
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const [exit, setExit] = useState<TerminalExit | null>(null);
+  const [startError, setStartError] = useState<string | null>(null);
   const [status, setStatus] = useState<TerminalStatus>("running");
 
   useTauriEvent<TerminalOutputEvent>(TERMINAL_OUTPUT_EVENT, (payload) => {
@@ -223,13 +235,19 @@ export function useXterm(container: RefObject<HTMLDivElement | null>): XtermHand
         // A spawn failure (e.g. no `claude` on PATH) rejects the command; show
         // it in the pane rather than leaving a blank terminal. \x1b[31m…\x1b[0m
         // is the ANSI red the terminal already renders.
+        //
+        // The buffer line is the detail, not the state: `startError` is what
+        // the view raises and a screen reader hears (see `XtermHandle`).
         if (!active) return;
-        term.writeln(
-          `\x1b[31m${backendCopy(
-            error,
-            "Couldn't start Claude Code. Check that the claude command is installed, then reopen this view.",
-          )}\x1b[0m`,
+        // Worded once and used twice: the buffer line and the state a screen
+        // reader hears must be the same sentence, and neither may be the raw
+        // rejection (docs/DESIGN_SYSTEM.md §3).
+        const message = backendCopy(
+          error,
+          "Couldn't start Claude Code. Check that the claude command is installed, then press Restart to try again.",
         );
+        term.writeln(`\x1b[31m${message}\x1b[0m`);
+        setStartError(message);
         setStatus("failed");
       });
 
@@ -281,21 +299,27 @@ export function useXterm(container: RefObject<HTMLDivElement | null>): XtermHand
         fit.fit();
         void resizeTerminal(term.cols, term.rows);
         setExit(null);
+        setStartError(null);
         setStatus("running");
       })
       .catch((error: unknown) => {
         // Same shape as the open failure above: a respawn can fail for the same
         // reasons the first spawn could, and an unreported rejection would leave
         // the pane sitting on a dead session with no account of why.
-        termRef.current?.writeln(
-          `\x1b[31m${backendCopy(
-            error,
-            "Couldn't restart Claude Code. Check that the claude command is installed, then reopen this view.",
-          )}\x1b[0m`,
+        //
+        // `exit` is cleared with it. The old exit is stale the moment a restart
+        // is attempted, and leaving it set would let the view go on reporting
+        // "Session ended" over a failure that has its own thing to say.
+        const message = backendCopy(
+          error,
+          "Couldn't restart Claude Code. Check that the claude command is installed, then press Restart to try again.",
         );
+        termRef.current?.writeln(`\x1b[31m${message}\x1b[0m`);
+        setExit(null);
+        setStartError(message);
         setStatus("failed");
       });
   };
 
-  return { exit, status, restart };
+  return { exit, startError, status, restart };
 }

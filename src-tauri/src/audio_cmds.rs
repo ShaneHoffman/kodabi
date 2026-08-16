@@ -545,7 +545,8 @@ pub async fn run_mic_test(
     if capture.is_active()? {
         return Err("Stop the current capture before running the mic test.".to_string());
     }
-    const TEST_FAILED: &str = "The mic test didn't finish. Nothing was recorded; try again.";
+    const TEST_FAILED: &str =
+        "The mic test didn't finish. Check that your microphone is connected, then run it again.";
     let outcome = tauri::async_runtime::spawn_blocking(kodabi_audio::run_mic_test)
         .await
         .map_err(|err| crate::user_errors::reported("run_mic_test", err, TEST_FAILED))?
