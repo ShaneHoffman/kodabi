@@ -53,9 +53,9 @@ function VaultBridge() {
 
 /**
  * Renders the shell and opens the rename dialog on the Growth project via the
- * header's Project menu, where Rename lives alongside Glossary and Delete
- * project — ViewFrame's header action slot holds one control, so every verb
- * but "New note" collapses behind that single trigger.
+ * header's Project menu, where Rename lives alongside New note, Glossary and
+ * Delete project — ViewFrame's header action slot holds one control, so every
+ * project verb collapses behind that single trigger.
  */
 async function openRename(user: ReturnType<typeof userEvent.setup>) {
   serveVault([project("Growth", 2)]);
