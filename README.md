@@ -150,8 +150,12 @@ package.json            # Frontend package manifest and scripts.
 vite.config.ts, tsconfig*.json, eslint.config.js   # Frontend build/lint config.
 CLAUDE.md, CONTRIBUTING.md, kangentic.json   # Agent guide, contributor guide, and the
                         # Kangentic board/workflow definition.
-.github/                # GitHub Actions workflows — ci.yml (the gate matrix run on every PR)
-                        # and release.yml (tag-triggered NSIS build → draft Release).
+SECURITY.md, CODE_OF_CONDUCT.md   # Private vulnerability disclosure route and supported
+                        # versions; the Contributor Covenant.
+.github/                # GitHub Actions workflows — workflows/ci.yml (the gate matrix run on
+                        # every PR) and workflows/release.yml (tag-triggered NSIS build → draft
+                        # Release) — plus the community health files: the issue forms and their
+                        # chooser under ISSUE_TEMPLATE/, and PULL_REQUEST_TEMPLATE.md.
 scripts/                # Dev/build helpers — PowerShell (tray icons, the app icon and
                         # NSIS wizard art, the social-preview banner, resource profiling,
                         # release code signing, model-release publishing) and the
@@ -280,6 +284,13 @@ Kodabi is pre-alpha and AGPL-3.0 licensed; issues and discussion are welcome. De
 a Kangentic board, with a `type/slug` branch-name convention and Conventional Commits. See
 [`CONTRIBUTING.md`](CONTRIBUTING.md) for the branch/commit rules and the board flow, and
 [`CLAUDE.md`](CLAUDE.md) for the full engineering gates.
+
+Bug reports and feature requests go through the [issue tracker](https://github.com/ShaneHoffman/kodabi/issues),
+which offers a form for each. Everyone taking part is expected to follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).
+
+**Found a security vulnerability?** Don't open a public issue. [`SECURITY.md`](SECURITY.md) has the
+private disclosure route and what to include.
 
 ## License
 
