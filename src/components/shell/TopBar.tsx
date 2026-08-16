@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { CAPTURE_TOGGLE_SHORTCUT } from "../../captureControl";
 import { captureLabel, markMode } from "../../captureLabel";
 import { isCaptureActive, useCaptureState } from "../../useCaptureState";
 import { PALETTE_SHORTCUT_LABEL } from "../../useCommandPalette";
@@ -120,7 +121,8 @@ export function TopBar({ onOpenPalette }: Props) {
   // aria-live region inside the pill — follows a debounced state so a flapping
   // VAD doesn't spam screen readers on every toggle. (The contract the sidebar
   // foot's indicator used to hold.)
-  const label = captureLabel(useDebouncedValue(captureState, 400));
+  const settledCapture = useDebouncedValue(captureState, 400);
+  const label = captureLabel(settledCapture);
   const mode = markMode(captureState);
 
   // Timed from the moment the session engaged, not from the first audio: the
@@ -141,6 +143,28 @@ export function TopBar({ onOpenPalette }: Props) {
   // the detail slot and never touches the mark or the headline.
   const { state: models } = useModelStatus();
   const modelsDetail = isTranscriptionReady(models) ? null : "Transcription not ready yet";
+
+  // The one place in the main window that teaches the capture chord, and the
+  // reason it is here rather than on a first-run banner: it sits on the very
+  // indicator the chord operates, so the lesson and the thing it is about are
+  // the same object. Permanent on every idle pill by design, the way an editor
+  // keeps its shortcut in the placeholder rather than retiring it once.
+  //
+  // Withheld the moment capture is engaged at all, which is a stricter test
+  // than the pill's own: the pill hides its detail while *recording*, and
+  // `starting` and `reconnecting` are neither recording nor idle — they keep
+  // the detail slot open, and a press during either one STOPS the capture (the
+  // tray reads "Stop capture" for every phase but idle, `capture_control.rs`).
+  // Teaching "starts a capture" there is exactly backwards, which is the whole
+  // reason this is a null rather than a constant.
+  //
+  // Both clocks are read — the live state and the debounced one the headline
+  // beside it speaks from — so the hint can neither outlive a capture's last
+  // engaged moment nor appear next to a headline still saying one is running.
+  const shortcutHint =
+    engaged || isCaptureActive(settledCapture.phase)
+      ? null
+      : `${CAPTURE_TOGGLE_SHORTCUT} starts a capture`;
 
   const maximized = useWindowMaximized();
 
@@ -186,7 +210,15 @@ export function TopBar({ onOpenPalette }: Props) {
         // and it only reaches an idle pill anyway — the detail slot is hidden
         // while live, which is exactly right here. Nothing is wrong during the
         // recording; it is the transcription afterwards that is waiting.
-        detail={label.detail ?? modelsDetail}
+        //
+        // The chord hint is the last rung, so the chain reads failure, then
+        // models, then teaching: something wrong always outranks something to
+        // learn. That ordering is also what keeps first run right — while the
+        // models download, the more urgent fact holds the slot, and the hint
+        // takes over the moment transcription is ready. It is `null` on any
+        // engaged pill, so the chain falls through to nothing there rather
+        // than to a hint that would be false (see `shortcutHint`).
+        detail={label.detail ?? modelsDetail ?? shortcutHint}
         elapsedSeconds={elapsedSeconds}
       />
 
