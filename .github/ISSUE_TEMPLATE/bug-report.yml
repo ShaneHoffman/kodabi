@@ -1,0 +1,102 @@
+name: Bug report
+description: Something in Kodabi does not work the way it should.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        **Kodabi writes no log file.** Diagnostic output goes to standard error, which a normal
+        installed build has nowhere to put, so there is nothing on disk for you to attach. What
+        helps most instead is the exact error text shown on screen, a screenshot, and the details
+        below.
+
+        **Please do not report a security vulnerability here.** Use
+        [private vulnerability reporting](https://github.com/ShaneHoffman/kodabi/security/advisories/new)
+        instead. See [SECURITY.md](https://github.com/ShaneHoffman/kodabi/blob/main/SECURITY.md).
+
+        **Please do not paste real meeting content**, transcripts, or notes. Redact anything you
+        would not want on a public page.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What went wrong, and what you expected instead. Include any error text shown on screen, word for word.
+      placeholder: |
+        What I did:
+        What I expected:
+        What happened instead:
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The shortest sequence that shows the problem. If it only happens sometimes, say roughly how often.
+      placeholder: |
+        1. Open Kodabi
+        2. Start a recording
+        3. ...
+    validations:
+      required: false
+
+  - type: input
+    id: version
+    attributes:
+      label: Kodabi version
+      description: Open Settings, then the About card. The Version row shows the build you are running.
+      placeholder: "0.2.0"
+    validations:
+      required: true
+
+  - type: input
+    id: windows-version
+    attributes:
+      label: Windows version
+      description: Press Windows+R, run `winver`, and copy the version and build line.
+      placeholder: "Windows 11 24H2 (build 26100.1742)"
+    validations:
+      required: false
+
+  - type: dropdown
+    id: models
+    attributes:
+      label: Model status
+      description: Open Settings, then the Models card, and pick what it shows. Kodabi downloads its speech and embedding models on first run.
+      options:
+        - Installed
+        - Still downloading
+        - Download failed
+        - Developer override (KODABI_* paths or a local model dir)
+        - Not sure
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: area
+    attributes:
+      label: Where does it happen
+      description: Tick anything that applies.
+      options:
+        - label: Recording or transcription
+        - label: Notes, routing, or the vault
+        - label: Search or the index
+        - label: Chat or the embedded terminal
+        - label: Install, update, or startup
+        - label: Something else
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Anything else
+      description: |
+        Screenshots are welcome. Also useful if any of these apply:
+        a build you compiled yourself rather than the released installer; any `KODABI_SANDBOX`,
+        `KODABI_KB_ROOT`, or `KODABI_INDEX_DB` environment variables you have set; whether the
+        problem started after an update.
+    validations:
+      required: false

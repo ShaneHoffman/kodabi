@@ -4,6 +4,16 @@ Thanks for helping build Kodabi. The project is developed through a **Kangentic 
 lightweight git-flow. Please follow the conventions below — AI agents get the same rules from the
 repo's root `CLAUDE.md`.
 
+## Before you start
+
+- **Bugs and ideas** go through the [issue tracker](https://github.com/ShaneHoffman/kodabi/issues),
+  which offers a form for each. The bug form asks for the details that actually help: Kodabi ships
+  no log file, so the version, the Windows build, the model state and the on-screen error text are
+  the evidence.
+- **Security vulnerabilities do not go in an issue.** Report them privately through
+  [`SECURITY.md`](SECURITY.md)'s disclosure route, which also states which versions get fixes.
+- **Everyone taking part** follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Branch names
 
 Every branch is `type/slug`:
