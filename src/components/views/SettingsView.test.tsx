@@ -2,6 +2,8 @@ import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsView } from "./SettingsView";
+import { CAPTURE_TOGGLE_SHORTCUT } from "../../captureControl";
+import { QUICK_CAPTURE_SHORTCUT } from "../../quickCapture";
 import { ModelStatusProvider } from "../providers/ModelStatusProvider";
 import { NavigationProvider } from "../providers/NavigationProvider";
 import { NavigationContext } from "../../useNavigation";
@@ -225,6 +227,24 @@ describe("SettingsView capture overlay", () => {
     // indent that came with it claimed a dependency that was never there.
     expect(within(card("Capture")).getAllByRole("switch")).toHaveLength(2);
     expect(screen.queryByRole("group", { name: "Capture pill" })).not.toBeInTheDocument();
+  });
+
+  it("writes down both global chords, not just the capture toggle", async () => {
+    await renderSeeded(DEFAULTS);
+
+    // This card is the one place the app documents its shortcuts, so both of
+    // them belong in it or neither does. Quick capture's chord used to appear
+    // only as a hint on a command-palette row, which is no help to the person
+    // who needs it: someone who has forgotten the chord is looking for where it
+    // is written down, not for the palette entry that duplicates it.
+    const capture = within(card("Capture"));
+    expect(capture.getByText(CAPTURE_TOGGLE_SHORTCUT)).toBeInTheDocument();
+    expect(capture.getByText(QUICK_CAPTURE_SHORTCUT)).toBeInTheDocument();
+
+    // Both are read-only by design: the backend registers each at startup and
+    // offers no rebinding command, so neither may render as a field that would
+    // take an edit and drop it.
+    expect(capture.queryByRole("textbox")).not.toBeInTheDocument();
   });
 
   it("gives each toggle the same accessible name as the row you can see", async () => {

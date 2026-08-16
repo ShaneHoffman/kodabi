@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useNavigation } from "./useNavigation";
 import { entryView, folderHue, formatSlug, useProjects, type FolderHue } from "./useProjects";
 import { useFailedSessions } from "./useSessions";
-import { showQuickCaptureWindow } from "./quickCapture";
+import { QUICK_CAPTURE_SHORTCUT, showQuickCaptureWindow } from "./quickCapture";
 import { CAPTURE_TOGGLE_SHORTCUT, startCapture, stopCapture } from "./captureControl";
 import { isCaptureActive, useCaptureState } from "./useCaptureState";
 
@@ -103,9 +103,8 @@ export function useCommands(): Command[] {
         id: "open-capture",
         kind: "action",
         title: "Quick capture",
-        // The one command here with a global binding, mirroring
-        // `DEFAULT_QUICK_CAPTURE_SHORTCUT` in src-tauri/src/quick_capture.rs.
-        hint: "Ctrl+Alt+Space",
+        // The one command here with a global binding of its own.
+        hint: QUICK_CAPTURE_SHORTCUT,
         // Quick capture is its own window (#45), not a main-window view — the
         // palette action pops it, matching the global hotkey.
         run: () => {
