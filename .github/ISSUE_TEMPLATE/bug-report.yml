@@ -66,11 +66,12 @@ body:
     id: models
     attributes:
       label: Model status
-      description: Open Settings, then the Models card, and pick what it shows. Kodabi downloads its speech and embedding models on first run.
+      description: Open Settings, then the Models card, and pick the line that matches the "Speech and search models" row. Kodabi downloads those models on first run.
       options:
         - Installed
-        - Still downloading
-        - Download failed
+        - Not downloaded yet (the row offers a "Download ... MB" button)
+        - Downloading
+        - A download that failed (the row offers "Try again", usually with an error)
         - Developer override (KODABI_* paths or a local model dir)
         - Not sure
     validations:

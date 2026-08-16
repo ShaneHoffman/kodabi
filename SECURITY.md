@@ -32,8 +32,8 @@ release rather than as backports.
 
 | Version | Supported |
 | ------- | --------- |
-| 0.2.x (latest release) | Yes |
-| Older releases | No |
+| The latest release | Yes |
+| Anything older | No |
 
 The installed app checks for updates on startup and offers them with a click, so "update to the
 latest release" is the supported way to receive a fix. Installers and updates are code-signed, and
@@ -41,8 +41,11 @@ updates additionally carry a minisign signature the app verifies before installi
 
 ## Scope
 
-Kodabi is a local-first desktop app. It has no server, no account system, and no telemetry, and your
-notes and recordings stay on your machine. The surfaces most worth your attention are:
+Kodabi is a local-first desktop app. It has no server of its own, no account system, and no
+telemetry, and your notes and recordings stay on your machine — with one deliberate exception:
+the features built on Claude (cleanup, distill, routing, chat) send transcript text out through
+your own Claude account. How Kodabi uses that path is in scope. The surfaces most worth your
+attention are:
 
 - the installer and the auto-updater, including their signature checks,
 - `kodabi-mcp`, the bundled MCP server, and what it exposes to a connected client,

@@ -60,8 +60,9 @@ representative at an online or offline event.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported privately to the maintainer, [@ShaneHoffman](https://github.com/ShaneHoffman),
-through GitHub. Use GitHub's own private reporting, or the contact details on that
-profile, rather than a public issue or pull request.
+using the contact details on that GitHub profile rather than a public issue or pull
+request. GitHub's private vulnerability reporting is for security reports only, per
+[SECURITY.md](SECURITY.md); it is not the route for a Code of Conduct concern.
 
 All complaints will be reviewed and investigated promptly and fairly.
 
