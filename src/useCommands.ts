@@ -146,7 +146,7 @@ export function useCommands(): Command[] {
               void startCapture().catch(() => {});
             },
           },
-      // The four below open a screen rather than doing something, so they are
+      // The five below open a screen rather than doing something, so they are
       // `navigate` despite reading as verbs: the kind tag answers "where does
       // this take me", and "Open chat" takes you to the chat view.
       {
@@ -169,6 +169,17 @@ export function useCommands(): Command[] {
         kind: "navigate",
         title: "Open terminal",
         run: () => navigate({ kind: "terminal" }),
+      },
+      {
+        // The vault-wide glossary's front door. Every project glossary is
+        // reachable from its own project, but this one belongs to no folder —
+        // and it is the glossary that matters most, since transcription biases
+        // against it for every capture. Settings kept it alive; this is the way
+        // in that does not require knowing it is in Settings.
+        id: "glossary",
+        kind: "navigate",
+        title: "Vault glossary",
+        run: () => navigate({ kind: "glossary", slug: null }),
       },
       {
         id: "settings",

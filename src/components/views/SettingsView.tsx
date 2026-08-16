@@ -157,11 +157,14 @@ function micCheckSummary(result: MicCheckResult): string {
 }
 
 /**
- * The way into the vault-wide glossary, which has no other home: every project
- * glossary is reachable from its own project, but the vault one belongs to no
- * folder — and it is the one that matters most, since transcription biases
- * against it for every capture (a session is transcribed before routing has
- * picked a project).
+ * Settings' way into the vault-wide glossary, which has no home of its own:
+ * every project glossary is reachable from its own project, but the vault one
+ * belongs to no folder — and it is the one that matters most, since
+ * transcription biases against it for every capture (a session is transcribed
+ * before routing has picked a project). It is the permanent way in rather than
+ * the only one: the palette's "Vault glossary" command (`useCommands`) is the
+ * front door for someone who does not already know it lives here, and the model
+ * nudge's ready beat points a first-run user at it once.
  *
  * A link, not an editor. Settings rows are label-left / control-right and hold
  * one value each; a list you add to and delete from is a view, so this row
