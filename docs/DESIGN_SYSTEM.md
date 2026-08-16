@@ -465,13 +465,38 @@ Measured with a WCAG 2.1 relative-luminance check, alpha composited first (night
 `ink-faint` is the step that sets the floor, and it is the reason the night value is `#838d78` rather
 than the `#7e8873` first drawn: that value cleared 4.90 on the ground but only **4.41 on the panel**,
 which is where faint text actually renders. It was lightened until the tightest of the three numbers
-cleared 4.5 — and that number is the card's 4.62, with only 0.12 of headroom. **A surface darker
-than `glass-card` would put faint metadata under the floor**, which is the constraint any new
-material has to clear.
+cleared 4.5 — and that number is the card's 4.62, with only 0.12 of headroom. **The direction of the
+constraint is opposite in the two variants, and it follows from which side of the surface the ink
+sits on.** At night the ink is lighter than everything under it, so contrast falls as the surface
+*lightens*: the card is the lightest of the three and therefore the tightest, and a surface lighter
+than `glass-card` would put faint metadata under the floor. In day the ink is the darker half, so it
+is the *ground* — the darkest day surface — that is tightest at 4.91, and the risk is a surface
+darker than it. A new material clears both or it clears neither.
 
 **`ink-faint` is a metadata register and is spent on no other text.** Timestamps, counts, ids,
-eyebrows, keyboard hints. The moment it carries a sentence the user has to read, it is the wrong
-token.
+eyebrows, keyboard hints, and **the control hint** — the one optional line under a `Field`, a
+`Checkbox`, or a settings row. The moment it carries a sentence the user has to read, it is the
+wrong token.
+
+**The hint is in the register, and the word carrying that is "has to".** A hint is a sentence the
+user *may* read: the control works unread, it is bound as a description (`aria-describedby`) rather
+than as content, and it stops at a line or two — on a settings row at the 46ch measure §1 gives it,
+inside a dialog or a form column at whatever already bounds the control. What the register
+excludes is text the app is *announcing* — a status, an error, empty-state copy, the payoff of
+something the user just did. Those have to be read, so they read at `ink-dim` or above.
+`StatusMessage` is the settled far side of that line: its `status` variant used to sit here and was
+promoted, because a line the app deliberately announces through a live region is the last thing that
+should be the hardest to read.
+
+**Two bounds keep the carve-out from swallowing the rule.** A hint is *one or two lines*: a
+paragraph is prose, whatever it is passed as, and prose reads at `ink-dim` (the Settings Attribution
+row is the worked example — a licensing paragraph, so it takes the row's `body` slot rather than its
+`hint`). And this is a **register** claim, not a contrast one — measured past the table, because a
+`Field`'s hint most often renders in a dialog rather than on a card: `ink-faint` reads **4.87** on
+night's composited dialog and **4.67** on its reduced-transparency solid, and 5.43 / 5.54 on day's.
+Every surface a hint lands on clears the floor in both variants. Promoting a hint buys
+no legibility; it only flattens it against the label it explains — on a `Field`, where the label is
+itself `ink-dim` at the same size, weight would be the only thing left telling the two apart.
 
 The one thing it colours that is not text is the spirit-mark's dormant core (`src/index.css` §3),
 and that is the same claim in another material: the mark at idle is metadata about the capture, not
