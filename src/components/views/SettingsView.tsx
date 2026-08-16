@@ -22,6 +22,7 @@ import { applyContrast, readContrast } from "../../contrast";
 import { applyReduceMotion, readReduceMotion } from "../../reduceMotion";
 import { INDEX_STATE_EVENT } from "../../events";
 import { formatMegabytes } from "../../models";
+import { QUICK_CAPTURE_SHORTCUT } from "../../quickCapture";
 import { useModelStatus } from "../../useModelStatus";
 import { useUpdaterStatus } from "../../useUpdaterStatus";
 import { useTauriEvent } from "../../useTauriEvent";
@@ -753,6 +754,23 @@ export function SettingsView() {
                   is what it is. */}
               <span className="font-data text-[12.5px] text-ink-read">
                 {CAPTURE_TOGGLE_SHORTCUT}
+              </span>
+            </Row>
+
+            {/* The second of the two global chords, and the reason this card is
+                the app's shortcut reference rather than a page about recording.
+                Quick capture's chord is learned once and then only ever
+                forgotten, and until this row it was written down nowhere a user
+                would think to look: the palette prints it as a hint on a row you
+                have to already be in the palette to see, and the tray item
+                carries no accelerator text at all.
+
+                Same recipe as the row above, deliberately — mono for a key
+                sequence, rendered rather than editable because the backend
+                registers this one at startup too. */}
+            <Row label="Quick capture" hint="Opens the quick capture box from anywhere.">
+              <span className="font-data text-[12.5px] text-ink-read">
+                {QUICK_CAPTURE_SHORTCUT}
               </span>
             </Row>
 

@@ -7,6 +7,19 @@ import { invoke } from "@tauri-apps/api/core";
  * the backend to show/hide and to file the captured text.
  */
 
+/**
+ * The OS-global chord that pops the capture box, mirroring
+ * `DEFAULT_QUICK_CAPTURE_SHORTCUT` in `src-tauri/src/quick_capture.rs`. It fires
+ * even while Kodabi is unfocused, which is the whole point of the feature.
+ *
+ * The backend registers it at startup and offers no rebinding command, so this
+ * is a claim about a real accelerator rather than a suggestion: every surface
+ * that teaches the chord reads it from here, in the accelerator's own unspaced
+ * spelling. `CAPTURE_TOGGLE_SHORTCUT` in `captureControl.ts` is the same
+ * arrangement for the other global chord.
+ */
+export const QUICK_CAPTURE_SHORTCUT = "Ctrl+Alt+Space";
+
 /** Where a quick-captured note landed. `project: null` is the Inbox sentinel
  * (matching `NoteSummary`); `confidence` is always present (routing always
  * scores). */
