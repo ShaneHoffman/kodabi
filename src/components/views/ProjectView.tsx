@@ -127,48 +127,50 @@ export function ProjectView({ slug }: Props) {
             slug
       }
       action={
-        // Ink, not the reserved green: the verbs on a reading screen earn
-        // their place by being quiet text, not by being a colour. Creation
-        // leads and stays a button, because it is the thing you came here to
-        // do.
+        // ONE control, because the frame header's slot holds one action
+        // (docs/UI_CONVENTIONS.md §5, and ViewFrame's own doc on the prop).
+        // Every verb here acts on the project, and the project is what this
+        // view *is* — so none of them has another slot to move to: nothing
+        // summons contextual chrome here, a row affordance would act on one
+        // note rather than the folder, and a library view has no composer. The
+        // four collapse behind one trigger rather than growing the toolbar the
+        // frame forbids.
         //
-        // EVERYTHING ELSE THIS FOLDER CAN DO GOES IN THE MENU. The header slot
-        // holds one action, and the glossary made three — so rather than grow
-        // a toolbar the frame's doc forbids, the project's other verbs collapse
-        // behind one trigger. Rename is exactly the next project-scoped verb
-        // that home was built for.
-        <div className="flex items-center gap-2">
-          <Button
-            variant="quiet"
-            onClick={() => navigate({ kind: "noteEditor", noteId: null, project: slug })}
-          >
-            New note
-          </Button>
-          <Menu.Root>
-            <Menu.Trigger
-              render={
-                <Button variant="quiet" aria-label={`${displayName} project actions`}>
-                  Project
-                  <span aria-hidden="true" className="text-[10px] text-ink-faint">
-                    ▾
-                  </span>
-                </Button>
-              }
-            />
-            {/* `end`: the trigger sits at the right edge of the header, so the
-                menu hangs back over the view rather than off the panel. */}
-            <Menu.Content align="end">
-              <Menu.Item onClick={() => navigate({ kind: "glossary", slug })}>
-                Glossary
-              </Menu.Item>
-              {/* Rename and delete both need more from the user before they
-                  take effect (a name, a confirmation), which the ellipsis
-                  promises on either. */}
-              <Menu.Item onClick={() => setRenaming(true)}>Rename…</Menu.Item>
-              <Menu.Item onClick={() => setConfirmingDelete(true)}>Delete project…</Menu.Item>
-            </Menu.Content>
-          </Menu.Root>
-        </div>
+        // Ink, not the reserved green: the verbs on a reading screen earn their
+        // place by being quiet text, not by being a colour.
+        <Menu.Root>
+          <Menu.Trigger
+            render={
+              <Button variant="quiet" aria-label={`${displayName} project actions`}>
+                Project
+                <span aria-hidden="true" className="text-[10px] text-ink-faint">
+                  ▾
+                </span>
+              </Button>
+            }
+          />
+          {/* `end`: the trigger sits at the right edge of the header, so the
+              menu hangs back over the view rather than off the panel. */}
+          <Menu.Content align="end">
+            {/* Creation leads. It is still the thing you came here to do, and
+                first is where base-ui puts the highlight when the menu opens
+                from the keyboard, so Enter writes a note. Plain, not
+                `suggested`: that variant is a claim the system is proposing
+                this row, and nothing is being guessed here. */}
+            <Menu.Item onClick={() => navigate({ kind: "noteEditor", noteId: null, project: slug })}>
+              New note
+            </Menu.Item>
+            <Menu.Item onClick={() => navigate({ kind: "glossary", slug })}>Glossary</Menu.Item>
+            {/* The line between working inside this folder and changing the
+                folder. Rename and delete both need more from the user before
+                they take effect (a name, a confirmation), which the ellipsis
+                promises on either — and the destructive one sits furthest from
+                where the keyboard lands. */}
+            <Menu.Separator />
+            <Menu.Item onClick={() => setRenaming(true)}>Rename…</Menu.Item>
+            <Menu.Item onClick={() => setConfirmingDelete(true)}>Delete project…</Menu.Item>
+          </Menu.Content>
+        </Menu.Root>
       }
     >
       {error ? (

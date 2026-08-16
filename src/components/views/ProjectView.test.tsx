@@ -67,8 +67,8 @@ function renderShell() {
 
 /**
  * Renders the shell, navigates into the Growth project view, and opens the
- * header's Project menu — where every project verb but "New note" lives, since
- * the frame header's action slot holds one control.
+ * header's Project menu — where every project verb lives, creation included,
+ * since the frame header's action slot holds one control and the trigger is it.
  */
 async function openGrowthMenu(user: ReturnType<typeof userEvent.setup>) {
   serveVault([project("Growth", 2), project("Growth/Q4", 3)]);
@@ -196,6 +196,30 @@ describe("ProjectView delete flow", () => {
   });
 });
 
+describe("ProjectView creation entry", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  it("opens a blank editor scoped to this project from the Project menu", async () => {
+    const user = userEvent.setup();
+    await openGrowthMenu(user);
+
+    await user.click(await screen.findByRole("menuitem", { name: "New note" }));
+
+    // The create form, prefilled with the folder you started from: creation
+    // moved behind the trigger when the header dropped to one action, and what
+    // it must not lose on the way is the scope.
+    expect(await screen.findByLabelText("Project")).toHaveValue("Growth");
+    expect(screen.getByLabelText("Title")).toHaveValue("");
+    // Navigating to the form writes nothing on its own — the note exists only
+    // once Create is pressed. `write_note` is the command that would appear:
+    // creation goes through it, and `save_note` only ever updates a note that
+    // already exists, so naming that one here would assert nothing.
+    expect(invokedCommands()).not.toContain("write_note");
+  });
+});
+
 describe("ProjectView glossary entry", () => {
   beforeEach(() => {
     resetTauriMocks();
@@ -225,9 +249,9 @@ describe("ProjectView rename affordance", () => {
   });
 
   it("opens a prefilled dialog from the Project menu", async () => {
-    // Rename is a project-scoped verb like Glossary and Delete project, so it
-    // lives in the same menu rather than a fourth button contending with
-    // ViewFrame's single header action. The rename flow itself is covered by
+    // Rename is a project-scoped verb like New note, Glossary and Delete
+    // project, so it lives in the same menu: the header holds one action, and
+    // that action is the trigger. The rename flow itself is covered by
     // RenameProjectDialog.test.tsx; this pins the wiring.
     const user = userEvent.setup();
     await openGrowthMenu(user);
