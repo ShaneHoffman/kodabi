@@ -223,9 +223,9 @@ describe("TopBar", () => {
   });
 
   it("drops the chord hint once the capture it teaches is running", async () => {
-    // Teaching outranks nothing: the detail slot closes while live, so the hint
-    // is gone exactly when pressing the chord would stop a capture rather than
-    // start one.
+    // Teaching outranks nothing, but only while the teaching is true: the hint
+    // is withheld on every engaged pill, and a recording one is the plainest
+    // case (its detail slot closes too).
     serveVault();
     onCommand("model_status", () => ({
       ready: true,
@@ -247,6 +247,46 @@ describe("TopBar", () => {
       });
     });
 
+    expect(screen.getByRole("status")).not.toHaveTextContent("Ctrl+Shift+K");
+  });
+
+  it("drops the chord hint on a capture that is engaged but recording nothing", async () => {
+    // The case the pill's own live/not-live test cannot carry: `degraded` with
+    // no source live is engaged and reaching disk with nothing, so the detail
+    // slot stays open, and it can stay open for as long as the devices are
+    // gone. A press there stops that capture (the tray says "Stop capture" for
+    // every phase but idle), so the slot must not offer to start one. Same
+    // reasoning covers the `starting` window.
+    serveVault();
+    onCommand("model_status", () => ({
+      ready: true,
+      bytesRequired: 0,
+      bytesPresent: 0,
+      sets: [],
+      downloading: false,
+      modelsDir: "C:\\app\\.models",
+    }));
+    renderShell();
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("Ctrl+Shift+K starts a capture");
+    });
+
+    act(() => {
+      emitFromBackend(CAPTURE_STATE_EVENT, {
+        phase: "degraded",
+        sources: { loopback: "stalled", microphone: "stalled" },
+      });
+    });
+
+    // Gone on the live state, before the headline's debounce has caught up...
+    expect(screen.getByRole("status")).not.toHaveTextContent("Ctrl+Shift+K");
+    // ...and still gone once it has, which is the reading that would persist.
+    await waitFor(
+      () => {
+        expect(screen.getByRole("status")).toHaveTextContent("Reconnecting");
+      },
+      { timeout: 2000 },
+    );
     expect(screen.getByRole("status")).not.toHaveTextContent("Ctrl+Shift+K");
   });
 
