@@ -213,8 +213,10 @@ describe("ProjectView creation entry", () => {
     expect(await screen.findByLabelText("Project")).toHaveValue("Growth");
     expect(screen.getByLabelText("Title")).toHaveValue("");
     // Navigating to the form writes nothing on its own — the note exists only
-    // once Create is pressed.
-    expect(invokedCommands()).not.toContain("save_note");
+    // once Create is pressed. `write_note` is the command that would appear:
+    // creation goes through it, and `save_note` only ever updates a note that
+    // already exists, so naming that one here would assert nothing.
+    expect(invokedCommands()).not.toContain("write_note");
   });
 });
 
