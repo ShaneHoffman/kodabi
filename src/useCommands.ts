@@ -105,7 +105,7 @@ export function useCommands(): Command[] {
           void showQuickCaptureWindow();
         },
       },
-      // The four below open a screen rather than doing something, so they are
+      // The five below open a screen rather than doing something, so they are
       // `navigate` despite reading as verbs: the kind tag answers "where does
       // this take me", and "Open chat" takes you to the chat view.
       {
