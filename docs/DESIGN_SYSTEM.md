@@ -173,8 +173,11 @@ are the frame the app is drawn in rather than actions a view is about, and a win
 does not squish when you close it. The same reasoning the dock already makes about shape holds for
 movement: an action is a rectangle that lifts, and a destination is a place that fills. So the press
 lives on the primitives in `src/components/ui/` (plus the capture toast, which is a rectangle that
-performs a verb), and hand-rolled shell chrome answers with colour and fill instead. A control
-inside a *view* is not shell: it presses like everything else.
+performs a verb), and hand-rolled shell chrome answers with colour and fill instead. An action
+inside a *view* cannot borrow the exemption — it presses like everything else, which is why the note
+editor's format toolbar does. A destination inside a view is the other half of the same argument and
+fills rather than presses, wherever it sits: `ProjectView`'s index rows take one wash and nothing
+more, because you are already inside the folder and none of it is waiting on you.
 
 ### Hover enhances, never reveals
 

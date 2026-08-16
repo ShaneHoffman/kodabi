@@ -528,7 +528,18 @@ function Tool({
       // avoid, only in miniature. Inset keeps the ring on the button.
       className={clsx(
         "focus-ring-inset rounded-[6px] px-2 py-1 font-ui text-[12px] leading-none text-ink",
-        "transition-colors duration-140 ease-out-strong hover:bg-wash active:bg-wash-hover",
+        // `scale`, not `transform`: Tailwind v4's `scale-*` sets the standalone
+        // property, so a transition naming `transform` animates nothing and the
+        // press lands as a snap (UI_CONVENTIONS §3). The colour steps ride the
+        // same 140ms clock, so a hover that turns into a press reads as one
+        // gesture.
+        "transition-[scale,background-color] duration-140 ease-out-strong",
+        "hover:bg-wash active:bg-wash-hover",
+        // The one press spec (DESIGN_SYSTEM §2). These are actions on the
+        // selection, not the frame the app is drawn in, so the shell's
+        // stillness is not theirs to borrow. The swap needs no repeated guard
+        // because the press carries none: this button has no disabled state.
+        "active:scale-97 motion-reduce:active:scale-100",
         className,
       )}
     >
