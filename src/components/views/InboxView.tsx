@@ -22,6 +22,7 @@ import {
 } from "../../useNotes";
 import { folderHue, useProjects, type FolderHue, type Project } from "../../useProjects";
 import { isSessionSource } from "../../useSessions";
+import { backendCopy } from "../../errorCopy";
 import { formatElapsed, useElapsed } from "../../useElapsed";
 import { useReduceMotion } from "../../useReduceMotion";
 import { useTimeout } from "../../useTimeout";
@@ -358,12 +359,7 @@ export function InboxView() {
       }
     >
       {error ? (
-        <div className="flex flex-col gap-2">
-          <StatusMessage variant="error">Couldn&apos;t load the inbox: {error}</StatusMessage>
-          <p className="text-[11.5px] leading-relaxed text-ink-dim">
-            Your captured notes are still on disk. Reopen this view to try again.
-          </p>
-        </div>
+        <StatusMessage variant="error">{error}</StatusMessage>
       ) : (
         <>
           {remaining > 0 && <Progress cleared={cleared} />}
@@ -1090,7 +1086,9 @@ function InboxRow({
       })
       .catch((err: unknown) => {
         setPending(false);
-        setError(String(err));
+        setError(
+          backendCopy(err, "Couldn't file this note. It is still in the Inbox; try again."),
+        );
       });
   };
 
@@ -1285,16 +1283,9 @@ function InboxRow({
           </div>
         </div>
         {error && (
-          <div className="flex flex-col gap-2">
-            <StatusMessage variant="error" compact>
-              Couldn&apos;t file this note: {error}
-            </StatusMessage>
-            {/* The row stays put and its controls come back live on failure,
-                so the retry is the same menu they just used. */}
-            <p className="text-[11.5px] leading-relaxed text-ink-dim">
-              The note is still in your inbox. Pick a project again to retry.
-            </p>
-          </div>
+          <StatusMessage variant="error" compact>
+            {error}
+          </StatusMessage>
         )}
         {confirmingDelete && (
           <DeleteNoteDialog

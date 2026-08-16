@@ -76,7 +76,13 @@ pub fn model_status(
     app: AppHandle,
     state: tauri::State<'_, ModelsState>,
 ) -> Result<ModelStatusDto, String> {
-    let manifest = models::manifest::embedded().map_err(|err| err.to_string())?;
+    let manifest = models::manifest::embedded().map_err(|err| {
+        crate::user_errors::reported(
+            "model_manifest",
+            err,
+            "Kodabi's model list couldn't be read. Reinstall Kodabi to repair it.",
+        )
+    })?;
     let models_dir = sandbox::models_dir(&app)?;
     let status = models::status(
         &manifest,
@@ -95,7 +101,13 @@ pub fn model_status(
 /// spawned; progress arrives on the `models:state` event.
 #[tauri::command]
 pub fn download_models(app: AppHandle, state: tauri::State<'_, ModelsState>) -> Result<(), String> {
-    let manifest = models::manifest::embedded().map_err(|err| err.to_string())?;
+    let manifest = models::manifest::embedded().map_err(|err| {
+        crate::user_errors::reported(
+            "model_manifest",
+            err,
+            "Kodabi's model list couldn't be read. Reinstall Kodabi to repair it.",
+        )
+    })?;
     let models_dir = sandbox::models_dir(&app)?;
 
     if state
@@ -141,8 +153,21 @@ pub fn download_models(app: AppHandle, state: tauri::State<'_, ModelsState>) -> 
             Err(models::ModelsError::Cancelled) => ModelsStateEvent::Cancelled,
             Err(err) => {
                 eprintln!("kodabi: model download failed: {err}");
+                // A checksum or size mismatch discarded the file, so retrying is
+                // a fresh attempt; everything else resumes from what landed.
+                let message = match err {
+                    models::ModelsError::ShaMismatch { .. }
+                    | models::ModelsError::SizeMismatch { .. } => {
+                        "A downloaded file didn't verify, so it was discarded. Try the download \
+                         again."
+                    }
+                    _ => {
+                        "The download didn't finish. Nothing else was affected; trying again picks \
+                         up where it stopped."
+                    }
+                };
                 ModelsStateEvent::Error {
-                    message: err.to_string(),
+                    message: message.to_string(),
                 }
             }
         };

@@ -106,17 +106,16 @@ export function UpdateNotice({ onClose }: Props) {
               cannot reach. A `variant="error"` here would nest a second
               `role="alert"` inside the first and announce the failure twice.
               This matches `CaptureToast`, where the corner surface likewise
-              owns its region. The register is the primitive's compact one. */}
-          <p className="text-[12px] text-ink-dim">
-            {phase.step === "download"
-              ? `Couldn't download the update: ${phase.message}`
-              : `Couldn't install the update: ${phase.message}`}
-          </p>
+              owns its region. The register is the primitive's compact one.
+
+              The message is rendered whole rather than behind a step prefix:
+              `useUpdater` words each step's failure itself (`opaqueFailure`),
+              since a plugin rejection is a transport error, not copy. */}
+          <p className="text-[12px] text-ink-dim">{phase.message}</p>
           {/* Says what was NOT harmed, because a failed self-update is exactly
-              the kind of thing a user assumes has broken their install. */}
-          <p className="text-[12px] text-ink-dim">
-            Your current version is untouched and your notes are safe.
-          </p>
+              the kind of thing a user assumes has broken their install. The
+              message above already covers the install; this adds the notes. */}
+          <p className="text-[12px] text-ink-dim">Your notes are safe.</p>
           <div className="flex items-center justify-end gap-2.5">
             <Button variant="quiet" onClick={onClose}>
               Dismiss

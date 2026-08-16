@@ -179,14 +179,19 @@ describe("TerminalView", () => {
   // tree. `role="alert"` is asserted rather than the text alone, because being
   // announced is the half that was missing.
   it("announces a failure to start, and offers a way back from it", async () => {
+    // An `Error`, not a string: a non-string rejection did not come from the
+    // command boundary, so `useXterm` words the sentence and the exception text
+    // reaches neither the pane nor the announcement (docs/DESIGN_SYSTEM.md §3).
     onCommand("terminal_open", () => {
-      throw "claude is not on PATH";
+      throw new Error("claude is not on PATH");
     });
     render(<TerminalView />);
 
     const failure = await screen.findByRole("alert");
-    expect(failure).toHaveTextContent(/couldn't start claude code/i);
-    expect(failure).toHaveTextContent("claude is not on PATH");
+    expect(failure).toHaveTextContent(
+      "Couldn't start Claude Code. Check that the claude command is installed, then press Restart to try again.",
+    );
+    expect(screen.queryByText(/not on PATH/)).toBeNull();
     expect(screen.getByText("claude · could not start")).toBeInTheDocument();
 
     onCommand("terminal_open", () => SNAPSHOT);
@@ -210,12 +215,16 @@ describe("TerminalView", () => {
     const ended = screen.getByRole("status");
 
     onCommand("terminal_restart", () => {
-      throw "claude is not on PATH";
+      throw new Error("claude is not on PATH");
     });
     await userEvent.click(screen.getByRole("button", { name: "Restart" }));
 
+    // A failed restart says so in its own words, rather than borrowing the
+    // first-start sentence: this attempt is the one that failed.
     const failure = await screen.findByRole("alert");
-    expect(failure).toHaveTextContent(/couldn't start claude code/i);
+    expect(failure).toHaveTextContent(
+      "Couldn't restart Claude Code. Check that the claude command is installed, then press Restart to try again.",
+    );
     expect(screen.queryByText(/session ended/i)).not.toBeInTheDocument();
     // And it is a NEW element, not the exited row with its `role` rewritten.
     // Both branches are the same component at the same position, so unkeyed

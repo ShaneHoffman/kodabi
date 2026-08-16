@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { backendCopy, opaqueFailure } from "./errorCopy";
+
 /*
  * Vault change signal — a per-webview fan-out: something changed on disk, so
  * every disk-reading hook refetches. Its sole writer is `useVaultChangedBridge`,
@@ -41,8 +43,16 @@ export type VaultQuery<T> = {
  *
  * `fetcher` identity drives refetching: wrap it in `useCallback` keyed on its
  * inputs, so a changed input restarts the query and a re-render doesn't.
+ *
+ * `errorText` is the sentence to show when the fetch fails. Pass one wherever
+ * the view should say the same thing however the read failed; omit it to render
+ * the backend's own copy (`backendCopy`), which is right when the failures a
+ * caller can hit are meaningfully different from each other.
  */
-export function useVaultQuery<T>(fetcher: () => Promise<T>): VaultQuery<T> {
+export function useVaultQuery<T>(
+  fetcher: () => Promise<T>,
+  errorText?: string,
+): VaultQuery<T> {
   const [state, setState] = useState<{
     data: T | null;
     loading: boolean;
@@ -62,7 +72,17 @@ export function useVaultQuery<T>(fetcher: () => Promise<T>): VaultQuery<T> {
         })
         .catch((err: unknown) => {
           if (active && ticket === seq.current) {
-            setState({ data: null, loading: false, error: String(err) });
+            // `opaqueFailure` rather than a bare `errorText`: a caller with a
+            // fixed sentence discards the rejection, so the console is the only
+            // account left of what actually failed. Dropping it unlogged is the
+            // one hole the two helpers exist to close.
+            const message = errorText
+              ? opaqueFailure(err, errorText)
+              : backendCopy(
+                  err,
+                  "Couldn't load this from your vault. Your notes on disk are untouched; reopen this view to try again.",
+                );
+            setState({ data: null, loading: false, error: message });
           }
         });
     };
@@ -73,7 +93,9 @@ export function useVaultQuery<T>(fetcher: () => Promise<T>): VaultQuery<T> {
       active = false;
       unsubscribe();
     };
-  }, [fetcher]);
+    // `errorText` is a string literal at every call site, so its identity is
+    // stable and listing it here never costs a refetch.
+  }, [fetcher, errorText]);
 
   const setData = useCallback((data: T) => {
     seq.current += 1;

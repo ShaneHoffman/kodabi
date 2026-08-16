@@ -22,6 +22,7 @@ mod terminal_cmds;
 mod transcribe;
 mod tray_promotion;
 mod updater_cmds;
+mod user_errors;
 
 use kodabi_core::device::DeviceId;
 use tauri::Manager;

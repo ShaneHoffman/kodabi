@@ -18,6 +18,12 @@ use crate::index_state::IndexState;
 const SNIPPET_MARK_OPEN: &str = "\u{E000}";
 const SNIPPET_MARK_CLOSE: &str = "\u{E001}";
 
+/// The index failing to open is a whole-session condition, not a per-query one:
+/// nothing the reader does brings it back before a restart, and the notes
+/// themselves are files on disk that search never had custody of.
+const INDEX_UNAVAILABLE: &str =
+    "Search isn't available this session. Your notes are safe; restart Kodabi to bring it back.";
+
 /// Drops and repopulates the note index from every file on disk. Returns as soon
 /// as the job is queued; rebuild progress arrives on the `index:state` event.
 #[tauri::command]
@@ -25,7 +31,7 @@ pub async fn rebuild_index(app: AppHandle) -> Result<(), String> {
     if app.state::<IndexState>().request_rebuild() {
         Ok(())
     } else {
-        Err("the note index is unavailable this session".to_string())
+        Err(INDEX_UNAVAILABLE.to_string())
     }
 }
 
@@ -40,7 +46,7 @@ pub async fn rebuild_index(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 pub async fn search_notes(app: AppHandle, params: SearchParams) -> Result<SearchResults, String> {
     let Some(handle) = app.state::<IndexState>().search_handle() else {
-        return Err("the note index is unavailable this session".to_string());
+        return Err(INDEX_UNAVAILABLE.to_string());
     };
     let options = SearchOptions {
         marks: SnippetMarks {
@@ -49,8 +55,11 @@ pub async fn search_notes(app: AppHandle, params: SearchParams) -> Result<Search
         },
         prefix_last_term: true,
     };
+    // The index's own errors name rusqlite internals and cursor encodings; a
+    // failed search costs the reader nothing but the query they can retype.
+    const SEARCH_FAILED: &str = "Search hit a problem. Your notes are safe; try the search again.";
     tauri::async_runtime::spawn_blocking(move || handle.search(&params, options))
         .await
-        .map_err(|err| err.to_string())?
-        .map_err(|err| err.to_string())
+        .map_err(|err| crate::user_errors::reported("search_notes", err, SEARCH_FAILED))?
+        .map_err(|err| crate::user_errors::reported("search_notes", err, SEARCH_FAILED))
 }

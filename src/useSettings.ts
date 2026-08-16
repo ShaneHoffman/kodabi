@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { backendCopy } from "./errorCopy";
 import { SETTINGS_CHANGED_EVENT } from "./events";
 
 /*
@@ -157,7 +158,13 @@ export function useSettings(): {
         setError(null);
       })
       .catch((err) => {
-        if (active) setError(String(err));
+        if (active)
+          setError(
+            backendCopy(
+              err,
+              "Couldn't load your settings. They are still saved; reopen this view to try again.",
+            ),
+          );
       })
       .finally(() => {
         if (active) setLoading(false);

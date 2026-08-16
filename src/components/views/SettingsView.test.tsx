@@ -301,7 +301,7 @@ describe("SettingsView failures", () => {
     // is the one error here with nothing else left to look at
     // (docs/DESIGN_SYSTEM.md §3).
     onCommand("get_settings", () => {
-      throw "settings.json is malformed";
+      throw new Error("settings.json is malformed");
     });
     render(
       <NavigationProvider>
@@ -314,10 +314,10 @@ describe("SettingsView failures", () => {
     );
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Couldn't load settings: settings.json is malformed");
-    expect(
-      screen.getByText("Your settings file is untouched. Leave Settings and come back to try again."),
-    ).toBeInTheDocument();
+    expect(alert).toHaveTextContent(
+      "Couldn't load your settings. They are still saved; reopen this view to try again.",
+    );
+    expect(screen.queryByText(/settings\.json is malformed/)).toBeNull();
   });
 
 });
@@ -395,22 +395,19 @@ describe("SettingsView appearance", () => {
   it("keeps the stored theme showing when the save fails", async () => {
     const user = userEvent.setup();
     onCommand("set_appearance", () => {
-      throw "the settings file is read only";
+      throw "Couldn't save the theme. The previous theme still applies; try again.";
     });
     await renderSeeded(DEFAULTS);
 
     await user.click(screen.getByRole("combobox", { name: /Theme/ }));
     await user.click(screen.getByRole("option", { name: "Dark" }));
 
+    // The sentence says which value is actually in force, and the row below
+    // proves it: not flipped optimistically, still showing what is on disk
+    // (docs/DESIGN_SYSTEM.md §3).
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      /the settings file is read only/,
+      "Couldn't save the theme. The previous theme still applies; try again.",
     );
-    // Not flipped optimistically: the control still shows what is on disk. The
-    // next-step line is what says so in words, since the row alone leaves "did
-    // that stick?" open (docs/DESIGN_SYSTEM.md §3).
-    expect(
-      screen.getByText("Your previous setting is still in effect. Change it again to retry."),
-    ).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: /Theme/ })).toHaveTextContent(
       "Match the system",
     );
@@ -777,11 +774,20 @@ describe("SettingsView About card", () => {
   it("reports a failed manual check here, which is the one place that does", async () => {
     // The corner notice deliberately stays quiet about check failures; a check
     // someone clicked has to answer for itself.
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
     failCheck("no route to host");
     const user = userEvent.setup();
     await renderSeeded();
 
     await user.click(within(about()).getByRole("button", { name: "Check for updates" }));
-    expect(await within(about()).findByText(/no route to host/)).toBeInTheDocument();
+    // The plugin's transport error stays in the log; the card says what failed
+    // and what happens next.
+    expect(
+      await within(about()).findByText(
+        "Couldn't check for updates. Kodabi will try again next launch.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(about()).queryByText(/no route to host/)).toBeNull();
+    logged.mockRestore();
   });
 });

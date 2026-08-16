@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { MODELS_STATE_EVENT } from "./events";
+import { backendCopy } from "./errorCopy";
 import {
   aggregateModelStatus,
   cancelModelDownload,
@@ -76,7 +77,13 @@ export function useModelDownload(): {
     try {
       await startModelDownload();
     } catch (error) {
-      setState({ status: "error", message: String(error) });
+      setState({
+        status: "error",
+        message: backendCopy(
+          error,
+          "Couldn't start the download. Nothing else was affected; try again.",
+        ),
+      });
     }
   }, []);
 
@@ -84,7 +91,13 @@ export function useModelDownload(): {
     try {
       await cancelModelDownload();
     } catch (error) {
-      setState({ status: "error", message: String(error) });
+      setState({
+        status: "error",
+        message: backendCopy(
+          error,
+          "Couldn't stop the download. It may still be running; reopen Settings to check.",
+        ),
+      });
     }
   }, []);
 

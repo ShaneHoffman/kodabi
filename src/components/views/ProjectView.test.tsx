@@ -158,7 +158,7 @@ describe("ProjectView delete flow", () => {
   it("shows a failed delete inside the dialog and stays open", async () => {
     const user = userEvent.setup();
     onCommand("delete_project", () => {
-      throw "folder is locked";
+      throw "Couldn't delete the project. Its notes are untouched; try again.";
     });
     const deleteButton = await openGrowth(user);
 
@@ -168,14 +168,7 @@ describe("ProjectView delete flow", () => {
 
     expect(
       await within(dialog).findByText(
-        "Couldn't delete the project: folder is locked",
-      ),
-    ).toBeInTheDocument();
-    // Plus what happens next, which the dialog lays out as a sibling of the
-    // alert (docs/DESIGN_SYSTEM.md §3).
-    expect(
-      within(dialog).getByText(
-        "The project and its notes are untouched. You can try again or cancel.",
+        "Couldn't delete the project. Its notes are untouched; try again.",
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Delete this project?" })).toBeInTheDocument();
@@ -191,11 +184,13 @@ describe("ProjectView delete flow", () => {
 
     await user.click(await screen.findByRole("button", { name: /Growth/ }));
 
+    // One sentence with both halves, fixed by `useProjectNotes`: the listing
+    // reads the same to a reader whatever the backend hit.
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Couldn't load notes: vault is unreadable");
-    expect(
-      screen.getByText("Your notes are still on disk. Reopen this view to try again."),
-    ).toBeInTheDocument();
+    expect(alert).toHaveTextContent(
+      "Couldn't read your notes. They are still on disk; reopen this view to try again.",
+    );
+    expect(screen.queryByText(/vault is unreadable/)).toBeNull();
     // A failed read is not an empty project.
     expect(screen.queryByText(/No notes here yet\./)).not.toBeInTheDocument();
   });

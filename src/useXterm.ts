@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal, type ITheme } from "@xterm/xterm";
+import { backendCopy } from "./errorCopy";
 // xterm.js ships its own required stylesheet — the terminal does not render
 // without it, and it is a vendor file we neither write nor migrate.
 // eslint-disable-next-line no-restricted-syntax -- third-party stylesheet, not ours to replace
@@ -238,8 +239,15 @@ export function useXterm(container: RefObject<HTMLDivElement | null>): XtermHand
         // The buffer line is the detail, not the state: `startError` is what
         // the view raises and a screen reader hears (see `XtermHandle`).
         if (!active) return;
-        term.writeln(`\x1b[31mCould not start Claude Code: ${String(error)}\x1b[0m`);
-        setStartError(String(error));
+        // Worded once and used twice: the buffer line and the state a screen
+        // reader hears must be the same sentence, and neither may be the raw
+        // rejection (docs/DESIGN_SYSTEM.md §3).
+        const message = backendCopy(
+          error,
+          "Couldn't start Claude Code. Check that the claude command is installed, then press Restart to try again.",
+        );
+        term.writeln(`\x1b[31m${message}\x1b[0m`);
+        setStartError(message);
         setStatus("failed");
       });
 
@@ -302,11 +310,13 @@ export function useXterm(container: RefObject<HTMLDivElement | null>): XtermHand
         // `exit` is cleared with it. The old exit is stale the moment a restart
         // is attempted, and leaving it set would let the view go on reporting
         // "Session ended" over a failure that has its own thing to say.
-        termRef.current?.writeln(
-          `\x1b[31mCould not restart Claude Code: ${String(error)}\x1b[0m`,
+        const message = backendCopy(
+          error,
+          "Couldn't restart Claude Code. Check that the claude command is installed, then press Restart to try again.",
         );
+        termRef.current?.writeln(`\x1b[31m${message}\x1b[0m`);
         setExit(null);
-        setStartError(String(error));
+        setStartError(message);
         setStatus("failed");
       });
   };

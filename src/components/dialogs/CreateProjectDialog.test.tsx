@@ -120,7 +120,7 @@ describe("CreateProjectDialog", () => {
     const user = userEvent.setup();
     serveVault();
     onCommand("create_project", () => {
-      throw 'project "Ops" already exists';
+      throw 'A project named "Ops" already exists. Pick a different name.';
     });
     renderShell();
 
@@ -129,9 +129,59 @@ describe("CreateProjectDialog", () => {
     await user.click(screen.getByRole("button", { name: "Create" }));
 
     expect(
-      await screen.findByText('project "Ops" already exists'),
+      await screen.findByText('A project named "Ops" already exists. Pick a different name.'),
     ).toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "New project" })).toBeInTheDocument();
+  });
+
+  it("shows the validation rule a typed name broke, verbatim", async () => {
+    // Half of the leak pin for a dialog. Validation detail is the ONE thing the
+    // boundary passes through unchanged (`user_errors::note_error` →
+    // `user_sentence`), because it describes what the user typed: no generic
+    // sentence could tell them which rule they broke. A change that started
+    // swallowing these in favour of a house sentence would fail here.
+    const user = userEvent.setup();
+    serveVault();
+    onCommand("create_project", () => {
+      throw 'Project segment "aux" is a reserved Windows device name.';
+    });
+    renderShell();
+
+    await user.click(await screen.findByRole("button", { name: "New project" }));
+    await user.type(screen.getByLabelText("Project name"), "aux");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(
+      await screen.findByText('Project segment "aux" is a reserved Windows device name.'),
+    ).toBeInTheDocument();
+  });
+
+  it("shows its own sentence, not the exception, when the rejection is not backend copy", async () => {
+    // The other half. A non-string rejection did not come from the command
+    // boundary, so it carries developer text (a stack, a class name) that
+    // docs/DESIGN_SYSTEM.md §3 forbids on screen: `backendCopy` logs it and the
+    // dialog's own sentence renders instead.
+    const user = userEvent.setup();
+    const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+    serveVault();
+    onCommand("create_project", () => {
+      throw new TypeError("projects.map is not a function");
+    });
+    renderShell();
+
+    await user.click(await screen.findByRole("button", { name: "New project" }));
+    await user.type(screen.getByLabelText("Project name"), "Ops");
+    await user.click(screen.getByRole("button", { name: "Create" }));
+
+    expect(
+      await screen.findByText(
+        "Couldn't finish creating the project. Your notes are untouched; try again.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/TypeError|is not a function/)).toBeNull();
+    // Not swallowed: the console is the only record there is.
+    expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
   });
 
   it("closes on Escape without creating anything", async () => {

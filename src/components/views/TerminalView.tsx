@@ -87,10 +87,14 @@ export function TerminalView() {
           way the assertive role is the one actually in force. */}
       {status !== "running" && (
         <div className="flex items-center gap-2.5 pt-2">
+          {/* `startError` is a whole sentence when there is one (`useXterm`
+              words it, naming the Restart button beside this line), so it is
+              rendered as-is rather than behind a prefix. The fallback covers
+              the one case that has no message to show: a failure raised
+              without one. */}
           {status === "failed" ? (
             <StatusMessage key="failed" variant="error" compact>
-              Couldn&apos;t start Claude Code{startError ? `: ${startError}` : ""}. Restart
-              to try again.
+              {startError ?? "Couldn't start Claude Code. Restart to try again."}
             </StatusMessage>
           ) : (
             <StatusMessage key="exited" variant="status" compact>

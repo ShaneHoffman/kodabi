@@ -163,18 +163,18 @@ describe("Dock project listing failure", () => {
   it("says what failed, what happens next, and keeps the vault reachable", async () => {
     serveVault();
     onCommand("list_projects", () => {
-      throw "index is locked";
+      throw "Couldn't read your projects. They are still on disk; restart Kodabi if this keeps happening.";
     });
 
     renderShell();
 
-    const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Couldn't load projects: index is locked");
-    // The dock never unmounts, so "reopen this view" is not the way out here
+    // One sentence, both halves. The dock never unmounts, so "reopen this
+    // view" is not the way out here and `list_projects` does not say it
     // (docs/DESIGN_SYSTEM.md §3).
-    expect(
-      screen.getByText("Your project folders are untouched. Restarting Kodabi reloads them."),
-    ).toBeInTheDocument();
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Couldn't read your projects. They are still on disk; restart Kodabi if this keeps happening.",
+    );
     // Data stays reachable: a failed listing must not read as an empty vault,
     // and the system destinations still work.
     expect(screen.queryByText(/No projects yet\./)).not.toBeInTheDocument();

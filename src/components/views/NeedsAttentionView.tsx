@@ -10,6 +10,7 @@ import {
   type FailedSession,
 } from "../../useSessions";
 import { notifyVaultChanged } from "../../useVaultQuery";
+import { backendCopy } from "../../errorCopy";
 import type { DistillEvent } from "../../useDistillState";
 import { SpiritMark } from "../capture/SpiritMark";
 import { Button } from "../ui/Button";
@@ -130,18 +131,12 @@ function CaptureSummary({
         </p>
       )}
       {rowError && (
-        <>
-          <StatusMessage variant="error" compact>
-            {rowError}
-          </StatusMessage>
-          {/* One sentence for all four verbs, and the only safety copy a
-              DISMISSED row gets: the sentence above it is gated on !dismissed,
-              so a failed restore would otherwise say nothing about what
-              survived. The row's buttons stay live, which is the retry. */}
-          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
-            The capture is unchanged and still listed. You can try again.
-          </p>
-        </>
+        // No companion line: every value that reaches here is a whole sentence
+        // that already names what survived, whether it came from the distill's
+        // own event or from one of this view's fallbacks.
+        <StatusMessage variant="error" compact>
+          {rowError}
+        </StatusMessage>
       )}
     </div>
   );
@@ -204,9 +199,11 @@ export function NeedsAttentionView() {
     // that is still going, which would queue a second run and a second note.
     setPendingPath((current) => (current === payload.session_path ? null : current));
     if (payload.status === "error") {
+      // Verbatim: the distill's own event message is already a sentence naming
+      // the failure and what is still safe (`distill_cmds`).
       setRowErrors((current) => ({
         ...current,
-        [payload.session_path]: `Couldn't retry this capture: ${payload.message}`,
+        [payload.session_path]: payload.message,
       }));
     }
     // No notifyVaultChanged() here. The sidebar's needs-attention row is
@@ -248,7 +245,10 @@ export function NeedsAttentionView() {
       setPendingPath(null);
       setRowErrors((current) => ({
         ...current,
-        [path]: `Couldn't retry this capture: ${String(err)}`,
+        [path]: backendCopy(
+          err,
+          "Couldn't start the retry. The recording and transcript are safe; try again.",
+        ),
       }));
     });
   };
@@ -269,7 +269,10 @@ export function NeedsAttentionView() {
       .catch((err: unknown) => {
         setRowErrors((current) => ({
           ...current,
-          [path]: `Couldn't ${verb} this capture: ${String(err)}`,
+          [path]: backendCopy(
+            err,
+            "Couldn't update this capture. The recording and transcript are untouched; try again.",
+          ),
         }));
       })
       .finally(() => setActionPending(null));
@@ -296,7 +299,9 @@ export function NeedsAttentionView() {
         notifyVaultChanged();
       })
       .catch((err: unknown) => {
-        setDeleteError(`Couldn't delete the capture: ${String(err)}`);
+        setDeleteError(
+          backendCopy(err, "Couldn't delete this capture. Its files are untouched; try again."),
+        );
       })
       .finally(() => setActionPending(null));
   };
@@ -322,16 +327,9 @@ export function NeedsAttentionView() {
       }
     >
       {error ? (
-        <div className="flex flex-col gap-2">
-          <StatusMessage variant="error">
-            Couldn&apos;t list captured sessions: {error}
-          </StatusMessage>
-          {/* Nothing here is retried automatically, so the recordings being
-              intact is the load-bearing half. */}
-          <p className="text-[11.5px] leading-relaxed text-ink-dim">
-            Your captures are still on disk. Reopen this view to try again.
-          </p>
-        </div>
+        <StatusMessage variant="error">
+          {error}
+        </StatusMessage>
       ) : (
         <>
           {activeSessions.length === 0 ? (
@@ -532,7 +530,6 @@ export function NeedsAttentionView() {
               busyLabel="Deleting…"
               busy={isRunning("delete", confirmingSession.path)}
               error={deleteError}
-              errorHint="The capture and its recording are still on disk. You can try again or cancel."
               onConfirm={confirmDelete}
               onClose={() => {
                 setConfirmingDeletePath(null);

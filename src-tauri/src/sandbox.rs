@@ -166,9 +166,14 @@ pub(crate) fn config_dir(app: &AppHandle) -> Result<PathBuf, String> {
     if let Some(base) = base() {
         return Ok(base.clone());
     }
-    app.path()
-        .app_config_dir()
-        .map_err(|err| format!("failed to resolve the app config directory: {err}"))
+    app.path().app_config_dir().map_err(|err| {
+        crate::user_errors::reported(
+            "config_dir",
+            err,
+            "Kodabi couldn't find its settings folder. Restart the app; your notes on disk are \
+             untouched.",
+        )
+    })
 }
 
 /// Where the models downloaded on first run live.
@@ -190,5 +195,12 @@ pub(crate) fn models_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path()
         .app_data_dir()
         .map(|dir| dir.join(kodabi_core::sandbox::MODELS_SUBDIR))
-        .map_err(|err| format!("failed to resolve the models directory: {err}"))
+        .map_err(|err| {
+            crate::user_errors::reported(
+                "models_dir",
+                err,
+                "Kodabi couldn't find its data folder. Restart the app; your notes on disk are \
+                 untouched.",
+            )
+        })
 }

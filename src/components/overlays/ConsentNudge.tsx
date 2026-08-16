@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { backendCopy } from "../../errorCopy";
 import {
   acknowledgeConsent,
   buildRetentionPolicy,
@@ -56,7 +57,9 @@ export function ConsentNudge({ onClose }: Props) {
     try {
       await acknowledgeConsent(buildRetentionPolicy(kind, Number(days)));
     } catch (err) {
-      setError(`Couldn't save your choice: ${String(err)}`);
+      setError(
+        backendCopy(err, "Couldn't save your choice, so recording stays off. Try again."),
+      );
       setSubmitting(false);
       return;
     }
@@ -64,7 +67,12 @@ export function ConsentNudge({ onClose }: Props) {
       await invoke("start_capture");
       onClose();
     } catch (err) {
-      setError(`Couldn't start capture: ${String(err)}`);
+      setError(
+        backendCopy(
+          err,
+          "Couldn't start recording. Check your microphone in Windows sound settings, then try again.",
+        ),
+      );
       setSubmitting(false);
     }
   };

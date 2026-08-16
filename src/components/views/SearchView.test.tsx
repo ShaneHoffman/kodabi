@@ -112,17 +112,16 @@ describe("SearchView", () => {
   it("says what failed and what happens next when the index errors", async () => {
     const user = userEvent.setup();
     onCommand("search_notes", () => {
-      throw "index is rebuilding";
+      throw "Search hit a problem. Your notes are safe; try the search again.";
     });
     const field = await openSearch(user);
 
     await user.type(field, "tournament");
 
     const alert = await screen.findByRole("alert");
-    expect(alert).toHaveTextContent("Couldn't search your notes: index is rebuilding");
-    expect(
-      screen.getByText("Your notes are untouched. Edit the search to try again."),
-    ).toBeInTheDocument();
+    expect(alert).toHaveTextContent(
+      "Search hit a problem. Your notes are safe; try the search again.",
+    );
     // The retry the copy promises: the field is still there, still holding the
     // query (docs/DESIGN_SYSTEM.md §3 leaves the data reachable).
     expect(field).toHaveValue("tournament");
@@ -249,14 +248,16 @@ describe("SearchView", () => {
   it("surfaces a failed search, which is also how an unavailable index reads", async () => {
     const user = userEvent.setup();
     onCommand("search_notes", () => {
-      throw new Error("the note index is unavailable this session");
+      throw "Search isn't available this session. Your notes are safe; restart Kodabi to bring it back.";
     });
     const field = await openSearch(user);
 
     await user.type(field, "tournament");
 
     expect(
-      await screen.findByText(/the note index is unavailable this session/),
+      await screen.findByText(
+        "Search isn't available this session. Your notes are safe; restart Kodabi to bring it back.",
+      ),
     ).toBeInTheDocument();
   });
 });

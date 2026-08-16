@@ -47,7 +47,21 @@ pub const CHAT_EVENT: &str = "chat:event";
 const COALESCE_MS: u64 = 16;
 /// Flush the delta coalescer once this much text piled up regardless.
 const MAX_DELTA_BYTES: usize = 8 * 1024;
-const POISONED: &str = "chat state lock poisoned";
+/// Same reasoning as `terminal_cmds::POISONED`, including why the copy sends
+/// the reader to an app restart rather than to Try again: this lock does not
+/// recover, and Try again re-enters `chat_restart`, which takes it too.
+const POISONED: &str = "Chat hit an internal error. Restart Kodabi to continue.";
+
+/// Writing the user's message to the child failed. The interrupt and
+/// permission-answer paths word their own, because what did not happen differs;
+/// what they share is the reassurance, and it is this one: the session object is
+/// still there, so the reader's next attempt is a real one.
+const CHAT_SEND_FAILED: &str = "Couldn't send the message. The chat is still open; try again.";
+
+/// Spawning or transcript setup failed. As with the terminal, naming `claude`
+/// is the actionable half.
+const CHAT_START_FAILED: &str =
+    "Couldn't start the chat. Check that the claude command is installed, then press Try again.";
 /// The deny message the model sees when the user declines a permission card
 /// (or a stop/exit resolves the card for them).
 const DENY_MESSAGE: &str = "The user declined this action in Kodabi.";
@@ -450,7 +464,9 @@ pub fn chat_send(state: State<'_, ChatState>, text: String) -> Result<(), String
     let session = guard
         .as_ref()
         .filter(|s| s.child.is_alive())
-        .ok_or_else(|| "chat session is not running".to_string())?;
+        .ok_or_else(|| {
+            "The chat isn't running. Start a new chat to send this message.".to_string()
+        })?;
 
     session.shared.record(ChatRecord::User {
         ts: chat::now_ts(),
@@ -462,7 +478,7 @@ pub fn chat_send(state: State<'_, ChatState>, text: String) -> Result<(), String
     session
         .child
         .write_line(chat::user_message_json(&text))
-        .map_err(|e| e.to_string())?;
+        .map_err(|err| crate::user_errors::reported("chat_send", err, CHAT_SEND_FAILED))?;
     session.shared.turn_active.store(true, Ordering::Relaxed);
     // A cancel that raced the previous turn's natural end leaves a stale
     // interrupt intent; consumed here, it cannot relabel this turn's real
@@ -488,7 +504,13 @@ pub fn chat_cancel(app: AppHandle, state: State<'_, ChatState>) -> Result<(), St
         .write_line(chat::interrupt_request_json(&format!(
             "kodabi_interrupt_{counter}"
         )))
-        .map_err(|e| e.to_string())
+        .map_err(|err| {
+            crate::user_errors::reported(
+                "chat_cancel",
+                err,
+                "Couldn't stop the turn. The chat is still open; try again.",
+            )
+        })
 }
 
 /// Answers the pending permission card. A stale `request_id` (already
@@ -538,7 +560,11 @@ pub fn chat_permission_respond(
         if let Ok(mut pending_slot) = session.shared.pending.lock() {
             *pending_slot = Some(pending);
         }
-        return Err(err.to_string());
+        return Err(crate::user_errors::reported(
+            "chat_permission_respond",
+            err,
+            "Couldn't send your answer. The chat is still open; try again.",
+        ));
     }
 
     session.shared.record(ChatRecord::Permission {
@@ -610,24 +636,24 @@ fn spawn_session(app: &AppHandle) -> Result<ChatSessionState, String> {
     let kb_root = crate::transcribe::knowledge_base_dir(app)?;
     let device = app
         .try_state::<DeviceId>()
-        .ok_or_else(|| "device identity not initialized".to_string())?;
+        .ok_or_else(|| "Chat isn't ready yet. Restart Kodabi and try again.".to_string())?;
 
     let chat_id = uuid::Uuid::new_v4().to_string();
     let config = ChatProcessConfig::from_env();
     let started_at = chrono::Utc::now();
 
-    let transcript =
-        ChatTranscript::create(&kb_root, &device, started_at).map_err(|e| e.to_string())?;
+    let transcript = ChatTranscript::create(&kb_root, &device, started_at)
+        .map_err(|err| crate::user_errors::reported("chat_open", err, CHAT_START_FAILED))?;
     transcript
         .append(&ChatRecord::Meta {
             chat_id: chat_id.clone(),
             model: config.model.clone(),
             started_at: started_at.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
         })
-        .map_err(|e| e.to_string())?;
+        .map_err(|err| crate::user_errors::reported("chat_open", err, CHAT_START_FAILED))?;
 
-    let (child, events) =
-        spawn_chat(&config, &mcp_path, &chat_id, &kb_root).map_err(|e| e.to_string())?;
+    let (child, events) = spawn_chat(&config, &mcp_path, &chat_id, &kb_root)
+        .map_err(|err| crate::user_errors::reported("chat_open", err, CHAT_START_FAILED))?;
     let child = Arc::new(child);
 
     let shared = Arc::new(SharedChat {
@@ -810,17 +836,28 @@ fn handle_item(
             shared.turn_active.store(false, Ordering::Relaxed);
             let stopped = shared.interrupting.swap(false, Ordering::Relaxed) && is_error;
             let error = if is_error && !stopped {
-                let message = result
-                    .filter(|text| !text.trim().is_empty())
-                    .unwrap_or_else(|| "the turn failed".to_owned());
+                let detail = result.filter(|text| !text.trim().is_empty());
+                // The transcript keeps what Claude actually said, unwrapped.
                 shared.record(ChatRecord::Error {
                     ts: chat::now_ts(),
-                    message: message.clone(),
+                    message: detail
+                        .clone()
+                        .unwrap_or_else(|| "the turn failed".to_owned()),
                 });
+                // One sentence for both renderings of this failure. The live
+                // `turn_done` event and the snapshot log used to be worded
+                // differently for the same turn, because the view prefixed the
+                // event and rendered the restored entry bare. Claude's own text
+                // is the detail rather than something to replace: it is written
+                // for a reader ("usage limit reached").
+                let shown = match detail {
+                    Some(text) => format!("Couldn't finish the answer: {text}"),
+                    None => "Couldn't finish the answer. Try sending the message again.".to_owned(),
+                };
                 shared.push_entry(ChatEntryDto::Error {
-                    message: message.clone(),
+                    message: shown.clone(),
                 });
-                Some(message)
+                Some(shown)
             } else {
                 None
             };
