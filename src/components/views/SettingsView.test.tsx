@@ -2,14 +2,13 @@ import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SettingsView } from "./SettingsView";
-import { CAPTURE_TOGGLE_SHORTCUT } from "../../captureControl";
+import { CAPTURE_TOGGLE_SHORTCUT, type ShortcutStatus } from "../../captureControl";
 import { QUICK_CAPTURE_SHORTCUT } from "../../quickCapture";
 import { ModelStatusProvider } from "../providers/ModelStatusProvider";
 import { NavigationProvider } from "../providers/NavigationProvider";
 import { NavigationContext } from "../../useNavigation";
 import { UpdaterProvider } from "../providers/UpdaterProvider";
 import type { OverlaySettings, Settings } from "../../useSettings";
-import { CAPTURE_TOGGLE_SHORTCUT, type ShortcutStatus } from "../../captureControl";
 import { INDEX_STATE_EVENT } from "../../events";
 import {
   emitFromBackend,
