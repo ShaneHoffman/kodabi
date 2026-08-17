@@ -756,6 +756,10 @@ describe("SettingsView mic test", () => {
       expect(attribution).toHaveTextContent(/CC BY 4\.0/);
       // The licence obliges us to state that the files were changed.
       expect(attribution).toHaveTextContent(/quantized to int8/);
+      // A paragraph, so it reads a register up from a hint — the row's `body`
+      // slot, not its `hint` (docs/DESIGN_SYSTEM.md §6). Pinned because the
+      // text assertions above survive a silent revert to `hint`.
+      expect(attribution).toHaveClass("text-ink-dim");
     });
   });
 });

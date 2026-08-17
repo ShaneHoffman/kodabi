@@ -36,11 +36,19 @@ export function StatusMessage({
   // looking; a status is polite because it accompanies something they started.
   const role = variant === "error" ? "alert" : variant === "status" ? "status" : undefined;
   // All three variants read at `ink-dim`. `status` used to sit a step fainter,
-  // in the metadata register (3.12:1 day, 3.37:1 night — under the 4.5:1
-  // floor, docs/DESIGN_SYSTEM.md §6). A status line is a sentence the app is
-  // deliberately announcing, often through a live region: it is the last thing
-  // that should be the hardest to read. Hierarchy between the three comes from
-  // the role and from `compact`, not from fading one.
+  // in the metadata register, and the promotion is the settled far side of
+  // that register's line (docs/DESIGN_SYSTEM.md §6): a status is a sentence the
+  // app is deliberately ANNOUNCING, often through a live region, so it is a
+  // sentence the user has to read — where a hint, which stays faint, is one
+  // they may. It is the last thing that should be the hardest to read.
+  // Hierarchy between the three comes from the role and from `compact`, not
+  // from fading one.
+  //
+  // The reason is register, not contrast. This comment used to cite 3.12:1 day
+  // and 3.37:1 night against the 4.5:1 floor; those numbers measured a
+  // pre-Grove token and no current surface produces them — today's `ink-faint`
+  // clears the floor everywhere it renders (§6's table). The promotion stands
+  // on what the text is, not on what it measured.
   const tone = "text-ink-dim";
   const size = compact ? "text-[12px]" : "text-[15px] leading-relaxed";
 

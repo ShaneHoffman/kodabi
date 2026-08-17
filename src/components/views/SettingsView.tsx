@@ -102,11 +102,15 @@ function Card({ title, children }: { title: string; children: ReactNode }) {
 function Row({
   label,
   hint,
+  body,
   foot,
   children,
 }: {
   label: string;
   hint?: ReactNode;
+  /** Prose the row genuinely needs — a paragraph rather than a line. Reads one
+   * register up from `hint`; see below. */
+  body?: ReactNode;
   foot?: ReactNode;
   children?: ReactNode;
 }) {
@@ -116,12 +120,23 @@ function Row({
         <div className="flex min-w-0 flex-col gap-0.5">
           <span className="text-[13.5px] font-semibold text-ink">{label}</span>
           {/* The one short line a setting is allowed to explain itself with,
-              capped at the measure a hint gets (docs/DESIGN_SYSTEM.md §1).
+              capped at the measure a hint gets (docs/DESIGN_SYSTEM.md §1) and
+              read in the metadata register, which §6 settles as the hint's
+              home: a hint is a sentence the user MAY read, so it stays faint.
               Never a paragraph: a config panel that argues with you is a config
               panel nobody finishes reading. */}
           {hint && (
             <p className="max-w-[46ch] text-[11.5px] leading-relaxed text-ink-faint">
               {hint}
+            </p>
+          )}
+          {/* The rare row whose explanation is genuinely prose — Attribution's
+              licensing text is the only one today. Same measure and size as a
+              hint, one register up: §6's carve-out is bounded by length, and a
+              paragraph is prose whatever prop it arrives in. */}
+          {body && (
+            <p className="max-w-[46ch] text-[11.5px] leading-relaxed text-ink-dim">
+              {body}
             </p>
           )}
         </div>
@@ -885,7 +900,10 @@ export function SettingsView() {
             <ModelsControl />
             <Row
               label="Attribution"
-              hint={
+              // A paragraph, not a hint: five lines of licensing prose is the
+              // case DESIGN_SYSTEM §6's carve-out excludes, so it reads at
+              // ink-dim through `body`.
+              body={
                 <>
                   Speech recognition uses Parakeet TDT 0.6b v2 by NVIDIA,
                   licensed under CC BY 4.0

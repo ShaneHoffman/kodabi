@@ -84,7 +84,10 @@ Where a bullet says a guard holds something, read it as *that part is no longer 
   whether the register is right, whether a label reads as an apology. Two register claims from
   DESIGN_SYSTEM §6 are checkable in the same pass: `ink-faint` is a metadata register, so the moment
   it carries a sentence the user has to read it is the wrong token; and a hue never colours running
-  text.
+  text. **The control hint is in the register and settled** — the one optional line under a `Field`,
+  a `Checkbox` or a settings row is a sentence the user *may* read, so faint is correct there and
+  promoting it is the finding. Its bound is length: a *paragraph* is prose whatever it is passed as,
+  and reads at `ink-dim` (Settings' `Row` has a `body` slot for exactly that).
 
 **The rest of the doctrine is not restated here and is not thereby optional.** Green's closed list of
 meanings, rectangles versus pills, the one press spec, the nine glass thicknesses, the radius ladder,
