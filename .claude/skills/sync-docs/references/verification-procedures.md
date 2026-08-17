@@ -66,10 +66,12 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 - **Verify:** Glob the top level and each `crates/*`; confirm every path the README
   lists exists, and that new top-level directories or crates appear in the block.
   Then confirm ARCHITECTURE.md §2's table names the same crate set (it lists crates
-  only, not top-level directories) and does not contradict the README's one-line
-  description of any of them.
+  only, not top-level directories), that the crate count stated in the prose above the
+  table still matches the number of rows, and that no row contradicts the README's
+  one-line description of the same crate.
 - **Failure:** a listed path that no longer exists, a new crate/dir the README block
-  doesn't mention, or a crate missing from — or misdescribed in — ARCHITECTURE.md §2.
+  doesn't mention, a crate missing from — or misdescribed in — ARCHITECTURE.md §2, or a
+  crate count in §2's prose that no longer matches its table.
 
 ## Anchor 4 — UI primitives ↔ docs/UI_CONVENTIONS.md
 

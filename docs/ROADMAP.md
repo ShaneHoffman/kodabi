@@ -3,8 +3,8 @@
 Phases 0 through 3 are complete; their goals and milestones are summarized in `docs/FOUNDING_DOC.md`
 §6, and the checklists below record what shipped. This file holds the **remaining phases as
 planning material** — goals, milestones, and checklists that get broken into tickets when their
-phase comes up. Vision + architecture source of truth is `docs/FOUNDING_DOC.md`; this is the
-working roadmap derived from it.
+phase comes up. The vision this is derived from is `docs/FOUNDING_DOC.md`; the architecture as
+built is `docs/ARCHITECTURE.md`.
 
 **Decisions already locked that affect later phases:** License = AGPL-3.0-only · Frontend = React +
 Tailwind · Transcription = per-channel (you/them attribution) · Default STT engine = Parakeet TDT,

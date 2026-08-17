@@ -2,8 +2,8 @@
 
 Kodabi is a Windows desktop app (Tauri + Rust backend, React + Tailwind frontend, AGPL-3.0) that
 turns meeting transcripts into routed, searchable Markdown notes, with Claude Code / MCP over the
-knowledge base. Vision + architecture live in `docs/FOUNDING_DOC.md`; the working roadmap is
-`docs/ROADMAP.md`.
+knowledge base. The system as built is `docs/ARCHITECTURE.md`; the vision it came from is
+`docs/FOUNDING_DOC.md`; the working roadmap is `docs/ROADMAP.md`.
 
 Development runs on a **Kangentic board**, so how you create work and name branches matters.
 
