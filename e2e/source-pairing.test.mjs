@@ -38,7 +38,7 @@ import {
 const EXE = process.env.KODABI_E2E_EXE ?? "target/debug/kodabi.exe";
 
 /**
- * Seven scenarios, and deliberately not all ten.
+ * Seven scenarios, and deliberately not the whole catalogue.
  *
  * `sessions/needs-attention` is left out because it writes captures no note
  * claims, which would break the "every seeded session is claimed" tripwire
@@ -46,7 +46,10 @@ const EXE = process.env.KODABI_E2E_EXE ?? "target/debug/kodabi.exe";
  * view. `composition/at-ceiling` is left out because its claim is a design
  * judgement (three clusters, four controls) that a machine would assert badly.
  * `confidence/low-score` is a display string, which the jsdom tier already
- * covers.
+ * covers, and `routing/suggested-destination` is the same: its claim is the
+ * guess rendered on an Inbox row, which is a display string over a scoring
+ * decision `crates/kodabi-core`'s own tests pin far more precisely than a
+ * screenshot of a list could.
  */
 const SEED = [
   "retention/both",

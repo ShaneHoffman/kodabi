@@ -111,11 +111,35 @@ Settings → Models whenever you want them back.
 - **Files notes for you.** Confident matches go straight into the right project; the rest wait in an
   Inbox. Re-routing one is a click, and the correction is remembered — it measurably changes where
   the next note lands.
+
+<p align="center">
+  <img src="docs/screenshots/inbox.png" width="900"
+       alt="Kodabi's Inbox with ten unfiled notes. The newest row carries a suggested destination, reading 50% match and an arrow to Briarwood Golf in that folder's colour, while the rows under it read 'no confident guess'. Every row offers File and Delete on its right edge.">
+</p>
+
 - **Quick capture.** A global hotkey opens a text box that goes through the same routing pipeline.
+
+<p align="center">
+  <img src="docs/screenshots/quick-capture.png" width="640"
+       alt="The quick-capture sheet floating over the app: one typed line asking whether a contractor's bid covers a drainage run, above a footer where Enter saves and routes it, Esc dismisses, the router's live guess points at the Inbox, and buttons offer Record and File it.">
+</p>
+
 - **Hybrid search.** Full-text (SQLite FTS5) and vector search over the whole vault, merged with
   reciprocal rank fusion, exposed to Claude Code as a `search_notes` MCP tool.
+
+<p align="center">
+  <img src="docs/screenshots/search.png" width="900"
+       alt="Searching the vault for 'irrigation' returns three hits. Every result highlights the matched word in a snippet of its body, and the two whose titles contain it highlight it there too. Under each title runs a line giving the project it is filed in (or 'inbox' for the two still unfiled), its kind where it has one, and its date.">
+</p>
+
 - **Chat over your history.** A designed chat view driving Claude Code, plus an embedded terminal for
   power users — both wired to the MCP server.
+
+<p align="center">
+  <img src="docs/screenshots/chat.png" width="900"
+       alt="The chat view answering the question 'What did we decide about the irrigation contractor?'. Two quiet lines record that it searched the notes and opened one, then the answer names the note it took them from and lists the decisions it found, the follow-ups still open, and a related unfiled note worth checking.">
+</p>
+
 - **Plain Markdown on disk.** Every note is a file with YAML frontmatter that you can read, edit,
   grep, or sync yourself.
 
@@ -208,8 +232,9 @@ SECURITY.md, CODE_OF_CONDUCT.md   # Private vulnerability disclosure route and s
                         # chooser under ISSUE_TEMPLATE/, and PULL_REQUEST_TEMPLATE.md.
 scripts/                # Dev/build helpers — PowerShell (tray icons, the app icon and
                         # NSIS wizard art, the social-preview banner, resource profiling,
-                        # release code signing, model-release publishing) and the
-                        # `pnpm dev:sandbox` launcher.
+                        # release code signing, model-release publishing), the
+                        # `pnpm dev:sandbox` launcher, and `pnpm screenshots`, which
+                        # retakes docs/screenshots/ from a sandboxed dev window.
 target/, dist/          # Build output (git-ignored).
 .sandbox/               # Dev sandbox state, when `pnpm dev:sandbox` has run (git-ignored).
 ```
@@ -231,6 +256,7 @@ pnpm lint          # frontend lint
 pnpm e2e:build     # build the app for the end-to-end harness (must precede test:e2e)
 pnpm test:e2e      # end-to-end tests against the real app window (Windows only)
 pnpm seed:vault    # write a fixture vault of named scenarios, for previewing
+pnpm screenshots   # retake this README's screenshots (needs a dev window, see below)
 ```
 
 Rust tests, lint, and format run from the repo root (the workspace covers all crates). A quick
@@ -279,6 +305,25 @@ Every agent-driven launch uses it — the `/preview` skill, the e2e harness, and
 Kangentic task sessions. A sandboxed run that would resolve to the real vault or
 app dirs refuses to start rather than falling through. Full state map, refusal
 rules and what is deliberately left unsandboxed: [`docs/DEV_SANDBOX.md`](docs/DEV_SANDBOX.md).
+
+### Retaking the screenshots
+
+The images in this README are captured from that sandboxed vault, so they show
+fixture data rather than anyone's real notes. `pnpm screenshots` retakes them from
+a running dev window over the same CDP plumbing the e2e harness uses, which means
+the window has to be launched with a debugging port:
+
+```powershell
+$env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS='--remote-debugging-port=9222'
+pnpm dev:sandbox
+pnpm screenshots              # in a second terminal; name shots to retake a subset
+pnpm screenshots inbox note   # inbox | note | search | chat | quick-capture
+```
+
+Each main-window shot is a 1280x720 viewport rasterized at 2x, so the composition
+does not depend on the display it was taken on. The chat shot spends one real
+Claude turn, because the chat view is a live session and there is no fixture
+transcript to stand in for one.
 
 ### Speech-to-text engines
 

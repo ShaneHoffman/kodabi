@@ -32,7 +32,7 @@ change to a note surface can be looked at in every state it reaches:
 
 ```powershell
 pnpm seed:vault -- --list                    # the catalogue (pnpm eats bare flags)
-pnpm seed:vault C:\kodabi-fixture            # all ten scenarios
+pnpm seed:vault C:\kodabi-fixture            # every scenario
 pnpm seed:vault C:\kodabi-fixture retention/recording-only sessions/needs-attention
 ```
 
@@ -155,6 +155,7 @@ the **rule** they exercise, not the data they hold:
 | `composition/at-ceiling` | a filed session note at the 3-cluster/4-control ceiling |
 | `sessions/needs-attention` | two unclaimed captures, one behind the dismissed shelf |
 | `confidence/low-score` | an Inbox note well under the 0.6 routing threshold |
+| `routing/suggested-destination` | the one Inbox card that offers a destination |
 | `transcript/fifty-turns` | a long transcript, to prove it is uncapped |
 | `source/keyword-only` | the two shapes that must *not* pair |
 

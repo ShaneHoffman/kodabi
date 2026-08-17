@@ -286,7 +286,7 @@ To reach the same states by hand, seed a vault from the catalogue the slices use
 and point a dev build at it:
 
 ```powershell
-pnpm seed:vault -- --list        # the ten scenarios and what each one is for
+pnpm seed:vault -- --list        # every scenario and what each one is for
 pnpm seed:vault C:\kodabi-fixture
 $env:KODABI_SANDBOX="C:\kodabi-fixture"
 pnpm tauri dev
