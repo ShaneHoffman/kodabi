@@ -1,6 +1,6 @@
 ---
 name: release
-description: Cut a tagged Windows release — bump both version fields, land them on main, push the tag, watch the signed build, and hand back the draft GitHub Release. Never publishes it.
+description: Cut a tagged Windows release — bump both version fields, land them on main, push the tag, watch the signed build, write the title and notes onto the draft GitHub Release, and hand it back. Never publishes it.
 disable-model-invocation: true
 argument-hint: [version, e.g. 0.2.0 — omit and you'll be asked]
 ---
@@ -13,7 +13,8 @@ below precisely.
 
 Hard rules:
 - **Never publish the draft Release.** The workflow uploads to a *draft* on purpose — a human
-  reviews the assets and the generated notes, then publishes.
+  reviews the assets and the notes, then publishes. `gh release edit` must never carry
+  `--draft=false`; that flag *is* the publish.
 - **Never tag a commit that isn't on `origin/main`,** and never tag from a feature branch.
 - **Never move, delete, or force-push a tag that has already built.** A bad release is superseded
   by the next patch version, never rewritten — installers in the wild are pinned to release assets.
@@ -116,7 +117,31 @@ re-push the tag.
   binary. If signing was skipped (no variables configured), say so plainly — an unsigned release
   is a legitimate outcome, but never a silent one.
 
-## 8. Stop
+## 8. Retitle the draft and write the notes
+
+The workflow leaves a placeholder title (`Kodabi v<version>`) and auto-generated notes (a PR
+list). Replace both so this release reads like the previous ones — the title format, body
+skeleton, and writing rules live in
+[`references/release-notes-format.md`](references/release-notes-format.md). The build wait in
+step 6 is a fine time to draft the body; apply it only once step 7 has confirmed the draft.
+
+1. Gather what shipped: the previous `v*` tag
+   (`git -C <repo> tag --list 'v*' --sort=-v:refname`), the draft's auto-generated notes
+   (`gh release view v<version> --json body`) as the PR inventory, and
+   `git -C <repo> log --first-parent --oneline v<previous>..v<version>`. Read the PRs behind
+   anything the title alone doesn't let you describe for a user.
+2. Write the body with the Write tool to a file **outside the repo** (per
+   [`shell-discipline`](../../rules/shell-discipline.md)), following the format reference.
+3. Apply both together — the title is the bare version, and per the hard rule above the
+   command never carries `--draft=false`:
+
+   ```
+   gh release edit v<version> --title "<version>" --notes-file <path>
+   ```
+
+4. `gh release view v<version>` — confirm the title, the body, and that it is still a draft.
+
+## 9. Stop
 
 Report the draft Release URL, the tag, and whether the build was signed. **Do not publish it** —
 a human reviews the notes and assets and clicks publish.
