@@ -101,6 +101,17 @@ number of days, or discard each transcript as soon as it has been distilled into
 security relies on your OS disk encryption (e.g. BitLocker) plus this retention policy; app-level
 encryption is a later consideration.
 
+**One connection is made on the app's own initiative:** at startup, an installed build asks GitHub
+whether a newer release exists (the updater manifest published beside each release). It sends nothing
+about you or your notes — GitHub sees the request's IP address, as any HTTPS request reveals, but not
+which version you are on, since the comparison happens on your machine after the manifest is fetched.
+And **nothing downloads or installs without a click**.
+
+That check is the only unprompted network call Kodabi makes that does not go through your own Claude
+account: every LLM call (distill, glossary, chat) runs on your account through the `claude` CLI, and
+the first-run model download starts only when you ask for it. Settings → About has the same check as
+a button, and dev builds skip the startup one entirely.
+
 ## Stack
 
 - **Tauri** (Rust) — Windows-first desktop shell
