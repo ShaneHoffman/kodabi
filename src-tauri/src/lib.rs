@@ -8,6 +8,7 @@ mod events;
 mod glossary_cmds;
 mod index_cmds;
 mod index_state;
+mod ledger_state;
 mod models;
 mod models_cmds;
 mod note_cmds;
@@ -167,9 +168,23 @@ pub fn run() {
                 Err(err) => eprintln!("failed to resolve the knowledge base directory: {err}"),
             }
 
+            // Open the commitment ledger BEFORE the index, because the index's
+            // startup reconcile is what feeds it: `LedgerState::initialize`
+            // queues the vault-snapshot restore as its worker's first job, and
+            // that must precede the first sync or the database is no longer
+            // empty and the restore is skipped for good.
+            let ledger = ledger_state::LedgerState::initialize(app.handle());
+            let ledger_handle = ledger.handle();
+            app.manage(ledger);
+
             // Open the note index (best-effort — a cache, never a launch
             // blocker) so the note commands can keep it in sync on write/edit.
-            app.manage(index_state::IndexState::initialize(app.handle()));
+            // It forwards every re-derivation of a note's action items to the
+            // ledger, which is the ledger's only ingest path.
+            app.manage(index_state::IndexState::initialize(
+                app.handle(),
+                ledger_handle,
+            ));
 
             // Build the tray (which manages `CaptureController`) BEFORE
             // registering the shortcut, so a hotkey firing in the first
@@ -349,6 +364,9 @@ pub fn run() {
             ) {
                 terminal_cmds::reap(app_handle);
                 chat_cmds::reap(app_handle);
+                // Write any commitment snapshot the debounce had not reached
+                // yet. Bounded, so a slow disk cannot hang the quit.
+                ledger_state::flush(app_handle);
             }
         });
 }

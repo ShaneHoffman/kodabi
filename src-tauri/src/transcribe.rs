@@ -1022,9 +1022,9 @@ mod tests {
         }
     }
 
-    /// A unique path per test run, in the OS temp dir — avoids adding a
-    /// `tempfile` dev-dependency for what's otherwise this crate's only test
-    /// needing a scratch file.
+    /// A unique path per test run, in the OS temp dir. Predates the crate's
+    /// `tempfile` dev-dependency and stays as-is: it needs one scratch *file*,
+    /// which this spells more directly than a temp directory would.
     fn scratch_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "kodabi-metrics-test-{}-{name}.jsonl",

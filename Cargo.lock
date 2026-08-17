@@ -2467,6 +2467,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-process",
  "tauri-plugin-updater",
+ "tempfile",
  "uuid",
  "winreg 0.55.0",
 ]

@@ -87,3 +87,8 @@ whisper = ["dep:kodabi-transcribe", "kodabi-transcribe/whisper"]
 # `tauri:build` script in package.json is the only thing pinning it into what
 # ships, so semantic search would go quietly missing if it were dropped there.
 embed = ["dep:kodabi-embed", "kodabi-embed/bge"]
+
+[dev-dependencies]
+# The ledger worker's tests need a scratch vault tree (a project folder, the
+# snapshots written into it) with cleanup, not a single scratch file.
+tempfile = "3"
