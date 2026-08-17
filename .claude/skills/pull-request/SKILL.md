@@ -16,13 +16,19 @@ Hard rules:
 Extra context from the caller (may be empty): $ARGUMENTS
 
 ## 1. Understand the change (read-only)
-Run and actually read these before writing anything:
-- `git branch --show-current` — the head branch.
-- `git log --oneline main..HEAD` — the commits this PR introduces.
-- `git diff --stat main...HEAD` — files touched and size.
-- `git diff main...HEAD` — skim the real changes for intent, risky areas, and anything a reviewer must know.
 
-If the current branch **is** `main`, or there are **no** commits vs `main`, STOP and report that there's nothing to open a PR for.
+**Base every diff on `origin/main`, never on local `main`.** A worktree's local `main` is routinely
+dozens of commits behind the remote, and diffing against it folds every already-merged commit it is
+missing into your view of this branch. That pollutes the PR body, and step 3 would rename the branch
+after work that isn't its own. Fetch first, then run and actually read these before writing anything:
+- `git fetch origin main`
+- `git branch --show-current` — the head branch.
+- `git log --oneline origin/main..HEAD` — the commits this PR introduces.
+- `git diff --stat origin/main...HEAD` — files touched and size.
+- `git diff origin/main...HEAD` — skim the real changes for intent, risky areas, and anything a
+  reviewer must know.
+
+If the current branch **is** `main`, or there are **no** commits vs `origin/main`, STOP and report that there's nothing to open a PR for.
 
 ## 2. Check for unexpected uncommitted changes
 
@@ -143,6 +149,12 @@ Which tool to use turns on **whether the task's stored `branch_name` still match
 just pushed** — not merely on whether *this* run renamed it. A re-run against a branch an earlier run
 renamed is still in the mismatched case.
 
+**Read the stored name; don't assume it.** No linking tool reports it — `kangentic_get_current_task`
+returns only the task's `#N` and column, and `kangentic_link_pr` takes just a `taskId`. Resolve the
+task by **`cwd`** (`kangentic_get_current_task` with the worktree path — that path survives a rename,
+the branch name doesn't), then read the stored value with `kangentic_query_db`:
+`SELECT branch_name FROM tasks WHERE display_id = <N>`. Compare it to `git branch --show-current`.
+
 - **Stored name matches (no rename has ever happened):** use `kangentic_link_pr`, exactly as before.
 - **Stored name is stale (this run or an earlier one renamed the branch):** `kangentic_link_pr` can't
   resolve the PR — it runs `gh pr list --head <stored branch_name>`, which no longer names a branch on
@@ -151,17 +163,21 @@ renamed is still in the mismatched case.
   `kangentic_update_task` with `taskId` plus `prNumber` and `prUrl`. If a previous run already linked
   it, re-linking with the same values is harmless.
 
+If you call `kangentic_link_pr` and it can't find the PR, that **is** the stale case however the
+comparison read — fall through to the `kangentic_update_task` link rather than reporting the PR as
+linked.
+
 The stored `branch_name` stays stale after a rename, so the card keeps displaying the old name and
 anything keyed on it (a PR-state refresh, local-branch cleanup at Done) may miss the branch. That's
 cosmetic and accepted — a human merges via `/merge-pr`, which resolves the PR from the *current*
 branch, and drags the card to Done regardless.
 
 ## 11. Check for and resolve merge conflicts
-A clean-looking diff in step 1 does **not** guarantee the PR can merge: `git log --oneline main..HEAD`
-only shows commits unique to your branch — it says nothing about commits your branch is *missing*
-from `main` (check `git log --oneline HEAD..origin/main` if you want that view directly). A local
-`main` that hasn't been fetched recently hides this; other PRs can land on `main` after your branch
-diverged and still conflict with it.
+A clean-looking diff in step 1 does **not** guarantee the PR can merge:
+`git log --oneline origin/main..HEAD` only shows commits unique to your branch — it says nothing
+about commits your branch is *missing* from `main` (check `git log --oneline HEAD..origin/main` if
+you want that view directly). Step 1's fetch is already stale by now, too: other PRs can land on
+`main` after it and still conflict with this branch.
 
 - `git fetch origin main`
 - `gh pr view --json mergeable,mergeStateStatus` (no argument — resolves the PR for the current
