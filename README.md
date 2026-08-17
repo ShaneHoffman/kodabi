@@ -69,6 +69,39 @@ and on any build cut before signing was switched on — Windows shows a "Windows
 prompt: choose *More info* → *Run anyway*. The installer's Properties → Digital Signatures tab is
 the way to check the publisher before running it.
 
+### Where your data lives, and what uninstalling does
+
+Your notes, and everything Kodabi derives from them, live in one folder:
+`%APPDATA%\com.kodabi.app`.
+
+| What | Where |
+| --- | --- |
+| Your notes | project folders and `Inbox\`, as plain Markdown files |
+| Recordings and raw transcripts | `sessions\` |
+| Chat transcripts | `chats\` |
+| Search index | `index.db` (derived; rebuilt from the notes) |
+| Settings | `settings.toml` |
+| Downloaded models | `.models\` (~796 MB) |
+
+Two more folders belong to the app rather than to you: the program installs per-user to
+`%LOCALAPPDATA%\Kodabi`, and the window's WebView2 profile sits in
+`%LOCALAPPDATA%\com.kodabi.app` (browser state, plus the high-contrast and reduced-motion
+toggles, which are per-device display preferences rather than settings about your notes).
+
+**A normal uninstall leaves your notes alone.** The vault, the index and your settings stay
+where they are, deliberately: the notes are yours, they are readable without Kodabi, and
+reinstalling later picks the same vault back up. An update never touches them either.
+
+> **Careful with the uninstaller's "delete the application data" checkbox.** It is not a way
+> to reclaim the space the models take up. It deletes both `com.kodabi.app` folders whole:
+> **every note, recording, chat and setting goes with them.** The box starts unticked. Leave
+> it that way unless you really do want the notes gone.
+
+**To free that space and keep everything else:** quit Kodabi (including the tray icon), then
+delete `%APPDATA%\com.kodabi.app\.models`. Nothing else reads that folder, so your notes,
+recordings and settings are untouched. The app offers to fetch the models again from
+Settings → Models whenever you want them back.
+
 ## What it does
 
 - **Records and transcribes on your device.** System audio and your microphone, captured together,

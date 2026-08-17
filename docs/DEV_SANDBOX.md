@@ -31,7 +31,7 @@ it.
 | Settings — `settings.toml` (consent, retention, overlay, appearance) | `app_config_dir()` | `sandbox::config_dir` → `lib.rs` setup | `<base>` |
 | Device identity — `device.toml` | `app_config_dir()` | `sandbox::config_dir` → `kodabi_core::device` | `<base>` |
 | Claude Code wiring — `_claude/kodabi.mcp.json`, `_claude/terminal-settings.json` | `app_config_dir()` | `sandbox::config_dir` → `terminal_cmds` | `<base>/_claude` |
-| WebView2 profile (localStorage, webview state) | derived from the exe name | `WEBVIEW2_USER_DATA_FOLDER` | `<base>/.webview2` |
+| WebView2 profile (localStorage, webview state) | `%LOCALAPPDATA%\com.kodabi.app\EBWebView` — the one location *outside* the app-data folder | `WEBVIEW2_USER_DATA_FOLDER` | `<base>/.webview2` |
 | Downloaded models — Parakeet, Silero VAD, bge-small | `app_data_dir()/.models` | `sandbox::models_dir` | `<base>/.models` |
 | Session artifacts — `<stem>.jsonl`, `.wav`, `.dismissed` | `<vault>/sessions/` | follows the vault root | inside `<base>` |
 | In-flight capture spill — `sessions/inflight/<session>/` | `<vault>/sessions/inflight/` | `kodabi_core::inflight` | inside `<base>` |
