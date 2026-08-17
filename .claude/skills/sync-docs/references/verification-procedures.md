@@ -59,11 +59,19 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 
 - **Source of truth:** the actual top-level tree (crates under `crates/`, top-level
   directories).
-- **Mirror:** the "Repository layout" block in `README.md`.
+- **Mirror:** the "Repository layout" block in `README.md`, **and** the crate table in
+  §2 of `docs/ARCHITECTURE.md`, which enumerates the same seven `crates/kodabi-*`
+  members with what each owns. The two mirrors are independent, so a new crate can
+  reach one and miss the other.
 - **Verify:** Glob the top level and each `crates/*`; confirm every path the README
   lists exists, and that new top-level directories or crates appear in the block.
-- **Failure:** a listed path that no longer exists, or a new crate/dir the block
-  doesn't mention.
+  Then confirm ARCHITECTURE.md §2's table names the same crate set (it lists crates
+  only, not top-level directories), that the crate count stated in the prose above the
+  table still matches the number of rows, and that no row contradicts the README's
+  one-line description of the same crate.
+- **Failure:** a listed path that no longer exists, a new crate/dir the README block
+  doesn't mention, a crate missing from — or misdescribed in — ARCHITECTURE.md §2, or a
+  crate count in §2's prose that no longer matches its table.
 
 ## Anchor 4 — UI primitives ↔ docs/UI_CONVENTIONS.md
 

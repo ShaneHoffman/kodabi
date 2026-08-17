@@ -13,6 +13,9 @@ repo's root `CLAUDE.md`.
 - **Security vulnerabilities do not go in an issue.** Report them privately through
   [`SECURITY.md`](SECURITY.md)'s disclosure route, which also states which versions get fixes.
 - **Everyone taking part** follows the [Code of Conduct](CODE_OF_CONDUCT.md).
+- **Before diving into the code,** read [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). It covers
+  the crate graph, the core-vs-shell rule that decides where a change belongs, the MCP inversion,
+  and the capture → transcribe → distill → route → index pipeline.
 
 ## Branch names
 

@@ -1,8 +1,12 @@
 # Kodabi — Founding Document
 
-*This document is the source of truth for vision and architecture; the working roadmap derived
-from it is [`ROADMAP.md`](ROADMAP.md). It lives in the `docs/` folder and gets amended, not
-abandoned.*
+*This document is the source of truth for **vision**; the working roadmap derived from it is
+[`ROADMAP.md`](ROADMAP.md). It lives in the `docs/` folder and gets amended, not abandoned.*
+
+> **Looking for the current architecture? Read [`ARCHITECTURE.md`](ARCHITECTURE.md) instead.** §3
+> below is the architecture as it was *envisioned* in Phase 0 — amended as the system evolved, but
+> never rewritten, and §6–§7 carry superseded history on purpose. `ARCHITECTURE.md` is the trimmed
+> version describing the system as built.
 
 **Why "Kodabi":** Kodabi (ko-DAH-bee) is coined from *kodama* (木霊, the forest spirit that hears
 you and echoes back) and *yamabiko* (山彦, the mountain's answering voice — its `-biko` suffix is

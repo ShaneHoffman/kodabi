@@ -3,8 +3,8 @@
 Phases 0 through 3 are complete; their goals and milestones are summarized in `docs/FOUNDING_DOC.md`
 §6, and the checklists below record what shipped. This file holds the **remaining phases as
 planning material** — goals, milestones, and checklists that get broken into tickets when their
-phase comes up. Vision + architecture source of truth is `docs/FOUNDING_DOC.md`; this is the
-working roadmap derived from it.
+phase comes up. The vision this is derived from is `docs/FOUNDING_DOC.md`; the architecture as
+built is `docs/ARCHITECTURE.md`.
 
 **Decisions already locked that affect later phases:** License = AGPL-3.0-only · Frontend = React +
 Tailwind · Transcription = per-channel (you/them attribution) · Default STT engine = Parakeet TDT,
@@ -50,7 +50,7 @@ Glossary-cleanup post-pass pulled forward into Phase 1.
 
 - [ ] Design pass on every screen against the locked system; the distill-and-route transition
 - [ ] Onboarding: first project, glossary seeding, hotkey setup, consent nudge — the consent nudge ships (`ConsentNudge`, shown before the first capture), and glossary seeding is now introduced rather than only reachable: a "Vault glossary" command in the palette (`src/useCommands.ts`) plus the ask on the model nudge's ready beat, the one moment where seeding still precedes the first meeting. First project and hotkey setup are the pieces still owed
-- [ ] README with screenshots, architecture doc (trimmed founding doc), contribution guide — `README.md` (with screenshots) and `CONTRIBUTING.md` are live at the repo root; the architecture doc is the one piece still owed
+- [x] README with screenshots, architecture doc (trimmed founding doc), contribution guide — `README.md` (with screenshots) and `CONTRIBUTING.md` are live at the repo root, and `docs/ARCHITECTURE.md` (the trimmed founding doc: crate graph, core-vs-shell, the MCP inversion, the capture → transcribe → distill → route → index pipeline, the two-signature release path) closed out the piece that was still owed. `FOUNDING_DOC.md` keeps the vision and points current-architecture readers at it
 - [x] Windows installer / signing — shipped (#156–#160): `.github/workflows/release.yml` builds the NSIS installer and signs every shipped binary through Azure Artifact Signing, authenticating with a secretless GitHub OIDC federated credential, and `tauri-plugin-updater` verifies each release with its own minisign signature. The Azure side and the repository variables that switch it on are configured; v0.1.0 and v0.2.0 both shipped signed, with auto-update verified end to end
 - [x] Crash reporting decision (opt-in only) — decided 2026-08-14: v1 ships none, and the app captures no crash data at all (no panic hook, no crash log, so there is nothing to report even if reporting existed). Any future reporting is strictly opt-in, local-capture-first, and never transmits user-derived content automatically. Evidence and revisit triggers: `docs/decisions/crash-reporting.md`
 - [ ] Launch: GitHub, relevant communities — **deliberately held.** The release pipeline is ready; launch waits on more feature work first (the 2026-08-14 Phase 4 gap audit, tickets #183–#203)
