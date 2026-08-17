@@ -32,6 +32,17 @@ pub struct ReconcileReport {
     pub unchanged: usize,
     /// Rows deleted because their file left the vault.
     pub deleted: usize,
+    /// The ids behind `upserted`, in scan order.
+    ///
+    /// Reconcile derives each of these notes' meeting facts on the way past, but
+    /// stores them rather than returning them; a caller that also needs to know
+    /// *which* notes changed (the commitment ledger's ingest, which must see
+    /// every re-derivation) would otherwise have to diff the index itself. An
+    /// unchanged note is deliberately absent: its facts are a pure function of a
+    /// body that did not change.
+    pub upserted_ids: Vec<String>,
+    /// The ids behind `deleted`, in sweep order.
+    pub deleted_ids: Vec<String>,
     /// `.md` files that failed to read or parse this pass (likely mid-write).
     /// Their existing index rows are spared so a partial write can't drop a note.
     pub skipped: Vec<PathBuf>,
@@ -118,6 +129,7 @@ pub fn reconcile(
                     indexed.meeting = crate::meeting::meeting_facts_for(&listed.note, vault_root);
                     index.upsert_note(&indexed)?;
                     report.upserted += 1;
+                    report.upserted_ids.push(indexed.id.clone());
                 }
             }
         }
@@ -139,6 +151,7 @@ pub fn reconcile(
         }
         if index.delete_note(&id)? {
             report.deleted += 1;
+            report.deleted_ids.push(id);
         }
     }
 
@@ -147,7 +160,8 @@ pub fn reconcile(
 
 /// Derives and stores meeting facts for every fact-carrying note (meeting or
 /// chat, per `meeting::derives_facts`) the index has not backfilled yet,
-/// returning how many were filled. The meeting-facts counterpart to the caller's
+/// returning the ids it filled (the count is `.len()`, and the ids are what the
+/// ledger's ingest needs). The meeting-facts counterpart to the caller's
 /// embedding backfill (`note_ids_missing_embeddings` then `reconcile_missing`):
 /// the v3 migration adds the meeting tables empty, and `reconcile`'s fast path
 /// skips an unchanged note, so existing notes carry no facts until this runs.
@@ -160,8 +174,8 @@ pub fn reconcile(
 pub fn reconcile_missing_meeting_facts(
     vault_root: &Path,
     index: &mut NoteIndex,
-) -> Result<usize, ReconcileError> {
-    let mut backfilled = 0;
+) -> Result<Vec<String>, ReconcileError> {
+    let mut backfilled = Vec::new();
     for id in index.note_ids_missing_meeting_facts()? {
         let Some(row) = index.get_note(&id)? else {
             continue;
@@ -178,7 +192,7 @@ pub fn reconcile_missing_meeting_facts(
             vault_root,
         );
         index.set_meeting_facts(&row.id, Some(&facts))?;
-        backfilled += 1;
+        backfilled.push(row.id);
     }
     Ok(backfilled)
 }
@@ -362,7 +376,7 @@ mod tests {
         );
 
         let filled = reconcile_missing_meeting_facts(vault, &mut index).unwrap();
-        assert_eq!(filled, 1);
+        assert_eq!(filled, vec!["n_meet01".to_string()]);
 
         let facts = index.get_meeting_facts("n_meet01").unwrap().unwrap();
         assert_eq!(facts.duration_seconds, Some(60));
@@ -375,10 +389,9 @@ mod tests {
 
         // And the note is no longer missing, so a second backfill is a no-op.
         assert!(index.note_ids_missing_meeting_facts().unwrap().is_empty());
-        assert_eq!(
-            reconcile_missing_meeting_facts(vault, &mut index).unwrap(),
-            0
-        );
+        assert!(reconcile_missing_meeting_facts(vault, &mut index)
+            .unwrap()
+            .is_empty());
     }
 
     /// The chat leg of the backfill. Same work list, same derive, but the type
@@ -423,7 +436,7 @@ mod tests {
 
         assert_eq!(
             reconcile_missing_meeting_facts(vault, &mut index).unwrap(),
-            1
+            vec!["n_chat01".to_string()]
         );
 
         let facts = index.get_meeting_facts("n_chat01").unwrap().unwrap();
@@ -437,10 +450,9 @@ mod tests {
 
         // Converged: the row exists, so a second pass is a no-op.
         assert!(index.note_ids_missing_meeting_facts().unwrap().is_empty());
-        assert_eq!(
-            reconcile_missing_meeting_facts(vault, &mut index).unwrap(),
-            0
-        );
+        assert!(reconcile_missing_meeting_facts(vault, &mut index)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

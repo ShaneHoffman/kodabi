@@ -380,8 +380,8 @@ fn run_rebuild(
 fn backfill_meeting_facts(index: &Mutex<NoteIndex>, vault_root: &Path) {
     let mut idx = lock(index);
     match reconcile::reconcile_missing_meeting_facts(vault_root, &mut idx) {
-        Ok(0) => {}
-        Ok(count) => eprintln!("backfilled meeting facts for {count} note(s)"),
+        Ok(ids) if ids.is_empty() => {}
+        Ok(ids) => eprintln!("backfilled meeting facts for {} note(s)", ids.len()),
         Err(err) => eprintln!("meeting-facts backfill failed: {err}"),
     }
 }
