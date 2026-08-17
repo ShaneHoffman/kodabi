@@ -1,7 +1,6 @@
 ---
 name: pull-request
-description: Open a GitHub pull request against main with a Conventional-Commit title and a structured, best-practice description. Used by the Open PR board column.
-disable-model-invocation: true
+description: Open a GitHub pull request against main with a Conventional-Commit title and a structured, best-practice description. Used by the Open PR board column, and invocable by the model when a flow (e.g. /release) needs a PR opened.
 argument-hint: [optional extra context — issue refs, emphasis, or a title hint]
 ---
 
