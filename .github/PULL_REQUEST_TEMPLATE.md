@@ -14,7 +14,8 @@ engineering rules, including the gate commands for each surface, are in
 [`CLAUDE.md`](https://github.com/ShaneHoffman/kodabi/blob/main/CLAUDE.md).
 
 - [ ] Branch is named `type/slug`, with a Conventional-Commit type and no task ID.
-- [ ] Commit subjects are `<type>: <imperative summary>`, matching the branch type.
+- [ ] Commit subjects are `<type>: <imperative summary>`, matching the branch type as it was when
+      each commit was made (subjects are never rewritten if the branch is later renamed).
 - [ ] The pre-commit gates for the surfaces this change touches all pass locally. Rust changes need
       `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`,
       and `cargo test --workspace --locked`; frontend changes need

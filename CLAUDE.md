@@ -20,9 +20,19 @@ The board is the source of truth for work; a local todo list is not.
 
 **Never omit `branchName`.** Kangentic ships no branch-name policy, so an omitted name
 auto-defaults to `{slug}-{taskId8}` (e.g. `adopt-agpl-3-0-licen-5fa38daf`). That name **locks the
-moment the task leaves To Do** (its worktree materializes) and **cannot be renamed** afterward
-without desyncing PR tracking — `kangentic_link_pr` resolves PRs via `gh pr list --head <branch>`,
-so a rename permanently breaks the link. Set it correctly up front; there is no clean fix later.
+moment the task leaves To Do** (its worktree materializes): the *stored* `branch_name` can never be
+changed afterwards, so renaming the git branch desyncs PR tracking — `kangentic_link_pr` resolves PRs
+via `gh pr list --head <branch>`, and after a rename the stored name no longer matches. Set it
+correctly up front; the one repair below is partial.
+
+**The single carve-out is `/pull-request`,** which re-derives the branch name from the final diff and
+may rename a branch that has **never been pushed** (it checks `git ls-remote --heads origin`). Since
+no PR exists yet, nothing on the remote is orphaned; the skill then links the PR with
+`kangentic_update_task` (`prNumber` + `prUrl`) instead of `kangentic_link_pr`, which could not resolve
+it. The stored `branch_name` stays **stale** afterwards — nothing can fix it — so `kangentic_link_pr`
+won't resolve for that task again, the card keeps displaying the old name, and anything else keyed on
+`branch_name` (a PR-state refresh, local-branch cleanup at Done) may miss the renamed branch. Those
+costs are cosmetic and accepted; they are not a licence to skip setting the name up front.
 
 **Passing `branchName` is not enough — the `column: "Backlog"` argument silently drops it.**
 `kangentic_create_task` routes `column: "Backlog"` (case-insensitive) through its backlog-creation
@@ -50,7 +60,8 @@ named **"Write Me Code"**.)
   `git diff origin/main...HEAD` at high rigor, fixes the real in-scope findings, runs the gates, and
   **commits on the task branch — but never pushes.** Findings too large to fix during review are
   reported as skips for the human gate.
-- **Open PR** runs the `/pull-request` skill: push → `gh pr create --base main` → `kangentic_link_pr`.
+- **Open PR** runs the `/pull-request` skill: re-derive branch name + title from the diff → push →
+  `gh pr create --base main` → link (`kangentic_link_pr`, or `kangentic_update_task` after a rename).
   **It never merges** — a human reviews the green PR on GitHub, then drags the card to Merge PR.
 - **Merge PR** runs the `/merge-pr` skill: verify the PR is green and mergeable, then
   `gh pr merge --merge --admin` and delete the remote branch. The `--admin` covers only the
@@ -61,9 +72,12 @@ named **"Write Me Code"**.)
   "Request changes" from Code Review goes back to **Executing**.
 
 Commit subjects follow Conventional Commits: `<type>: <imperative summary>`, matching the branch's
-`type` (branch `feat/scaffold-tauri-app` → `feat: scaffold Tauri app shell`). One sanctioned
-exception: Code Review's own remediation commit is `fix: fix code-review findings` (`docs:` when
-the fixes are docs-only) whatever the branch prefix, so review-driven corrections read as such.
+`type` (branch `feat/scaffold-tauri-app` → `feat: scaffold Tauri app shell`). Two sanctioned
+exceptions, both of which read *more* truthfully than the branch prefix would: Code Review's own
+remediation commit is `fix: fix code-review findings` (`docs:` when the fixes are docs-only)
+whatever the branch prefix, so review-driven corrections read as such; and when `/pull-request`'s
+re-derivation changes the branch's `type`, the commits already on the branch **keep their original
+subjects** — history is never retconned, so those subjects legitimately predate the new prefix.
 
 ## Engineering rules
 
