@@ -108,10 +108,15 @@ encryption is a later consideration.
 - **SQLite** (FTS5 + `sqlite-vec`) — hybrid full-text + vector search
 - **MCP server** — exposes the knowledge base to Claude Code for chat over real history
 
+How the pieces fit together — the crate graph, core-vs-shell, the MCP inversion, and the
+capture → transcribe → distill → route → index pipeline — is
+[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
 ## Repository layout
 
 ```
-docs/                   # Strategy & spec docs — roadmap, aesthetic direction, founding doc.
+docs/                   # Strategy & spec docs — architecture, roadmap, aesthetic direction,
+                        # founding doc. ARCHITECTURE.md is the one to start with.
                         # docs/screenshots/ holds the images this README embeds.
 design/                 # Historical Phase-0 artefacts — the moodboard and spirit-mark
                         # pages. No build reads them; the live design system is the
@@ -138,7 +143,8 @@ crates/kodabi-transcribe/ # Transcription engines: Parakeet TDT via sherpa-onnx 
 crates/kodabi-embed/    # Local embedding backend — bge-small-en-v1.5 via fastembed/ONNX
                         # Runtime, fully offline at runtime; cargo-feature-gated.
 crates/kodabi-llm/      # The headless Claude Code runner every LLM call (cleanup, distill,
-                        # routing, chat sessions) goes through.
+                        # chat sessions) goes through. Routing is not one: it is
+                        # deterministic and lexical, with no model call.
 crates/kodabi-mcp/      # Stdio MCP server (hand-rolled JSON-RPC) exposing the v1 tool
                         # surface of docs/MCP_TOOL_SURFACE.md over kodabi-core.
 e2e/                    # End-to-end harness — drives the real app window over CDP, across
