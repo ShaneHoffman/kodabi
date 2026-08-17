@@ -16,7 +16,7 @@ Guidance for adding or changing anything under `.claude/skills/` and
   two would drift.
 - **Match the house style.** Frontmatter keys are exactly `name`, `description`,
   `argument-hint` (add `disable-model-invocation: true` only for a human/board-column
-  skill like `merge-pr`). The body is an H1 title, hard rules bolded near the
+  skill like `code-review-fix`). The body is an H1 title, hard rules bolded near the
   top, a `…from the caller (may be empty): $ARGUMENTS` line, then numbered
   `## N. Step` sections. Agents use `name`, `description` (with when-to-use
   examples), a single `model` key, and `tools`.

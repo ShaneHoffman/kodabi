@@ -17,8 +17,10 @@ Hard rules:
 - **Never tag a commit that isn't on `origin/main`,** and never tag from a feature branch.
 - **Never move, delete, or force-push a tag that has already built.** A bad release is superseded
   by the next patch version, never rewritten — installers in the wild are pinned to release assets.
-- **Never bypass the branch ruleset** (`--admin`, merge-queue overrides). The version bump goes
-  through a PR like any other change.
+- **Never bypass the branch ruleset.** The version bump goes through a PR like any other change,
+  and its checks must be green before it merges. The one sanctioned `--admin` is the one inside
+  [`merge-pr`](../merge-pr/SKILL.md), covering only the un-satisfiable one-approval rule — never
+  failing or pending checks, and never a direct push to `main`.
 
 Target version from the caller (may be empty): $ARGUMENTS
 
@@ -66,9 +68,12 @@ The second command must print `READY` before you continue.
 - Commit with [`commit`](../commit/SKILL.md) — it runs the gates the changed surface needs
   (`tauri.conf.json` lives under `src-tauri/`, so the Rust gates apply). Subject:
   `chore: release v<version>`.
-- Open it with [`pull-request`](../pull-request/SKILL.md).
-- **A human reviews and merges.** Stop here and tell the user the PR is waiting; resume at step 5
-  once it has landed.
+- Open it with [`pull-request`](../pull-request/SKILL.md) — its own steps watch CI on the PR
+  until it is green.
+- Merge it with [`merge-pr`](../merge-pr/SKILL.md). This is the standing auto-merge sanction that
+  skill names: a version-bump PR that is green and mergeable does not wait for a manual merge. If
+  `merge-pr` stops instead of merging (red or pending checks, conflicts, a draft), report why and
+  stop — do not work around whatever it refused.
 
 ## 5. Tag `main`
 
