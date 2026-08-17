@@ -143,6 +143,18 @@ Needs attention. **It is deliberately absent from the folder palette**, so "a pr
 went wrong" can never be confused at a glance. `--color-danger` is its destructive-confirmation
 sibling.
 
+**`--color-danger` has exactly one argued exception: the title bar's close button on hover**
+(`CLOSE_BUTTON_CLASS`, `src/components/shell/TopBar.tsx`). It reads as a stronger claim than the
+button makes — closing hides to the tray, so nothing is destroyed — and the convention wins anyway:
+a Windows title bar's rightmost button is read by muscle memory long before anyone reads its colour,
+and being the one button that answers differently is what makes it findable at a glance. Note what
+the exception does *not* do: it spends the `danger-bg-hover` / `danger` pair rather than the OS's
+own red, so the button re-themes with the ground like everything else, and it stops at hover — the
+resting button is dim ink, identical to its two neighbours. The case is argued in a comment at the
+constant, which is how an exception to this doctrine is taken (`.claude/rules/design-consistency.md`
+treats `Field`'s focus ring the same way). Anything else reaching for red is a finding, and
+`--color-warn` has no exception at all.
+
 ### Folder hues are identity, never status
 
 Coral, cobalt, teal, plum. A hue answers *which project*, and nothing else — never priority, never
