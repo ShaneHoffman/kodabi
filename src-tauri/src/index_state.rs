@@ -34,6 +34,7 @@ use kodabi_core::watch::{self, VaultWatcher};
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::events::{INDEX_STATE_EVENT, VAULT_CHANGED_EVENT};
+use crate::ledger_state::{self, LedgerHandle, NoteFacts};
 use crate::transcribe::knowledge_base_dir;
 
 /// A unit of work for the index worker.
@@ -83,6 +84,75 @@ pub struct IndexState {
     _watcher: Option<Mutex<VaultWatcher>>,
 }
 
+/// Forwards a note's freshly derived action items to the commitment ledger.
+///
+/// Every path that (re)derives facts funnels through this worker — an in-app
+/// write enqueues `Job::Note` with the facts already attached, and a reconcile
+/// or rebuild derives them inside `kodabi_core::reconcile` — so hooking the
+/// worker covers all of them and the note commands need no ledger awareness.
+///
+/// Reconcile's unchanged-note fast path is deliberately not a gap: facts are a
+/// pure function of the note's body, and item ids are content hashes, so a note
+/// whose body did not change re-derives to exactly what the ledger already has.
+fn forward_to_ledger(ledger: &LedgerHandle, note: &IndexedNote) {
+    let Some(facts) = &note.meeting else {
+        return; // a type that carries no commitments (`meeting::derives_facts`)
+    };
+    let Ok(date_utc) = kodabi_core::index::normalize_date_to_utc(&note.date) else {
+        return; // an unparseable date has no place on the aging clock
+    };
+    ledger.sync(NoteFacts {
+        note_id: note.id.clone(),
+        project: ledger_state::project_slug(note.project.as_deref()),
+        date_utc,
+        items: facts.action_items.clone(),
+    });
+}
+
+/// Forwards every note a reconcile pass touched, reading each one's items back
+/// out of the index it just wrote them to.
+///
+/// The read-back keeps `reconcile` a pure converger that knows nothing about the
+/// ledger. It is cheap (rows the pass just wrote, under a lock it already
+/// holds), and `sync_note_items` is idempotent, so a redundant forward costs a
+/// transaction and changes nothing.
+fn forward_reconciled(index: &Mutex<NoteIndex>, ledger: &LedgerHandle, ids: &[String]) {
+    if ids.is_empty() {
+        return;
+    }
+    let idx = lock(index);
+    let mut batch = Vec::new();
+    for id in ids {
+        let Ok(Some(row)) = idx.get_note(id) else {
+            continue;
+        };
+        if !kodabi_core::meeting::derives_facts(row.note_type.into()) {
+            continue;
+        }
+        let Ok(items) = idx.get_action_items(id) else {
+            continue;
+        };
+        batch.push(NoteFacts {
+            note_id: row.id,
+            project: ledger_state::project_slug(row.project.as_deref()),
+            date_utc: row.date_utc,
+            items: items
+                .into_iter()
+                .map(|item| kodabi_core::meeting::ActionItemFact {
+                    id: item.id,
+                    description: item.description,
+                    owner: item.owner,
+                    due_date: item.due_date,
+                    done: item.done,
+                    extracted_date: item.extracted_date,
+                })
+                .collect(),
+        });
+    }
+    drop(idx);
+    ledger.sync_batch(batch);
+}
+
 /// A cloneable read handle onto the index, for commands that query it.
 ///
 /// It exists because managed state cannot cross onto a blocking thread: a
@@ -111,7 +181,7 @@ impl IndexState {
     /// Opens the index, builds the embedder, and spawns the worker. Never fails:
     /// an unopenable index degrades to "notes aren't indexed", not a launch
     /// failure.
-    pub fn initialize(app: &AppHandle) -> Self {
+    pub fn initialize(app: &AppHandle, ledger: LedgerHandle) -> Self {
         let Some(index) = open_index(app) else {
             eprintln!("note index unavailable — notes will not be searchable this session");
             return Self {
@@ -135,7 +205,14 @@ impl IndexState {
         let worker_index = Arc::clone(&index);
         let worker_embedder = embedder.clone();
         std::thread::spawn(move || {
-            run_worker(app_handle, worker_index, worker_embedder, worker_root, jobs)
+            run_worker(
+                app_handle,
+                worker_index,
+                worker_embedder,
+                worker_root,
+                jobs,
+                ledger,
+            )
         });
 
         // A full reconciliation scan at startup converges files added or edited
@@ -246,15 +323,32 @@ fn run_worker(
     embedder: Option<Arc<dyn Embedder>>,
     vault_root: Option<PathBuf>,
     jobs: Receiver<Job>,
+    ledger: LedgerHandle,
 ) {
     for job in jobs {
         match job {
-            Job::Note(note) => process_note(&index, embedder.as_deref(), &note),
-            Job::DeleteNote(id) => process_delete(&index, &id),
-            Job::Reconcile => {
-                run_reconcile(&app, &index, embedder.as_deref(), vault_root.as_deref())
+            Job::Note(note) => {
+                process_note(&index, embedder.as_deref(), &note);
+                forward_to_ledger(&ledger, &note);
             }
-            Job::Rebuild => run_rebuild(&app, &index, embedder.as_deref(), vault_root.as_deref()),
+            Job::DeleteNote(id) => {
+                process_delete(&index, &id);
+                ledger.note_gone(&id);
+            }
+            Job::Reconcile => run_reconcile(
+                &app,
+                &index,
+                embedder.as_deref(),
+                vault_root.as_deref(),
+                &ledger,
+            ),
+            Job::Rebuild => run_rebuild(
+                &app,
+                &index,
+                embedder.as_deref(),
+                vault_root.as_deref(),
+                &ledger,
+            ),
         }
     }
 }
@@ -280,6 +374,7 @@ fn run_reconcile(
     index: &Mutex<NoteIndex>,
     embedder: Option<&dyn Embedder>,
     vault_root: Option<&Path>,
+    ledger: &LedgerHandle,
 ) {
     let Some(root) = vault_root else {
         return; // no vault path resolved — nothing to reconcile against.
@@ -296,9 +391,17 @@ fn run_reconcile(
                     report.upserted, report.unchanged, report.deleted
                 );
             }
+            // Every note whose facts were re-derived, plus every note that left
+            // the vault, reaches the ledger before the embed sweep — the
+            // commitments matter more than the vectors, and the sweep is slow.
+            forward_reconciled(index, ledger, &report.upserted_ids);
+            for id in &report.deleted_ids {
+                ledger.note_gone(id);
+            }
             // Meeting notes skipped by the fast path (unchanged on disk) still
             // need their facts derived after the v3 migration — backfill them.
-            backfill_meeting_facts(index, root);
+            let backfilled = backfill_meeting_facts(index, root);
+            forward_reconciled(index, ledger, &backfilled);
             if let Some(embedder) = embedder {
                 reconcile_missing(index, embedder);
             }
@@ -318,6 +421,7 @@ fn run_rebuild(
     index: &Mutex<NoteIndex>,
     embedder: Option<&dyn Embedder>,
     vault_root: Option<&Path>,
+    ledger: &LedgerHandle,
 ) {
     let _ = app.emit(INDEX_STATE_EVENT, IndexStateEvent::Rebuilding);
 
@@ -339,7 +443,12 @@ fn run_rebuild(
     };
     match report {
         Ok(report) => {
-            backfill_meeting_facts(index, root);
+            forward_reconciled(index, ledger, &report.upserted_ids);
+            for id in &report.deleted_ids {
+                ledger.note_gone(id);
+            }
+            let backfilled = backfill_meeting_facts(index, root);
+            forward_reconciled(index, ledger, &backfilled);
             if let Some(embedder) = embedder {
                 reconcile_missing(index, embedder);
             }
@@ -377,12 +486,20 @@ fn run_rebuild(
 /// derive pass. Best-effort — a failure is logged and the next sweep retries.
 /// Fast (a meeting is one small JSONL read; a chat is body-parse only), so it
 /// runs under the index lock like `reconcile` itself.
-fn backfill_meeting_facts(index: &Mutex<NoteIndex>, vault_root: &Path) {
+/// Returns the ids it filled, so the caller can forward them to the ledger.
+fn backfill_meeting_facts(index: &Mutex<NoteIndex>, vault_root: &Path) -> Vec<String> {
     let mut idx = lock(index);
     match reconcile::reconcile_missing_meeting_facts(vault_root, &mut idx) {
-        Ok(0) => {}
-        Ok(count) => eprintln!("backfilled meeting facts for {count} note(s)"),
-        Err(err) => eprintln!("meeting-facts backfill failed: {err}"),
+        Ok(ids) => {
+            if !ids.is_empty() {
+                eprintln!("backfilled meeting facts for {} note(s)", ids.len());
+            }
+            ids
+        }
+        Err(err) => {
+            eprintln!("meeting-facts backfill failed: {err}");
+            Vec::new()
+        }
     }
 }
 

@@ -12,6 +12,13 @@ breaking databases in the field.
 **Hard rules:** never edit or reorder an existing `migration_XXXX_*` entry — append a
 new one. The v1 DDL is frozen (byte-stable, including `FLOAT[768]`).
 
+**Scope: the note index only.** The commitment ledger has its own append-only set in
+`crates/kodabi-core/src/ledger/migrations.rs`, and this skill does **not** cover it. The
+mechanics are identical (`user_version`, one transaction per migration) but one rule
+inverts: `ledger.db` is durable user state, not a rebuildable cache, so step 2's
+drop-and-recreate option does not exist there — a ledger migration must carry existing
+rows forward. Follow that module's own doc.
+
 What's changing (may be empty): $ARGUMENTS
 
 ## 1. Read the module doc first

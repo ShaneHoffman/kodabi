@@ -26,8 +26,9 @@ it.
 
 | State | Default location | Resolver | Sandboxed to |
 |---|---|---|---|
-| Vault root — `sessions/`, `chats/`, project note folders, `_glossary.yml` | `app_data_dir()` | `transcribe::knowledge_base_dir` (`KODABI_KB_ROOT`) | `<base>` |
+| Vault root — `sessions/`, `chats/`, project note folders, `_glossary.yml`, `_routing_examples.yml`, `_ledger.yml` | `app_data_dir()` | `transcribe::knowledge_base_dir` (`KODABI_KB_ROOT`) | `<base>` |
 | Note index — `index.db` (+ `-wal`, `-shm`) | `app_data_dir()/index.db` | `index_state::index_db_path` (`KODABI_INDEX_DB`) | `<base>/.index/index.db` |
+| Commitment ledger — `ledger.db` (+ `-wal`, `-shm`) | `app_config_dir()/ledger.db` | `sandbox::config_dir` → `ledger_state` | `<base>/ledger.db` |
 | Settings — `settings.toml` (consent, retention, overlay, appearance) | `app_config_dir()` | `sandbox::config_dir` → `lib.rs` setup | `<base>` |
 | Device identity — `device.toml` | `app_config_dir()` | `sandbox::config_dir` → `kodabi_core::device` | `<base>` |
 | Claude Code wiring — `_claude/kodabi.mcp.json`, `_claude/terminal-settings.json` | `app_config_dir()` | `sandbox::config_dir` → `terminal_cmds` | `<base>/_claude` |
@@ -40,6 +41,16 @@ it.
 
 Retention keeps no bookkeeping file: membership is derived from disk on every
 sweep, so there is no separate state to isolate.
+
+**The two databases above differ in kind, not just in contents.** `index.db` can
+be deleted and reconstructed from the Markdown at any time; `ledger.db` holds
+judgements (a waiver, a snooze, a closure and its evidence) that exist nowhere
+else, so it is the one *database* that is durable rather than derived. Its backup is the vault, not the config dir:
+every change is mirrored into a per-project `_ledger.yml`, and a missing or empty
+`ledger.db` is rebuilt from those at startup. A sandboxed run therefore gets both
+halves under `<base>` — the database directly, the snapshots inside the fixture
+vault — so re-seeding the fixtures discards the two together and leaves them
+consistent.
 
 **Deliberately not sandboxed:**
 

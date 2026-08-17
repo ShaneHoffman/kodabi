@@ -68,7 +68,7 @@ optional: capture is not a feature you can build without.
 
 | Crate | What it owns |
 | --- | --- |
-| `kodabi-core` | The pure data layer: settings, the SQLite note index, capture bookkeeping, distill, routing, the vault writer, retention, the file watcher, and the query surface the MCP server serves. UI-agnostic, and free of any model-runtime FFI — what it compiles natively is bundled SQLite, the `sqlite-vec` extension, and `ring` (via `ureq`'s TLS), none of which need a toolchain beyond a C compiler. |
+| `kodabi-core` | The pure data layer: settings, the SQLite note index, the commitment ledger, capture bookkeeping, distill, routing, the vault writer, retention, the file watcher, and the query surface the MCP server serves. UI-agnostic, and free of any model-runtime FFI — what it compiles natively is bundled SQLite, the `sqlite-vec` extension, and `ring` (via `ureq`'s TLS), none of which need a toolchain beyond a C compiler. |
 | `kodabi-audio` | WASAPI loopback (system audio) and microphone capture via `cpal`, the two-channel combiner and drift correction, the recovery spill, and the Settings mic test. |
 | `kodabi-aec` | Acoustic echo cancellation — a safe wrapper over a vendored speexdsp canceller, cleaning speaker bleed off the mic channel. |
 | `kodabi-transcribe` | Transcription engines that need FFI: `ParakeetEngine` (sherpa-onnx) behind the `parakeet` feature, `WhisperEngine` (whisper.cpp) behind `whisper`, and the Silero `VadGate` behind `vad`. The `TranscriptionEngine` trait itself lives in `kodabi_core::transcription`, so core can be tested without any of them. |
@@ -198,8 +198,10 @@ Notes are Markdown + YAML frontmatter in per-project folders. The frontmatter fi
 [`FRONTMATTER_SCHEMA.md`](FRONTMATTER_SCHEMA.md) (and mirrors the MCP `NoteSummary` shape — editing
 one requires checking the other); filenames carry a timestamp and device ID so two machines can
 never collide ([`FILENAME_SCHEME.md`](FILENAME_SCHEME.md)). Each project folder also carries its own
-`_glossary.yml` and `_routing_examples.yml`, which is what keeps them per-project isolated and makes
-them sync with the knowledge.
+`_glossary.yml`, `_routing_examples.yml` and `_ledger.yml`, which is what keeps them per-project
+isolated and makes them sync with the knowledge. None of the three names its own project — the
+folder it sits in is the project — which is what lets a project rename move the folder and carry
+them along untouched.
 
 The derived index is SQLite: **FTS5** for full-text and **sqlite-vec** for semantic search over
 384-dimensional bge-small embeddings, chunked per note. A file watcher re-indexes on change, and the
@@ -209,6 +211,24 @@ Rank Fusion** (`crates/kodabi-core/src/index/search.rs`) — and surfaced to Cla
 
 Multi-device is bring-your-own-sync: sync the folder with anything, and each device rebuilds its own
 index locally. The database is never synced.
+
+### The commitment ledger
+
+The one durable database, and deliberately **not** the index. `ledger.db` lives in the config dir
+beside `settings.toml` (`kodabi_core::ledger`, resolved through `sandbox::config_dir`), because it
+holds what Markdown cannot carry: a commitment's identity across edits of its own text, evidence
+gathered outside the vault, and the states a checkbox has no spelling for (snoozed, waived, closed
+*with provenance*, superseded by a later mention). The note's checkbox remains the sole truth for
+done/not-done — the ledger stores no `done` column and a `- [x]` flip is invisible to it.
+
+That durability is why it is a separate file. The index may be nuked and rebuilt at will; these are
+judgements a person made that exist nowhere else, so the ledger has its own append-only migration
+set whose doctrine forbids drop-and-recreate. Its backup is the vault: after each change, the
+affected project's entries are mirrored to `_ledger.yml`, and a missing or empty database is
+rebuilt from those snapshots at startup — a non-empty one always wins, since merging two divergent
+histories is not something to guess at. Extracted items are referenced by their content-hashed `a_`
+ids, which are re-minted whenever a line's text is edited, so entries carry their own durable ids
+and re-link across those edits (`kodabi_core::ledger::sync`).
 
 ## 6. The release path, and its two signatures
 

@@ -15,6 +15,7 @@ pub mod embed;
 pub mod glossary;
 pub mod index;
 pub mod inflight;
+pub mod ledger;
 pub mod llm;
 pub mod meeting;
 pub mod metrics;

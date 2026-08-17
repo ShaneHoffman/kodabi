@@ -227,6 +227,63 @@ fn parse_body(note_id: &str, date: &str, body: &str) -> (Vec<String>, Vec<Action
     (decisions, action_items)
 }
 
+/// The 0-based body line index of the action item with `item_id`, or `None` when
+/// no line in this body mints that id.
+///
+/// Walks the body exactly as [`parse_body`] does — same section state machine,
+/// same occurrence counting — because the occurrence counter is what
+/// distinguishes two identical lines, so a walk that diverged from it would
+/// return the wrong line for the second of a duplicate pair.
+///
+/// `None` is an ordinary answer, not a failure: an item whose line has since
+/// been edited or deleted no longer exists in the body, and the caller
+/// (`vault::annotate_action_item`) treats annotating as best-effort.
+pub fn action_item_line(note_id: &str, body: &str, item_id: &str) -> Option<usize> {
+    let mut occurrences: HashMap<(String, String, Option<String>), u32> = HashMap::new();
+    let mut section = Section::Other;
+
+    for (index, raw_line) in body.lines().enumerate() {
+        let line = raw_line.trim();
+        if let Some(heading) = line.strip_prefix("## ") {
+            section = match heading.trim() {
+                "Decisions" => Section::Decisions,
+                "Action items" => Section::ActionItems,
+                _ => Section::Other,
+            };
+            continue;
+        }
+        if line.starts_with("# ") {
+            section = Section::Other;
+            continue;
+        }
+        if !matches!(section, Section::ActionItems) {
+            continue;
+        }
+        let Some((owner, description, due_date)) = parse_action_line(line) else {
+            continue;
+        };
+        let owner = if owner.trim().is_empty() {
+            UNASSIGNED_OWNER.to_string()
+        } else {
+            owner
+        };
+        let key = (owner.clone(), description.clone(), due_date.clone());
+        let occurrence = occurrences.entry(key).or_insert(0);
+        let id = action_item_id(
+            note_id,
+            &owner,
+            &description,
+            due_date.as_deref(),
+            *occurrence,
+        );
+        *occurrence += 1;
+        if id == item_id {
+            return Some(index);
+        }
+    }
+    None
+}
+
 /// Reads the session transcript (if any) and computes `(duration_seconds,
 /// speaker_count)`. A keyword source, or a `RawArtifact` whose file is gone,
 /// yields `(None, None)` — both `MeetingMeta` fields are nullable for exactly
@@ -326,6 +383,64 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     use tempfile::tempdir;
+
+    // --- action_item_line -------------------------------------------------
+
+    const ANNOTATED_BODY: &str = "# Summary\n\nWe met.\n\n## Action items\n\n\
+         - [ ] Priya to send the deck by 2026-08-20.\n\
+         - [x] You to book the venue.\n\
+         - [ ] Priya to send the deck by 2026-08-20.\n";
+
+    #[test]
+    fn action_item_line_finds_each_item_including_duplicates() {
+        let items = parse_body("n_aaaaaa", "2026-08-01", ANNOTATED_BODY).1;
+        assert_eq!(items.len(), 3);
+
+        // Body line indexes: 0 `# Summary`, 1 blank, 2 prose, 3 blank,
+        // 4 `## Action items`, 5 blank, then the three items.
+        assert_eq!(
+            action_item_line("n_aaaaaa", ANNOTATED_BODY, &items[0].id),
+            Some(6)
+        );
+        assert_eq!(
+            action_item_line("n_aaaaaa", ANNOTATED_BODY, &items[1].id),
+            Some(7)
+        );
+        // The duplicate resolves to the *second* occurrence's line, which only
+        // the shared occurrence counting can get right.
+        assert_eq!(
+            action_item_line("n_aaaaaa", ANNOTATED_BODY, &items[2].id),
+            Some(8)
+        );
+    }
+
+    #[test]
+    fn action_item_line_is_none_for_an_unknown_or_foreign_id() {
+        let items = parse_body("n_aaaaaa", "2026-08-01", ANNOTATED_BODY).1;
+        assert_eq!(
+            action_item_line("n_aaaaaa", ANNOTATED_BODY, "a_notreal"),
+            None
+        );
+        // Ids are scoped by note, so another note's id never matches here.
+        assert_eq!(
+            action_item_line("n_bbbbbb", ANNOTATED_BODY, &items[0].id),
+            None
+        );
+    }
+
+    #[test]
+    fn a_closure_annotation_is_inert_to_the_grammar() {
+        // The line `vault::annotate_action_item` writes must parse as nothing:
+        // no phantom item, and every real id unchanged.
+        let plain = "## Action items\n\n- [ ] Priya to send the deck.\n";
+        let annotated = "## Action items\n\n- [ ] Priya to send the deck.\n  \
+             - Closed 2026-08-17: PR merged (example.com/pull/42).\n";
+
+        let before = parse_body("n_aaaaaa", "2026-08-01", plain).1;
+        let after = parse_body("n_aaaaaa", "2026-08-01", annotated).1;
+        assert_eq!(before, after);
+        assert_eq!(after.len(), 1, "the annotation minted no item");
+    }
 
     fn segment(index: u64, channel: Channel, start_ms: u64, end_ms: u64) -> TranscriptSegment {
         TranscriptSegment {

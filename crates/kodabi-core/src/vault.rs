@@ -14,6 +14,8 @@ use std::time::SystemTime;
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 
 use crate::glossary;
+use crate::ledger;
+use crate::meeting;
 use crate::note::{
     self, Note, NoteEdit, NoteError, NoteId, NoteType, Result, Routing, Source, INBOX,
 };
@@ -308,6 +310,104 @@ pub fn save_note_edit(
         path: listed.path,
         title,
     }))
+}
+
+/// The prefix every closure-evidence annotation line carries.
+///
+/// Chosen to be **inert to the action-item grammar**: `meeting::parse_body`
+/// trims each line and then silently skips anything `distill::parse_action_line`
+/// rejects, and a line starting `- Closed ` can never start `- [ ] ` or
+/// `- [x] `. So an annotated body re-derives byte-identical
+/// [`crate::meeting::ActionItemFact`]s, ids included, and annotating never mints
+/// a phantom item. The prefix is fixed rather than free-form so that when the
+/// grammar is later widened to hand-written notes, the widened parser has one
+/// literal to recognize and skip.
+pub const ANNOTATION_PREFIX: &str = "- Closed ";
+
+/// Indentation that renders the annotation as a sub-bullet of the item it
+/// belongs to. Purely cosmetic to the parser (which trims), load-bearing to the
+/// reader.
+const ANNOTATION_INDENT: &str = "  ";
+
+/// What [`annotate_action_item`] did.
+#[derive(Debug, Clone, PartialEq)]
+pub enum AnnotateOutcome {
+    /// The line was inserted; carries the note as it now stands on disk.
+    Annotated(Box<ListedNote>),
+    /// No note in the vault carries that id.
+    NoteMissing,
+    /// The note exists but no line in it mints that item id any more — it was
+    /// edited or deleted since the ledger linked it.
+    ItemMissing,
+    /// The exact line is already there, so nothing was written.
+    AlreadyAnnotated,
+}
+
+/// Appends a closure-evidence annotation directly beneath an action item in its
+/// source note.
+///
+/// **Annotate, never destroy.** The human-readable story of a commitment lives
+/// in the Markdown, so when the ledger closes an entry on evidence it says so
+/// here, in a line a person reads, rather than only in a database row. The
+/// checkbox is left exactly as the user left it: this function never ticks a
+/// box, never rewrites the item, and never removes anything.
+///
+/// `annotation` is the sentence after the date, rendered by the caller (the
+/// evidence provider knows what it found). It is written as
+/// `  - Closed <YYYY-MM-DD>: <annotation>`, which
+/// [`crate::meeting::parse_body`] skips, so the note's item ids are unchanged
+/// and the re-index this write triggers is a no-op for the ledger.
+///
+/// Best-effort by contract: [`AnnotateOutcome::ItemMissing`] and
+/// [`AnnotateOutcome::NoteMissing`] are ordinary answers. A caller records its
+/// evidence in the ledger regardless of what this returns, because the database
+/// is the operational truth and the note is the narrative.
+pub fn annotate_action_item(
+    vault_root: &Path,
+    id: &NoteId,
+    action_item_id: &str,
+    closed_on: &str,
+    annotation: &str,
+) -> Result<AnnotateOutcome> {
+    // Located vault-wide, not by a stored project: a note the ledger linked
+    // last month may have been re-filed since, and the id is what never moves.
+    let Some((_, listed)) = find_note_anywhere(vault_root, id)? else {
+        return Ok(AnnotateOutcome::NoteMissing);
+    };
+    let Some(line_index) =
+        meeting::action_item_line(listed.note.id.as_str(), &listed.note.body, action_item_id)
+    else {
+        return Ok(AnnotateOutcome::ItemMissing);
+    };
+
+    let annotation_line =
+        format!("{ANNOTATION_INDENT}{ANNOTATION_PREFIX}{closed_on}: {annotation}");
+    let mut lines: Vec<&str> = listed.note.body.lines().collect();
+    // Idempotent: a provider that retries after a crash must not stack
+    // duplicate lines under one item.
+    if lines
+        .get(line_index + 1)
+        .is_some_and(|next| next.trim() == annotation_line.trim())
+    {
+        return Ok(AnnotateOutcome::AlreadyAnnotated);
+    }
+    lines.insert(line_index + 1, &annotation_line);
+    let body = lines.join("\n");
+
+    let merged = listed.note.clone().with_edits(NoteEdit {
+        note_type: listed.note.note_type,
+        title: listed.note.title.clone(),
+        date: listed.note.date.clone(),
+        tags: listed.note.tags.clone(),
+        body,
+    })?;
+    note::save_note_at(&listed.path, &merged)?;
+    let title = effective_title(&merged, &listed.path);
+    Ok(AnnotateOutcome::Annotated(Box::new(ListedNote {
+        note: merged,
+        path: listed.path,
+        title,
+    })))
 }
 
 /// Maximum length (in `char`s) of a correction reason — mirrors the MCP
@@ -876,8 +976,8 @@ pub struct DeletedProject {
 
 /// Deletes a project: every parseable contained note — direct and in child
 /// projects — is moved back to the Inbox, the per-project infra files
-/// (`_glossary.yml`, `_routing_examples.yml`, writer scratch temps) are
-/// removed, and the folder tree is deleted.
+/// (`_glossary.yml`, `_routing_examples.yml`, `_ledger.yml`, writer scratch
+/// temps) are removed, and the folder tree is deleted.
 ///
 /// **No-data-loss guard:** the tree is walked *before* anything is touched, and
 /// any item Kodabi does not manage (an attachment, an unparseable `.md`, a
@@ -1013,9 +1113,11 @@ pub struct RenamedProject {
 ///
 /// **Unmanaged items ride along.** Unlike [`delete_project`], an attachment or
 /// an unparseable `.md` is not a blocker: a rename destroys nothing, and
-/// `fs::rename` carries the whole tree over untouched. `_glossary.yml` and
-/// `_routing_examples.yml` move with the folder and need no rewrite — neither
-/// names its own project. `previous_project` strings in *other* projects' logs
+/// `fs::rename` carries the whole tree over untouched. `_glossary.yml`,
+/// `_routing_examples.yml` and `_ledger.yml` move with the folder and need no
+/// rewrite — none of the three names its own project, which is precisely the
+/// invariant that keeps this a move rather than a rewrite, and which a new infra
+/// file has to preserve. `previous_project` strings in *other* projects' logs
 /// keep naming the old slug, the same historical provenance
 /// [`delete_project`] leaves behind.
 ///
@@ -1373,15 +1475,22 @@ pub fn delete_note(vault_root: &Path, id: &NoteId) -> Result<Option<DeletedNote>
 }
 
 /// The files Kodabi itself plants in a project folder and may therefore delete
-/// with it: the glossary and routing-examples logs, plus their (and the note
-/// writer's) crash-leftover scratch temps.
+/// with it: the glossary, routing-examples, and commitment-ledger files, plus
+/// their (and the note writer's) crash-leftover scratch temps.
+///
+/// Anything else in the folder is a user's own file, and `delete_project`
+/// refuses to remove a folder holding one. So **a new infrastructure file must
+/// be added here in the same change that starts writing it**, or every project
+/// that has ever written one becomes undeletable.
 fn is_removable_infra(name: &str) -> bool {
     name == glossary::GLOSSARY_FILE
         || name == routing_examples::ROUTING_EXAMPLES_FILE
+        || name == ledger::LEDGER_SNAPSHOT_FILE
         || (name.ends_with(".tmp")
             && (name.starts_with(".note.")
                 || name.starts_with(glossary::GLOSSARY_FILE)
-                || name.starts_with(routing_examples::ROUTING_EXAMPLES_FILE)))
+                || name.starts_with(routing_examples::ROUTING_EXAMPLES_FILE)
+                || name.starts_with(ledger::LEDGER_SNAPSHOT_FILE)))
 }
 
 /// Discovers project folders under the KB root, sorted by slug (so a parent
@@ -2920,6 +3029,204 @@ mod tests {
         assert!(!vault.path().join(INBOX).exists());
     }
 
+    // --- annotate_action_item ---------------------------------------------
+
+    /// Writes a meeting note whose body carries the distilled action-item
+    /// grammar, and returns its path plus the derived facts.
+    fn meeting_with_items(vault: &Path, project: &str, id: &str) -> Vec<meeting::ActionItemFact> {
+        let note = Note::new(
+            NoteId::parse(id).unwrap(),
+            NoteType::Meeting,
+            Routing::Manual {
+                project: project.to_string(),
+            },
+            "2026-08-01",
+            vec![Tag::parse("fixture").unwrap()],
+            Source::parse("manual").unwrap(),
+            "# Summary\n\nWe met.\n\n## Action items\n\n\
+             - [ ] Priya to send the revised deck by 2026-08-20.\n\
+             - [ ] You to book the venue.\n",
+        )
+        .unwrap();
+        note::write_note(vault, &note, Some("kickoff")).unwrap();
+        meeting::meeting_facts_for(&note, vault)
+            .unwrap()
+            .action_items
+    }
+
+    #[test]
+    fn annotate_action_item_writes_under_the_right_line() {
+        let vault = tempdir().unwrap();
+        let items = meeting_with_items(vault.path(), "Ops", "n_aaaaaa");
+        let target = &items[0];
+
+        let outcome = annotate_action_item(
+            vault.path(),
+            &NoteId::parse("n_aaaaaa").unwrap(),
+            &target.id,
+            "2026-08-17",
+            "PR merged (example.com/pull/42), evidence in n_bbbbbb.",
+        )
+        .unwrap();
+
+        let AnnotateOutcome::Annotated(listed) = outcome else {
+            panic!("expected an annotation, got {outcome:?}");
+        };
+        let body = &listed.note.body;
+        let lines: Vec<&str> = body.lines().collect();
+        let item_line = lines
+            .iter()
+            .position(|line| line.contains("send the revised deck"))
+            .unwrap();
+        assert_eq!(
+            lines[item_line + 1],
+            "  - Closed 2026-08-17: PR merged (example.com/pull/42), evidence in n_bbbbbb."
+        );
+        // The item itself is untouched: the checkbox is the user's.
+        assert!(lines[item_line].starts_with("- [ ] "));
+        // And the second item did not move or change.
+        assert!(body.contains("- [ ] You to book the venue."));
+    }
+
+    #[test]
+    fn an_annotated_body_re_derives_identical_action_items() {
+        // The whole point of the line's shape: it is inert to the grammar, so
+        // annotating never re-mints an id and never mints a phantom item.
+        let vault = tempdir().unwrap();
+        let before = meeting_with_items(vault.path(), "Ops", "n_aaaaaa");
+
+        annotate_action_item(
+            vault.path(),
+            &NoteId::parse("n_aaaaaa").unwrap(),
+            &before[0].id,
+            "2026-08-17",
+            "closed by evidence.",
+        )
+        .unwrap();
+
+        let (_, listed) = find_note_anywhere(vault.path(), &NoteId::parse("n_aaaaaa").unwrap())
+            .unwrap()
+            .unwrap();
+        let after = meeting::meeting_facts_for(&listed.note, vault.path())
+            .unwrap()
+            .action_items;
+        assert_eq!(before, after, "annotation must be invisible to extraction");
+    }
+
+    #[test]
+    fn annotate_action_item_is_idempotent() {
+        let vault = tempdir().unwrap();
+        let items = meeting_with_items(vault.path(), "Ops", "n_aaaaaa");
+        let id = NoteId::parse("n_aaaaaa").unwrap();
+
+        annotate_action_item(vault.path(), &id, &items[0].id, "2026-08-17", "done.").unwrap();
+        let second =
+            annotate_action_item(vault.path(), &id, &items[0].id, "2026-08-17", "done.").unwrap();
+
+        assert_eq!(second, AnnotateOutcome::AlreadyAnnotated);
+        let (_, listed) = find_note_anywhere(vault.path(), &id).unwrap().unwrap();
+        assert_eq!(
+            listed.note.body.matches("- Closed 2026-08-17").count(),
+            1,
+            "a retry must not stack duplicate lines"
+        );
+    }
+
+    #[test]
+    fn annotate_action_item_reports_a_missing_note_or_item() {
+        let vault = tempdir().unwrap();
+        meeting_with_items(vault.path(), "Ops", "n_aaaaaa");
+
+        assert_eq!(
+            annotate_action_item(
+                vault.path(),
+                &NoteId::parse("n_zzzzzz").unwrap(),
+                "a_111111",
+                "2026-08-17",
+                "x",
+            )
+            .unwrap(),
+            AnnotateOutcome::NoteMissing
+        );
+        assert_eq!(
+            annotate_action_item(
+                vault.path(),
+                &NoteId::parse("n_aaaaaa").unwrap(),
+                "a_notreal",
+                "2026-08-17",
+                "x",
+            )
+            .unwrap(),
+            AnnotateOutcome::ItemMissing
+        );
+    }
+
+    #[test]
+    fn annotate_action_item_disambiguates_duplicate_lines() {
+        // Two byte-identical lines differ only by occurrence, so the second's id
+        // must land on the second line.
+        let vault = tempdir().unwrap();
+        let note = Note::new(
+            NoteId::parse("n_aaaaaa").unwrap(),
+            NoteType::Meeting,
+            Routing::Manual {
+                project: "Ops".to_string(),
+            },
+            "2026-08-01",
+            vec![Tag::parse("fixture").unwrap()],
+            Source::parse("manual").unwrap(),
+            "## Action items\n\n\
+             - [ ] Priya to send the deck.\n\
+             - [ ] Priya to send the deck.\n",
+        )
+        .unwrap();
+        note::write_note(vault.path(), &note, Some("dupes")).unwrap();
+        let items = meeting::meeting_facts_for(&note, vault.path())
+            .unwrap()
+            .action_items;
+        assert_eq!(items.len(), 2);
+
+        annotate_action_item(
+            vault.path(),
+            &NoteId::parse("n_aaaaaa").unwrap(),
+            &items[1].id,
+            "2026-08-17",
+            "the second one.",
+        )
+        .unwrap();
+
+        let (_, listed) = find_note_anywhere(vault.path(), &NoteId::parse("n_aaaaaa").unwrap())
+            .unwrap()
+            .unwrap();
+        let lines: Vec<&str> = listed.note.body.lines().collect();
+        let annotated = lines
+            .iter()
+            .position(|line| line.contains("- Closed"))
+            .unwrap();
+        // It sits under the *second* item line, not the first.
+        assert!(lines[annotated - 1].contains("send the deck"));
+        assert!(lines[annotated - 2].contains("send the deck"));
+    }
+
+    #[test]
+    fn delete_project_removes_the_ledger_snapshot_with_the_folder() {
+        // Without `_ledger.yml` in `is_removable_infra`, every project that has
+        // ever flushed a snapshot becomes undeletable.
+        let vault = tempdir().unwrap();
+        write(vault.path(), "Ops", "n_aaaaaa", "2026-07-10", Some("real"));
+        let dir = vault.path().join("Ops");
+        fs::write(dir.join(ledger::LEDGER_SNAPSHOT_FILE), "version: 1\n").unwrap();
+        fs::write(
+            dir.join(format!("{}.9999.0.tmp", ledger::LEDGER_SNAPSHOT_FILE)),
+            "half written",
+        )
+        .unwrap();
+
+        let deleted = delete_project(vault.path(), "Ops").unwrap();
+        assert_eq!(deleted.moved_notes.len(), 1);
+        assert!(!dir.exists(), "the folder and its infra went together");
+    }
+
     #[test]
     fn delete_project_blocks_on_hidden_subdirectories() {
         let vault = tempdir().unwrap();
@@ -3335,6 +3642,7 @@ mod tests {
             "examples: []\n",
         )
         .unwrap();
+        fs::write(dir.join(ledger::LEDGER_SNAPSHOT_FILE), "version: 1\n").unwrap();
         fs::write(dir.join("photo.png"), [1u8, 2, 3, 4]).unwrap();
         fs::write(dir.join("broken.md"), "no frontmatter here").unwrap();
         fs::create_dir(dir.join(".obsidian")).unwrap();
@@ -3352,6 +3660,12 @@ mod tests {
         assert_eq!(
             fs::read_to_string(moved.join(routing_examples::ROUTING_EXAMPLES_FILE)).unwrap(),
             "examples: []\n"
+        );
+        // The ledger snapshot rides along unrewritten, which is only safe
+        // because it never names its own project.
+        assert_eq!(
+            fs::read_to_string(moved.join(ledger::LEDGER_SNAPSHOT_FILE)).unwrap(),
+            "version: 1\n"
         );
         assert_eq!(fs::read(moved.join("photo.png")).unwrap(), [1u8, 2, 3, 4]);
         assert!(moved.join(".obsidian").is_dir());
