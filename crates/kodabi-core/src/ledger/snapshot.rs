@@ -378,11 +378,11 @@ impl Ledger {
                         .push(format!("skipped malformed entry id {:?}", entry.entry_id));
                     continue;
                 }
-                if !seen.insert(entry.entry_id.clone()) {
+                if seen.contains(&entry.entry_id) {
                     report.duplicates_skipped += 1;
                     continue;
                 }
-                Ledger::insert_entry(
+                let inserted = Ledger::insert_entry(
                     &tx,
                     &LedgerEntry {
                         entry_id: entry.entry_id.clone(),
@@ -399,7 +399,22 @@ impl Ledger {
                         closed_via: entry.closed_via,
                         review_reason: entry.review_reason.clone(),
                     },
-                )?;
+                );
+                // A row the schema refuses is a bad *file*, not a bad database:
+                // skip it the way a malformed id or unparseable YAML is skipped,
+                // because propagating it would roll the transaction back and
+                // lose every other project's commitments too. A genuine SQLite
+                // failure (a full disk, a corrupt database) still propagates.
+                if let Err(err) = inserted {
+                    if !is_constraint_violation(&err) {
+                        return Err(err);
+                    }
+                    report
+                        .warnings
+                        .push(format!("skipped entry {:?} ({err})", entry.entry_id));
+                    continue;
+                }
+                seen.insert(entry.entry_id.clone());
 
                 for item in &entry.items {
                     // Two entries claiming one live line cannot both be right;
@@ -474,6 +489,17 @@ impl Ledger {
         self.clear_all_dirty();
         Ok(report)
     }
+}
+
+/// Whether an error is SQLite refusing a row on a `CHECK`, a uniqueness rule or
+/// a foreign key — i.e. the file said something the schema forbids, rather than
+/// the database being unable to do its job.
+fn is_constraint_violation(err: &LedgerError) -> bool {
+    matches!(
+        err,
+        LedgerError::Sqlite(rusqlite::Error::SqliteFailure(error, _))
+            if error.code == rusqlite::ErrorCode::ConstraintViolation
+    )
 }
 
 /// Walks the vault collecting project slugs, using the same rules as
@@ -698,6 +724,41 @@ mod tests {
             .unwrap();
         assert_eq!(report.entries_restored, 1, "the good file still restored");
         assert_eq!(report.warnings.len(), 1);
+    }
+
+    #[test]
+    fn an_entry_the_schema_refuses_is_skipped_not_fatal() {
+        // `closed` with no `closed_via` violates the entries table's CHECK. It
+        // is a bad file, so it must be skipped like any other bad file — losing
+        // every *other* project's commitments to it would be the opposite of
+        // what the snapshots exist for.
+        let (dir, mut ledger, entry_id) = vault_with_entry();
+        ledger.flush_snapshots(dir.path()).unwrap();
+        let broken = dir.path().join("Ops");
+        fs::create_dir_all(&broken).unwrap();
+        fs::write(
+            snapshot_path(&broken),
+            "version: 1\nentries:\n\
+             - entry_id: le_ffffffffffff\n  \
+               state: closed\n  \
+               direction: theirs\n  \
+               owner: Priya\n  \
+               description: closed with no provenance\n  \
+               created_at: 2026-07-01T00:00:00Z\n  \
+               updated_at: 2026-07-01T00:00:00Z\n  \
+               last_mention: 2026-07-01T00:00:00Z\n",
+        )
+        .unwrap();
+
+        let mut restored = Ledger::open_in_memory().unwrap();
+        let report = restored
+            .restore_from_snapshots_if_empty(dir.path())
+            .unwrap();
+        assert_eq!(report.entries_restored, 1, "the good file still restored");
+        assert_eq!(report.warnings.len(), 1, "{:?}", report.warnings);
+        assert!(report.warnings[0].contains("le_ffffffffffff"));
+        assert!(restored.get_entry(&entry_id).unwrap().is_some());
+        assert!(restored.get_entry("le_ffffffffffff").unwrap().is_none());
     }
 
     #[test]

@@ -279,8 +279,13 @@ impl Ledger {
             if filter.include_descendants {
                 // Prefix-compare rather than LIKE: a slug is user-supplied text
                 // and LIKE would give `_` and `%` in it wildcard meaning.
+                //
+                // The length is in `char`s, not bytes: SQLite's `substr` counts
+                // characters, so a byte length would over-read a slug carrying
+                // any non-ASCII character and silently drop its descendants.
                 let prefix = format!("{project}/");
-                args.push(Box::new(i64::try_from(prefix.len()).unwrap_or(i64::MAX)));
+                let prefix_chars = prefix.chars().count();
+                args.push(Box::new(i64::try_from(prefix_chars).unwrap_or(i64::MAX)));
                 let len = args.len();
                 args.push(Box::new(prefix));
                 let value = args.len();
@@ -651,7 +656,12 @@ impl Ledger {
         }
         let (from_state, from_project) = Self::state_and_project(&self.conn, from)?;
         let (_, to_project) = Self::state_and_project(&self.conn, to)?;
-        if from_state == EntryState::Closed {
+        // Checked against the whole transition table *before* the edge is
+        // written, not just for `Closed`: the insert and the state change are
+        // two statements on a bare connection, so a transition rejected after
+        // the insert would leave a live edge on an entry that never became
+        // superseded — the exact drift this state is meant to make impossible.
+        if !transition_allowed(from_state, EntryState::Superseded) {
             return Err(LedgerError::IllegalTransition {
                 entry_id: from.to_string(),
                 from: from_state,
@@ -1172,6 +1182,67 @@ mod tests {
             })
             .unwrap();
         assert!(matched.is_empty());
+    }
+
+    #[test]
+    fn descendants_match_a_non_ascii_project_slug() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![fact("a_111111", "Priya", "send the deck")];
+        ledger
+            .sync_note_items(&NoteSync {
+                note_id: "n_a1b2c3",
+                project: "Café/Q3",
+                note_date_utc: DAY,
+                items: &items,
+                now: NOW,
+            })
+            .unwrap();
+        let wide = ledger
+            .list_entries(&EntryFilter {
+                project: Some("Café".to_string()),
+                include_descendants: true,
+                ..EntryFilter::default()
+            })
+            .unwrap();
+        assert_eq!(wide.len(), 1, "a child of a non-ASCII slug is a descendant");
+    }
+
+    #[test]
+    fn a_rejected_link_leaves_no_edge_behind() {
+        let (mut ledger, first) = seeded();
+        let items = vec![fact("a_222222", "Priya", "send the final deck")];
+        let second = ledger
+            .sync_note_items(&NoteSync {
+                note_id: "n_d4e5f6",
+                project: "Briarwood Golf",
+                note_date_utc: DAY,
+                items: &items,
+                now: NOW,
+            })
+            .unwrap()
+            .created[0]
+            .clone();
+
+        ledger.waive(&first, NOW).unwrap();
+        let err = ledger
+            .link_entries(&first, &second, LinkKind::Supersedes, NOW)
+            .unwrap_err();
+        assert!(
+            matches!(err, LedgerError::IllegalTransition { .. }),
+            "{err:?}"
+        );
+
+        // The refusal must be total: a stored edge whose `from` is not
+        // superseded is exactly the drift the state machine exists to prevent.
+        let detail = ledger.get_entry(&first).unwrap().unwrap();
+        assert_eq!(detail.entry.state, EntryState::Waived);
+        assert!(detail.links_out.is_empty(), "{:?}", detail.links_out);
+        assert!(ledger
+            .get_entry(&second)
+            .unwrap()
+            .unwrap()
+            .links_in
+            .is_empty());
     }
 
     #[test]

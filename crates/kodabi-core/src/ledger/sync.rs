@@ -177,6 +177,11 @@ fn reconcile(
             .push(idx);
     }
 
+    // Pairs are recorded as they are decided, never re-derived afterwards: only
+    // the tier that made a pair knows which side belongs to which, and tier B
+    // pairs two *different* owners by construction, so nothing about the pair
+    // survives in the owner keys.
+    let mut pairs: Vec<(usize, usize)> = Vec::new();
     let mut paired_gone: BTreeSet<usize> = BTreeSet::new();
     let mut paired_new: BTreeSet<usize> = BTreeSet::new();
     for (owner, gone_idxs) in &by_owner_gone {
@@ -186,6 +191,7 @@ fn reconcile(
         if gone_idxs.len() == 1 && new_idxs.len() == 1 {
             paired_gone.insert(gone_idxs[0]);
             paired_new.insert(new_idxs[0]);
+            pairs.push((gone_idxs[0], new_idxs[0]));
         }
     }
 
@@ -199,22 +205,10 @@ fn reconcile(
     if unpaired_gone.len() == 1 && unpaired_new.len() == 1 {
         paired_gone.insert(unpaired_gone[0]);
         paired_new.insert(unpaired_new[0]);
+        pairs.push((unpaired_gone[0], unpaired_new[0]));
     }
 
     // Apply the pairs: the entry keeps its identity and adopts the new text.
-    let mut pairs: Vec<(usize, usize)> = Vec::new();
-    {
-        let mut gone_iter = paired_gone.iter().copied().collect::<Vec<_>>();
-        let mut new_iter = paired_new.iter().copied().collect::<Vec<_>>();
-        // Both sets were built by owner-keyed pairing, so re-pair them the same
-        // way rather than by set order.
-        gone_iter.sort_by_key(|idx| vanished_facts[*idx].1.owner_norm.clone());
-        new_iter.sort_by_key(|idx| normalize(&fresh[*idx].owner));
-        if gone_iter.len() == new_iter.len() {
-            pairs = gone_iter.into_iter().zip(new_iter).collect();
-        }
-    }
-
     for (gone_idx, new_idx) in &pairs {
         let (old_item_id, facts) = &vanished_facts[*gone_idx];
         let item = fresh[*new_idx];
@@ -241,7 +235,6 @@ fn reconcile(
     }
 
     // Everything the tiers did not pair.
-    let paired_new_set = paired_new.clone();
     let leftover_gone: Vec<&(String, EntryFacts)> = vanished_facts
         .iter()
         .enumerate()
@@ -251,7 +244,7 @@ fn reconcile(
     fresh = fresh
         .into_iter()
         .enumerate()
-        .filter(|(idx, _)| !paired_new_set.contains(idx))
+        .filter(|(idx, _)| !paired_new.contains(idx))
         .map(|(_, item)| item)
         .collect();
 
@@ -792,6 +785,47 @@ mod tests {
         assert_eq!(open.len(), 1, "exactly one commitment stays live");
         let detail = ledger.get_entry(&entry_id).unwrap().unwrap();
         assert_eq!(detail.item_refs.iter().filter(|r| r.active).count(), 1);
+    }
+
+    #[test]
+    fn tier_b_pairs_the_leftovers_not_whoever_sorts_first() {
+        // Two edits in one pass: Mia's line is reworded (tier A pairs it by
+        // owner) and Ana's is both reworded *and* handed to Zoe (only tier B can
+        // pair it). The two tiers must keep their own pairings; deriving them
+        // from two sorted index sets crosses the wires and hands each entry the
+        // other's text.
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let before = vec![
+            fact("a_a00000", "Ana", "book the venue"),
+            fact("a_m00000", "Mia", "send the deck"),
+        ];
+        sync_note(&mut ledger, "n_a1b2c3", "Ops", DAY_ONE, &before);
+        let entries = ledger.list_entries(&EntryFilter::default()).unwrap();
+        let ana = entries
+            .iter()
+            .find(|e| e.owner == "Ana")
+            .unwrap()
+            .entry_id
+            .clone();
+        let mia = entries
+            .iter()
+            .find(|e| e.owner == "Mia")
+            .unwrap()
+            .entry_id
+            .clone();
+
+        let after = vec![
+            fact("a_m11111", "Mia", "send the revised deck"),
+            fact("a_z11111", "Zoe", "book the venue soon"),
+        ];
+        sync_note(&mut ledger, "n_a1b2c3", "Ops", DAY_ONE, &after);
+
+        let mia_now = ledger.get_entry(&mia).unwrap().unwrap().entry;
+        assert_eq!(mia_now.owner, "Mia");
+        assert_eq!(mia_now.description, "send the revised deck");
+        let ana_now = ledger.get_entry(&ana).unwrap().unwrap().entry;
+        assert_eq!(ana_now.owner, "Zoe");
+        assert_eq!(ana_now.description, "book the venue soon");
     }
 
     #[test]

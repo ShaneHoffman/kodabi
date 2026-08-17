@@ -257,7 +257,13 @@ fn run_worker(
                 // the pending flush writes the project's current contents
                 // whenever it runs. Without this, a steady stream of edits to
                 // one project would starve the writer until `max_delay`.
-                if pending_after > pending_before {
+                //
+                // The `oldest.is_none()` leg re-arms after a flush whose write
+                // failed: those projects are still dirty but carry no deadline,
+                // so without it the retry would wait for some *other* project to
+                // be dirtied. Arming on the next job rather than immediately is
+                // what keeps a wedged disk from spinning while the app is idle.
+                if pending_after > 0 && (pending_after > pending_before || oldest.is_none()) {
                     let now = Instant::now();
                     oldest.get_or_insert(now);
                     newest = Some(now);
