@@ -243,9 +243,12 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   5. `README.md`'s data-location table still names every user-visible thing the state map
      puts under `app_data_dir()` (notes, `sessions/`, `chats/`, `index.db`,
      `settings.toml`, `MODELS_SUBDIR`), and still names the WebView2 profile as the one
-     thing living outside it. Its uninstall warning still matches the bundler:
-     `src-tauri/tauri.conf.json`'s `bundle.windows.nsis` block carries no custom
-     `template` or `installerHooks`, so what ships is the stock NSIS template, whose
+     thing living outside it. Its uninstall warning still matches the bundler: no
+     `bundle.windows.nsis` block carries a custom `template` or `installerHooks` — check
+     `src-tauri/tauri.conf.json` **and** the release overlays merged over it
+     (`tauri.bundle.conf.json`, plus CI's `tauri.updater.conf.json`), since the bundle
+     overlay already carries a `bundle.windows` block and is where a bundle-time hook
+     would naturally land — so what ships is the stock NSIS template, whose
      delete-app-data checkbox `RmDir /r`s **both** `$APPDATA\<identifier>` and
      `$LOCALAPPDATA\<identifier>` — the vault with them. A custom template, an installer
      hook, or a Tauri upgrade that changes either the checkbox or the forced webview
