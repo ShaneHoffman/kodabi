@@ -68,7 +68,7 @@ optional: capture is not a feature you can build without.
 
 | Crate | What it owns |
 | --- | --- |
-| `kodabi-core` | The pure data layer: settings, the SQLite note index, capture bookkeeping, distill, routing, the vault writer, retention, the file watcher, and the query surface the MCP server serves. UI-agnostic, and free of any model-runtime FFI — what it compiles natively is bundled SQLite, the `sqlite-vec` extension, and `ring` (via `ureq`'s TLS), none of which need a toolchain beyond a C compiler. |
+| `kodabi-core` | The pure data layer: settings, the SQLite note index, the commitment ledger, capture bookkeeping, distill, routing, the vault writer, retention, the file watcher, and the query surface the MCP server serves. UI-agnostic, and free of any model-runtime FFI — what it compiles natively is bundled SQLite, the `sqlite-vec` extension, and `ring` (via `ureq`'s TLS), none of which need a toolchain beyond a C compiler. |
 | `kodabi-audio` | WASAPI loopback (system audio) and microphone capture via `cpal`, the two-channel combiner and drift correction, the recovery spill, and the Settings mic test. |
 | `kodabi-aec` | Acoustic echo cancellation — a safe wrapper over a vendored speexdsp canceller, cleaning speaker bleed off the mic channel. |
 | `kodabi-transcribe` | Transcription engines that need FFI: `ParakeetEngine` (sherpa-onnx) behind the `parakeet` feature, `WhisperEngine` (whisper.cpp) behind `whisper`, and the Silero `VadGate` behind `vad`. The `TranscriptionEngine` trait itself lives in `kodabi_core::transcription`, so core can be tested without any of them. |

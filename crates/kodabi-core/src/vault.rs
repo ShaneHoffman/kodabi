@@ -1113,9 +1113,11 @@ pub struct RenamedProject {
 ///
 /// **Unmanaged items ride along.** Unlike [`delete_project`], an attachment or
 /// an unparseable `.md` is not a blocker: a rename destroys nothing, and
-/// `fs::rename` carries the whole tree over untouched. `_glossary.yml` and
-/// `_routing_examples.yml` move with the folder and need no rewrite — neither
-/// names its own project. `previous_project` strings in *other* projects' logs
+/// `fs::rename` carries the whole tree over untouched. `_glossary.yml`,
+/// `_routing_examples.yml` and `_ledger.yml` move with the folder and need no
+/// rewrite — none of the three names its own project, which is precisely the
+/// invariant that keeps this a move rather than a rewrite, and which a new infra
+/// file has to preserve. `previous_project` strings in *other* projects' logs
 /// keep naming the old slug, the same historical provenance
 /// [`delete_project`] leaves behind.
 ///

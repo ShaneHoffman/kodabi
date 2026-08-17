@@ -42,10 +42,10 @@ it.
 Retention keeps no bookkeeping file: membership is derived from disk on every
 sweep, so there is no separate state to isolate.
 
-**`ledger.db` is the one durable database, and the only row above that is not
-rebuildable.** `index.db` can be deleted and reconstructed from the Markdown at
-any time; the ledger holds judgements (a waiver, a snooze, a closure and its
-evidence) that exist nowhere else. Its backup is the vault, not the config dir:
+**The two databases above differ in kind, not just in contents.** `index.db` can
+be deleted and reconstructed from the Markdown at any time; `ledger.db` holds
+judgements (a waiver, a snooze, a closure and its evidence) that exist nowhere
+else, so it is the one *database* that is durable rather than derived. Its backup is the vault, not the config dir:
 every change is mirrored into a per-project `_ledger.yml`, and a missing or empty
 `ledger.db` is rebuilt from those at startup. A sandboxed run therefore gets both
 halves under `<base>` — the database directly, the snapshots inside the fixture

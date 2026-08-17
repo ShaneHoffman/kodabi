@@ -89,8 +89,8 @@ Two more folders belong to the app rather than to you: the program installs per-
 `%LOCALAPPDATA%\com.kodabi.app` (browser state, plus the high-contrast and reduced-motion
 toggles, which are per-device display preferences rather than settings about your notes).
 
-The search index is the one thing in that list you can delete freely: it is derived from your
-notes and rebuilt from them. The commitment ledger is not derived. It tracks what was promised,
+The search index is derived: delete it and Kodabi rebuilds it from your notes. The commitment
+ledger is not derived. It tracks what was promised,
 what closed it, and what you snoozed or waived, none of which a checkbox in a note can say. So
 it keeps a copy of itself as a `_ledger.yml` file inside each project folder, which means
 backing up your notes backs up the ledger too, and a lost `ledger.db` is rebuilt from those
