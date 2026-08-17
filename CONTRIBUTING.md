@@ -28,13 +28,22 @@ Every branch is `type/slug`:
   `chore/adopt-git-flow`.
 
 If you create work through the board, set the branch name **when you create the task** (the
-`kangentic_create_task` `branchName` field, or New Task → Advanced in the UI). A task's branch
-cannot be renamed after it starts without breaking PR tracking, so get it right up front.
+`kangentic_create_task` `branchName` field, or New Task → Advanced in the UI). Renaming a task's
+branch once it has started breaks the board's PR tracking, so get it right up front.
+
+The one exception is the **Open PR** stage. Work drifts while a ticket is executed, so before pushing
+it re-derives the branch name from the final diff and renames the branch if the old name is genuinely
+wrong — but only when the branch has never been pushed, since at that point no PR exists to orphan.
+It then links the PR to the card directly. The card goes on displaying the old branch name afterwards,
+which is cosmetic: the merge and the Done drag both work regardless.
 
 ## Commits
 
 Use Conventional-Commit subjects: `<type>: <imperative summary>`, matching the branch's `type`
 (e.g. branch `feat/scaffold-tauri-app` → `feat: scaffold Tauri app shell`).
+
+Commits are never rewritten to chase a later rename. If the Open PR stage renames the branch to a
+different `type`, the subjects already on it stand as written.
 
 ## Pull requests & the stage gate
 

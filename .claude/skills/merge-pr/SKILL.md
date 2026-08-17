@@ -55,7 +55,7 @@ Re-run step 1's `gh pr view --json mergeable,mergeStateStatus` if it has been a 
 - `mergeable: MERGEABLE` — continue.
 - `mergeable: UNKNOWN` — GitHub is still computing; wait a few seconds and retry a couple of
   times.
-- `mergeable: CONFLICTING` — STOP. Conflict resolution is `/pull-request`'s job (its step 10);
+- `mergeable: CONFLICTING` — STOP. Conflict resolution is `/pull-request`'s job (its step 11);
   report and suggest re-running that stage.
 - `mergeStateStatus: BLOCKED` is **expected** — that's the un-satisfiable approval rule `--admin`
   exists for. `BEHIND` still merges (the merge commit incorporates main), but say so in the final
@@ -80,6 +80,8 @@ local branch, which misbehaves inside a worktree.)
 ## 7. Report
 - If running inside a Kangentic task and the PR isn't linked yet, link it with
   `kangentic_link_pr` (normally `/pull-request` already did; skip silently if the tool isn't
-  available).
+  available). If that call can't find the PR, the branch was renamed at Open PR and the task's
+  stored `branch_name` is stale — link it the way `/pull-request` does in that case, with
+  `kangentic_update_task` and `prNumber` + `prUrl`.
 - Report: the PR URL, the merge commit SHA, a one-line summary of what shipped, any `BEHIND`
   caveat from step 4 — and remind the human that dragging the card to Done removes the worktree.
