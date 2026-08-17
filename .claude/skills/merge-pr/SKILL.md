@@ -1,16 +1,17 @@
 ---
 name: merge-pr
-description: Merge the current branch's reviewed, green pull request into main with a merge commit, then delete the remote branch. Used by the Merge PR board column.
-disable-model-invocation: true
+description: Merge the current branch's reviewed, green pull request into main with a merge commit, then delete the remote branch. Used by the Merge PR board column, and invocable by the model only where a merge is already sanctioned — the /release flow's version-bump PR, or an explicit user go-ahead.
 argument-hint: [optional extra context — e.g. a PR number if branch resolution fails]
 ---
 
 # Merge the pull request
 
-Merge the **current branch's** open PR into **`main`**, following the steps below precisely. A
-human dragging the card into the Merge PR column (or invoking this skill) **is** the merge
-approval — the review already happened on the PR; your job is to verify the PR is actually ready
-and then merge it.
+Merge the **current branch's** open PR into **`main`**, following the steps below precisely. The
+merge approval is a human dragging the card into the Merge PR column, a human invoking this
+skill, or a flow with a standing auto-merge sanction (currently only `/release`'s version-bump
+PR, step 4) — the review already happened on the PR; your job is to verify the PR is actually
+ready and then merge it. Absent one of those three sanctions, don't invoke this skill on your own
+judgment.
 
 Hard rules:
 - **Merging is the whole job.** No code changes, no fixes, no new commits, no pushing new work —

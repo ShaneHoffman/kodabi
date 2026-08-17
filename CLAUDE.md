@@ -259,9 +259,11 @@ Task-shaped workflows live under `.claude/skills/`:
 - `preview` — launch Tauri dev and smoke-test the app.
 - `pull-request` — open a PR against main (Open PR board column; never merges).
 - `merge-pr` — merge the branch's reviewed, green PR into main (Merge PR board column; merge
-  commit + `--admin` for the approval gap only).
-- `release` — cut a tagged release: bump both version fields, land them, tag main, watch the
-  signed build (human-invoked; never publishes the draft Release).
+  commit + `--admin` for the approval gap only). Model-invocable only where the merge is already
+  sanctioned: `/release`'s version-bump PR, or an explicit user go-ahead.
+- `release` — cut a tagged release: bump both version fields, land them via `pull-request` +
+  `merge-pr` (its green version-bump PR auto-merges), tag main, watch the signed build
+  (human-invoked; never publishes the draft Release).
 - `add-tauri-command` — scaffold a command across all layers, then audit parity.
 - `add-migration` — append a note-index migration safely, then audit.
 - `commit` — run the gates for the changed surface, then commit (never pushes).
