@@ -359,8 +359,12 @@ export function Select({
               data-highlighted={index === active ? "" : undefined}
               // The chosen row reads through weight and a check — value, never
               // hue — and menuRow is already at font-medium, so the check is
-              // the whole mark.
-              className={clsx(menuRow(), "cursor-pointer justify-between")}
+              // the whole mark. What this call site adds is layout and nothing
+              // else: `cursor` is the recipe's, resolving to the same arrow a
+              // menu row shows, and a `cursor-pointer` here would have been
+              // settled by emission order rather than by this className
+              // (UI_CONVENTIONS §4).
+              className={clsx(menuRow(), "justify-between")}
             >
               <span>{option.label}</span>
               {index === selectedIndex && (

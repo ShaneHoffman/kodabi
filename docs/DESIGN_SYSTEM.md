@@ -179,6 +179,18 @@ Every pressable thing in Grove presses the same way: **`scale-97` over 140ms on 
 Not 0.95 on one control and 0.98 on another; not a colour flash instead. The press is the one state
 allowed to move its own box, and it moves nothing else on the page.
 
+**The shell is exempt, and its stillness is the point.** The title bar's chrome links and caption
+glyphs, the wordmark, and the dock — its rows and its one creation verb alike — do not press. They
+are the frame the app is drawn in rather than actions a view is about, and a window's own chrome
+does not squish when you close it. The same reasoning the dock already makes about shape holds for
+movement: an action is a rectangle that lifts, and a destination is a place that fills. So the press
+lives on the primitives in `src/components/ui/` (plus the capture toast, which is a rectangle that
+performs a verb), and hand-rolled shell chrome answers with colour and fill instead. An action
+inside a *view* cannot borrow the exemption — it presses like everything else, which is why the note
+editor's format toolbar does. A destination inside a view is the other half of the same argument and
+fills rather than presses, wherever it sits: `ProjectView`'s index rows take one wash and nothing
+more, because you are already inside the folder and none of it is waiting on you.
+
 ### Hover enhances, never reveals
 
 A control is fully legible before the pointer arrives. Hover may lift a card, brighten a fill, or
@@ -270,9 +282,11 @@ corner it hangs off, a dialog from its centre, a toast from the corner it sits i
 
 ### Lists rise in
 
-`animate-rise-in` lifts each row 8px with a 45ms stagger. The stagger is capped: past about five rows
-it stops reading as a cascade and starts reading as lag, so longer lists animate only the first
-screenful.
+`animate-rise-in` lifts each row 8px with a 45ms stagger. The **delay** is capped at five steps: past
+about five rows a cascade stops reading as one gesture and starts reading as lag, so the sixth row
+onward rises together with the fifth rather than trailing further behind it. Every row still rises —
+the cap shortens the cascade, it does not leave the rest of a long list arriving without the
+movement its neighbours had.
 
 ### What does not animate
 

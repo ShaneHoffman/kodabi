@@ -520,9 +520,26 @@ function Tool({
       onClick={(event) => {
         if (event.detail === 0) onApply();
       }}
+      // `focus-ring-inset` on a control that does *not* fill its container, so
+      // it is an argued exception to §2's rule rather than the case that rule
+      // names. The toolbar is `p-1`, 4px, and these buttons sit 2px apart: an
+      // outward ring at +2px would cross the gap onto its neighbour and hang
+      // over the glass edge, which is the same clipping the inset exists to
+      // avoid, only in miniature. Inset keeps the ring on the button.
       className={clsx(
         "focus-ring-inset rounded-[6px] px-2 py-1 font-ui text-[12px] leading-none text-ink",
-        "transition-colors duration-140 ease-out-strong hover:bg-wash active:bg-wash-hover",
+        // `scale`, not `transform`: Tailwind v4's `scale-*` sets the standalone
+        // property, so a transition naming `transform` animates nothing and the
+        // press lands as a snap (UI_CONVENTIONS §3). The colour steps ride the
+        // same 140ms clock, so a hover that turns into a press reads as one
+        // gesture.
+        "transition-[scale,background-color] duration-140 ease-out-strong",
+        "hover:bg-wash active:bg-wash-hover",
+        // The one press spec (DESIGN_SYSTEM §2). These are actions on the
+        // selection, not the frame the app is drawn in, so the shell's
+        // stillness is not theirs to borrow. The swap needs no repeated guard
+        // because the press carries none: this button has no disabled state.
+        "active:scale-97 motion-reduce:active:scale-100",
         className,
       )}
     >
