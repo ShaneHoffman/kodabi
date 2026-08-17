@@ -345,7 +345,7 @@ export const SCENARIOS = {
   },
 
   "routing/suggested-destination": {
-    why: "An Inbox note whose body names its project once. `best_candidate` weights a bare name mention at exactly `NAME_WEIGHT`, which lands on 0.5 — over the Inbox's display floor, under the auto-file threshold — so the row offers `→ briarwood-golf` in the folder's hue rather than filing itself. Nothing else in the catalogue names a project at all, so this is the only card that carries a guess, and it is the one the README's Inbox screenshot is framed on.",
+    why: "An Inbox note whose body names its project once. `best_candidate` weights a bare name mention at exactly `NAME_WEIGHT`, which lands on 0.5 — over the Inbox's display floor, under the auto-file threshold — so the row offers `→ Briarwood Golf` in the folder's hue rather than filing itself. Nothing else in the catalogue names a project at all, so this is the only card that carries a guess, and it is the one the README's Inbox screenshot is framed on.",
     sessions: [
       {
         key: "walkThrough",

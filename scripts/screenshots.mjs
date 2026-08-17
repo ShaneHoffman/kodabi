@@ -171,13 +171,28 @@ async function pressEscape(session) {
  *
  * The update notice needs no handling: `UpdaterProvider` never checks in a dev
  * session, which is also what README's privacy section promises.
+ *
+ * A bounded wait rather than one snapshot, because the nudge does not exist yet
+ * when the shell does: `useModelDownload` seeds `{ status: "unknown" }` and the
+ * dialog renders `null` for that beat, so it only mounts once the `model_status`
+ * invoke lands — and `waitForShell` pins the *vault* query, which is a different
+ * round trip with no ordering between them. A single check can therefore pass a
+ * moment before the modal opens, and then every shot is taken through its scrim.
+ * There is no positive signal for "the status landed and there was nothing to
+ * show" — an already-provisioned sandbox renders no dialog at all — so this
+ * waits out the window instead of waiting for an element.
  */
-async function dismissFirstRunChrome(session) {
+async function dismissFirstRunChrome(session, { graceMs = 5_000 } = {}) {
   const dialog = 'document.querySelector(\'[role="dialog"]\')';
-  const open = await session.evaluate(`!!${dialog}`);
-  if (!open) return;
-  await pressEscape(session);
-  await session.waitFor(`!${dialog}`, { label: "the first-run dialog closed" });
+  const deadline = Date.now() + graceMs;
+  while (Date.now() < deadline) {
+    if (await session.evaluate(`!!${dialog}`)) {
+      await pressEscape(session);
+      await session.waitFor(`!${dialog}`, { label: "the first-run dialog closed" });
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
 }
 
 /**

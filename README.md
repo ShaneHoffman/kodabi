@@ -129,7 +129,7 @@ Settings → Models whenever you want them back.
 
 <p align="center">
   <img src="docs/screenshots/search.png" width="900"
-       alt="Searching the vault for 'irrigation' returns three hits. Each result highlights the matched word in its title and in a snippet of its body, over a line naming the project it is filed in, its kind, and its date.">
+       alt="Searching the vault for 'irrigation' returns three hits. Every result highlights the matched word in a snippet of its body, and the two whose titles contain it highlight it there too. Under each title runs a line giving the project it is filed in (or 'inbox' for the two still unfiled), its kind where it has one, and its date.">
 </p>
 
 - **Chat over your history.** A designed chat view driving Claude Code, plus an embedded terminal for
@@ -137,7 +137,7 @@ Settings → Models whenever you want them back.
 
 <p align="center">
   <img src="docs/screenshots/chat.png" width="900"
-       alt="The chat view answering the question 'What did we decide about the irrigation contractor?'. Two quiet lines record that it searched the notes and opened one, then the answer lists the decisions it found, quotes the note it took them from, and links back to that note.">
+       alt="The chat view answering the question 'What did we decide about the irrigation contractor?'. Two quiet lines record that it searched the notes and opened one, then the answer names the note it took them from and lists the decisions it found, the follow-ups still open, and a related unfiled note worth checking.">
 </p>
 
 - **Plain Markdown on disk.** Every note is a file with YAML frontmatter that you can read, edit,
