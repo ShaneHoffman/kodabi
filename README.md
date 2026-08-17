@@ -80,6 +80,7 @@ Your notes, and everything Kodabi derives from them, live in one folder:
 | Recordings and raw transcripts | `sessions\` |
 | Chat transcripts | `chats\` |
 | Search index | `index.db` (derived; rebuilt from the notes) |
+| Commitment ledger | `ledger.db`, plus a `_ledger.yml` backup in each project folder |
 | Settings | `settings.toml` |
 | Downloaded models | `.models\` (~796 MB) |
 
@@ -88,9 +89,17 @@ Two more folders belong to the app rather than to you: the program installs per-
 `%LOCALAPPDATA%\com.kodabi.app` (browser state, plus the high-contrast and reduced-motion
 toggles, which are per-device display preferences rather than settings about your notes).
 
-**A normal uninstall leaves your notes alone.** The vault, the index and your settings stay
-where they are, deliberately: the notes are yours, they are readable without Kodabi, and
-reinstalling later picks the same vault back up. An update never touches them either.
+The search index is the one thing in that list you can delete freely: it is derived from your
+notes and rebuilt from them. The commitment ledger is not derived. It tracks what was promised,
+what closed it, and what you snoozed or waived, none of which a checkbox in a note can say. So
+it keeps a copy of itself as a `_ledger.yml` file inside each project folder, which means
+backing up your notes backs up the ledger too, and a lost `ledger.db` is rebuilt from those
+files the next time Kodabi starts.
+
+**A normal uninstall leaves your notes alone.** The vault, the index, the ledger and your
+settings stay where they are, deliberately: the notes are yours, they are readable without
+Kodabi, and reinstalling later picks the same vault back up. An update never touches them
+either.
 
 > **Careful with the uninstaller's "delete the application data" checkbox.** It is not a way
 > to reclaim the space the models take up. It deletes both `com.kodabi.app` folders whole:

@@ -204,6 +204,24 @@ parsed back out into the index like a meeting's — so a commitment made in a ch
 `list_outstanding_items` and `get_note`'s `action_items`. A hand-filed note (`type: note`) is not
 parsed this way: its body is stored verbatim, so a checkbox in it is prose, not a tracked item.
 
+### Closure annotations under an action item
+
+One line may sit directly beneath an action item, written by the commitment ledger when an entry is
+closed on evidence (`vault::annotate_action_item`):
+
+```markdown
+- [ ] Jane to send the signed budget memo to finance by 2026-07-11.
+  - Closed 2026-07-09: memo acknowledged in the finance thread (evidence in n_a1b2c3).
+```
+
+The shape is fixed — two spaces, then `- Closed <YYYY-MM-DD>: `, then a sentence — and it is
+**inert to the grammar above** by construction: the parser trims each line and then skips anything
+that is not `- [ ] ` or `- [x] `, so an annotated body re-derives byte-identical action items, ids
+included. That is the whole point of the prefix, and the reason the ledger annotates rather than
+ticking the box: **the checkbox stays the user's**, and the human-readable story of a commitment
+stays in the Markdown rather than living only in a database. Adding more of these lines, or letting
+one start with a checkbox, would break the id stability the ledger depends on.
+
 The `source` path is the chat transcript under `chats/`, written by the chat view one JSONL record
 per turn. Unlike the `sessions/` scheme it carries no title slug — a chat is named only by when it
 started and which device it started on.

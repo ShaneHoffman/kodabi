@@ -238,9 +238,12 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   contents table), which states the *unsandboxed* defaults only.
 - **Verify:**
   1. Every path in the state-map table still resolves the way the table says: grep the
-     three `sandbox::config_dir` call sites (`lib.rs` setup, `terminal_cmds`'s
-     `write_mcp_config` and `write_config_files`) and confirm no `app_config_dir()` call
-     has reappeared outside `sandbox.rs` itself.
+     four `sandbox::config_dir` call sites (`lib.rs` setup, `terminal_cmds`'s
+     `write_mcp_config` and `write_config_files`, and `ledger_state`'s `open_ledger`)
+     and confirm no `app_config_dir()` call has reappeared outside `sandbox.rs` itself.
+     That seam is the *only* thing sandboxing the config dir — there is no
+     relocate-by-directory sweep — so a new file resolved any other way silently writes
+     into the user's real data under `KODABI_SANDBOX`.
   2. The derived subpaths in the doc match the constants (`.index/index.db`,
      `.webview2`, the `-dev` suffix), and `indexDbFor()` in `e2e/lib/vault.mjs` still
      computes the same index path as `INDEX_SUBDIR`/`INDEX_FILE` — the two
@@ -249,9 +252,12 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   4. `e2e/lib/app.mjs` still sets `KODABI_SANDBOX` and no second isolation mechanism has
      grown beside it.
   5. `README.md`'s data-location table still names every user-visible thing the state map
-     puts under `app_data_dir()` (notes, `sessions/`, `chats/`, `index.db`,
-     `settings.toml`, `MODELS_SUBDIR`), and still names the WebView2 profile as the one
-     thing living outside it. Its uninstall warning still matches the bundler: no
+     puts under `app_data_dir()` (notes, `sessions/`, `chats/`, `index.db`, `ledger.db`
+     and its `_ledger.yml` snapshots, `settings.toml`, `MODELS_SUBDIR`), and still names
+     the WebView2 profile as the one thing living outside it. It also still distinguishes
+     the *derived* `index.db` (safe to delete) from the *durable* `ledger.db` (not
+     derived; backed up as `_ledger.yml` in each project folder) — collapsing the two
+     into one "derived" claim would tell a user it is safe to delete their commitments. Its uninstall warning still matches the bundler: no
      `bundle.windows.nsis` block carries a custom `template` or `installerHooks` — check
      `src-tauri/tauri.conf.json` **and** the release overlays merged over it
      (`tauri.bundle.conf.json`, plus CI's `tauri.updater.conf.json`), since the bundle
