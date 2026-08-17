@@ -232,7 +232,10 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 - **Mirror:** `docs/DEV_SANDBOX.md` — the state-map table (state → default location →
   resolver → sandboxed location), the switch's value grammar, and the refusal table's
   three messages. Also the `pnpm dev:sandbox` line in `README.md`'s script list and its
-  "Dev sandbox" section, and the *Isolation* section of `e2e/README.md`.
+  "Dev sandbox" section, and the *Isolation* section of `e2e/README.md`. And
+  `README.md`'s "Where your data lives, and what uninstalling does" section — the
+  user-facing half of the same map (the `%APPDATA%\com.kodabi.app` folder and its
+  contents table), which states the *unsandboxed* defaults only.
 - **Verify:**
   1. Every path in the state-map table still resolves the way the table says: grep the
      three `sandbox::config_dir` call sites (`lib.rs` setup, `terminal_cmds`'s
@@ -245,9 +248,23 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   3. The three refusal messages quoted in the doc match the `#[error(...)]` strings.
   4. `e2e/lib/app.mjs` still sets `KODABI_SANDBOX` and no second isolation mechanism has
      grown beside it.
+  5. `README.md`'s data-location table still names every user-visible thing the state map
+     puts under `app_data_dir()` (notes, `sessions/`, `chats/`, `index.db`,
+     `settings.toml`, `MODELS_SUBDIR`), and still names the WebView2 profile as the one
+     thing living outside it. Its uninstall warning still matches the bundler: no
+     `bundle.windows.nsis` block carries a custom `template` or `installerHooks` — check
+     `src-tauri/tauri.conf.json` **and** the release overlays merged over it
+     (`tauri.bundle.conf.json`, plus CI's `tauri.updater.conf.json`), since the bundle
+     overlay already carries a `bundle.windows` block and is where a bundle-time hook
+     would naturally land — so what ships is the stock NSIS template, whose
+     delete-app-data checkbox `RmDir /r`s **both** `$APPDATA\<identifier>` and
+     `$LOCALAPPDATA\<identifier>` — the vault with them. A custom template, an installer
+     hook, or a Tauri upgrade that changes either the checkbox or the forced webview
+     `data_directory` invalidates that section.
 - **Failure:** a state location the table omits or misattributes, a layout constant the
-  doc contradicts, a refusal message that has been reworded in only one place, or a
-  config-dir call site bypassing the seam.
+  doc contradicts, a refusal message that has been reworded in only one place, a
+  config-dir call site bypassing the seam, or a README data-location claim that has
+  drifted from the resolvers.
 
 ---
 
