@@ -65,7 +65,7 @@ export async function clickWhenEnabled(session, testId, { timeoutMs = 5_000 } = 
  * exactly `label`.
  *
  * `clickWhenEnabled` takes `querySelector`'s first match, which is right for a
- * singleton control and wrong for a list: a seeded vault puts nine rows in the
+ * singleton control and wrong for a list: a seeded vault puts ten rows in the
  * Inbox and a slice has to open a named one. Throws rather than no-op'ing when
  * nothing matches, because a click that lands nowhere fails much later,
  * somewhere unrelated.

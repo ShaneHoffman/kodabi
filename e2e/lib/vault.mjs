@@ -96,6 +96,13 @@ const DRAINAGE_TURNS = [
   ["them", 6_100, 13_400, "Then we re-bid it before the irrigation work starts."],
 ];
 
+/** A short walk of the course, behind the one note that carries a routing guess. */
+const WALK_THROUGH_TURNS = [
+  ["you", 0, 5_800, "The back nine is holding water again by the sixth."],
+  ["them", 5_800, 14_200, "Same low run as last autumn, so the survey was right."],
+  ["you", 52_000, 60_400, "Then it goes in the irrigation contract, not a separate bid."],
+];
+
 const WAVED_OFF_TURNS = [["you", 0, 3_300, "Wrong meeting, sorry."]];
 
 /**
@@ -120,7 +127,7 @@ const FIFTY_TURNS = Array.from({ length: 50 }, (_, index) => [
  *
  * Data because three consumers need to read the catalogue without executing it:
  * `--list` prints `why`, a slice reads titles off the manifest, and
- * `assertCatalogue` needs to see all ten at once to check the properties no
+ * `assertCatalogue` needs to see them all at once to check the properties no
  * single scenario can state about itself.
  *
  * A session declares `minutesAgo` and the artifacts that survived; `artifacts:
@@ -333,6 +340,43 @@ export const SCENARIOS = {
         source: "quick-capture",
         confidence: 0.31,
         body: "Routing found evidence for two projects and preferred neither by enough. Expect a low match score on the Inbox row.",
+      },
+    ],
+  },
+
+  "routing/suggested-destination": {
+    why: "An Inbox note whose body names its project once. `best_candidate` weights a bare name mention at exactly `NAME_WEIGHT`, which lands on 0.5 — over the Inbox's display floor, under the auto-file threshold — so the row offers `→ briarwood-golf` in the folder's hue rather than filing itself. Nothing else in the catalogue names a project at all, so this is the only card that carries a guess, and it is the one the README's Inbox screenshot is framed on.",
+    sessions: [
+      {
+        key: "walkThrough",
+        // The most recent capture in the catalogue, so its note sorts to the head
+        // of the Inbox: `scan_project_notes` orders by date descending, and a
+        // screenshot of the guess is worth nothing if the card is below the fold.
+        minutesAgo: 15,
+        slug: "course-walk-through",
+        artifacts: ["jsonl", "wav"],
+        wavSeconds: 6,
+        turns: WALK_THROUGH_TURNS,
+      },
+    ],
+    notes: [
+      {
+        id: "n_sugg0011",
+        project: "Inbox",
+        file: "walk-through-and-the-drainage-re-bid",
+        type: "meeting",
+        // The title deliberately does NOT name the project. Titles score with
+        // `TITLE_MULTIPLIER`, so naming it here would push the live guess above
+        // the stored confidence below and the row would show two different
+        // numbers for what is meant to be one story.
+        title: "Walk-through and the drainage re-bid",
+        dateFrom: "walkThrough",
+        tags: ["phase-2"],
+        source: { session: "walkThrough" },
+        // Exactly what the router scores the body's lone name mention at, so the
+        // stored gauge and the live guess on the row agree.
+        confidence: 0.5,
+        body: "The back nine is holding water at the sixth again, and the survey from last autumn was right about the low run. Briarwood Golf would rather the clubhouse drainage went into the irrigation contract than out as a separate bid.",
       },
     ],
   },
