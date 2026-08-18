@@ -128,6 +128,49 @@ pub struct MicCheckResult {
     pub measured_at: DateTime<Utc>,
 }
 
+/// Commitment-ledger tuning: when an untouched entry starts reading as aging
+/// and then as stale, and how sure a conversation has to be that a commitment
+/// was already done before the app closes it without asking.
+///
+/// Thresholds rather than constants because the right numbers depend on how
+/// often the user actually meets: a fortnight of silence means something quite
+/// different on a weekly cadence than on a quarterly one. `NonZeroU32` for the
+/// day counts, matching [`RetentionPolicy::KeepDays`] — a zero-day threshold
+/// would tier every commitment stale the moment it was written.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LedgerSettings {
+    /// Days without a mention or an evidence check before a commitment reads
+    /// as aging.
+    pub aging_after_days: NonZeroU32,
+    /// Days before it reads as stale. Below `aging_after_days` this collapses
+    /// to a single boundary rather than a tier nothing can reach
+    /// (`ledger::AgingConfig`).
+    pub stale_after_days: NonZeroU32,
+    /// How confident a conversation's "that's already done" has to be to close
+    /// the commitment on its own. At or below this the claim parks in
+    /// `EntryState::NeedsReview` with the evidence attached, for a human to
+    /// confirm or dismiss. Clamped to `0.0..=1.0` where it is read.
+    pub conversation_autoclose: f64,
+}
+
+impl Default for LedgerSettings {
+    fn default() -> Self {
+        Self {
+            aging_after_days: nonzero(crate::ledger::DEFAULT_AGING_AFTER_DAYS),
+            stale_after_days: nonzero(crate::ledger::DEFAULT_STALE_AFTER_DAYS),
+            conversation_autoclose: crate::ledger::DEFAULT_CONVERSATION_AUTOCLOSE,
+        }
+    }
+}
+
+/// The ledger defaults are plain `u32` constants (nothing in the read model
+/// cares that they are non-zero); this is the one place that has to lift them,
+/// and a zero would be a bug in the constant rather than in a user's file.
+fn nonzero(days: u32) -> NonZeroU32 {
+    NonZeroU32::new(days).expect("ledger day thresholds are non-zero constants")
+}
+
 /// The persisted app settings. `#[serde(default)]` makes every field optional
 /// on load, so an older file missing a field (or a future file with an extra
 /// one) still deserializes — forward/backward compatibility for a config the
@@ -149,10 +192,12 @@ pub struct Settings {
     /// Theme choice.
     pub appearance: AppearanceSettings,
     /// The most recent Settings mic-test result, if the user has ever run
-    /// one. Last field deliberately: serde emits fields in declaration
-    /// order, so appending leaves the existing JSON/TOML prefix
-    /// byte-identical for anything mirroring the older shape.
+    /// one.
     pub mic_check: Option<MicCheckResult>,
+    /// Commitment-ledger tuning. Last field deliberately: serde emits fields
+    /// in declaration order, so appending leaves the existing JSON/TOML prefix
+    /// byte-identical for anything mirroring the older shape.
+    pub ledger: LedgerSettings,
 }
 
 /// Loads the settings stored at `config_path`, writing defaults on first run.
@@ -292,6 +337,7 @@ mod tests {
                 overlay: OverlaySettings::default(),
                 appearance: AppearanceSettings::default(),
                 mic_check: None,
+                ledger: LedgerSettings::default(),
             };
             save(&path, &settings).unwrap();
             assert_eq!(load_or_create(&path).unwrap(), settings);
@@ -316,6 +362,7 @@ mod tests {
             },
             appearance: AppearanceSettings::default(),
             mic_check: None,
+            ledger: LedgerSettings::default(),
         };
         save(&path, &settings).unwrap();
         assert_eq!(load_or_create(&path).unwrap(), settings);
@@ -333,6 +380,7 @@ mod tests {
             overlay: OverlaySettings::default(),
             appearance: AppearanceSettings::default(),
             mic_check: None,
+            ledger: LedgerSettings::default(),
         })
         .unwrap();
         assert!(toml.contains("consent_acknowledged = true"), "{toml}");
@@ -450,7 +498,7 @@ mod tests {
         let json = serde_json::to_string(&Settings::default()).unwrap();
         assert_eq!(
             json,
-            r#"{"consent_acknowledged":false,"retention":{"policy":"keep_all"},"overlay":{"manual_captures":false,"auto_captures":true},"appearance":{"theme":"system"},"mic_check":null}"#
+            r#"{"consent_acknowledged":false,"retention":{"policy":"keep_all"},"overlay":{"manual_captures":false,"auto_captures":true},"appearance":{"theme":"system"},"mic_check":null,"ledger":{"aging_after_days":14,"stale_after_days":30,"conversation_autoclose":0.8}}"#
         );
 
         let keep = serde_json::to_string(&Settings {
@@ -470,11 +518,12 @@ mod tests {
                     .unwrap()
                     .with_timezone(&Utc),
             }),
+            ledger: LedgerSettings::default(),
         })
         .unwrap();
         assert_eq!(
             keep,
-            r#"{"consent_acknowledged":true,"retention":{"policy":"keep_days","days":30},"overlay":{"manual_captures":true,"auto_captures":false},"appearance":{"theme":"dark"},"mic_check":{"outcome":"speakers","echo_db":12.5,"delay_ms":85.0,"measured_at":"2026-07-22T00:48:18Z"}}"#
+            r#"{"consent_acknowledged":true,"retention":{"policy":"keep_days","days":30},"overlay":{"manual_captures":true,"auto_captures":false},"appearance":{"theme":"dark"},"mic_check":{"outcome":"speakers","echo_db":12.5,"delay_ms":85.0,"measured_at":"2026-07-22T00:48:18Z"},"ledger":{"aging_after_days":14,"stale_after_days":30,"conversation_autoclose":0.8}}"#
         );
     }
 
@@ -558,6 +607,92 @@ mod tests {
         assert!(settings.mic_check.is_none());
         save(&path, &settings).unwrap();
         assert_eq!(load_or_create(&path).unwrap().mic_check, None);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn ledger_defaults_match_the_read_models_own_thresholds() {
+        // One set of numbers, defined where the tiering happens; this struct
+        // only lifts them into the user's file.
+        let ledger = Settings::default().ledger;
+        assert_eq!(
+            ledger.aging_after_days.get(),
+            crate::ledger::DEFAULT_AGING_AFTER_DAYS
+        );
+        assert_eq!(
+            ledger.stale_after_days.get(),
+            crate::ledger::DEFAULT_STALE_AFTER_DAYS
+        );
+        assert_eq!(
+            ledger.conversation_autoclose,
+            crate::ledger::DEFAULT_CONVERSATION_AUTOCLOSE
+        );
+    }
+
+    #[test]
+    fn ledger_tuning_round_trips_through_toml() {
+        let dir = temp_dir("ledger-roundtrip");
+        let path = dir.join("settings.toml");
+
+        let settings = Settings {
+            ledger: LedgerSettings {
+                aging_after_days: NonZeroU32::new(7).unwrap(),
+                stale_after_days: NonZeroU32::new(21).unwrap(),
+                conversation_autoclose: 0.95,
+            },
+            ..Settings::default()
+        };
+        save(&path, &settings).unwrap();
+        assert_eq!(load_or_create(&path).unwrap(), settings);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_settings_file_written_before_ledger_tuning_still_loads() {
+        // The forward/backward-compatibility claim `#[serde(default)]` makes,
+        // exercised against a file from an install that predates this field.
+        let dir = temp_dir("ledger-absent");
+        let path = dir.join("settings.toml");
+        fs::write(
+            &path,
+            "consent_acknowledged = true
+
+[retention]
+policy = \"keep_all\"
+",
+        )
+        .unwrap();
+
+        let loaded = load_or_create(&path).unwrap();
+        assert!(loaded.consent_acknowledged);
+        assert_eq!(loaded.ledger, LedgerSettings::default());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_zero_day_threshold_is_refused_at_the_file_boundary() {
+        // `NonZeroU32` is the guard: zero days would tier every commitment
+        // stale the instant it was written.
+        let dir = temp_dir("ledger-zero");
+        let path = dir.join("settings.toml");
+        fs::write(
+            &path,
+            "[ledger]
+aging_after_days = 0
+stale_after_days = 30
+conversation_autoclose = 0.8
+",
+        )
+        .unwrap();
+
+        // A corrupt file self-heals to defaults rather than bricking startup.
+        assert_eq!(
+            load_or_create(&path).unwrap().ledger,
+            LedgerSettings::default()
+        );
 
         fs::remove_dir_all(&dir).unwrap();
     }

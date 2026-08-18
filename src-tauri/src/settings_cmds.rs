@@ -10,7 +10,9 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use kodabi_core::settings::{self, AppearanceSettings, OverlaySettings, RetentionPolicy, Settings};
+use kodabi_core::settings::{
+    self, AppearanceSettings, LedgerSettings, OverlaySettings, RetentionPolicy, Settings,
+};
 use tauri::{AppHandle, Emitter, State};
 
 /// Event emitted after settings change over IPC, carrying the new [`Settings`].
@@ -141,6 +143,29 @@ pub fn set_appearance(
         |s| s.appearance = appearance,
     )?;
     let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
+    Ok(settings)
+}
+
+/// Sets the commitment-ledger tuning: the aging and stale day thresholds, and
+/// how sure a conversation has to be before a completion claim closes an entry
+/// on its own.
+///
+/// Emits the ledger event as well as the settings one, because the thresholds
+/// are read when the commitments list is assembled: without it the Commitments
+/// view would keep rendering the tiers it was given until something else
+/// happened to refetch.
+#[tauri::command]
+pub fn set_ledger_tuning(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+    ledger: LedgerSettings,
+) -> Result<Settings, String> {
+    let settings = state.update(
+        "Couldn't save the commitment settings. The previous values still apply; try again.",
+        |s| s.ledger = ledger,
+    )?;
+    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
+    let _ = app.emit(crate::events::LEDGER_CHANGED_EVENT, ());
     Ok(settings)
 }
 

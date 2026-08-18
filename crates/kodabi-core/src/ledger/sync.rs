@@ -41,6 +41,24 @@ use super::store::normalize;
 use super::{mint_id, Direction, EntryState, Ledger, Result};
 use crate::meeting::ActionItemFact;
 
+/// "This new line is that existing commitment, said again."
+///
+/// The reconciler pairs lines to entries by exact normalized text, which is
+/// the only thing it can be sure of on its own. A distill that was shown the
+/// open commitments knows more than that: it can tell that "send the slide
+/// deck" is the commitment already recorded as "send the deck". A hint carries
+/// that judgement in, so the paraphrase links instead of minting a second live
+/// entry for one promise.
+///
+/// Advisory, never binding: a hint naming an entry that has since closed or
+/// vanished is ignored, and the ordinary matching runs.
+pub struct LinkHint {
+    /// The action-item id in the note being synced.
+    pub item_id: String,
+    /// The existing entry it restates.
+    pub entry_id: String,
+}
+
 /// One note's freshly derived facts, as handed to [`Ledger::sync_note_items`].
 pub struct NoteSync<'a> {
     pub note_id: &'a str,
@@ -51,6 +69,10 @@ pub struct NoteSync<'a> {
     /// in it look freshly mentioned.
     pub note_date_utc: &'a str,
     pub items: &'a [ActionItemFact],
+    /// Lines this note's distill recognized as commitments already tracked.
+    /// Empty for an ordinary index-driven sync, which knows only what the text
+    /// says.
+    pub link_hints: &'a [LinkHint],
     /// RFC 3339 UTC, for `created_at` / `updated_at` / ref timestamps.
     pub now: &'a str,
 }
@@ -116,6 +138,7 @@ impl Ledger {
             project: "",
             note_date_utc: now,
             items: &[],
+            link_hints: &[],
             now,
         })
     }
@@ -252,7 +275,18 @@ fn reconcile(
     for item in &fresh {
         let owner_norm = normalize(&item.owner);
         let description_norm = normalize(&item.description);
-        match match_live_entry(tx, &owner_norm, &description_norm)? {
+        // A hint first, then the text. The hint is a stronger claim than exact
+        // equality can make, and it is checked against the live states so a
+        // stale one falls through rather than resurrecting a settled entry.
+        let hinted = match sync.link_hints.iter().find(|hint| hint.item_id == item.id) {
+            Some(hint) if is_live_entry(tx, &hint.entry_id)? => Some(hint.entry_id.clone()),
+            _ => None,
+        };
+        let matched = match hinted {
+            Some(entry_id) => Some(entry_id),
+            None => match_live_entry(tx, &owner_norm, &description_norm)?,
+        };
+        match matched {
             Some(entry_id) => {
                 link_ref(tx, &entry_id, sync.note_id, &item.id, sync.now)?;
                 bump_mention(tx, &entry_id, sync, dirty)?;
@@ -335,6 +369,24 @@ fn entry_facts(tx: &Connection, entry_id: &str) -> Result<EntryFacts> {
         last_mention,
         state: EntryState::parse(&state)?,
     })
+}
+
+/// Whether an entry exists and is in a state a new line may attach to.
+///
+/// The same live set [`match_live_entry`] trusts: a closed or waived
+/// commitment restated later is a new commitment, not a revival.
+fn is_live_entry(tx: &Connection, entry_id: &str) -> Result<bool> {
+    let state: Option<String> = tx
+        .query_row(
+            "SELECT state FROM ledger_entries WHERE entry_id = ?1",
+            [entry_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(matches!(
+        state.as_deref(),
+        Some("open") | Some("needs_review") | Some("snoozed")
+    ))
 }
 
 /// The live entry that best matches an owner + description, if any.
@@ -497,6 +549,7 @@ mod tests {
                 note_id,
                 project,
                 note_date_utc: date,
+                link_hints: &[],
                 items,
                 now: NOW,
             })
@@ -887,5 +940,133 @@ mod tests {
         let detail = ledger.get_entry(&entry_id).unwrap().unwrap();
         assert_eq!(detail.entry.last_mention, DAY_TWO, "clock never runs back");
         assert_eq!(detail.entry.project, "Briarwood Golf", "project holds");
+    }
+
+    /// Syncs with the distill's judgement about which lines restate what.
+    fn sync_hinted(
+        ledger: &mut Ledger,
+        note_id: &str,
+        date: &str,
+        items: &[ActionItemFact],
+        hints: &[LinkHint],
+    ) -> SyncOutcome {
+        ledger
+            .sync_note_items(&NoteSync {
+                note_id,
+                project: "Briarwood Golf",
+                note_date_utc: date,
+                link_hints: hints,
+                items,
+                now: NOW,
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn a_hint_pairs_a_paraphrase_the_text_could_never_match() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let first = vec![fact("a_111111", "You", "send the deck")];
+        let created = sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &first);
+        let entry_id = created.created[0].clone();
+
+        // Different words for the same promise: exact matching gives up here,
+        // which is precisely why the distill's judgement is worth carrying in.
+        let second = vec![fact("a_222222", "You", "send the slide deck")];
+        let outcome = sync_hinted(
+            &mut ledger,
+            "n_d4e5f6",
+            DAY_TWO,
+            &second,
+            &[LinkHint {
+                item_id: "a_222222".to_string(),
+                entry_id: entry_id.clone(),
+            }],
+        );
+
+        assert!(outcome.created.is_empty());
+        assert_eq!(outcome.rementioned, vec![entry_id.clone()]);
+        let entries = ledger.list_entries(&EntryFilter::default()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].last_mention, DAY_TWO);
+    }
+
+    #[test]
+    fn a_hint_naming_a_settled_entry_falls_through_to_the_ordinary_rules() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let first = vec![fact("a_111111", "You", "send the deck")];
+        let created = sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &first);
+        let entry_id = created.created[0].clone();
+        ledger.waive(&entry_id, NOW).unwrap();
+
+        // A hint is advisory. Reviving a commitment a human waived would
+        // erase their judgement, so a stale hint is ignored rather than obeyed.
+        let second = vec![fact("a_222222", "You", "send the slide deck")];
+        let outcome = sync_hinted(
+            &mut ledger,
+            "n_d4e5f6",
+            DAY_TWO,
+            &second,
+            &[LinkHint {
+                item_id: "a_222222".to_string(),
+                entry_id: entry_id.clone(),
+            }],
+        );
+
+        assert_eq!(outcome.created.len(), 1);
+        assert_ne!(outcome.created[0], entry_id);
+        assert_eq!(
+            ledger.get_entry(&entry_id).unwrap().unwrap().entry.state,
+            EntryState::Waived
+        );
+    }
+
+    #[test]
+    fn a_hint_for_an_unknown_entry_is_ignored() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![fact("a_111111", "You", "send the deck")];
+        let outcome = sync_hinted(
+            &mut ledger,
+            "n_a1b2c3",
+            DAY_ONE,
+            &items,
+            &[LinkHint {
+                item_id: "a_111111".to_string(),
+                entry_id: "le_invented".to_string(),
+            }],
+        );
+
+        assert_eq!(outcome.created.len(), 1);
+    }
+
+    #[test]
+    fn a_hint_never_overrides_a_line_that_is_already_linked() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![
+            fact("a_111111", "You", "send the deck"),
+            fact("a_222222", "Priya", "book the venue"),
+        ];
+        let created = sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &items);
+        let deck = created.created[0].clone();
+
+        // Re-syncing the same note with a hint pointing the venue line at the
+        // deck's entry: the lines are unchanged, so the earlier tiers pair
+        // them first and the hint never gets a say.
+        let outcome = sync_hinted(
+            &mut ledger,
+            "n_a1b2c3",
+            DAY_ONE,
+            &items,
+            &[LinkHint {
+                item_id: "a_222222".to_string(),
+                entry_id: deck.clone(),
+            }],
+        );
+
+        assert_eq!(outcome.unchanged, 2);
+        assert!(outcome.rementioned.is_empty());
+        assert_eq!(
+            ledger.list_entries(&EntryFilter::default()).unwrap().len(),
+            2
+        );
     }
 }

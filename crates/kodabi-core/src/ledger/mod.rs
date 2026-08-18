@@ -28,16 +28,21 @@
 //! items through [`ledger_item_refs`](migrations), whose rows retire rather than
 //! disappear. [`sync`] is where a re-minted id is re-attached to its entry.
 
+pub mod distill_apply;
 mod migrations;
 pub mod snapshot;
 mod store;
 mod sync;
 pub mod view;
 
+pub use distill_apply::{apply_distill_follow_up, AppliedUpdates, AutoClose, DistillFollowUp};
 pub use snapshot::{ProjectSnapshot, RestoreReport, LEDGER_SNAPSHOT_FILE, LEDGER_SNAPSHOT_VERSION};
 pub use store::{EntryDetail, EntryFilter, EntryLink, Evidence, ItemRef, LedgerEntry};
-pub use sync::{NoteSync, SyncOutcome};
-pub use view::{Commitment, CommitmentItem, CommitmentSource, NoteContext};
+pub use sync::{LinkHint, NoteSync, SyncOutcome};
+pub use view::{
+    AgingConfig, AgingTier, Commitment, CommitmentItem, CommitmentSource, NoteContext,
+    DEFAULT_AGING_AFTER_DAYS, DEFAULT_STALE_AFTER_DAYS,
+};
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -50,6 +55,16 @@ use rusqlite::Connection;
 /// shell's `sandbox::config_dir`, so `KODABI_SANDBOX` relocates it with the rest
 /// of the config state).
 pub const LEDGER_DB_FILE: &str = "ledger.db";
+
+/// How sure a conversation's report that a commitment was already done has to
+/// be before the app closes it unasked.
+///
+/// The default sits high on purpose: the two failures are not symmetric. A
+/// claim parked for review costs one click; a commitment closed wrongly is one
+/// the user stops seeing and never delivers. Below this, the evidence is still
+/// recorded and the entry parks in [`EntryState::NeedsReview`] rather than
+/// being discarded.
+pub const DEFAULT_CONVERSATION_AUTOCLOSE: f64 = 0.8;
 
 /// Base36 alphabet for minted ids (mirrors [`crate::note`]'s).
 const ALPHABET: &[u8; 36] = b"0123456789abcdefghijklmnopqrstuvwxyz";

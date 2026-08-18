@@ -406,27 +406,41 @@ fn run(app: &AppHandle, session_path: &Path) -> Result<PathBuf, DistillFailure> 
     let kb = knowledge_base_dir(app).map_err(DistillFailure::Other)?;
     let runner = ClaudeRunner::new(ClaudeConfig::distill_from_env());
     let config = routing_config_from_env();
-    kodabi_core::distill::distill_session(&runner, &kb, session_path, &|output, body| {
-        let (routing, diagnostics) = route_distilled(&kb, output, body, &config);
-        // Discovery failed outright: the note fell back to Inbox. Warn the UI so
-        // the misrouting is visible, not silent.
-        if let Some(err) = &diagnostics.discovery_failure {
-            let message =
-                format!("routing signals failed to load; filing this note to Inbox: {err}");
-            eprintln!("distill: {message}");
-            let _ = app.emit(
-                DISTILL_STATE_EVENT,
-                DistillStateEvent::RoutingFallback { message },
-            );
-        }
-        // A single project's signal file is broken but routing still ran
-        // (contained to that project). Log it so the user can fix the file; the
-        // note landed wherever the surviving signals sent it, not in a fallback.
-        report_signal_failures("distill", &diagnostics.glossary_failures);
-        report_signal_failures("distill", &diagnostics.example_failures);
-        routing
+    kodabi_core::distill::distill_session(
+        &runner,
+        &kb,
+        session_path,
+        &|output, body| {
+            let (routing, diagnostics) = route_distilled(&kb, output, body, &config);
+            // Discovery failed outright: the note fell back to Inbox. Warn the UI so
+            // the misrouting is visible, not silent.
+            if let Some(err) = &diagnostics.discovery_failure {
+                let message =
+                    format!("routing signals failed to load; filing this note to Inbox: {err}");
+                eprintln!("distill: {message}");
+                let _ = app.emit(
+                    DISTILL_STATE_EVENT,
+                    DistillStateEvent::RoutingFallback { message },
+                );
+            }
+            // A single project's signal file is broken but routing still ran
+            // (contained to that project). Log it so the user can fix the file; the
+            // note landed wherever the surviving signals sent it, not in a fallback.
+            report_signal_failures("distill", &diagnostics.glossary_failures);
+            report_signal_failures("distill", &diagnostics.example_failures);
+            routing
+        },
+        &crate::distill_follow_up::open_commitments_fetcher(
+            app.state::<crate::ledger_state::LedgerState>().client(),
+            config.clone(),
+        ),
+    )
+    .map(|distilled| {
+        // The note is written; the ledger half runs after it and can only
+        // ever cost itself.
+        crate::distill_follow_up::apply_after_distill(app, &kb, &distilled);
+        distilled.path
     })
-    .map(|distilled| distilled.path)
     .map_err(|err| match err {
         DistillError::EmptyTranscript => DistillFailure::EmptyTranscript {
             reason: err.to_string(),

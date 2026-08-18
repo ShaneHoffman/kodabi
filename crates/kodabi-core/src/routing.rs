@@ -165,7 +165,11 @@ impl RoutingConfig {
     /// `threshold` when finite and in `(0.0, 1.0]`, else [`DEFAULT_THRESHOLD`]
     /// — a bad value falls back rather than breaking the pipeline. Excluding
     /// `0.0` keeps a dead tie (confidence `0.0`) from ever auto-filing.
-    fn effective_threshold(&self) -> f64 {
+    ///
+    /// Public because the same floor decides more than filing: the distill
+    /// pass asks whether a guess is good enough to show that project's open
+    /// commitments to the model.
+    pub fn effective_threshold(&self) -> f64 {
         if self.threshold.is_finite() && self.threshold > 0.0 && self.threshold <= 1.0 {
             self.threshold
         } else {

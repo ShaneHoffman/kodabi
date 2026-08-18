@@ -35,6 +35,8 @@ function commitment(
     created_at: "2026-08-01T00:00:00Z",
     updated_at: "2026-08-01T00:00:00Z",
     last_mention: "2026-08-01T00:00:00Z",
+    last_evidence_check: null,
+    tier: "fresh",
     snoozed_until: null,
     snooze_lapsed: false,
     closed_via: null,
@@ -634,5 +636,86 @@ describe("CommitmentsView", () => {
       name: 'Mark "book the venue" done',
     });
     expect(box).toBeDisabled();
+  });
+
+  it("names a commitment's tier once it stops being fresh", async () => {
+    const user = userEvent.setup();
+    serve({
+      entries: [
+        commitment({
+          entry_id: "le_stale",
+          description: "send the deck",
+          tier: "stale",
+          item: item({ description: "send the deck" }),
+        }),
+        commitment({
+          entry_id: "le_aging",
+          description: "chase the invoice",
+          tier: "aging",
+          item: item({ description: "chase the invoice" }),
+        }),
+        commitment({
+          entry_id: "le_fresh",
+          description: "book the venue",
+          item: item(),
+        }),
+      ],
+    });
+
+    await openCommitments(user);
+
+    const mine = await screen.findByTestId("commitments-mine");
+    expect(within(mine).getByText(/stale · heard/)).toBeInTheDocument();
+    expect(within(mine).getByText(/aging · heard/)).toBeInTheDocument();
+    // Fresh says nothing: it is the absence of a problem, so a fresh row
+    // spends no line telling you everything is fine.
+    expect(within(mine).queryByText(/fresh/)).not.toBeInTheDocument();
+  });
+
+  it("promotes a stale row's age out of the faint run", async () => {
+    const user = userEvent.setup();
+    serve({
+      entries: [
+        commitment({
+          entry_id: "le_stale",
+          description: "send the deck",
+          tier: "stale",
+          item: item({ description: "send the deck" }),
+        }),
+      ],
+    });
+
+    await openCommitments(user);
+
+    // Age reads as weight and position, never as a hue: the promotion is one
+    // step up the ink ladder, the same treatment overdue gets.
+    const mine = await screen.findByTestId("commitments-mine");
+    expect(within(mine).getByText(/^stale · heard/)).toHaveClass("text-ink-dim");
+  });
+
+  it("leaves the promoted slot to overdue when a row is both", async () => {
+    const user = userEvent.setup();
+    serve({
+      entries: [
+        commitment({
+          entry_id: "le_both",
+          description: "chase the invoice",
+          tier: "stale",
+          item: item({
+            description: "chase the invoice",
+            due_date: "2026-08-10",
+            status: "overdue",
+          }),
+        }),
+      ],
+    });
+
+    await openCommitments(user);
+
+    // One promoted segment per row. An overdue row spends it on overdue, so
+    // the tier stays in the faint run rather than competing with it.
+    const mine = await screen.findByTestId("commitments-mine");
+    expect(within(mine).getByText(/^overdue · due/)).toHaveClass("text-ink-dim");
+    expect(within(mine).getByText(/stale · heard/)).not.toHaveClass("text-ink-dim");
   });
 });

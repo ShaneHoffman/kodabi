@@ -19,6 +19,7 @@ const ACKNOWLEDGED: Settings = {
   overlay: { manual_captures: false, auto_captures: true },
   appearance: { theme: "system" },
   mic_check: null,
+  ledger: { aging_after_days: 14, stale_after_days: 30, conversation_autoclose: 0.8 },
 };
 
 function primaryButton(): HTMLElement {

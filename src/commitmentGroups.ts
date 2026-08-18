@@ -78,19 +78,39 @@ export function needsReview(commitment: Commitment): boolean {
 }
 
 /**
+ * When anything last touched a commitment: the later of the mention that named
+ * it and the evidence check that looked for it.
+ *
+ * Both are RFC 3339 UTC with a `Z`, the format whose lexical order is its
+ * chronological order, so this is a string comparison on purpose. It matches
+ * the anchor `AgingTier::derive` uses backend-side, which is what keeps the
+ * within-band order agreeing with the tier the band was chosen by.
+ */
+export function agingAnchor(commitment: Commitment): string {
+  const checked = commitment.last_evidence_check;
+  return checked !== null && checked > commitment.last_mention ? checked : commitment.last_mention;
+}
+
+/**
  * Where a row sorts inside its group. Lower comes first.
  *
  * The order the ticket asks for, with one thing ahead of it: a needs-review row
  * is one keystroke from resolution and the ledger is asking directly, which
- * outranks any due date. Then overdue, then due soonest, then the undated by
- * how long ago anyone last mentioned them (the aging proxy until #234 gives
- * aging its own tiers), then fresh.
+ * outranks any due date. Then overdue, then due soonest, then the undated ones
+ * by tier.
+ *
+ * The tiers subdivide the undated band rather than reordering the dated one: a
+ * commitment with a date carries its own escalation, since it becomes overdue
+ * on its own and lands in band 1. An undated one has nothing but this to
+ * resurface it, so going quiet is the only signal it has, and stale leads.
  */
 function sortRank(commitment: Commitment): number {
   if (needsReview(commitment)) return 0;
   if (commitment.item?.status === "overdue") return 1;
   if (commitment.item?.due_date) return 2;
-  return 3;
+  if (commitment.tier === "stale") return 3;
+  if (commitment.tier === "aging") return 4;
+  return 5;
 }
 
 /** Orders one group's rows. */
@@ -104,9 +124,12 @@ function compare(a: Commitment, b: Commitment): number {
   const dueB = dayValue(b.item?.due_date);
   if (dueA !== null && dueB !== null && dueA !== dueB) return dueA - dueB;
 
-  // Undated: oldest mention first, so the ones going quiet float up.
-  if (dueA === null && dueB === null && a.last_mention !== b.last_mention) {
-    return a.last_mention < b.last_mention ? -1 : 1;
+  // Undated: quietest first, so within a tier the ones nobody has touched for
+  // longest lead.
+  if (dueA === null && dueB === null) {
+    const anchorA = agingAnchor(a);
+    const anchorB = agingAnchor(b);
+    if (anchorA !== anchorB) return anchorA < anchorB ? -1 : 1;
   }
 
   // Stable and deterministic, so a refetch never reshuffles equal rows.

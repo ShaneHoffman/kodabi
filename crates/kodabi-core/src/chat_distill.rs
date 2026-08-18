@@ -34,11 +34,13 @@ use chrono::{DateTime, Local, Utc};
 
 use crate::chat::{self, ChatRecord};
 use crate::distill::{
-    self, distill_rendered, DistillError, DistillOutput, DistilledNote, PromptFlavor, RenderedLine,
+    self, distill_rendered, DistillError, DistillOutput, DistilledNote, OpenCommitment,
+    PromptFlavor, RenderedLine,
 };
 use crate::llm::HeadlessClaude;
 use crate::naming;
 use crate::note::{NoteType, Routing, Source};
+use crate::routing;
 
 /// Prompt prefix for the local user's turns. Deliberately the same token the
 /// meeting pass uses for the local speaker, so "You" means one thing.
@@ -139,6 +141,7 @@ pub fn distill_chat(
     vault_root: &Path,
     chat_path: &Path,
     route: &dyn Fn(&DistillOutput, &str) -> Routing,
+    open_entries: &dyn Fn(&routing::RouteGuess) -> Vec<OpenCommitment>,
 ) -> Result<DistilledNote, DistillError> {
     let records = chat::read_transcript(chat_path).map_err(DistillError::ChatTranscript)?;
     if !chat::has_distillable_substance(&records) {
@@ -195,6 +198,7 @@ pub fn distill_chat(
             title_seed_fallback: None,
         },
         route,
+        open_entries,
     )
 }
 
@@ -214,6 +218,13 @@ fn conversation_chars(records: &[ChatRecord]) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The fetcher for a distill with no ledger behind it: every call site
+    /// that is not exercising the commitment context uses this, so the prompt
+    /// it sends is the plain one.
+    fn no_open_entries(_: &routing::RouteGuess) -> Vec<OpenCommitment> {
+        Vec::new()
+    }
+
     use crate::chat::{ChatTranscript, PermissionResolution};
     use crate::device::DeviceId;
     use crate::distill::RESPONSE_SHAPE_SPEC;
@@ -447,7 +458,8 @@ mod tests {
         let chat_path = write_chat(vault.path(), &substantive());
         let runner = MockRunner::new(OUTPUT_JSON);
 
-        let distilled = distill_chat(&runner, vault.path(), &chat_path, &inbox).unwrap();
+        let distilled =
+            distill_chat(&runner, vault.path(), &chat_path, &inbox, &no_open_entries).unwrap();
 
         let markdown = std::fs::read_to_string(&distilled.path).unwrap();
         assert!(markdown.contains("type: chat"), "{markdown}");
@@ -485,7 +497,14 @@ mod tests {
             &[meta("2026-07-10T16:15:00Z"), user("hi"), assistant("hello")],
         );
 
-        let err = distill_chat(&PanicRunner, vault.path(), &chat_path, &inbox).unwrap_err();
+        let err = distill_chat(
+            &PanicRunner,
+            vault.path(),
+            &chat_path,
+            &inbox,
+            &no_open_entries,
+        )
+        .unwrap_err();
 
         assert!(
             matches!(err, DistillError::ThinChat { chars: 7, min } if min == chat::MIN_CHAT_DISTILL_CHARS),
@@ -502,7 +521,14 @@ mod tests {
         let elsewhere = tempfile::tempdir().unwrap();
         let chat_path = write_chat(elsewhere.path(), &substantive());
 
-        let err = distill_chat(&PanicRunner, vault.path(), &chat_path, &inbox).unwrap_err();
+        let err = distill_chat(
+            &PanicRunner,
+            vault.path(),
+            &chat_path,
+            &inbox,
+            &no_open_entries,
+        )
+        .unwrap_err();
 
         assert!(
             matches!(err, DistillError::SessionOutsideVault(_)),
@@ -515,7 +541,14 @@ mod tests {
         let vault = tempfile::tempdir().unwrap();
         let missing = vault.path().join(chat::CHATS_DIR).join("nope.jsonl");
 
-        let err = distill_chat(&PanicRunner, vault.path(), &missing, &inbox).unwrap_err();
+        let err = distill_chat(
+            &PanicRunner,
+            vault.path(),
+            &missing,
+            &inbox,
+            &no_open_entries,
+        )
+        .unwrap_err();
 
         assert!(matches!(err, DistillError::ChatTranscript(_)), "{err:?}");
     }

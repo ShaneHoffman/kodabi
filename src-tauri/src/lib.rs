@@ -4,6 +4,7 @@ mod capture_watchdog;
 mod chat_cmds;
 mod chat_distill_cmds;
 mod distill_cmds;
+mod distill_follow_up;
 mod events;
 mod glossary_cmds;
 mod index_cmds;
@@ -322,6 +323,7 @@ pub fn run() {
             settings_cmds::set_retention_policy,
             settings_cmds::set_capture_overlay,
             settings_cmds::set_appearance,
+            settings_cmds::set_ledger_tuning,
             settings_cmds::acknowledge_consent,
             terminal_cmds::terminal_open,
             terminal_cmds::terminal_write,

@@ -164,7 +164,8 @@ cleanup pass fixes the rest at transcription time, so distill always starts from
 ### Distill
 
 At meeting end — batch, not continuous — a **single headless-Claude call** returns summary, action
-items, decisions and open questions as one structured result. A transcript over the input character
+items, decisions, open questions and (when the pass was shown any) its verdicts on existing
+commitments as one structured result. A transcript over the input character
 budget is chunked on segment boundaries and map-reduced: one call per chunk, then as many merge
 rounds as the parts themselves need — they are model output, so nothing bounds their combined size —
 each returning that same single shape. A two-hour meeting distills rather than erroring. A failure
@@ -241,6 +242,38 @@ said. Since the ledger worker owns the database single-threaded, commands reach 
 request/reply channel (`ledger_state::LedgerClient`) that reports an unavailable ledger rather than
 dropping a person's judgement silently, and mutations announce themselves on `ledger:changed` —
 distinct from `vault:changed`, which would be a lie for a write that touched no note.
+
+Two things age. A row's **tier** (`fresh` / `aging` / `stale`) is derived at read time by
+`ledger::view` from the later of `last_mention` and `last_evidence_check`, against a `today` the
+shell supplies and the day thresholds the user set in Settings. Nothing writes when a tier changes,
+for the same reason nothing writes when a snooze lapses: a stored tier would need a writer on the
+day it turned, and the read model can simply answer the question instead. `updated_at` is
+deliberately not part of it, because that is the sync's wall clock and re-indexing an old vault
+would otherwise make every commitment in it look freshly discussed. Stale rows lead the undated
+band; a row with a date already escalates on its own by becoming overdue.
+
+The other ageing input is the distill pass, which is the ledger's first evidence **producer**.
+Before the model call, the pass guesses the project from the raw transcript
+(`routing::best_candidate` — the authoritative routing still runs afterwards on the rendered body)
+and is shown that project's open commitments as a bounded JSON block. The guess has to clear the
+same confidence threshold that decides auto-filing, so a transcript the router could not place
+confidently is distilled with no block at all and the pass behaves exactly as it did before this
+existed. It classifies any it hears
+about as `refresh`, `supersede`, or `completed`, and `ledger::distill_apply` turns those into state:
+a refresh advances the mention clock, a supersede links the old entry to the new one, and a
+completion claim is recorded as `conversation` evidence that either closes the entry or parks it in
+`needs_review` for a human, depending on the user's confidence threshold. A close is the one place
+the app ticks a checkbox the user did not: the box belongs to whichever *earlier* note recorded the
+promise, and it is written together with a `- Closed <date>: …` line naming the conversation that
+reported it, so a box nobody remembers ticking can be traced back
+(`docs/FRONTMATTER_SCHEMA.md`). Anything short of that threshold leaves every note untouched. A refresh naming one of
+the new note's own lines is also the dedup mechanism — it is handed to the reconciler as a hint, so
+a paraphrase (`"send the slide deck"` for `"send the deck"`) links to the existing commitment rather
+than minting a second live entry for one promise. The classifications ride the shared
+`RESPONSE_SHAPE_SPEC`, so meeting and chat distills both produce them; the map-reduced path for a
+very long transcript deliberately does not, since an item index cannot survive a merge that rewrites
+the list. The whole second half is best effort and runs after the note is on disk
+(`distill_follow_up`): a distill never fails because the ledger was busy or unavailable.
 
 ## 6. The release path, and its two signatures
 

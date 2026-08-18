@@ -60,6 +60,114 @@ pub struct CommitmentSource {
     pub path: String,
 }
 
+/// How long an untouched commitment stays [`AgingTier::Fresh`], then
+/// [`AgingTier::Aging`], before it reads as [`AgingTier::Stale`].
+///
+/// Days rather than instants because this is a calendar judgement a person
+/// makes ("nobody has said anything for a month"), and the same reason
+/// [`AgingTier::derive`] takes `today` rather than an instant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgingConfig {
+    pub aging_after_days: u32,
+    pub stale_after_days: u32,
+}
+
+/// The default thresholds: a commitment on a weekly cadence has missed at
+/// least one full cycle at a fortnight, and a month of silence is the point
+/// where it has most likely been forgotten rather than merely delayed.
+pub const DEFAULT_AGING_AFTER_DAYS: u32 = 14;
+pub const DEFAULT_STALE_AFTER_DAYS: u32 = 30;
+
+impl Default for AgingConfig {
+    fn default() -> Self {
+        Self {
+            aging_after_days: DEFAULT_AGING_AFTER_DAYS,
+            stale_after_days: DEFAULT_STALE_AFTER_DAYS,
+        }
+    }
+}
+
+impl AgingConfig {
+    /// The stale threshold as the derivation actually applies it: never below
+    /// the aging one, so a config with the two inverted degrades to a single
+    /// boundary rather than to a tier that can never be reached. Clamped at
+    /// use rather than at construction, matching `RoutingConfig`, so the
+    /// stored value stays the number the user typed.
+    fn effective_stale_after_days(self) -> u32 {
+        self.stale_after_days.max(self.aging_after_days)
+    }
+}
+
+/// How long a commitment has gone without anyone touching it.
+///
+/// Derived, never stored: the inputs are already on the entry, and a stored
+/// tier would need a writer on the day it changes — which is exactly the
+/// mechanism [`super::EntryState::Snoozed`] deliberately avoids.
+///
+/// The pre-meeting prep briefs of Theme 2 are the other intended consumer:
+/// [`derive`](AgingTier::derive) takes the two anchor strings and nothing
+/// else, and the vault's `_ledger.yml` snapshot carries both, so a brief can
+/// call this without opening the ledger database.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgingTier {
+    Fresh,
+    Aging,
+    Stale,
+}
+
+impl AgingTier {
+    /// The wire spelling, matching [`super::EntryState::as_str`]'s convention.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AgingTier::Fresh => "fresh",
+            AgingTier::Aging => "aging",
+            AgingTier::Stale => "stale",
+        }
+    }
+
+    /// Tiers an entry by how long ago anything last touched it.
+    ///
+    /// The anchor is the later of the two: a mention in a meeting and an
+    /// evidence check are both somebody looking at this commitment, and either
+    /// one means it has not gone quiet. Deliberately *not* `updated_at`, which
+    /// is the sync's wall clock — re-indexing an old vault would then make
+    /// every entry look fresh, which is the failure `last_mention` was defined
+    /// as a note date to avoid.
+    ///
+    /// Both anchors are RFC 3339 UTC with a `Z`
+    /// (`.claude/rules/utc-timestamps.md`), so the later of the two is the
+    /// lexically larger one. An anchor that will not parse reads as `Stale`:
+    /// showing a commitment as needing attention is a smaller failure than
+    /// hiding one that does, the same call [`snooze_lapsed`] makes.
+    pub fn derive(
+        last_mention: &str,
+        last_evidence_check: Option<&str>,
+        today: NaiveDate,
+        config: AgingConfig,
+    ) -> AgingTier {
+        let anchor = match last_evidence_check {
+            Some(checked) if checked > last_mention => checked,
+            _ => last_mention,
+        };
+        let Some(day) = anchor
+            .get(..10)
+            .and_then(|prefix| NaiveDate::parse_from_str(prefix, "%Y-%m-%d").ok())
+        else {
+            return AgingTier::Stale;
+        };
+        // A future anchor is not aged: a note dated tomorrow is odd, but it is
+        // not evidence of neglect.
+        let age_days = today.signed_duration_since(day).num_days().max(0);
+        if age_days >= i64::from(config.effective_stale_after_days()) {
+            AgingTier::Stale
+        } else if age_days >= i64::from(config.aging_after_days) {
+            AgingTier::Aging
+        } else {
+            AgingTier::Fresh
+        }
+    }
+}
+
 /// One ledger entry as a surface renders it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Commitment {
@@ -74,6 +182,11 @@ pub struct Commitment {
     /// ([`EntryState::Snoozed`]), so the surface asks here and files a lapsed
     /// entry back with the live work.
     pub snooze_lapsed: bool,
+    /// How long this entry has gone untouched. Stamped for every entry
+    /// whatever its state, including snoozed and settled ones: what a tier
+    /// *means* for sort order and for what a row says is the surface's call,
+    /// the same division [`Commitment::snooze_lapsed`] draws.
+    pub tier: AgingTier,
 }
 
 /// Joins entries to their source lines and evaluates snooze expiry.
@@ -85,10 +198,11 @@ pub fn assemble(
     details: Vec<EntryDetail>,
     notes: &HashMap<String, NoteContext>,
     today: NaiveDate,
+    aging: AgingConfig,
 ) -> Vec<Commitment> {
     details
         .into_iter()
-        .map(|detail| assemble_one(detail, notes, today))
+        .map(|detail| assemble_one(detail, notes, today, aging))
         .collect()
 }
 
@@ -96,8 +210,15 @@ fn assemble_one(
     detail: EntryDetail,
     notes: &HashMap<String, NoteContext>,
     today: NaiveDate,
+    aging: AgingConfig,
 ) -> Commitment {
     let snooze_lapsed = snooze_lapsed(&detail, today);
+    let tier = AgingTier::derive(
+        &detail.entry.last_mention,
+        detail.entry.last_evidence_check.as_deref(),
+        today,
+        aging,
+    );
     // Refs come back active-first ([`Ledger::item_refs`]), and only a live ref
     // names the line a person can still tick. A retired ref is history.
     let active = detail.item_refs.iter().find(|item_ref| item_ref.active);
@@ -127,6 +248,7 @@ fn assemble_one(
         item,
         source,
         snooze_lapsed,
+        tier,
     }
 }
 
@@ -238,6 +360,7 @@ mod tests {
                 project: "Briarwood Golf",
                 note_date_utc: DAY,
                 items: &items,
+                link_hints: &[],
                 now: NOW,
             })
             .unwrap();
@@ -262,7 +385,7 @@ mod tests {
             ),
         )]);
 
-        let assembled = assemble(details, &notes, today());
+        let assembled = assemble(details, &notes, today(), AgingConfig::default());
 
         let item = assembled[0].item.as_ref().expect("the live line");
         // The note's current text wins over the entry's cached copy.
@@ -286,6 +409,7 @@ mod tests {
                 project: "Briarwood Golf",
                 note_date_utc: DAY,
                 items: &[],
+                link_hints: &[],
                 now: NOW,
             })
             .unwrap();
@@ -302,7 +426,7 @@ mod tests {
                 vec![row("a_111111", "Priya", "stale text", None, true)],
             ),
         )]);
-        let assembled = assemble(vec![retired], &notes, today());
+        let assembled = assemble(vec![retired], &notes, today(), AgingConfig::default());
         assert!(assembled[0].item.is_none(), "a retired ref is history");
         assert!(assembled[0].source.is_none());
     }
@@ -312,7 +436,7 @@ mod tests {
         let (ledger, _) = seeded();
         let details = ledger.list_details(&Default::default()).unwrap();
 
-        let assembled = assemble(details, &HashMap::new(), today());
+        let assembled = assemble(details, &HashMap::new(), today(), AgingConfig::default());
 
         assert!(assembled[0].item.is_none());
         assert!(assembled[0].source.is_none());
@@ -342,7 +466,7 @@ mod tests {
             ),
         )]);
 
-        let assembled = assemble(details.clone(), &notes, today());
+        let assembled = assemble(details.clone(), &notes, today(), AgingConfig::default());
         assert_eq!(
             assembled[0].item.as_ref().unwrap().status,
             ActionItemStatus::Overdue
@@ -350,7 +474,7 @@ mod tests {
 
         // The same data read a week earlier is not overdue.
         let earlier = NaiveDate::from_ymd_opt(2026, 8, 10).unwrap();
-        let assembled = assemble(details, &notes, earlier);
+        let assembled = assemble(details, &notes, earlier, AgingConfig::default());
         assert_eq!(
             assembled[0].item.as_ref().unwrap().status,
             ActionItemStatus::Open
@@ -369,7 +493,7 @@ mod tests {
             ),
         )]);
 
-        let assembled = assemble(details, &notes, today());
+        let assembled = assemble(details, &notes, today(), AgingConfig::default());
 
         assert!(assembled[0].item.as_ref().unwrap().done);
         assert_eq!(
@@ -391,7 +515,7 @@ mod tests {
         ] {
             ledger.snooze(&entry_id, until, NOW).unwrap();
             let details = ledger.list_details(&Default::default()).unwrap();
-            let assembled = assemble(details, &HashMap::new(), today());
+            let assembled = assemble(details, &HashMap::new(), today(), AgingConfig::default());
             assert_eq!(
                 assembled[0].snooze_lapsed, expected,
                 "snoozed until {until}, read on 2026-08-17"
@@ -407,7 +531,7 @@ mod tests {
         details[0].entry.state = EntryState::Snoozed;
         details[0].entry.snoozed_until = Some("next Tuesday".to_string());
 
-        let assembled = assemble(details, &HashMap::new(), today());
+        let assembled = assemble(details, &HashMap::new(), today(), AgingConfig::default());
         assert!(assembled[0].snooze_lapsed);
     }
 
@@ -417,7 +541,7 @@ mod tests {
         ledger.close(&entry_id, ClosedVia::Manual, NOW).unwrap();
         let details = ledger.list_details(&Default::default()).unwrap();
 
-        let assembled = assemble(details, &HashMap::new(), today());
+        let assembled = assemble(details, &HashMap::new(), today(), AgingConfig::default());
         assert!(!assembled[0].snooze_lapsed);
     }
 
@@ -459,5 +583,119 @@ mod tests {
             10,
         );
         assert_eq!(settled.len(), 1);
+    }
+
+    /// `today()` is 2026-08-17, so an anchor N days back is `17 - N` in August.
+    fn days_ago(days: u32) -> String {
+        let day = today() - chrono::Duration::days(i64::from(days));
+        format!("{}T09:00:00Z", day.format("%Y-%m-%d"))
+    }
+
+    #[test]
+    fn tiers_fall_on_their_configured_boundaries() {
+        let config = AgingConfig::default();
+        let tier = |days: u32| AgingTier::derive(&days_ago(days), None, today(), config);
+
+        // Fresh right up to the boundary, which is itself aging: "after 14
+        // days" means the fourteenth day already counts.
+        assert_eq!(tier(0), AgingTier::Fresh);
+        assert_eq!(tier(13), AgingTier::Fresh);
+        assert_eq!(tier(14), AgingTier::Aging);
+        assert_eq!(tier(29), AgingTier::Aging);
+        assert_eq!(tier(30), AgingTier::Stale);
+        assert_eq!(tier(365), AgingTier::Stale);
+    }
+
+    #[test]
+    fn an_evidence_check_counts_as_touching_the_entry() {
+        let config = AgingConfig::default();
+        let stale_mention = days_ago(40);
+
+        // Nobody has said it out loud in forty days, but something checked it
+        // yesterday, so it has not gone quiet.
+        assert_eq!(
+            AgingTier::derive(&stale_mention, Some(&days_ago(1)), today(), config),
+            AgingTier::Fresh
+        );
+        // An older check never drags a recent mention backwards: the anchor is
+        // the later of the two, not the evidence one when it exists.
+        assert_eq!(
+            AgingTier::derive(&days_ago(1), Some(&days_ago(40)), today(), config),
+            AgingTier::Fresh
+        );
+        // With no check at all the mention stands alone.
+        assert_eq!(
+            AgingTier::derive(&stale_mention, None, today(), config),
+            AgingTier::Stale
+        );
+    }
+
+    #[test]
+    fn an_unreadable_anchor_reads_as_stale_and_a_future_one_as_fresh() {
+        let config = AgingConfig::default();
+        assert_eq!(
+            AgingTier::derive("not a timestamp", None, today(), config),
+            AgingTier::Stale
+        );
+        assert_eq!(
+            AgingTier::derive("", None, today(), config),
+            AgingTier::Stale
+        );
+        // A note dated tomorrow is odd, but it is not evidence of neglect.
+        assert_eq!(
+            AgingTier::derive("2026-09-01T00:00:00Z", None, today(), config),
+            AgingTier::Fresh
+        );
+    }
+
+    #[test]
+    fn an_inverted_config_collapses_to_one_boundary_rather_than_a_dead_tier() {
+        let config = AgingConfig {
+            aging_after_days: 30,
+            stale_after_days: 7,
+        };
+        // Below the aging threshold nothing has happened yet...
+        assert_eq!(
+            AgingTier::derive(&days_ago(20), None, today(), config),
+            AgingTier::Fresh
+        );
+        // ...and at it the entry goes straight to stale, because a stale
+        // threshold under the aging one cannot mean anything else.
+        assert_eq!(
+            AgingTier::derive(&days_ago(30), None, today(), config),
+            AgingTier::Stale
+        );
+    }
+
+    #[test]
+    fn assemble_stamps_a_tier_against_the_supplied_today() {
+        let (ledger, _) = seeded();
+        let details = ledger.list_details(&Default::default()).unwrap();
+        let notes = HashMap::new();
+
+        // The entry was mentioned on `DAY` (2026-08-17).
+        let fresh = assemble(details.clone(), &notes, today(), AgingConfig::default());
+        assert_eq!(fresh[0].tier, AgingTier::Fresh);
+
+        // Same entry, a clock two months on: the ledger did not change, the
+        // day did.
+        let later = NaiveDate::from_ymd_opt(2026, 10, 17).unwrap();
+        let stale = assemble(details, &notes, later, AgingConfig::default());
+        assert_eq!(stale[0].tier, AgingTier::Stale);
+    }
+
+    #[test]
+    fn a_snoozed_entry_is_tiered_like_any_other() {
+        let (mut ledger, entry_id) = seeded();
+        ledger.snooze(&entry_id, "2026-12-01", NOW).unwrap();
+        let details = ledger.list_details(&Default::default()).unwrap();
+
+        // Shelved is not the same as touched: the tier keeps running so a
+        // snooze that lapses months later rejoins the live work reading
+        // honestly rather than looking freshly minted.
+        let later = NaiveDate::from_ymd_opt(2026, 12, 1).unwrap();
+        let assembled = assemble(details, &HashMap::new(), later, AgingConfig::default());
+        assert_eq!(assembled[0].tier, AgingTier::Stale);
+        assert!(assembled[0].snooze_lapsed);
     }
 }

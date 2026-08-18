@@ -221,15 +221,23 @@ A line may sit directly beneath an action item, recording how the commitment was
 
 The shape is fixed: two spaces, then `- Closed <YYYY-MM-DD>: `, then a sentence. The writer is
 `vault::annotate_action_item`, the seam the commitment ledger's evidence providers call when they
-close an entry — so this is a **contract, not yet a behavior**: nothing in the app calls it today,
-and no note on disk carries such a line until the GitHub-evidence work lands.
+close an entry. Two providers reach it today: a human confirming a parked claim
+(`confirm_commitment_evidence`), and the distill pass, when a later conversation reports a
+commitment already done confidently enough to close it without asking
+(`distill_follow_up::apply_after_distill`, whose confidence floor is the user's
+`ledger.conversation_autoclose` setting). The comparison is strict, so a claim *at or below* that
+floor parks the entry in `needs_review` with the evidence attached and writes nothing to the note.
 
 The prefix is chosen to be **inert to the action-item grammar** by construction: the parser trims
 each line and then skips anything that is not `- [ ] ` or `- [x] `, so a body carrying any number of
 these re-derives byte-identical action items, ids included. That inertness is what makes the whole
-approach safe, and it is why the ledger annotates rather than ticking the box: **the checkbox stays
-the user's**, and the human-readable story of a commitment stays in the Markdown rather than living
-only in a database. The one thing that would break it is a line that *does* start with a checkbox,
+approach safe, and it is why an annotation is written alongside every automatic tick rather than
+instead of the story: the human-readable account of a commitment stays in the Markdown rather than
+living only in a database, so a box the app ticked says on the next line who reported it done and
+where. The two writes are separate calls and the annotation is allowed to fail on its own, so a
+ticked box without one is possible; what is never possible is an annotation that silently rewrote
+the item. Ticking is reserved for evidence that cleared the confidence bar or that a human
+confirmed; everything less certain waits in `needs_review` and leaves the box alone. The one thing that would break it is a line that *does* start with a checkbox,
 which would mint a phantom item and shift the occurrence counter behind every duplicate line after
 it.
 

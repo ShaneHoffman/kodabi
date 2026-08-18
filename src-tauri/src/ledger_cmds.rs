@@ -26,7 +26,8 @@ use chrono::{Duration, Local, SecondsFormat, Utc};
 use kodabi_core::index::ActionItemStatus;
 use kodabi_core::ledger::view::{self, Commitment};
 use kodabi_core::ledger::{
-    ClosedVia, EntryDetail, EntryFilter, EntryState, Evidence, LedgerEntry, NoteContext,
+    AgingConfig, ClosedVia, EntryDetail, EntryFilter, EntryState, Evidence, LedgerEntry,
+    NoteContext,
 };
 use kodabi_core::meeting;
 use kodabi_core::note::{self, NoteId, INBOX};
@@ -36,6 +37,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::events::{LEDGER_CHANGED_EVENT, VAULT_CHANGED_EVENT};
 use crate::index_state::{IndexReadHandle, IndexState};
 use crate::ledger_state::{LedgerCallError, LedgerClient, LedgerOp, LedgerState, MutateReply};
+use crate::settings_cmds::SettingsState;
 use crate::transcribe::knowledge_base_dir;
 use crate::user_errors::{reported, user_sentence};
 
@@ -82,6 +84,12 @@ pub struct CommitmentDto {
     created_at: String,
     updated_at: String,
     last_mention: String,
+    /// When an evidence provider last checked this commitment, if one ever
+    /// has. Pairs with `last_mention` as the other half of the aging anchor.
+    last_evidence_check: Option<String>,
+    /// `fresh | aging | stale`: how long the entry has gone untouched,
+    /// derived against the device's local today and the user's thresholds.
+    tier: String,
     snoozed_until: Option<String>,
     /// Whether a snooze's day has arrived. Evaluated at read time; nothing
     /// writes when a snooze lapses.
@@ -184,6 +192,7 @@ fn commitment_dto(commitment: Commitment) -> CommitmentDto {
         item,
         source,
         snooze_lapsed,
+        tier,
     } = commitment;
     let entry = detail.entry;
     CommitmentDto {
@@ -198,6 +207,8 @@ fn commitment_dto(commitment: Commitment) -> CommitmentDto {
         created_at: entry.created_at,
         updated_at: entry.updated_at,
         last_mention: entry.last_mention,
+        last_evidence_check: entry.last_evidence_check,
+        tier: tier.as_str().to_string(),
         snoozed_until: entry.snoozed_until,
         snooze_lapsed,
         closed_via: entry.closed_via.map(|via| via.as_str().to_string()),
@@ -299,6 +310,19 @@ const LEDGER_REFUSED: &str = "The commitment ledger isn't available this session
 // Helpers
 // ---------------------------------------------------------------------------
 
+/// The user's aging thresholds, as the read model wants them.
+///
+/// Read per call rather than cached: the Settings view can change these while
+/// the Commitments view is mounted, and the ledger event that follows sends it
+/// straight back here.
+fn aging_config(app: &AppHandle) -> AgingConfig {
+    let ledger = app.state::<SettingsState>().snapshot().ledger;
+    AgingConfig {
+        aging_after_days: ledger.aging_after_days.get(),
+        stale_after_days: ledger.stale_after_days.get(),
+    }
+}
+
 /// The device's local calendar day.
 ///
 /// Local rather than UTC on purpose, and one of the sanctioned local reads
@@ -329,7 +353,7 @@ fn handles(app: &AppHandle) -> (LedgerClient, Option<IndexReadHandle>) {
 /// The same eager pair `note_cmds` does after a write: the index upsert keeps
 /// search current without waiting on the watcher, and the broadcast makes every
 /// open window refetch. The watcher's own later reconcile is then a no-op.
-fn reindex_and_broadcast(app: &AppHandle, listed: &ListedNote, kb: &std::path::Path) {
+pub(crate) fn reindex_and_broadcast(app: &AppHandle, listed: &ListedNote, kb: &std::path::Path) {
     let rel = listed.path.strip_prefix(kb).unwrap_or(&listed.path);
     let mut indexed = kodabi_core::index::IndexedNote::from_note(
         &listed.note,
@@ -370,6 +394,7 @@ pub async fn list_commitments(
     project: Option<String>,
 ) -> Result<CommitmentsDto, String> {
     let (client, index) = handles(&app);
+    let aging = aging_config(&app);
     tauri::async_runtime::spawn_blocking(move || {
         let filter = |states: &[EntryState]| EntryFilter {
             states: Some(states.to_vec()),
@@ -409,11 +434,11 @@ pub async fn list_commitments(
 
         let today = local_today();
         Ok(CommitmentsDto {
-            entries: view::assemble(live, &notes, today)
+            entries: view::assemble(live, &notes, today, aging)
                 .into_iter()
                 .map(commitment_dto)
                 .collect(),
-            settled: view::assemble(settled, &notes, today)
+            settled: view::assemble(settled, &notes, today, aging)
                 .into_iter()
                 .map(commitment_dto)
                 .collect(),

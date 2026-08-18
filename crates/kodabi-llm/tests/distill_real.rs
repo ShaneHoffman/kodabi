@@ -89,9 +89,13 @@ fn distills_a_stored_transcript_into_a_schema_valid_meeting_note() {
     .expect("session should persist");
 
     let runner = ClaudeRunner::new(ClaudeConfig::distill());
-    let distilled = distill_session(&runner, vault.path(), &session_path, &|_, _| {
-        inbox_routing()
-    })
+    let distilled = distill_session(
+        &runner,
+        vault.path(),
+        &session_path,
+        &|_, _| inbox_routing(),
+        &no_open_entries,
+    )
     .expect("distill should succeed");
 
     let written = std::fs::read_to_string(&distilled.path).expect("note file should exist");
@@ -140,4 +144,12 @@ fn distills_a_stored_transcript_into_a_schema_valid_meeting_note() {
             .any(|line| !line.starts_with("- [ ] Unassigned to ")),
         "expected at least one owned action item, got: {action_lines:?}"
     );
+}
+
+/// The fetcher for a distill with no ledger behind it: this test exercises the
+/// real model against the note pipeline, not the commitment classifications.
+fn no_open_entries(
+    _: &kodabi_core::routing::RouteGuess,
+) -> Vec<kodabi_core::distill::OpenCommitment> {
+    Vec::new()
 }
