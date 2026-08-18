@@ -152,6 +152,23 @@ function NumberField({
   );
 }
 
+/** Which of the Commitments card's three fields a commit came from. */
+type LedgerField = keyof LedgerSettings;
+
+/**
+ * A number field's committed value, falling back to what is stored when the
+ * field is blank.
+ *
+ * `Number("")` is `0`, not `NaN`, so a cleared field would otherwise commit
+ * zero: harmless for the day counts, which clamp back up to their minimum, and
+ * the worst possible value for the auto-close confidence, where 0% closes every
+ * commitment a conversation claims done without ever asking. Clearing a field
+ * is how people start retyping one, so it has to mean "unchanged".
+ */
+function fieldNumber(raw: string, stored: number): number {
+  return raw.trim() === "" ? stored : Number(raw);
+}
+
 function Row({
   label,
   hint,
@@ -556,6 +573,10 @@ export function SettingsView() {
   const [ledgerSaved, setLedgerSaved] = useState(false);
   const [ledgerSavedTick, setLedgerSavedTick] = useState(0);
   const [savingLedger, setSavingLedger] = useState(false);
+  // Which field asked for the write, so its outcome lands under it: a `foot`
+  // is the row's own status line, and an error two rows below the control that
+  // raised it reads as belonging to the wrong setting.
+  const [ledgerFoot, setLedgerFoot] = useState<LedgerField>("aging_after_days");
   if (!seededLedger && settings) {
     setSeededLedger(true);
     setAgingDays(String(settings.ledger.aging_after_days));
@@ -569,20 +590,41 @@ export function SettingsView() {
     ledgerSavedTick,
   );
 
+  // One pair of lines, rendered under whichever row asked for the write.
+  const ledgerFootLines = (
+    <>
+      {ledgerSaved && <ConfirmLine>Saved.</ConfirmLine>}
+      {ledgerError && (
+        <StatusMessage variant="error" compact>
+          {ledgerError}
+        </StatusMessage>
+      )}
+    </>
+  );
+
   // Every ledger field commits the whole group, because the backend takes the
   // three together and the two day thresholds are read against each other.
-  const applyLedger = async (next: Partial<LedgerSettings>) => {
+  // `field` is only for where the outcome is reported; the values all come
+  // from the fields themselves.
+  const applyLedger = async (field: LedgerField) => {
     // Enter commits and then blur commits again as focus leaves. The
     // unchanged-value check below catches that once a save has landed; this
     // catches the case where the second fires while the first is still in
     // flight, which would otherwise be two writes of the same value.
     if (!settings || savingLedger) return;
     const merged: LedgerSettings = {
-      aging_after_days: clampDays(Number(agingDays)),
-      stale_after_days: clampDays(Number(staleDays)),
-      conversation_autoclose: clampConfidence(Number(autoclose) / 100),
-      ...next,
+      aging_after_days: clampDays(fieldNumber(agingDays, settings.ledger.aging_after_days)),
+      stale_after_days: clampDays(fieldNumber(staleDays, settings.ledger.stale_after_days)),
+      conversation_autoclose: clampConfidence(
+        fieldNumber(autoclose, settings.ledger.conversation_autoclose * 100) / 100,
+      ),
     };
+    // A cleared or clamped field shows the number the app is actually using
+    // rather than what was typed, whether or not the write below happens.
+    setAgingDays(String(merged.aging_after_days));
+    setStaleDays(String(merged.stale_after_days));
+    setAutoclose(String(Math.round(merged.conversation_autoclose * 100)));
+    setLedgerFoot(field);
     // Nothing to say when the committed value is what was already stored: a
     // blur that changed nothing should not announce a save.
     if (
@@ -824,49 +866,42 @@ export function SettingsView() {
           </Card>
 
           <Card title="Commitments">
+            {/* The three commit as a group, but the outcome belongs to the
+                field that asked for it: a `foot` is the row's own status line
+                (see `Row`), so it follows the commit rather than sitting on
+                whichever row happens to be last. */}
             <Row
               label="Aging"
               hint="Days without a mention before a commitment reads as aging in the Commitments view."
+              foot={ledgerFoot === "aging_after_days" && ledgerFootLines}
             >
               <NumberField
                 label="Days before aging"
                 value={agingDays}
                 min={1}
                 onChange={setAgingDays}
-                onCommit={() =>
-                  void applyLedger({ aging_after_days: clampDays(Number(agingDays)) })
-                }
+                onCommit={() => void applyLedger("aging_after_days")}
               />
             </Row>
 
             <Row
               label="Stale"
               hint="Days before it reads as stale and floats to the top of its group. Nothing is ever notified; the list just reorders."
+              foot={ledgerFoot === "stale_after_days" && ledgerFootLines}
             >
               <NumberField
                 label="Days before stale"
                 value={staleDays}
                 min={1}
                 onChange={setStaleDays}
-                onCommit={() =>
-                  void applyLedger({ stale_after_days: clampDays(Number(staleDays)) })
-                }
+                onCommit={() => void applyLedger("stale_after_days")}
               />
             </Row>
 
             <Row
               label="Close from conversation"
               hint="How sure a later conversation has to be that something was already done before Kodabi ticks it off for you. Below this, the claim waits for you to confirm it."
-              foot={
-                <>
-                  {ledgerSaved && <ConfirmLine>Saved.</ConfirmLine>}
-                  {ledgerError && (
-                    <StatusMessage variant="error" compact>
-                      {ledgerError}
-                    </StatusMessage>
-                  )}
-                </>
-              }
+              foot={ledgerFoot === "conversation_autoclose" && ledgerFootLines}
             >
               {/* A percentage rather than the stored 0..1: "80" is a number
                   people have an intuition about, and the field is a confidence
@@ -879,11 +914,7 @@ export function SettingsView() {
                 max={100}
                 width="w-16"
                 onChange={setAutoclose}
-                onCommit={() =>
-                  void applyLedger({
-                    conversation_autoclose: clampConfidence(Number(autoclose) / 100),
-                  })
-                }
+                onCommit={() => void applyLedger("conversation_autoclose")}
               />
               <span className="font-data text-[12.5px] text-ink-faint">%</span>
             </Row>

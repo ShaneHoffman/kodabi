@@ -938,4 +938,40 @@ describe("SettingsView About card", () => {
 
     expect(invoke).not.toHaveBeenCalledWith("set_ledger_tuning", expect.anything());
   });
+
+  it("treats a cleared commitment field as unchanged rather than as zero", async () => {
+    const user = userEvent.setup();
+    onCommand("set_ledger_tuning", () => DEFAULTS);
+    await renderSeeded();
+
+    // Clearing a field is how people start retyping one. Committing it as 0%
+    // would be the one setting that closes every claimed commitment without
+    // ever asking, so a blank field means "unchanged" and snaps back.
+    const confidence = screen.getByRole("spinbutton", { name: "Confidence percent" });
+    await user.clear(confidence);
+    await user.tab();
+
+    expect(invoke).not.toHaveBeenCalledWith("set_ledger_tuning", expect.anything());
+    expect(confidence).toHaveValue(80);
+  });
+
+  it("reports a failed save under the field that asked for it", async () => {
+    const user = userEvent.setup();
+    onCommand("set_ledger_tuning", () => {
+      throw "settings file is locked";
+    });
+    await renderSeeded();
+
+    // A `foot` is the row's own status line, so an error belongs to the
+    // control that raised it, not to whichever row happens to be last.
+    const aging = screen.getByRole("spinbutton", { name: "Days before aging" });
+    await user.clear(aging);
+    await user.type(aging, "7{Enter}");
+
+    // Each row is its own hairline unit, and the foot sits inside it.
+    const alert = await screen.findByRole("alert");
+    const confidence = screen.getByRole("spinbutton", { name: "Confidence percent" });
+    expect(aging.closest("div.border-t")).toContainElement(alert);
+    expect(confidence.closest("div.border-t")).not.toContainElement(alert);
+  });
 });

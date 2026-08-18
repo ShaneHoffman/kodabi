@@ -117,6 +117,11 @@ pub fn apply_distill_follow_up(
     // commitment can only disagree, and the first one wins rather than the
     // last one silently overwriting it.
     let mut touched: Vec<String> = Vec::new();
+    // And one *line* per pass, for the mirror-image case: two commitments the
+    // model says were both restated by the same new checkbox. Only one entry
+    // can hold a line, so without this the second update would take it off the
+    // first and close that first entry out as history.
+    let mut claimed_lines: Vec<String> = Vec::new();
 
     for update in follow_up.updates {
         let entry_id = update.entry_id.as_str();
@@ -141,7 +146,9 @@ pub fn apply_distill_follow_up(
         }
 
         let outcome = match update.kind {
-            LedgerUpdateKind::Refresh => apply_refresh(ledger, follow_up, update, now),
+            LedgerUpdateKind::Refresh => {
+                apply_refresh(ledger, follow_up, update, &mut claimed_lines, now)
+            }
             LedgerUpdateKind::Supersede => apply_supersede(ledger, follow_up, update, now),
             LedgerUpdateKind::Completed => {
                 apply_completion(ledger, follow_up, update, autoclose_threshold, now)
@@ -193,13 +200,26 @@ enum Applied {
 }
 
 /// "Still outstanding": advance the clock, change nothing else.
+///
+/// `claimed_lines` is the lines earlier updates in this pass already paired
+/// off. A line can only belong to one entry, so a second update naming it is
+/// the model telling us two commitments were restated by one checkbox: the
+/// first keeps the line and this one degrades to a bare re-mention, which is
+/// the whole truth about it anyway. Taking the line instead would close the
+/// first entry out as history over nothing.
 fn apply_refresh(
     ledger: &mut Ledger,
     follow_up: &DistillFollowUp<'_>,
     update: &LedgerUpdateDraft,
+    claimed_lines: &mut Vec<String>,
     now: &str,
 ) -> Result<Applied> {
-    if let Some(item) = update.item.and_then(|index| follow_up.items.get(index)) {
+    let line = update
+        .item
+        .and_then(|index| follow_up.items.get(index))
+        .filter(|item| !claimed_lines.contains(&item.id));
+    if let Some(item) = line {
+        claimed_lines.push(item.id.clone());
         // The hint already linked this line during the sync, which bumped the
         // mention with it. Unless the watcher got to the note first and minted
         // a duplicate for the same line, in which case the two entries have to
@@ -667,6 +687,50 @@ mod tests {
             })
             .unwrap();
         assert_eq!(superseded.len(), 1);
+    }
+
+    #[test]
+    fn two_refreshes_naming_one_line_never_supersede_each_other() {
+        let (mut ledger, first) = seeded();
+        // A second open commitment, so the note's single line is the only
+        // thing both updates can point at.
+        let second = ledger
+            .sync_note_items(&NoteSync {
+                note_id: "n_other",
+                project: "Briarwood Golf",
+                note_date_utc: EARLIER,
+                items: &[fact("a_other", "You", "book the venue")],
+                link_hints: &[],
+                now: EARLIER,
+            })
+            .unwrap()
+            .created[0]
+            .clone();
+
+        // One line, and a model that says both commitments were restated by
+        // it. Whichever entry loses the line is still a live promise: the
+        // second claim must not close the first out as history.
+        let items = vec![fact("a_new", "You", "handle the deck and the venue")];
+        let applied = apply(
+            &mut ledger,
+            &items,
+            &[
+                update(&first, LedgerUpdateKind::Refresh, Some(0), 0.9),
+                update(&second, LedgerUpdateKind::Refresh, Some(0), 0.9),
+            ],
+        );
+
+        assert_eq!(applied.refreshed, vec![first.clone(), second.clone()]);
+        assert!(applied.superseded.is_empty());
+        for entry_id in [&first, &second] {
+            let entry = ledger.get_entry(entry_id).unwrap().unwrap().entry;
+            assert_eq!(
+                entry.state,
+                EntryState::Open,
+                "{entry_id} is still an open promise"
+            );
+            assert_eq!(entry.last_mention, DAY, "{entry_id} was heard again");
+        }
     }
 
     #[test]
