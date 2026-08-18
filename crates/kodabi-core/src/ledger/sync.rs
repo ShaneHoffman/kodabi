@@ -198,7 +198,7 @@ fn reconcile(
         Some(_) => EnrolledVia::Override,
         None => EnrolledVia::Default,
     };
-    follow_override_project(tx, sync)?;
+    follow_override_project(tx, sync, dirty)?;
 
     // --- Partition -------------------------------------------------------
     let existing = active_refs(tx, sync.note_id)?;
@@ -408,17 +408,37 @@ pub(crate) fn note_override(tx: &Connection, note_id: &str) -> Result<Option<Enr
 ///
 /// The override is stored per note but snapshotted per project, so a re-filed
 /// note whose override stayed behind would write its judgement into a folder it
-/// no longer lives in. Cheap and idempotent: the `WHERE` makes it a no-op unless
-/// the note actually moved.
-fn follow_override_project(tx: &Connection, sync: &NoteSync<'_>) -> Result<()> {
+/// no longer lives in. Cheap and idempotent: it reads first and returns early
+/// unless the note actually moved.
+///
+/// Both projects are marked dirty when it does move, the same bookkeeping
+/// [`follow_project`] does for a re-filed entry: the old folder's snapshot still
+/// carries the override and the new folder's does not yet, so leaving either
+/// alone would restore the judgement into the wrong project.
+fn follow_override_project(
+    tx: &Connection,
+    sync: &NoteSync<'_>,
+    dirty: &mut BTreeSet<String>,
+) -> Result<()> {
     if sync.project.is_empty() {
         return Ok(());
     }
+    let previous: Option<String> = tx
+        .query_row(
+            "SELECT project FROM ledger_note_overrides WHERE note_id = ?1",
+            [sync.note_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(previous) = previous.filter(|project| project != sync.project) else {
+        return Ok(());
+    };
     tx.execute(
-        "UPDATE ledger_note_overrides SET project = ?2
-         WHERE note_id = ?1 AND project <> ?2",
+        "UPDATE ledger_note_overrides SET project = ?2 WHERE note_id = ?1",
         params![sync.note_id, sync.project],
     )?;
+    dirty.insert(previous);
+    dirty.insert(sync.project.to_string());
     Ok(())
 }
 
@@ -889,6 +909,12 @@ mod tests {
             )
             .unwrap();
         assert_eq!(project, "Briarwood Golf");
+        // Both snapshots are behind: the old folder's file still carries the
+        // override and the new folder's does not yet.
+        assert_eq!(
+            ledger.dirty_projects(),
+            vec!["Briarwood Golf".to_string(), "Inbox".to_string()]
+        );
     }
 
     #[test]

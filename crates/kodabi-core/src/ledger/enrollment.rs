@@ -20,6 +20,11 @@
 //!
 //! The asymmetry is deliberate: each direction only undoes what an override did.
 //!
+//! The untracking direction adds one more: **this meeting has to be the entry's
+//! only live source.** A commitment restated across meetings holds an active ref
+//! in each of them, and a meeting attended for context has no standing to
+//! untrack what another meeting is carrying.
+//!
 //! ## Why only one direction needs code
 //!
 //! Untracking has to be applied here, because the entries already exist and
@@ -111,6 +116,14 @@ impl Ledger {
     ///
     /// [`Direction::Mine`] is excluded because that is what context-only
     /// *means*: a direct ask is a commitment regardless of why you attended.
+    ///
+    /// **This meeting must be the entry's only live source.** A cross-note
+    /// re-mention leaves an active ref in every meeting that restated the
+    /// commitment, so without the second `NOT EXISTS` a context-only all-hands
+    /// would untrack a commitment a tracked one-to-one is carrying, purely for
+    /// having been mentioned in the wrong room. The mirror query needs no such
+    /// guard: an untracked entry is skipped by `match_live_entry`, so it can
+    /// never pick up a ref in a second note after the fact.
     fn overridable_entries(&self, note_id: &str) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
             "SELECT entry_id FROM ledger_entries
@@ -121,6 +134,9 @@ impl Ledger {
                AND EXISTS (SELECT 1 FROM ledger_item_refs
                            WHERE ledger_item_refs.entry_id = ledger_entries.entry_id
                              AND note_id = ?1 AND active = 1)
+               AND NOT EXISTS (SELECT 1 FROM ledger_item_refs
+                               WHERE ledger_item_refs.entry_id = ledger_entries.entry_id
+                                 AND note_id <> ?1 AND active = 1)
              ORDER BY entry_id",
         )?;
         let rows = stmt.query_map([note_id], |row| row.get(0))?;
@@ -306,6 +322,35 @@ mod tests {
             assert_eq!(entry.untracked_via, None, "{item_id} keeps no stale trace");
         }
         assert_eq!(ledger.note_tracking_override(NOTE).unwrap(), None);
+    }
+
+    #[test]
+    fn a_flip_spares_a_commitment_another_meeting_is_also_carrying() {
+        let (mut ledger, _) = seeded();
+        // The same commitment restated in a second meeting: tier 4 re-mentions
+        // the entry and leaves a second active ref behind, in a note that never
+        // produced it.
+        let restated = vec![fact("a_444444", "Priya", "send the revised deck")];
+        ledger
+            .sync_note_items(&NoteSync {
+                note_id: "n_d4e5f6",
+                project: PROJECT,
+                note_date_utc: DAY_ONE,
+                items: &restated,
+                link_hints: &[],
+                now: NOW,
+            })
+            .unwrap();
+
+        let outcome = ledger
+            .set_note_tracking("n_d4e5f6", PROJECT, true, LATER)
+            .unwrap();
+
+        assert!(
+            outcome.untracked.is_empty(),
+            "a context-only meeting decides what it enrolls, never what              another meeting is already carrying"
+        );
+        assert_eq!(entry_for(&ledger, "a_111111").state, EntryState::Open);
     }
 
     #[test]
