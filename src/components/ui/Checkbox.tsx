@@ -14,6 +14,25 @@ type Props = Omit<
   id?: string;
   /** Quiet helper text below the control, bound via aria-describedby. */
   hint?: ReactNode;
+  /**
+   * Renders the label to screen readers only.
+   *
+   * For a row that already prints the words beside the box, where a second
+   * visible label would be a duplicate but the control still needs a name.
+   * Named and shaped after `Select`'s, whose reasoning is the same.
+   */
+  hideLabel?: boolean;
+  /**
+   * Inert because a write is in flight.
+   *
+   * The same contract as `Button`'s `loading` and `Select`'s `busy`, for the
+   * same reason: the native `disabled` attribute blurs a focused element when
+   * it becomes disabled, so a person who ticked this box with the keyboard
+   * would lose their place every time the write round-trips. A busy box takes
+   * `aria-busy` + `aria-disabled`, stays focusable, and swallows its own
+   * change. `disabled` wins if both are passed.
+   */
+  busy?: boolean;
 };
 
 /**
@@ -38,12 +57,16 @@ export function Checkbox({
   onChange,
   id,
   hint,
+  hideLabel = false,
+  busy = false,
+  disabled = false,
   className = "",
   ...rest
 }: Props) {
   const generatedId = useId();
   const inputId = id ?? generatedId;
   const hintId = hint ? `${inputId}-hint` : undefined;
+  const isBusy = busy && !disabled;
 
   return (
     <div className="flex flex-col gap-1">
@@ -52,8 +75,17 @@ export function Checkbox({
           type="checkbox"
           id={inputId}
           checked={checked}
+          disabled={disabled}
+          // aria-busy says *why* it went inert; aria-disabled says that it did.
+          // Neither is the native attribute, so focus and the tab order stay
+          // exactly where the user left them.
+          aria-busy={isBusy || undefined}
+          aria-disabled={isBusy || undefined}
           aria-describedby={hintId}
-          onChange={(event) => onChange(event.target.checked)}
+          onChange={(event) => {
+            if (isBusy) return;
+            onChange(event.target.checked);
+          }}
           className={clsx(
             "grid size-[17px] flex-none cursor-pointer appearance-none place-content-center rounded-[4px] bg-transparent",
             // 1.4px rather than a hairline: the ring is the whole control, and
@@ -77,11 +109,11 @@ export function Checkbox({
             // argument's specificity, so (0,3,0) beats (0,2,0) — and paint a
             // ring around the ink fill while the box is also scaling down.
             "not-disabled:not-checked:active:shadow-[0_0_0_1.4px_var(--color-ink-read)]",
-            "not-disabled:active:scale-97",
+            "not-disabled:not-aria-disabled:active:scale-97",
             // The swap repeats the guard on purpose: `:not()` takes its
             // argument's specificity, so an unguarded stillness rule loses the
             // cascade and would be dead in the markup (see Button.tsx).
-            "motion-reduce:not-disabled:active:scale-100",
+            "motion-reduce:not-disabled:not-aria-disabled:active:scale-100",
             // Checked is an ink fill with a ground-coloured glyph — value, not
             // hue. The reserved green is never spent here.
             "checked:bg-ink checked:shadow-none",
@@ -97,12 +129,23 @@ export function Checkbox({
             // The box has no text to fade, so it dims instead — the one
             // sanctioned opacity fade in the system (DESIGN_SYSTEM §2).
             "disabled:cursor-not-allowed disabled:opacity-50",
+            // The busy pulse is opacity-only, so it is correct unpaired under
+            // reduced motion: movement is the accessibility problem, life is
+            // not (docs/DESIGN_SYSTEM.md §4). The guards repeat `aria-disabled`
+            // for the same specificity reason `not-checked` does above: an
+            // unguarded press rule would outrank the stillness it swaps.
+            "aria-disabled:cursor-progress aria-disabled:animate-pending",
             "focus-ring",
             className,
           )}
           {...rest}
         />
-        <label htmlFor={inputId} className="font-ui text-[12.5px] text-ink-read">
+        <label
+          htmlFor={inputId}
+          className={
+            hideLabel ? "sr-only" : "font-ui text-[12.5px] text-ink-read"
+          }
+        >
           {label}
         </label>
       </div>

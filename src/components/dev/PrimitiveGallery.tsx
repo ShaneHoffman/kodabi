@@ -146,6 +146,8 @@ export function PrimitiveGallery() {
             "Buttons",
             "Fields",
             "Switches",
+            "Checkboxes",
+            "Status messages",
             "Glass",
             "Overlays",
             "Kodama",
@@ -154,7 +156,7 @@ export function PrimitiveGallery() {
           ].map((name) => (
             <a
               key={name}
-              href={`#${name.toLowerCase()}`}
+              href={`#${name.toLowerCase().replace(/ /g, "-")}`}
               className="focus-ring-inset rounded-button px-2.5 py-2 text-[13.5px] text-ink-dim hover:bg-wash hover:text-ink"
             >
               {name}
@@ -305,6 +307,18 @@ export function PrimitiveGallery() {
               {/* Disabled dims rather than fades its text: the box has no text
                   to fade, which is the one sanctioned opacity drop. */}
               <Checkbox label="Archived, cannot be changed" checked disabled onChange={() => {}} />
+              {/* Busy, the same contract Button and Switch carry: the write is
+                  in flight, so the box pulses, declines its own change, and
+                  stays focusable. Tab to it and try. */}
+              <Checkbox label="Saving to the ledger" checked={false} busy onChange={() => {}} />
+              {/* Hidden label, for a row that already prints the words beside
+                  the box. It is still named to a screen reader. */}
+              <Checkbox
+                label="Send the revised deck"
+                hideLabel
+                checked={false}
+                onChange={() => {}}
+              />
             </div>
           </Section>
 

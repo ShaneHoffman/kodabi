@@ -158,14 +158,17 @@ describe("CommandPalette", () => {
     const user = userEvent.setup();
     await renderPalette();
     const options = screen.getAllByRole("option");
-    // Inbox, Search notes, Open chat, Open terminal, Vault glossary, Settings |
-    // briarwood-golf | New note, Quick capture, Start capture
-    expect(options).toHaveLength(10);
+    // Inbox, Search notes, Open chat, Open terminal, Commitments, Vault
+    // glossary, Settings | briarwood-golf | New note, Quick capture,
+    // Start capture
+    expect(options).toHaveLength(11);
     expect(selectedOption()).toHaveTextContent("Inbox");
 
-    await user.keyboard("{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}");
+    await user.keyboard(
+      "{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}{ArrowDown}",
+    );
 
-    // The seventh row is the first folder, reached with no extra keypress for
+    // The eighth row is the first folder, reached with no extra keypress for
     // the separator in between.
     expect(selectedOption()).toHaveTextContent("briarwood-golf");
   });

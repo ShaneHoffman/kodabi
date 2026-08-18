@@ -1,5 +1,6 @@
 import { useNavigation, viewKey } from "../../useNavigation";
 import { ChatView } from "../views/ChatView";
+import { CommitmentsView } from "../views/CommitmentsView";
 import { GlossaryView } from "../views/GlossaryView";
 import { InboxView } from "../views/InboxView";
 import { NeedsAttentionView } from "../views/NeedsAttentionView";
@@ -40,6 +41,11 @@ export function MainContent() {
       // the copy that used to live here folded the vault glossary onto a
       // project slugged `vault`.
       return <GlossaryView key={viewKey(view)} slug={view.slug} />;
+    case "commitments":
+      // Keyed for the same reason as the glossary: the view holds per-row and
+      // dialog state for one ledger, and a vault↔project jump is a different
+      // ledger entirely.
+      return <CommitmentsView key={viewKey(view)} slug={view.slug} />;
     case "search":
       // Keyed for the same reason as noteEditor: SearchView seeds its editable
       // draft from this prop once, so a second search (the palette's

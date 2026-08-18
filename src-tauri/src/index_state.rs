@@ -23,12 +23,14 @@
 //! edits and changes made while the app was closed both converge without a
 //! restart.
 
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use kodabi_core::embed::{self, Embedder};
 use kodabi_core::index::{IndexedNote, NoteIndex, SearchOptions, SearchParams, SearchResults};
+use kodabi_core::ledger::NoteContext;
 use kodabi_core::reconcile;
 use kodabi_core::watch::{self, VaultWatcher};
 use tauri::{AppHandle, Emitter, Manager};
@@ -177,6 +179,53 @@ impl SearchHandle {
     }
 }
 
+/// A cloneable read handle for the commitments join.
+///
+/// Separate from [`SearchHandle`] because it answers a different question with
+/// no embedder in it: given the note ids a set of ledger entries points at, what
+/// does the index currently say those notes' action items are. Same bargain as
+/// its sibling, for the same reason: managed state cannot cross onto a blocking
+/// thread, so a command clones this and reads there.
+#[derive(Clone)]
+pub struct IndexReadHandle {
+    index: Arc<Mutex<NoteIndex>>,
+}
+
+impl IndexReadHandle {
+    /// Reads the note context for each id, under one lock.
+    ///
+    /// Best-effort per note: a missing row or a read error omits that id rather
+    /// than failing the batch, because a commitment whose note the index has
+    /// lost still renders from the ledger's cached text
+    /// ([`kodabi_core::ledger::view`]). Blocking; call it off the IPC thread.
+    pub fn note_contexts(&self, note_ids: &BTreeSet<String>) -> HashMap<String, NoteContext> {
+        if note_ids.is_empty() {
+            return HashMap::new();
+        }
+        let idx = lock(&self.index);
+        let mut contexts = HashMap::with_capacity(note_ids.len());
+        for id in note_ids {
+            let Ok(Some(row)) = idx.get_note(id) else {
+                continue;
+            };
+            let Ok(items) = idx.get_action_items(id) else {
+                continue;
+            };
+            contexts.insert(
+                id.clone(),
+                NoteContext {
+                    note_id: row.id,
+                    title: row.title,
+                    project: row.project,
+                    path: row.path,
+                    items,
+                },
+            );
+        }
+        contexts
+    }
+}
+
 impl IndexState {
     /// Opens the index, builds the embedder, and spawns the worker. Never fails:
     /// an unopenable index degrades to "notes aren't indexed", not a launch
@@ -248,6 +297,13 @@ impl IndexState {
         Some(SearchHandle {
             index: Arc::clone(self.index.as_ref()?),
             embedder: self.embedder.clone(),
+        })
+    }
+
+    /// A read handle for the commitments join, when the index opened.
+    pub fn read_handle(&self) -> Option<IndexReadHandle> {
+        Some(IndexReadHandle {
+            index: Arc::clone(self.index.as_ref()?),
         })
     }
 

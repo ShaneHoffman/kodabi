@@ -329,12 +329,27 @@ impl Ledger {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
+    /// [`Ledger::list_entries`], hydrated: every match with its refs, evidence,
+    /// and links.
+    ///
+    /// The read a whole surface needs in one pass. A commitments view renders
+    /// the source line through the entry's active [`ItemRef`] and the pending
+    /// claims through its [`Evidence`], so fetching entries and then walking
+    /// back per row would be the same query N more times.
+    pub fn list_details(&self, filter: &EntryFilter) -> Result<Vec<EntryDetail>> {
+        self.hydrate(self.list_entries(filter)?)
+    }
+
     /// Every entry with an active ref in `note_id`.
     pub fn entries_for_note(&self, note_id: &str) -> Result<Vec<EntryDetail>> {
-        let entries = self.list_entries(&EntryFilter {
+        self.hydrate(self.list_entries(&EntryFilter {
             note_id: Some(note_id.to_string()),
             ..EntryFilter::default()
-        })?;
+        })?)
+    }
+
+    /// Attaches refs, evidence, and links to each entry, order preserved.
+    fn hydrate(&self, entries: Vec<LedgerEntry>) -> Result<Vec<EntryDetail>> {
         entries
             .into_iter()
             .map(|entry| {
@@ -591,6 +606,59 @@ impl Ledger {
         })
     }
 
+    /// Closes an entry on the strength of one recorded claim, taking the
+    /// closure's provenance from that claim's source.
+    ///
+    /// The confirm half of the confidence split: a provider that was not
+    /// confident enough to close parks the entry in
+    /// [`EntryState::NeedsReview`] with its claim attached, and a human
+    /// confirming it here closes it as `github` or `conversation` rather than
+    /// `manual` — the evidence is what resolved it, the human only agreed.
+    pub fn close_from_evidence(
+        &mut self,
+        entry_id: &str,
+        evidence_id: &str,
+        now: &str,
+    ) -> Result<(LedgerEntry, Evidence)> {
+        let claim = self
+            .evidence_for(entry_id)?
+            .into_iter()
+            .find(|claim| claim.evidence_id == evidence_id)
+            .ok_or_else(|| LedgerError::EvidenceNotFound {
+                evidence_id: evidence_id.to_string(),
+            })?;
+        let entry = self.close(entry_id, claim.source.as_closed_via(), now)?;
+        Ok((entry, claim))
+    }
+
+    /// Rejects a claim: removes it, and reopens the entry when that claim is
+    /// what closed it.
+    ///
+    /// The dismiss half of the confidence split. Reopening is deliberately
+    /// conditional on [`EntryState::Closed`]: dismissing a bad claim on a
+    /// snoozed or waived entry answers the claim, and must not also undo a
+    /// judgement the human made for unrelated reasons.
+    pub fn dismiss_evidence(
+        &mut self,
+        entry_id: &str,
+        evidence_id: &str,
+        now: &str,
+    ) -> Result<LedgerEntry> {
+        // Idempotent in the claim: a retry after a crash finds it already gone
+        // and still settles the entry's state below.
+        self.remove_evidence(evidence_id, now)?;
+        let (state, _) = Self::state_and_project(&self.conn, entry_id)?;
+        if state == EntryState::Closed {
+            return self.reopen(entry_id, now);
+        }
+        let detail = self
+            .get_entry(entry_id)?
+            .ok_or_else(|| LedgerError::EntryNotFound {
+                entry_id: entry_id.to_string(),
+            })?;
+        Ok(detail.entry)
+    }
+
     /// Stamps `last_evidence_check` without recording a claim — a provider that
     /// looked and found nothing still made the entry less stale to look at again.
     pub fn touch_evidence_check(&mut self, entry_id: &str, now: &str) -> Result<()> {
@@ -832,6 +900,120 @@ mod tests {
             .unwrap();
         let entry_id = outcome.created[0].clone();
         (ledger, entry_id)
+    }
+
+    #[test]
+    fn list_details_hydrates_and_keeps_list_entries_order() {
+        let (mut ledger, entry_id) = seeded();
+        ledger
+            .add_evidence(
+                &entry_id,
+                EvidenceSource::Github,
+                Some("https://example.com/pull/42"),
+                0.9,
+                NOW,
+                NOW,
+            )
+            .unwrap();
+
+        let details = ledger.list_details(&EntryFilter::default()).unwrap();
+        let entries = ledger.list_entries(&EntryFilter::default()).unwrap();
+
+        assert_eq!(
+            details.iter().map(|d| &d.entry).collect::<Vec<_>>(),
+            entries.iter().collect::<Vec<_>>(),
+            "hydration must not reorder or alter the entries"
+        );
+        let detail = &details[0];
+        assert_eq!(detail.item_refs.len(), 1);
+        assert_eq!(detail.evidence.len(), 1);
+        assert_eq!(detail.evidence[0].confidence, 0.9);
+    }
+
+    #[test]
+    fn close_from_evidence_takes_its_provenance_from_the_claim() {
+        let (mut ledger, entry_id) = seeded();
+        let claim = ledger
+            .add_evidence(
+                &entry_id,
+                EvidenceSource::Github,
+                Some("https://example.com/pull/42"),
+                0.94,
+                NOW,
+                NOW,
+            )
+            .unwrap();
+
+        let (entry, used) = ledger
+            .close_from_evidence(&entry_id, &claim.evidence_id, NOW)
+            .unwrap();
+
+        // `github`, not `manual`: the evidence resolved it, the human agreed.
+        assert_eq!(entry.state, EntryState::Closed);
+        assert_eq!(entry.closed_via, Some(ClosedVia::Github));
+        assert_eq!(used.evidence_id, claim.evidence_id);
+    }
+
+    #[test]
+    fn close_from_evidence_rejects_a_claim_that_is_not_the_entrys() {
+        let (mut ledger, entry_id) = seeded();
+        let err = ledger
+            .close_from_evidence(&entry_id, "ev_nosuchclaim", NOW)
+            .unwrap_err();
+        assert!(matches!(err, LedgerError::EvidenceNotFound { .. }));
+    }
+
+    #[test]
+    fn dismiss_evidence_reopens_a_closed_entry_but_leaves_a_snooze_alone() {
+        let (mut ledger, entry_id) = seeded();
+        let claim = ledger
+            .add_evidence(&entry_id, EvidenceSource::Github, None, 0.8, NOW, NOW)
+            .unwrap();
+        ledger
+            .close_from_evidence(&entry_id, &claim.evidence_id, NOW)
+            .unwrap();
+
+        let entry = ledger
+            .dismiss_evidence(&entry_id, &claim.evidence_id, NOW)
+            .unwrap();
+
+        assert_eq!(
+            entry.state,
+            EntryState::Open,
+            "a rejected claim undoes its own closure"
+        );
+        assert_eq!(entry.closed_via, None);
+        let detail = ledger.get_entry(&entry_id).unwrap().unwrap();
+        assert!(detail.evidence.is_empty(), "the claim itself is gone");
+
+        // A snoozed entry keeps its snooze: the claim is answered, the human's
+        // unrelated judgement is not undone.
+        let (mut ledger, entry_id) = seeded();
+        let claim = ledger
+            .add_evidence(&entry_id, EvidenceSource::Github, None, 0.5, NOW, NOW)
+            .unwrap();
+        ledger.snooze(&entry_id, "2026-09-01", NOW).unwrap();
+        let entry = ledger
+            .dismiss_evidence(&entry_id, &claim.evidence_id, NOW)
+            .unwrap();
+        assert_eq!(entry.state, EntryState::Snoozed);
+        assert_eq!(entry.snoozed_until.as_deref(), Some("2026-09-01"));
+    }
+
+    #[test]
+    fn dismiss_evidence_is_idempotent_in_the_claim() {
+        let (mut ledger, entry_id) = seeded();
+        let claim = ledger
+            .add_evidence(&entry_id, EvidenceSource::Github, None, 0.8, NOW, NOW)
+            .unwrap();
+        ledger
+            .dismiss_evidence(&entry_id, &claim.evidence_id, NOW)
+            .unwrap();
+        // A retry after a crash finds the claim gone and still answers.
+        let entry = ledger
+            .dismiss_evidence(&entry_id, &claim.evidence_id, NOW)
+            .unwrap();
+        assert_eq!(entry.state, EntryState::Open);
     }
 
     #[test]

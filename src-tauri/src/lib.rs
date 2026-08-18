@@ -8,6 +8,7 @@ mod events;
 mod glossary_cmds;
 mod index_cmds;
 mod index_state;
+mod ledger_cmds;
 mod ledger_state;
 mod models;
 mod models_cmds;
@@ -301,6 +302,13 @@ pub fn run() {
             glossary_cmds::add_glossary_term,
             glossary_cmds::update_glossary_term,
             glossary_cmds::delete_glossary_term,
+            ledger_cmds::list_commitments,
+            ledger_cmds::set_commitment_done,
+            ledger_cmds::snooze_commitment,
+            ledger_cmds::waive_commitment,
+            ledger_cmds::reopen_commitment,
+            ledger_cmds::confirm_commitment_evidence,
+            ledger_cmds::dismiss_commitment_evidence,
             index_cmds::rebuild_index,
             index_cmds::search_notes,
             models_cmds::model_status,

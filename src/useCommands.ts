@@ -170,6 +170,12 @@ export function useCommands(): Command[] {
         run: () => navigate({ kind: "terminal" }),
       },
       {
+        id: "commitments",
+        kind: "navigate",
+        title: "Commitments",
+        run: () => navigate({ kind: "commitments", slug: null }),
+      },
+      {
         // The vault-wide glossary's front door. Every project glossary is
         // reachable from its own project, but this one belongs to no folder —
         // and it is the glossary that matters most, since transcription biases

@@ -58,6 +58,15 @@ describe("PrimitiveGallery", () => {
       /indents under the LABEL/,
     );
     expect(screen.getByRole("checkbox", { name: "Archived, cannot be changed" })).toBeDisabled();
+    // Busy is the inert state that is NOT `disabled`: it stays focusable so a
+    // write in flight cannot throw the user's place away.
+    const busyBox = screen.getByRole("checkbox", { name: "Saving to the ledger" });
+    expect(busyBox).toHaveAttribute("aria-busy", "true");
+    expect(busyBox).not.toBeDisabled();
+    // A hidden label still names the control; only the printed words are gone.
+    expect(
+      screen.getByRole("checkbox", { name: "Send the revised deck" }),
+    ).toBeInTheDocument();
     // StatusMessage's variant fixes the role, so the roles ARE the coverage:
     // `empty` announces nothing, `status` is polite, `error` is assertive.
     // Queried by text rather than by role, because the kodama row's five

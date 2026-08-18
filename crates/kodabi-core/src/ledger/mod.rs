@@ -32,10 +32,12 @@ mod migrations;
 pub mod snapshot;
 mod store;
 mod sync;
+pub mod view;
 
 pub use snapshot::{ProjectSnapshot, RestoreReport, LEDGER_SNAPSHOT_FILE, LEDGER_SNAPSHOT_VERSION};
 pub use store::{EntryDetail, EntryFilter, EntryLink, Evidence, ItemRef, LedgerEntry};
 pub use sync::{NoteSync, SyncOutcome};
+pub use view::{Commitment, CommitmentItem, CommitmentSource, NoteContext};
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -84,6 +86,9 @@ pub enum LedgerError {
     /// No entry with this id.
     #[error("no ledger entry {entry_id:?}")]
     EntryNotFound { entry_id: String },
+    /// No evidence claim with this id on the entry it was looked up against.
+    #[error("no ledger evidence {evidence_id:?}")]
+    EvidenceNotFound { evidence_id: String },
     /// A lifecycle transition the state machine forbids (see
     /// [`store::LedgerEntry`]'s transition table).
     #[error("illegal ledger transition {from} -> {to} for {entry_id:?}")]

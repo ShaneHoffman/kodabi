@@ -33,6 +33,14 @@ export type View =
        * signals and project context. */
       slug: string | null;
     }
+  | {
+      kind: "commitments";
+      /** Which ledger to show. `null` is the WHOLE VAULT: commitments cross
+       * projects the way the meetings that made them do, so the vault-wide
+       * read is the primary one and a slug narrows it. Same two-scope shape as
+       * the glossary, and `viewKey` spells the two apart for the same reason. */
+      slug: string | null;
+    }
   | { kind: "search"; query: string }
   | { kind: "settings" }
   | { kind: "terminal" }
@@ -63,6 +71,12 @@ export function viewKey(view: View): string {
       // project slugged `vault` one key — and this string changing is the
       // whole of what resets the error boundary.
       return view.slug === null ? "glossary:vault" : `glossary:project:${view.slug}`;
+    case "commitments":
+      // Spelled apart rather than folded onto a sentinel, exactly as the
+      // glossary above: `vault` is not a reserved project name.
+      return view.slug === null
+        ? "commitments:vault"
+        : `commitments:project:${view.slug}`;
     case "search":
       return `search:${view.query}`;
     default:
