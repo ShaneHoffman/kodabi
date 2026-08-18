@@ -82,8 +82,11 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   `hideLabel`, `emptyLabel`), `Switch` (`busy` as its only inert form — no `disabled` prop
   exists; `label` is the visible words verbatim; the knob's travel is duration-gated, so it
   still arrives under reduced motion),
-  `Checkbox` (a box and its label; no variants, and §4 carries no contract bullet for it, so
-  the table row is the whole documented claim),
+  `Checkbox` (a box and its label; still no variants, but it now carries a §4 contract bullet
+  of its own: `busy` is the inert form that is *not* `disabled` — `aria-busy` + `aria-disabled`,
+  focusable, swallowing its own change, pulsing with `animate-pending` (opacity-only, so
+  correct unpaired under reduced motion) — while `disabled` keeps meaning a box there is
+  nothing to tick; `hideLabel` is `Select`'s, same reason),
   `Field` (`error` + `aria-invalid` travel together, `hint` and
   `error` both → `aria-describedby`, error described first),
   `StatusMessage` (variant → ARIA role), `ViewFrame` (seven variants; `summary` a **type

@@ -504,7 +504,7 @@ pub async fn set_commitment_done(
             entry_id: input.entry_id,
         }
     };
-    let reply = mutate(&app, "set_commitment_done", client, op)?;
+    let reply = mutate(&app, "set_commitment_done", client, op).await?;
 
     Ok(SetCommitmentDoneDto {
         entry: entry_dto(&reply.entry),
@@ -539,7 +539,8 @@ pub async fn snooze_commitment(
             entry_id: input.entry_id,
             until: input.until,
         },
-    )?;
+    )
+    .await?;
     Ok(entry_dto(&reply.entry))
 }
 
@@ -566,7 +567,8 @@ pub async fn waive_commitment(
         LedgerOp::Waive {
             entry_id: input.entry_id,
         },
-    )?;
+    )
+    .await?;
     Ok(entry_dto(&reply.entry))
 }
 
@@ -590,7 +592,8 @@ pub async fn reopen_commitment(
         LedgerOp::Reopen {
             entry_id: input.entry_id,
         },
-    )?;
+    )
+    .await?;
     Ok(entry_dto(&reply.entry))
 }
 
@@ -635,7 +638,8 @@ pub async fn confirm_commitment_evidence(
             entry_id: input.entry_id,
             evidence_id: input.evidence_id,
         },
-    )?;
+    )
+    .await?;
 
     let mut note_updated = false;
     let mut note_annotated = false;
@@ -719,23 +723,40 @@ pub async fn dismiss_commitment_evidence(
             entry_id: input.entry_id,
             evidence_id: input.evidence_id,
         },
-    )?;
+    )
+    .await?;
     Ok(entry_dto(&reply.entry))
 }
 
-/// Runs one mutation off the IPC thread and announces it.
+/// Runs one mutation off the async runtime and announces it.
+///
+/// `spawn_blocking`, and that is load-bearing rather than tidy:
+/// [`LedgerClient::mutate`] waits on the worker's reply for as long as
+/// `REPLY_TIMEOUT`, and the worker may be part-way through a whole-vault
+/// reconcile. Waiting for that on an async worker thread parks it for every
+/// other command in the app, so the wait happens on the blocking pool, exactly
+/// as `index_cmds` does with its search handle.
 ///
 /// The announcement happens on success only, but note that a failure the *view*
 /// caused (a stale row) is answered by copy telling the person to look again,
 /// which is the same refetch by a slower route.
-fn mutate(
+async fn mutate(
     app: &AppHandle,
     cmd: &'static str,
     client: LedgerClient,
     op: LedgerOp,
 ) -> Result<MutateReply, String> {
-    let reply = client
-        .mutate(op)
+    let reply = tauri::async_runtime::spawn_blocking(move || client.mutate(op))
+        .await
+        // A panicked blocking task says nothing about what the worker did with
+        // the job, so the copy claims nothing either.
+        .map_err(|err| {
+            reported(
+                cmd,
+                err,
+                "Couldn't update this commitment. Reopen this view to see the current list.",
+            )
+        })?
         .map_err(|err| ledger_error(cmd, err, LEDGER_REFUSED))?;
     broadcast_ledger_changed(app);
     Ok(reply)
