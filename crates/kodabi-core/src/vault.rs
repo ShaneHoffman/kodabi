@@ -312,6 +312,104 @@ pub fn save_note_edit(
     }))
 }
 
+/// What [`set_action_item_done`] did.
+#[derive(Debug, Clone, PartialEq)]
+pub enum SetDoneOutcome {
+    /// The checkbox was flipped; carries the note as it now stands on disk.
+    Updated(Box<ListedNote>),
+    /// The box already read the way the caller asked for, so nothing was
+    /// written.
+    AlreadySet,
+    /// No note in the vault carries that id.
+    NoteMissing,
+    /// The note exists but no line in it mints that item id any more.
+    ItemMissing,
+}
+
+/// Ticks or unticks one action item's checkbox in its source note.
+///
+/// **The checkbox is the source of truth for done/not-done**
+/// ([`crate::ledger`]), so a surface offering a person a checkbox writes the
+/// Markdown, and the ledger records only what a checkbox cannot spell. This is
+/// the write behind that click, and the counterpart to
+/// [`annotate_action_item`], which deliberately never touches the box.
+///
+/// Only the marker changes: the owner, description, due date and any trailing
+/// text are byte-preserved, so the line re-derives the same
+/// [`crate::meeting::ActionItemFact`] id (the checkbox character is not hashed)
+/// and the re-index this triggers is a no-op for the ledger's identity
+/// tracking.
+///
+/// Best-effort by contract, like its sibling: [`SetDoneOutcome::NoteMissing`]
+/// and [`SetDoneOutcome::ItemMissing`] are ordinary answers for a line that was
+/// edited away since the ledger linked it, not errors.
+pub fn set_action_item_done(
+    vault_root: &Path,
+    id: &NoteId,
+    action_item_id: &str,
+    done: bool,
+) -> Result<SetDoneOutcome> {
+    // Vault-wide for the same reason annotation is: the note may have been
+    // re-filed since the ledger linked it, and the id is what never moves.
+    let Some((_, listed)) = find_note_anywhere(vault_root, id)? else {
+        return Ok(SetDoneOutcome::NoteMissing);
+    };
+    let Some(line_index) =
+        meeting::action_item_line(listed.note.id.as_str(), &listed.note.body, action_item_id)
+    else {
+        return Ok(SetDoneOutcome::ItemMissing);
+    };
+
+    let mut lines: Vec<String> = listed.note.body.lines().map(str::to_string).collect();
+    let Some(line) = lines.get(line_index) else {
+        return Ok(SetDoneOutcome::ItemMissing);
+    };
+    // The line parsed as an action item to mint the id above, so it starts with
+    // one of the two markers after its indentation. Split rather than trim so
+    // the indentation survives verbatim.
+    let indent_len = line.len() - line.trim_start().len();
+    let (indent, rest) = line.split_at(indent_len);
+    let Some(body) = rest
+        .strip_prefix(UNCHECKED_MARKER)
+        .or_else(|| rest.strip_prefix(CHECKED_MARKER))
+    else {
+        return Ok(SetDoneOutcome::ItemMissing);
+    };
+    let marker = if done {
+        CHECKED_MARKER
+    } else {
+        UNCHECKED_MARKER
+    };
+    let updated = format!("{indent}{marker}{body}");
+    if updated == *line {
+        return Ok(SetDoneOutcome::AlreadySet);
+    }
+    lines[line_index] = updated;
+
+    let merged = listed.note.clone().with_edits(NoteEdit {
+        note_type: listed.note.note_type,
+        title: listed.note.title.clone(),
+        date: listed.note.date.clone(),
+        tags: listed.note.tags.clone(),
+        body: lines.join(
+            "
+",
+        ),
+    })?;
+    note::save_note_at(&listed.path, &merged)?;
+    let title = effective_title(&merged, &listed.path);
+    Ok(SetDoneOutcome::Updated(Box::new(ListedNote {
+        note: merged,
+        path: listed.path,
+        title,
+    })))
+}
+
+/// The two action-item markers, exactly as [`crate::distill::parse_action_line`]
+/// accepts them (lowercase `x` only).
+const UNCHECKED_MARKER: &str = "- [ ] ";
+const CHECKED_MARKER: &str = "- [x] ";
+
 /// The prefix every closure-evidence annotation line carries.
 ///
 /// Chosen to be **inert to the action-item grammar**: `meeting::parse_body`
@@ -3206,6 +3304,164 @@ mod tests {
         // It sits under the *second* item line, not the first.
         assert!(lines[annotated - 1].contains("send the deck"));
         assert!(lines[annotated - 2].contains("send the deck"));
+    }
+
+    // --- set_action_item_done ---------------------------------------------
+
+    #[test]
+    fn set_action_item_done_flips_only_the_marker() {
+        let vault = tempdir().unwrap();
+        let items = meeting_with_items(vault.path(), "Ops", "n_aaaaaa");
+        let id = NoteId::parse("n_aaaaaa").unwrap();
+
+        let outcome = set_action_item_done(vault.path(), &id, &items[0].id, true).unwrap();
+
+        let SetDoneOutcome::Updated(listed) = outcome else {
+            panic!("expected an update, got {outcome:?}");
+        };
+        assert!(listed
+            .note
+            .body
+            .contains("- [x] Priya to send the revised deck by 2026-08-20."));
+        // The sibling line is untouched.
+        assert!(listed.note.body.contains("- [ ] You to book the venue."));
+    }
+
+    #[test]
+    fn a_ticked_item_keeps_its_id_and_reads_back_done() {
+        // The checkbox character is not hashed into the `a_` id, which is what
+        // lets the ledger keep tracking a line across a tick.
+        let vault = tempdir().unwrap();
+        let before = meeting_with_items(vault.path(), "Ops", "n_aaaaaa");
+        let id = NoteId::parse("n_aaaaaa").unwrap();
+
+        set_action_item_done(vault.path(), &id, &before[0].id, true).unwrap();
+
+        let (_, listed) = find_note_anywhere(vault.path(), &id).unwrap().unwrap();
+        let after = meeting::meeting_facts_for(&listed.note, vault.path())
+            .unwrap()
+            .action_items;
+        assert_eq!(after[0].id, before[0].id, "the id must survive a tick");
+        assert!(after[0].done);
+        assert!(!after[1].done);
+        // And unticking returns the note to exactly where it started.
+        set_action_item_done(vault.path(), &id, &before[0].id, false).unwrap();
+        let (_, restored) = find_note_anywhere(vault.path(), &id).unwrap().unwrap();
+        let restored = meeting::meeting_facts_for(&restored.note, vault.path())
+            .unwrap()
+            .action_items;
+        assert_eq!(restored, before);
+    }
+
+    #[test]
+    fn set_action_item_done_is_idempotent() {
+        let vault = tempdir().unwrap();
+        let items = meeting_with_items(vault.path(), "Ops", "n_aaaaaa");
+        let id = NoteId::parse("n_aaaaaa").unwrap();
+
+        set_action_item_done(vault.path(), &id, &items[0].id, true).unwrap();
+        let second = set_action_item_done(vault.path(), &id, &items[0].id, true).unwrap();
+
+        assert_eq!(second, SetDoneOutcome::AlreadySet);
+        // Unticking an already-unticked item is the same answer.
+        assert_eq!(
+            set_action_item_done(vault.path(), &id, &items[1].id, false).unwrap(),
+            SetDoneOutcome::AlreadySet
+        );
+    }
+
+    #[test]
+    fn set_action_item_done_reports_a_missing_note_or_item() {
+        let vault = tempdir().unwrap();
+        meeting_with_items(vault.path(), "Ops", "n_aaaaaa");
+
+        assert_eq!(
+            set_action_item_done(
+                vault.path(),
+                &NoteId::parse("n_zzzzzz").unwrap(),
+                "a_whatever",
+                true
+            )
+            .unwrap(),
+            SetDoneOutcome::NoteMissing
+        );
+        assert_eq!(
+            set_action_item_done(
+                vault.path(),
+                &NoteId::parse("n_aaaaaa").unwrap(),
+                "a_gone",
+                true
+            )
+            .unwrap(),
+            SetDoneOutcome::ItemMissing
+        );
+    }
+
+    #[test]
+    fn set_action_item_done_disambiguates_duplicate_lines() {
+        // Two byte-identical lines: the second id must tick the second line.
+        let vault = tempdir().unwrap();
+        let note = Note::new(
+            NoteId::parse("n_aaaaaa").unwrap(),
+            NoteType::Meeting,
+            Routing::Manual {
+                project: "Ops".to_string(),
+            },
+            "2026-08-01",
+            vec![Tag::parse("fixture").unwrap()],
+            Source::parse("manual").unwrap(),
+            "## Action items\n\n\
+             - [ ] Priya to send the deck.\n\
+             - [ ] Priya to send the deck.\n",
+        )
+        .unwrap();
+        note::write_note(vault.path(), &note, Some("dupes")).unwrap();
+        let items = meeting::meeting_facts_for(&note, vault.path())
+            .unwrap()
+            .action_items;
+
+        set_action_item_done(
+            vault.path(),
+            &NoteId::parse("n_aaaaaa").unwrap(),
+            &items[1].id,
+            true,
+        )
+        .unwrap();
+
+        let (_, listed) = find_note_anywhere(vault.path(), &NoteId::parse("n_aaaaaa").unwrap())
+            .unwrap()
+            .unwrap();
+        let ticked: Vec<&str> = listed
+            .note
+            .body
+            .lines()
+            .filter(|line| line.starts_with("- [x] "))
+            .collect();
+        assert_eq!(ticked.len(), 1);
+        let lines: Vec<&str> = listed.note.body.lines().collect();
+        let ticked_at = lines.iter().position(|l| l.starts_with("- [x] ")).unwrap();
+        let first_item = lines.iter().position(|l| l.starts_with("- [ ] ")).unwrap();
+        assert!(
+            ticked_at > first_item,
+            "the second line must be the ticked one"
+        );
+    }
+
+    #[test]
+    fn ticking_an_item_preserves_its_annotation_line() {
+        // Annotate, never destroy: a closure line written by an evidence pass
+        // survives the user ticking the box above it.
+        let vault = tempdir().unwrap();
+        let items = meeting_with_items(vault.path(), "Ops", "n_aaaaaa");
+        let id = NoteId::parse("n_aaaaaa").unwrap();
+        annotate_action_item(vault.path(), &id, &items[0].id, "2026-08-17", "PR merged.").unwrap();
+
+        set_action_item_done(vault.path(), &id, &items[0].id, true).unwrap();
+
+        let (_, listed) = find_note_anywhere(vault.path(), &id).unwrap().unwrap();
+        let lines: Vec<&str> = listed.note.body.lines().collect();
+        let ticked = lines.iter().position(|l| l.starts_with("- [x] ")).unwrap();
+        assert_eq!(lines[ticked + 1], "  - Closed 2026-08-17: PR merged.");
     }
 
     #[test]

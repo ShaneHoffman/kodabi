@@ -230,6 +230,18 @@ histories is not something to guess at. Extracted items are referenced by their 
 ids, which are re-minted whenever a line's text is edited, so entries carry their own durable ids
 and re-link across those edits (`kodabi_core::ledger::sync`).
 
+The Commitments view reads it through `ledger_cmds`, whose organizing principle is the ledger's own
+`direction` column: what you owe and what you are waiting on are two groups on two planes, not a
+filter. A row is a ledger entry joined to the index's row for its source line
+(`kodabi_core::ledger::view`), because the two stores own different halves — identity and judgement
+here, `done` and `due_date` in the note. That is also why ticking a box in the view writes the
+Markdown and records `closed_via: manual` beside it, while snoozing and waiving touch no note at
+all: waiving exists precisely so nobody has to edit a meeting note to pretend something was not
+said. Since the ledger worker owns the database single-threaded, commands reach it through a
+request/reply channel (`ledger_state::LedgerClient`) that reports an unavailable ledger rather than
+dropping a person's judgement silently, and mutations announce themselves on `ledger:changed` —
+distinct from `vault:changed`, which would be a lie for a write that touched no note.
+
 ## 6. The release path, and its two signatures
 
 Release builds ship a real engine and the embedder. `pnpm tauri:build` — which passes

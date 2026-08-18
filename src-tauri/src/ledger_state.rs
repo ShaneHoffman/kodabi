@@ -12,18 +12,22 @@
 //! no lock to contend and no poisoning story. The index worker only ever does a
 //! non-blocking channel send into it, handing over facts by value.
 //!
-//! **Failure posture.** An unopenable `ledger.db` logs and degrades to a session
-//! that records nothing, rather than blocking launch. That is defensible *for
-//! this ticket* and no further: with no UI and no mutation surface yet, a
-//! degraded session can only miss automatic ingestions, and those re-converge
-//! from the notes at the next healthy startup reconcile. Nothing already
+//! **Failure posture, in two halves.** An unopenable `ledger.db` logs and
+//! degrades to a session that records nothing, rather than blocking launch.
+//! For *automatic* ingestion that is the right trade: [`LedgerHandle`] is
+//! fire-and-forget, a degraded session only misses derivations, and those
+//! re-converge from the notes at the next healthy startup reconcile. Nothing
 //! recorded is lost, because nothing is written.
 //!
-//! **This does not generalize.** The moment a surface exists that lets a person
-//! waive, snooze, or close an entry, silently dropping that write would be a
-//! lie: it must fail with copy instead. Whichever ticket adds that surface adds
-//! an availability check here for it to branch on — deliberately not added
-//! ahead of its caller, since an unused accessor is a promise nothing keeps.
+//! **A person's own judgement is different, and gets [`LedgerClient`].** Waiving,
+//! snoozing, or closing an entry is a decision that exists nowhere else, so
+//! dropping it silently would be a lie. Every command-facing call therefore goes
+//! through the client, which answers [`LedgerCallError::Unavailable`] when the
+//! ledger never opened and [`LedgerCallError::NoReply`] when the worker does not
+//! answer in time, and the wrapper turns each into copy that says what did and
+//! did not happen. Note the asymmetry a timeout forces: a queued job may still
+//! run after the caller has given up, so `NoReply` copy says the change *may*
+//! have applied rather than claiming it did not.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
@@ -31,7 +35,10 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use chrono::{SecondsFormat, Utc};
-use kodabi_core::ledger::{Ledger, NoteSync, LEDGER_DB_FILE};
+use kodabi_core::ledger::{
+    self, ClosedVia, EntryDetail, EntryFilter, Evidence, Ledger, LedgerEntry, NoteSync,
+    LEDGER_DB_FILE,
+};
 use kodabi_core::meeting::ActionItemFact;
 use kodabi_core::note::INBOX;
 use tauri::{AppHandle, Manager};
@@ -53,6 +60,14 @@ const SNAPSHOT_MAX_DELAY: Duration = Duration::from_secs(15);
 /// How long a shutdown flush may block the app's exit.
 const FLUSH_TIMEOUT: Duration = Duration::from_secs(2);
 
+/// How long a command waits for the worker to answer a read or a mutation.
+///
+/// Far laxer than [`FLUSH_TIMEOUT`], which races the user's patience at Quit.
+/// This one races nothing: the request sits behind whatever the worker is
+/// already doing, and a whole-vault reconcile's `SyncBatch` is one job. Timing
+/// out early would report failure for work that then succeeds.
+const REPLY_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// One note's derived action items, as handed to the ledger worker.
 pub struct NoteFacts {
     pub note_id: String,
@@ -61,6 +76,59 @@ pub struct NoteFacts {
     /// The note's `date_utc`, which becomes the entry's `last_mention`.
     pub date_utc: String,
     pub items: Vec<ActionItemFact>,
+}
+
+/// A mutation a person asked for, addressed to one entry.
+///
+/// Named as a request rather than called directly on the [`Ledger`] because the
+/// worker owns it: this is the wire between a command thread and that owner.
+pub enum LedgerOp {
+    /// Resolve, with the provenance of whoever established it.
+    Close { entry_id: String, via: ClosedVia },
+    /// Deliberately not going to happen.
+    Waive { entry_id: String },
+    /// Out of sight until a local `YYYY-MM-DD` day.
+    Snooze { entry_id: String, until: String },
+    /// Back to open, whatever it was: the undo behind every affordance.
+    Reopen { entry_id: String },
+    /// Accept a parked claim, closing with that claim's provenance.
+    ConfirmEvidence {
+        entry_id: String,
+        evidence_id: String,
+    },
+    /// Reject a parked claim, reopening the entry if that claim closed it.
+    DismissEvidence {
+        entry_id: String,
+        evidence_id: String,
+    },
+}
+
+impl LedgerOp {
+    /// The entry every variant addresses.
+    fn entry_id(&self) -> &str {
+        match self {
+            LedgerOp::Close { entry_id, .. }
+            | LedgerOp::Waive { entry_id }
+            | LedgerOp::Snooze { entry_id, .. }
+            | LedgerOp::Reopen { entry_id }
+            | LedgerOp::ConfirmEvidence { entry_id, .. }
+            | LedgerOp::DismissEvidence { entry_id, .. } => entry_id,
+        }
+    }
+}
+
+/// What a mutation settled on, plus what the caller needs to finish the job in
+/// the vault.
+#[derive(Debug)]
+pub struct MutateReply {
+    pub entry: LedgerEntry,
+    /// The claim that closed the entry ([`LedgerOp::ConfirmEvidence`] only), so
+    /// the caller can name the source in the note's annotation.
+    pub evidence: Option<Evidence>,
+    /// The entry's live `(note_id, item_id)`, when it still has one. The
+    /// caller needs it to tick the box or write the annotation, and neither is
+    /// possible for an entry whose source line is gone.
+    pub active_ref: Option<(String, String)>,
 }
 
 /// A unit of work for the ledger worker.
@@ -75,6 +143,16 @@ enum LedgerJob {
     RestoreIfEmpty,
     /// Write every pending snapshot now and acknowledge.
     Flush(Sender<()>),
+    /// Read entries matching a filter, hydrated, and reply.
+    ListDetails {
+        filter: EntryFilter,
+        reply: Sender<ledger::Result<Vec<EntryDetail>>>,
+    },
+    /// Apply one mutation and reply with what it settled on.
+    Mutate {
+        op: LedgerOp,
+        reply: Sender<ledger::Result<MutateReply>>,
+    },
 }
 
 /// A handle to the background ledger worker, held as Tauri managed state.
@@ -116,6 +194,75 @@ impl LedgerHandle {
     }
 }
 
+/// Why a [`LedgerClient`] call could not be answered.
+///
+/// Distinct from [`ledger::LedgerError`] on purpose: the two failures a person
+/// must be told about honestly are structural, not about the entry.
+#[derive(Debug)]
+pub enum LedgerCallError {
+    /// The ledger never opened this session, so nothing can be recorded.
+    Unavailable,
+    /// The worker did not answer within [`REPLY_TIMEOUT`]. **The job may still
+    /// run**: nothing cancels a queued job, so copy must not claim the change
+    /// was discarded.
+    NoReply,
+    /// The ledger answered, and the answer was a failure.
+    Ledger(ledger::LedgerError),
+}
+
+/// A cloneable request handle for the command layer.
+///
+/// The honest counterpart to [`LedgerHandle`]: every call here is a person's
+/// judgement rather than a derivation, so it waits for an answer and reports
+/// what happened. Mutations are routed through the worker rather than opening a
+/// second connection so that the snapshot debounce sees them exactly as it sees
+/// a sync (see [`run_worker`]) and the database keeps its single owner.
+#[derive(Clone)]
+pub struct LedgerClient(Option<Sender<LedgerJob>>);
+
+impl LedgerClient {
+    /// Whether the ledger opened this session.
+    ///
+    /// A command checks this *before* touching the vault, so a change that
+    /// cannot be recorded is refused whole rather than half-applied.
+    pub fn is_available(&self) -> bool {
+        self.0.is_some()
+    }
+
+    /// Entries matching `filter`, with their refs, evidence, and links.
+    pub fn list_details(
+        &self,
+        filter: EntryFilter,
+    ) -> std::result::Result<Vec<EntryDetail>, LedgerCallError> {
+        self.request(|reply| LedgerJob::ListDetails { filter, reply })
+    }
+
+    /// Applies one mutation.
+    pub fn mutate(&self, op: LedgerOp) -> std::result::Result<MutateReply, LedgerCallError> {
+        self.request(|reply| LedgerJob::Mutate { op, reply })
+    }
+
+    /// Sends a job carrying a reply channel and waits, bounded.
+    ///
+    /// Blocking by design: callers are commands, which run this inside
+    /// `spawn_blocking` rather than on an async worker thread.
+    fn request<T>(
+        &self,
+        build: impl FnOnce(Sender<ledger::Result<T>>) -> LedgerJob,
+    ) -> std::result::Result<T, LedgerCallError> {
+        let sender = self.0.as_ref().ok_or(LedgerCallError::Unavailable)?;
+        let (reply, answer) = mpsc::channel();
+        sender
+            .send(build(reply))
+            .map_err(|_| LedgerCallError::Unavailable)?;
+        match answer.recv_timeout(REPLY_TIMEOUT) {
+            Ok(Ok(value)) => Ok(value),
+            Ok(Err(err)) => Err(LedgerCallError::Ledger(err)),
+            Err(_) => Err(LedgerCallError::NoReply),
+        }
+    }
+}
+
 impl LedgerState {
     /// Opens the ledger, queues the startup restore, and spawns the worker.
     ///
@@ -152,12 +299,26 @@ impl LedgerState {
 
     /// A write handle for the index worker.
     pub fn handle(&self) -> LedgerHandle {
-        LedgerHandle(self.sender.as_ref().map(|sender| {
+        LedgerHandle(self.sender())
+    }
+
+    /// A request handle for the command layer.
+    ///
+    /// Cloned out of managed state before a command crosses onto a blocking
+    /// thread, which is what lets the blocking wait happen off the async
+    /// runtime (the `SearchHandle` shape in [`crate::index_state`]).
+    pub fn client(&self) -> LedgerClient {
+        LedgerClient(self.sender())
+    }
+
+    /// Clones the job sender, if the ledger opened.
+    fn sender(&self) -> Option<Sender<LedgerJob>> {
+        self.sender.as_ref().map(|sender| {
             sender
                 .lock()
                 .unwrap_or_else(|poison| poison.into_inner())
                 .clone()
-        }))
+        })
     }
 }
 
@@ -328,8 +489,62 @@ fn handle_job(ledger: &mut Ledger, vault_root: Option<&Path>, job: LedgerJob) ->
             flush_snapshots(ledger, vault_root);
             let _ = ack.send(());
         }
+        // A caller that gave up waiting has dropped its receiver, so the send
+        // fails and is ignored: the work is done either way, and the ledger is
+        // the truth the next read converges on.
+        LedgerJob::ListDetails { filter, reply } => {
+            let _ = reply.send(ledger.list_details(&filter));
+        }
+        LedgerJob::Mutate { op, reply } => {
+            let _ = reply.send(apply_mutation(ledger, op));
+        }
     }
     false
+}
+
+/// Applies one mutation and gathers what the caller needs to finish in the
+/// vault.
+///
+/// `now` is minted here rather than by the caller for the same reason
+/// [`sync_one`] does it: kodabi-core never reads the clock, and the worker is
+/// the shell-side owner of this database.
+fn apply_mutation(ledger: &mut Ledger, op: LedgerOp) -> ledger::Result<MutateReply> {
+    let now = now_utc();
+    let entry_id = op.entry_id().to_string();
+
+    let (entry, evidence) = match &op {
+        LedgerOp::Close { entry_id, via } => (ledger.close(entry_id, *via, &now)?, None),
+        LedgerOp::Waive { entry_id } => (ledger.waive(entry_id, &now)?, None),
+        LedgerOp::Snooze { entry_id, until } => (ledger.snooze(entry_id, until, &now)?, None),
+        LedgerOp::Reopen { entry_id } => (ledger.reopen(entry_id, &now)?, None),
+        LedgerOp::ConfirmEvidence {
+            entry_id,
+            evidence_id,
+        } => {
+            let (entry, claim) = ledger.close_from_evidence(entry_id, evidence_id, &now)?;
+            (entry, Some(claim))
+        }
+        LedgerOp::DismissEvidence {
+            entry_id,
+            evidence_id,
+        } => (ledger.dismiss_evidence(entry_id, evidence_id, &now)?, None),
+    };
+
+    // Read back rather than tracked through the mutation: the live ref is a
+    // property of the entry, and an entry whose source line is gone has none.
+    let active_ref = ledger.get_entry(&entry_id)?.and_then(|detail| {
+        detail
+            .item_refs
+            .iter()
+            .find(|item_ref| item_ref.active)
+            .map(|item_ref| (item_ref.note_id.clone(), item_ref.item_id.clone()))
+    });
+
+    Ok(MutateReply {
+        entry,
+        evidence,
+        active_ref,
+    })
 }
 
 /// Reconciles one note, logging a failure rather than propagating it — the
@@ -425,6 +640,202 @@ mod tests {
         let (ack, done) = mpsc::channel();
         sender.send(LedgerJob::Flush(ack)).unwrap();
         done.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+
+    /// Sends a job carrying a reply channel and waits for the answer, the way a
+    /// command's `LedgerClient` does.
+    fn request<T>(
+        sender: &Sender<LedgerJob>,
+        build: impl FnOnce(Sender<ledger::Result<T>>) -> LedgerJob,
+    ) -> ledger::Result<T> {
+        let (reply, answer) = mpsc::channel();
+        sender.send(build(reply)).unwrap();
+        answer.recv_timeout(Duration::from_secs(5)).unwrap()
+    }
+
+    /// Seeds one open entry through the worker and returns its id.
+    fn seed_entry(sender: &Sender<LedgerJob>) -> String {
+        sender
+            .send(LedgerJob::Sync(Box::new(facts_for(
+                "n_a1b2c3",
+                "Ops",
+                "a_111111",
+                "send the deck",
+            ))))
+            .unwrap();
+        let details = request(sender, |reply| LedgerJob::ListDetails {
+            filter: EntryFilter::default(),
+            reply,
+        })
+        .unwrap();
+        assert_eq!(details.len(), 1);
+        details[0].entry.entry_id.clone()
+    }
+
+    #[test]
+    fn the_worker_answers_a_hydrated_read() {
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+        seed_entry(&sender);
+
+        let details = request(&sender, |reply| LedgerJob::ListDetails {
+            filter: EntryFilter {
+                states: Some(vec![EntryState::Open]),
+                ..EntryFilter::default()
+            },
+            reply,
+        })
+        .unwrap();
+
+        assert_eq!(details.len(), 1);
+        assert_eq!(details[0].entry.description, "send the deck");
+        // Hydrated, not bare: the surface renders the live ref without a second
+        // round trip.
+        assert_eq!(details[0].item_refs.len(), 1);
+        assert!(details[0].item_refs[0].active);
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn a_mutation_through_the_worker_reaches_the_snapshot() {
+        // The reason mutations are routed through the worker at all: the
+        // debounced snapshot writer watches what the worker dirties, so a
+        // person's judgement has to travel the same path a sync does or it
+        // would never reach `_ledger.yml`.
+        let vault = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(vault.path().join("Ops")).unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+        let entry_id = seed_entry(&sender);
+
+        let reply = request(&sender, |reply| LedgerJob::Mutate {
+            op: LedgerOp::Close {
+                entry_id: entry_id.clone(),
+                via: ClosedVia::Manual,
+            },
+            reply,
+        })
+        .unwrap();
+        assert_eq!(reply.entry.state, EntryState::Closed);
+        assert_eq!(reply.entry.closed_via, Some(ClosedVia::Manual));
+        // The live ref rides along, so a caller can tick the box it names.
+        assert_eq!(
+            reply.active_ref,
+            Some(("n_a1b2c3".to_string(), "a_111111".to_string()))
+        );
+
+        flush_and_wait(&sender);
+        let snapshot =
+            std::fs::read_to_string(vault.path().join("Ops").join("_ledger.yml")).unwrap();
+        assert!(
+            snapshot.contains("state: closed"),
+            "the mutation never reached the vault snapshot: {snapshot}"
+        );
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn a_snooze_and_its_undo_round_trip() {
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+        let entry_id = seed_entry(&sender);
+
+        let reply = request(&sender, |reply| LedgerJob::Mutate {
+            op: LedgerOp::Snooze {
+                entry_id: entry_id.clone(),
+                until: "2026-09-01".to_string(),
+            },
+            reply,
+        })
+        .unwrap();
+        assert_eq!(reply.entry.state, EntryState::Snoozed);
+        assert_eq!(reply.entry.snoozed_until.as_deref(), Some("2026-09-01"));
+
+        let reply = request(&sender, |reply| LedgerJob::Mutate {
+            op: LedgerOp::Reopen {
+                entry_id: entry_id.clone(),
+            },
+            reply,
+        })
+        .unwrap();
+        assert_eq!(reply.entry.state, EntryState::Open);
+        assert_eq!(reply.entry.snoozed_until, None);
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn a_bad_snooze_date_comes_back_as_the_ledgers_own_complaint() {
+        // The wrapper passes this detail through as the user's words, so the
+        // worker must not swallow it.
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+        let entry_id = seed_entry(&sender);
+
+        let err = request(&sender, |reply| LedgerJob::Mutate {
+            op: LedgerOp::Snooze {
+                entry_id: entry_id.clone(),
+                until: "next Tuesday".to_string(),
+            },
+            reply,
+        })
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ledger::LedgerError::InvalidField {
+                field: "snoozed_until",
+                ..
+            }
+        ));
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn an_unavailable_ledger_refuses_every_client_call() {
+        // The failure posture this ticket owes: a session with no ledger must
+        // say so, not drop a person's judgement on the floor.
+        let state = LedgerState { sender: None };
+        let client = state.client();
+
+        assert!(!client.is_available());
+        assert!(matches!(
+            client.list_details(EntryFilter::default()),
+            Err(LedgerCallError::Unavailable)
+        ));
+        assert!(matches!(
+            client.mutate(LedgerOp::Waive {
+                entry_id: "le_whatever".to_string()
+            }),
+            Err(LedgerCallError::Unavailable)
+        ));
+    }
+
+    #[test]
+    fn a_client_call_after_the_worker_stops_is_unavailable() {
+        // The worker died but the handle outlived it. The send fails at once,
+        // which is what keeps this from waiting out the whole reply timeout
+        // before telling the user something they could have been told now.
+        let (sender, jobs) = mpsc::channel::<LedgerJob>();
+        let client = LedgerClient(Some(sender));
+        drop(jobs);
+
+        assert!(matches!(
+            client.mutate(LedgerOp::Waive {
+                entry_id: "le_whatever".to_string()
+            }),
+            Err(LedgerCallError::Unavailable)
+        ));
+        assert!(matches!(
+            client.list_details(EntryFilter::default()),
+            Err(LedgerCallError::Unavailable)
+        ));
     }
 
     #[test]

@@ -31,6 +31,13 @@ export const MODELS_STATE_EVENT = "models:state";
  * `events::SESSIONS_CHANGED_EVENT`. */
 export const SESSIONS_CHANGED_EVENT = "sessions:changed";
 
+/** A commitment-ledger mutation a person made: a close, waive, snooze, reopen,
+ * or an answered evidence claim. Distinct from `vault:changed` for the same
+ * reason `sessions:changed` is: waiving or snoozing touches no note. A ticked
+ * checkbox emits both, because it really does write Markdown. Mirrors
+ * `events::LEDGER_CHANGED_EVENT`. */
+export const LEDGER_CHANGED_EVENT = "ledger:changed";
+
 /** Post-capture transcription progress, as a tagged-status payload: `queued`
  * (parked behind another run's `TRANSCRIBE_LOCK`), `transcribing` (carrying
  * recording-normalized seconds, re-emitted per audio chunk), then `saved` or

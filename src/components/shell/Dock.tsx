@@ -78,8 +78,8 @@ function depthStyle(depth: number): CSSProperties | undefined {
  * folders pushed Chat and Terminal below the fold and made reaching them a
  * scroll. Bounding the list is what keeps them pinned.
  *
- * The Inbox, Needs attention and Search lead as PEERS in a system group: they
- * are the three things that act on the whole vault. Folders are places to
+ * The Inbox, Needs attention, Commitments and Search lead as PEERS in a system
+ * group: they are the things that act on the whole vault. Folders are places to
  * browse and carry their hue and their count. Chat and Terminal sit under a
  * hairline at the foot because they are tools over the knowledge base, not
  * places inside it.
@@ -161,10 +161,34 @@ export function Dock() {
           </StatusMessage>
         )}
 
-        {/* The system group: the three things that act on the whole vault. */}
+        {/* The system group: the things that act on the whole vault. */}
         <ul aria-label="System" className="flex flex-col gap-0.5">
           {inboxEntry && renderRow(inboxEntry)}
           <NeedsAttentionRow />
+          <li>
+            <button
+              type="button"
+              data-testid="commitments-nav"
+              aria-current={
+                view.kind === "commitments" && view.slug === null
+                  ? "page"
+                  : undefined
+              }
+              onClick={() => navigate({ kind: "commitments", slug: null })}
+              className={clsx(
+                dockRow({
+                  selected: view.kind === "commitments" && view.slug === null,
+                }),
+                "pl-2.5",
+              )}
+            >
+              {/* No count yet. One would need a fetch mounted for the whole
+                  session, the way NeedsAttentionRow carries its own, and the
+                  ledger has no cheap count read until the evidence pass gives
+                  it a reason to. */}
+              <span className="min-w-0 flex-1 truncate">Commitments</span>
+            </button>
+          </li>
           <li>
             <button
               type="button"

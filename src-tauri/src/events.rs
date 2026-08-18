@@ -25,3 +25,12 @@ pub const MODELS_STATE_EVENT: &str = "models:state";
 /// gone. Distinct from [`VAULT_CHANGED_EVENT`]: a prune touches no note, so
 /// nothing about the vault itself changed. Payload: none.
 pub const SESSIONS_CHANGED_EVENT: &str = "sessions:changed";
+
+/// Emitted after a commitment-ledger mutation a person made: a close, waive,
+/// snooze, reopen, or an answered evidence claim. Distinct from
+/// [`VAULT_CHANGED_EVENT`] for the same reason [`SESSIONS_CHANGED_EVENT`] is:
+/// waiving or snoozing touches no note, so claiming the vault changed would be
+/// a lie, and a surface listening for vault writes would refetch for nothing.
+/// A ticked checkbox emits both, because it really does write Markdown.
+/// Payload: none.
+pub const LEDGER_CHANGED_EVENT: &str = "ledger:changed";

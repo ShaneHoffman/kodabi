@@ -59,7 +59,8 @@ Glossary-cleanup post-pass pulled forward into Phase 1.
 Pulled by daily use, not pushed by roadmap. Each earns its place only after the core loop proves reliable. Names only — the full detail behind each candidate lives in `FOUNDING_DOC.md` §6:
 
 - Commitment ledger (flagship) — *in progress*: the core model, the durable `ledger.db`, the vault
-  snapshots and the ingest wiring have landed; the UI, GitHub evidence and aging remain
+  snapshots, the ingest wiring and the Commitments view (the Mine / Waiting-on-them split, live
+  checkboxes that write the note, snooze and waive) have landed; GitHub evidence and aging remain
 - Azure DevOps board integration
 - Weekly digests per project
 - Decision log queries

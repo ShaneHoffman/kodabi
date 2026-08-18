@@ -161,6 +161,9 @@ export function ProjectView({ slug }: Props) {
               New note
             </Menu.Item>
             <Menu.Item onClick={() => navigate({ kind: "glossary", slug })}>Glossary</Menu.Item>
+            <Menu.Item onClick={() => navigate({ kind: "commitments", slug })}>
+              Commitments
+            </Menu.Item>
             {/* The line between working inside this folder and changing the
                 folder. Rename and delete both need more from the user before
                 they take effect (a name, a confirmation), which the ellipsis

@@ -303,6 +303,13 @@ those two utilities on a row exactly as `Menu.test.tsx` counts these.
   `aria-activedescendant`; Enter/Space selects; Escape closes and returns focus to the trigger;
   outside click closes; typing jumps. `hideLabel` keeps the accessible name and drops the visual row.
   `emptyLabel` is what the open list says when there is nothing in it.
+- **`Checkbox`'s `busy` is that distinction a fourth time**, and it arrived with the Commitments
+  view, where ticking a box is a write to the source note rather than a local state flip. A busy box
+  takes `aria-busy` + `aria-disabled`, keeps its place in the tab order, swallows its own change, and
+  pulses (`animate-pending`, opacity-only, so it is correct unpaired under reduced motion).
+  `disabled` still means the genuine thing: a commitment whose source line was edited away has no box
+  to tick. `hideLabel` is `Select`'s, for the same reason — a list row that already prints the words
+  beside the box needs the accessible name without a second visible label.
 - **`Switch`'s `busy` is that distinction a third time**, and it is the only inert form it has: a
   switch with nothing to switch is a row that should not be on the screen, so there is no `disabled`
   prop to pass. Its `label` is the accessible name and must be the words printed beside it, verbatim.
