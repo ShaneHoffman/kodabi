@@ -360,6 +360,7 @@ mod tests {
                 project: "Briarwood Golf",
                 note_date_utc: DAY,
                 items: &items,
+                link_hints: &[],
                 now: NOW,
             })
             .unwrap();
@@ -408,6 +409,7 @@ mod tests {
                 project: "Briarwood Golf",
                 note_date_utc: DAY,
                 items: &[],
+                link_hints: &[],
                 now: NOW,
             })
             .unwrap();

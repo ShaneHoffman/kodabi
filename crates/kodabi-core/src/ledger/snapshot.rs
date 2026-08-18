@@ -578,6 +578,7 @@ mod tests {
                 project: "Briarwood Golf",
                 note_date_utc: DAY,
                 items: &items,
+                link_hints: &[],
                 now: NOW,
             })
             .unwrap();
@@ -649,6 +650,7 @@ mod tests {
                 project: "Ops",
                 note_date_utc: DAY,
                 items: &items,
+                link_hints: &[],
                 now: NOW,
             })
             .unwrap();
@@ -679,6 +681,7 @@ mod tests {
                 project: "Briarwood Golf",
                 note_date_utc: DAY,
                 items: &items,
+                link_hints: &[],
                 now: NOW,
             })
             .unwrap();
@@ -771,6 +774,7 @@ mod tests {
                 project: "Briarwood Golf",
                 note_date_utc: DAY,
                 items: &items,
+                link_hints: &[],
                 now: NOW,
             })
             .unwrap()
@@ -821,6 +825,7 @@ mod tests {
                     project,
                     note_date_utc: DAY,
                     items: &items,
+                    link_hints: &[],
                     now: NOW,
                 })
                 .unwrap();

@@ -35,9 +35,10 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use chrono::{SecondsFormat, Utc};
+use kodabi_core::distill::LedgerUpdateDraft;
 use kodabi_core::ledger::{
-    self, ClosedVia, EntryDetail, EntryFilter, Evidence, Ledger, LedgerEntry, NoteSync,
-    LEDGER_DB_FILE,
+    self, AppliedUpdates, ClosedVia, DistillFollowUp, EntryDetail, EntryFilter, Evidence, Ledger,
+    LedgerEntry, NoteSync, LEDGER_DB_FILE,
 };
 use kodabi_core::meeting::ActionItemFact;
 use kodabi_core::note::INBOX;
@@ -153,6 +154,25 @@ enum LedgerJob {
         op: LedgerOp,
         reply: Sender<ledger::Result<MutateReply>>,
     },
+    /// Sync a freshly distilled note and apply what its conversation said
+    /// about commitments the ledger already held.
+    DistillFollowUp {
+        follow_up: Box<OwnedFollowUp>,
+        autoclose_threshold: f64,
+        reply: Sender<ledger::Result<AppliedUpdates>>,
+    },
+}
+
+/// A [`DistillFollowUp`] that owns its strings, so it can cross the channel.
+///
+/// The core type borrows because it is built and used inside one call; a job
+/// outlives its sender, so this is the same shape with the lifetimes paid off.
+pub struct OwnedFollowUp {
+    pub note_id: String,
+    pub project: String,
+    pub note_date_utc: String,
+    pub items: Vec<ActionItemFact>,
+    pub updates: Vec<LedgerUpdateDraft>,
 }
 
 /// A handle to the background ledger worker, held as Tauri managed state.
@@ -240,6 +260,19 @@ impl LedgerClient {
     /// Applies one mutation.
     pub fn mutate(&self, op: LedgerOp) -> std::result::Result<MutateReply, LedgerCallError> {
         self.request(|reply| LedgerJob::Mutate { op, reply })
+    }
+
+    /// Syncs a distilled note and applies its commitment classifications.
+    pub fn distill_follow_up(
+        &self,
+        follow_up: OwnedFollowUp,
+        autoclose_threshold: f64,
+    ) -> std::result::Result<AppliedUpdates, LedgerCallError> {
+        self.request(|reply| LedgerJob::DistillFollowUp {
+            follow_up: Box::new(follow_up),
+            autoclose_threshold,
+            reply,
+        })
     }
 
     /// Sends a job carrying a reply channel and waits, bounded.
@@ -498,6 +531,29 @@ fn handle_job(ledger: &mut Ledger, vault_root: Option<&Path>, job: LedgerJob) ->
         LedgerJob::Mutate { op, reply } => {
             let _ = reply.send(apply_mutation(ledger, op));
         }
+        LedgerJob::DistillFollowUp {
+            follow_up,
+            autoclose_threshold,
+            reply,
+        } => {
+            // The worker owns the clock and the database both, so the sync and
+            // the classifications it feeds cannot interleave with a watcher
+            // sync of the same note.
+            let now = now_utc();
+            let result = ledger::apply_distill_follow_up(
+                ledger,
+                &DistillFollowUp {
+                    note_id: &follow_up.note_id,
+                    project: &follow_up.project,
+                    note_date_utc: &follow_up.note_date_utc,
+                    items: &follow_up.items,
+                    updates: &follow_up.updates,
+                },
+                autoclose_threshold,
+                &now,
+            );
+            let _ = reply.send(result);
+        }
     }
     false
 }
@@ -557,6 +613,7 @@ fn sync_one(ledger: &mut Ledger, facts: &NoteFacts) {
         project: &facts.project,
         note_date_utc: &facts.date_utc,
         items: &facts.items,
+        link_hints: &[],
         now: &now,
     });
     match result {
@@ -1008,5 +1065,51 @@ mod tests {
     fn an_unfiled_note_files_its_commitments_under_the_inbox() {
         assert_eq!(project_slug(None), INBOX);
         assert_eq!(project_slug(Some("Growth/Q3")), "Growth/Q3");
+    }
+
+    #[test]
+    fn a_distill_follow_up_syncs_and_classifies_in_one_pass() {
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, handle) = spawn_worker(&vault);
+        let entry_id = seed_entry(&sender);
+
+        // A later conversation reporting the commitment done, confidently.
+        let applied = request(&sender, |reply| LedgerJob::DistillFollowUp {
+            follow_up: Box::new(OwnedFollowUp {
+                note_id: "n_d4e5f6".to_string(),
+                project: "Ops".to_string(),
+                note_date_utc: "2026-08-19T00:00:00Z".to_string(),
+                items: Vec::new(),
+                updates: vec![LedgerUpdateDraft {
+                    entry_id: entry_id.clone(),
+                    kind: kodabi_core::distill::LedgerUpdateKind::Completed,
+                    item: None,
+                    confidence: 0.95,
+                    quote: None,
+                }],
+            }),
+            autoclose_threshold: 0.8,
+            reply,
+        })
+        .unwrap();
+
+        assert_eq!(applied.auto_closed.len(), 1);
+        // The worker mints `now` itself, so the caller never passes a clock in.
+        assert!(!applied.auto_closed[0].entry.updated_at.is_empty());
+
+        let entries = request(&sender, |reply| LedgerJob::ListDetails {
+            filter: EntryFilter {
+                states: Some(vec![EntryState::Closed]),
+                ..EntryFilter::default()
+            },
+            reply,
+        })
+        .unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].entry.entry_id, entry_id);
+
+        flush_and_wait(&sender);
+        drop(sender);
+        handle.join().unwrap();
     }
 }

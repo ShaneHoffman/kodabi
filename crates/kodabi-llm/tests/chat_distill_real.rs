@@ -216,8 +216,14 @@ fn distills_a_stored_chat_into_a_schema_valid_chat_note() {
         .to_owned();
 
     let runner = RecordingRunner::new();
-    let distilled = distill_chat(&runner, vault.path(), &chat_path, &|_, _| inbox_routing())
-        .expect("distill should succeed");
+    let distilled = distill_chat(
+        &runner,
+        vault.path(),
+        &chat_path,
+        &|_, _| inbox_routing(),
+        &no_open_entries,
+    )
+    .expect("distill should succeed");
 
     let written = std::fs::read_to_string(&distilled.path).expect("note file should exist");
     let note = Note::from_markdown(&written).expect("note should be schema-valid");
@@ -350,4 +356,12 @@ fn distills_a_stored_chat_into_a_schema_valid_chat_note() {
             "raw tool input leaked into the {label}:\n{haystack}"
         );
     }
+}
+
+/// The fetcher for a distill with no ledger behind it: this test exercises the
+/// real model against the note pipeline, not the commitment classifications.
+fn no_open_entries(
+    _: &kodabi_core::routing::RouteGuess,
+) -> Vec<kodabi_core::distill::OpenCommitment> {
+    Vec::new()
 }

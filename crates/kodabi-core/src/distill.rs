@@ -170,7 +170,16 @@ or \\\"You\\\" when the local user took it on; null when unclear>\", \"descripti
 to be done, as a verb phrase like \\\"send the signed budget memo to finance\\\" - no owner name \
 and no due date inside it>\", \"due_date\": \"<YYYY-MM-DD when a date was stated or clearly \
 implied relative to the meeting date; otherwise null>\"}], \"open_questions\": [\"<questions \
-raised but left unresolved>\"], \"tags\": [\"<zero to five lowercase-kebab-case topic tags>\"]}.";
+raised but left unresolved>\"], \"tags\": [\"<zero to five lowercase-kebab-case topic tags>\"], \
+\"ledger_updates\": [{\"entry\": \"<an id copied exactly from the open commitments listed \
+above>\", \"kind\": \"<refresh when it was mentioned as still outstanding, supersede when it \
+was replaced by a different action item you extracted, completed when the conversation says it was \
+already done>\", \"item\": <the 0-based index into action_items of the item that restates or \
+replaces it; null when none does>, \"confidence\": <0.0-1.0, how strongly the conversation \
+supports this>, \"quote\": \"<the shortest verbatim excerpt showing it, or null>\"}]}. \
+Report a ledger update only for a commitment listed above, at most once each, and only when the \
+conversation actually referred to it; when no commitments are listed, ledger_updates must be \
+empty.";
 
 /// The reporting rules that follow the shared shape spec in the distill (not
 /// merge) system prompt: what counts as reportable, and the no-fabrication rule.
@@ -234,6 +243,63 @@ pub(crate) fn system_prompt(flavor: &PromptFlavor) -> String {
     format!("{} {RESPONSE_SHAPE_SPEC} {}", flavor.role, flavor.rules)
 }
 
+/// What a conversation did to a commitment the ledger already holds.
+///
+/// The three are the whole vocabulary: a commitment can be brought up again,
+/// replaced by a different one, or reported done. Anything else the model
+/// might say about it is not something the ledger can act on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LedgerUpdateKind {
+    /// Mentioned as still outstanding. Resets the aging clock; no state change.
+    Refresh,
+    /// Replaced by a different commitment made in this conversation.
+    Supersede,
+    /// Reported as already done. Evidence, not a verdict: whether it closes
+    /// the entry or parks it for review is the confidence split's call.
+    Completed,
+}
+
+impl LedgerUpdateKind {
+    /// Parses the wire spelling, `None` for anything else. Case-insensitive
+    /// because the model writes these, and a capitalized "Refresh" is the
+    /// right answer spelled differently rather than a different answer.
+    fn parse(raw: &str) -> Option<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "refresh" => Some(LedgerUpdateKind::Refresh),
+            "supersede" | "superseded" | "supersedes" => Some(LedgerUpdateKind::Supersede),
+            "completed" | "complete" | "done" => Some(LedgerUpdateKind::Completed),
+            _ => None,
+        }
+    }
+}
+
+/// One classification of an open commitment, normalized and ready to apply.
+///
+/// "Draft" for the same reason [`ActionItemDraft`] is: this is what the
+/// conversation said, not what the ledger decided to do about it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LedgerUpdateDraft {
+    /// The entry the update is about. Validated against the entries actually
+    /// shown to the model before it leaves this module, and again against the
+    /// ledger before anything is written.
+    pub entry_id: String,
+    pub kind: LedgerUpdateKind,
+    /// Index into [`DistillOutput::action_items`] of the item that restates
+    /// (refresh) or replaces (supersede) the commitment; `None` when none
+    /// does. Already remapped past the items normalization dropped.
+    pub item: Option<usize>,
+    /// How strongly the conversation supports this, clamped to `0.0..=1.0`.
+    pub confidence: f64,
+    /// The shortest excerpt showing it, when the model quoted one.
+    pub quote: Option<String>,
+}
+
+/// The confidence a completion claim gets when the model omitted one.
+///
+/// Deliberately below any sane auto-close threshold: an unquantified claim
+/// parks for a human rather than closing a commitment on its own.
+const UNSTATED_CONFIDENCE: f64 = 0.5;
+
 /// The distilled content of one meeting, parsed and normalized from the
 /// model's JSON. [`render_body`] turns this into the note's Markdown body;
 /// [`route_distilled`] scores it into a [`Routing`].
@@ -252,6 +318,10 @@ pub struct DistillOutput {
     /// Already-validated tags; the model's invalid candidates are dropped,
     /// not surfaced as errors.
     pub tags: Vec<Tag>,
+    /// What this conversation did to commitments the ledger already held.
+    /// Empty unless open entries were shown to the model, and empty on the
+    /// map-reduced path (see [`distill_rendered`]).
+    pub ledger_updates: Vec<LedgerUpdateDraft>,
 }
 
 /// One extracted action item, pre-rendering. "Draft" because the durable
@@ -276,6 +346,9 @@ pub struct DistilledNote {
     pub path: PathBuf,
     pub id: NoteId,
     pub title: Option<String>,
+    /// What this conversation said about commitments the ledger already held.
+    /// The caller applies them: this module writes notes, not ledger state.
+    pub ledger_updates: Vec<LedgerUpdateDraft>,
 }
 
 /// The wire shape the model is asked for. `summary` is deliberately required
@@ -295,6 +368,27 @@ struct RawDistillOutput {
     open_questions: Vec<String>,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    ledger_updates: Vec<RawLedgerUpdate>,
+}
+
+/// One classification of an already-open commitment, as the model returns it.
+/// Same all-defaulting posture as [`RawActionItem`]: a malformed update is
+/// dropped in normalization rather than costing the whole distill.
+#[derive(serde::Deserialize)]
+struct RawLedgerUpdate {
+    #[serde(default)]
+    entry: String,
+    #[serde(default)]
+    kind: String,
+    /// Signed on the wire so a negative index deserializes and is then
+    /// rejected, rather than failing the parse of every update beside it.
+    #[serde(default)]
+    item: Option<i64>,
+    #[serde(default)]
+    confidence: Option<f64>,
+    #[serde(default)]
+    quote: Option<String>,
 }
 
 /// One action item as the model returns it. All fields default so a single
@@ -380,6 +474,59 @@ fn render_transcript(segments: &[TranscriptSegment]) -> String {
     transcript_from_lines(&render_lines(segments))
 }
 
+/// One open commitment as the distill prompt shows it.
+///
+/// Deliberately three fields: an id to refer back to, and the two the model
+/// needs to recognize the thing being talked about. Dates, states and history
+/// would be tokens spent on distinctions the classification does not draw.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct OpenCommitment {
+    pub entry_id: String,
+    pub owner: String,
+    pub description: String,
+}
+
+/// How many open commitments the prompt will name, and the character ceiling
+/// they share.
+///
+/// Both bounds are real: a long-running project accumulates entries without
+/// limit, and every one of them costs transcript budget. Forty is well past
+/// what any single meeting refers back to, and the character cap catches the
+/// pathological case of a few very long descriptions.
+const LEDGER_CONTEXT_MAX_ENTRIES: usize = 40;
+const LEDGER_CONTEXT_MAX_CHARS: usize = 8_000;
+
+/// Renders the open commitments as the prompt block, or `None` when there are
+/// none to show.
+///
+/// JSON rather than prose for the same reason the cleanup pass serializes its
+/// glossary that way: the ids have to come back byte-identical, and a bulleted
+/// list invites the model to paraphrase them.
+fn ledger_context_block(open: &[OpenCommitment]) -> Option<String> {
+    let mut shown: Vec<&OpenCommitment> = Vec::new();
+    let mut chars = 0usize;
+    for commitment in open.iter().take(LEDGER_CONTEXT_MAX_ENTRIES) {
+        // The serialized length of this entry, near enough: the exact framing
+        // is a few characters either way and the cap is not a cliff.
+        let cost = commitment.entry_id.chars().count()
+            + commitment.owner.chars().count()
+            + commitment.description.chars().count()
+            + 48;
+        if chars + cost > LEDGER_CONTEXT_MAX_CHARS {
+            break;
+        }
+        chars += cost;
+        shown.push(commitment);
+    }
+    if shown.is_empty() {
+        return None;
+    }
+    let payload = serde_json::to_string(&shown).ok()?;
+    Some(format!(
+        "Open commitments already recorded for this project:\n{payload}"
+    ))
+}
+
 /// The single-call request around an already-rendered transcript block. The
 /// one place that prompt is shaped, so [`build_request`] and
 /// [`distill_rendered`] (which measures before it commits) can never drift
@@ -388,11 +535,19 @@ fn request_from_transcript(
     transcript: &str,
     prompt_date: &str,
     flavor: &PromptFlavor,
+    ledger_context: Option<&str>,
 ) -> LlmRequest {
+    // Without a context block this is byte-for-byte the prompt this pass has
+    // always sent, which is what `meeting_flavor_reproduces_the_locked_prompts`
+    // pins: the ledger block is an addition to the prompt, not a rewrite of it.
+    let context = match ledger_context {
+        Some(block) => format!("\n\n{block}"),
+        None => String::new(),
+    };
     LlmRequest {
         system_prompt: system_prompt(flavor),
         prompt: format!(
-            "{}: {prompt_date}\n\n{}:\n{transcript}",
+            "{}: {prompt_date}{context}\n\n{}:\n{transcript}",
             flavor.date_label, flavor.body_label
         ),
     }
@@ -403,7 +558,12 @@ fn request_from_transcript(
 /// dates. Timestamps are deliberately omitted — they cost tokens and carry
 /// no extraction value at this granularity.
 pub fn build_request(segments: &[TranscriptSegment], meeting_date: &str) -> LlmRequest {
-    request_from_transcript(&render_transcript(segments), meeting_date, &MEETING_FLAVOR)
+    request_from_transcript(
+        &render_transcript(segments),
+        meeting_date,
+        &MEETING_FLAVOR,
+        None,
+    )
 }
 
 /// Splits the transcript into chunk bodies of at most `budget_chars`
@@ -561,6 +721,20 @@ fn deserialize_output(model_output: &str) -> Result<RawDistillOutput, DistillErr
 /// ([`parse_output`]) and one chunk ([`parse_chunk_output`]).
 fn normalize_output(raw: RawDistillOutput) -> DistillOutput {
     let summary = defuse_headings(raw.summary.replace("\r\n", "\n").trim());
+    // Action items are filtered, which renumbers them. The model's indexes
+    // point into the list it produced, so the surviving items' original
+    // positions are kept to remap the updates below; without it a dropped item
+    // would silently slide every later reference onto the wrong commitment.
+    let mut kept_from: Vec<usize> = Vec::new();
+    let mut action_items: Vec<ActionItemDraft> = Vec::new();
+    for (index, item) in raw.action_items.into_iter().enumerate() {
+        if let Some(item) = normalize_action_item(item) {
+            kept_from.push(index);
+            action_items.push(item);
+        }
+    }
+    let ledger_updates = normalize_ledger_updates(raw.ledger_updates, &kept_from);
+
     DistillOutput {
         title: normalize_title(raw.title),
         summary,
@@ -569,18 +743,64 @@ fn normalize_output(raw: RawDistillOutput) -> DistillOutput {
             .iter()
             .filter_map(|d| normalize_sentence(d))
             .collect(),
-        action_items: raw
-            .action_items
-            .into_iter()
-            .filter_map(normalize_action_item)
-            .collect(),
+        action_items,
         open_questions: raw
             .open_questions
             .iter()
             .filter_map(|q| normalize_sentence(q))
             .collect(),
         tags: normalize_tags(raw.tags),
+        ledger_updates,
     }
+}
+
+/// Normalizes the model's commitment classifications, dropping the unusable.
+///
+/// `kept_from` maps each surviving action item to the position it held in the
+/// model's own list, which is what its `item` indexes refer to.
+///
+/// An update naming an item that normalization dropped keeps its meaning only
+/// for a refresh, where the item is a hint and the entry is the point. A
+/// supersede without the commitment that replaced it has nothing to link to,
+/// so it goes.
+fn normalize_ledger_updates(
+    raw: Vec<RawLedgerUpdate>,
+    kept_from: &[usize],
+) -> Vec<LedgerUpdateDraft> {
+    raw.into_iter()
+        .filter_map(|update| {
+            let entry_id = update.entry.trim().to_string();
+            if entry_id.is_empty() {
+                return None;
+            }
+            let kind = LedgerUpdateKind::parse(&update.kind)?;
+            let item = update
+                .item
+                .and_then(|index| usize::try_from(index).ok())
+                .and_then(|index| kept_from.iter().position(|kept| *kept == index));
+            if item.is_none() && kind == LedgerUpdateKind::Supersede {
+                return None;
+            }
+            let confidence = match update.confidence {
+                Some(value) if value.is_finite() => value.clamp(0.0, 1.0),
+                _ => UNSTATED_CONFIDENCE,
+            };
+            Some(LedgerUpdateDraft {
+                entry_id,
+                kind,
+                item,
+                confidence,
+                // Collapsed, not sentence-normalized: this is a verbatim
+                // excerpt, and `normalize_sentence` would append a full stop
+                // the speaker never said.
+                quote: update
+                    .quote
+                    .as_deref()
+                    .map(collapse_ws)
+                    .filter(|quote| !quote.is_empty()),
+            })
+        })
+        .collect()
 }
 
 /// Collapses every whitespace run (including newlines) to a single space and
@@ -1201,6 +1421,7 @@ pub fn distill_session(
     vault_root: &Path,
     session_path: &Path,
     route: &dyn Fn(&DistillOutput, &str) -> Routing,
+    open_entries: &dyn Fn(&routing::RouteGuess) -> Vec<OpenCommitment>,
 ) -> Result<DistilledNote, DistillError> {
     let segments = raw_session::read_raw_session(session_path)?;
     if raw_session::is_silent(&segments) {
@@ -1259,6 +1480,7 @@ pub fn distill_session(
             title_seed_fallback: parsed_name.and_then(|parsed| parsed.slug),
         },
         route,
+        open_entries,
     )
 }
 
@@ -1292,29 +1514,66 @@ pub(crate) fn distill_rendered(
     vault_root: &Path,
     input: RenderedDistill<'_>,
     route: &dyn Fn(&DistillOutput, &str) -> Routing,
+    open_entries: &dyn Fn(&routing::RouteGuess) -> Vec<OpenCommitment>,
 ) -> Result<DistilledNote, DistillError> {
     // One call while the prompt fits the budget — the overwhelmingly common
     // case, byte-for-byte what this pass has always sent. Only a transcript
     // that would otherwise overflow takes the chunked map-reduce path.
-    let request = request_from_transcript(
-        &transcript_from_lines(input.lines),
-        input.prompt_date,
-        input.flavor,
-    );
-    let output = if request.prompt.chars().count() <= DISTILL_INPUT_BUDGET_CHARS {
-        parse_output(&runner.run(&request)?)?
+    let transcript = transcript_from_lines(input.lines);
+    let bare = request_from_transcript(&transcript, input.prompt_date, input.flavor, None);
+    let mut output = if bare.prompt.chars().count() <= DISTILL_INPUT_BUDGET_CHARS {
+        // Which project this is has to be guessed here, before the call: the
+        // authoritative routing runs on the rendered body, which does not
+        // exist yet. A guess is the right instrument anyway — it only decides
+        // which commitments are worth showing, and the model ignores the ones
+        // the conversation never mentions.
+        let open = guess_project(vault_root, &transcript)
+            .map(|guess| open_entries(&guess))
+            .unwrap_or_default();
+        let request = match ledger_context_block(&open) {
+            // The note always wins over the context: a transcript already near
+            // the budget takes the plain prompt rather than being chunked for
+            // the sake of a block that only ever adds precision.
+            Some(block) => {
+                let with_context = request_from_transcript(
+                    &transcript,
+                    input.prompt_date,
+                    input.flavor,
+                    Some(&block),
+                );
+                if with_context.prompt.chars().count() <= DISTILL_INPUT_BUDGET_CHARS {
+                    with_context
+                } else {
+                    bare
+                }
+            }
+            None => bare,
+        };
+        let mut output = parse_output(&runner.run(&request)?)?;
+        // The model can only report on what it was shown. An id it invented,
+        // or one from a list it was never given, is dropped here rather than
+        // being carried to something that would look it up.
+        retain_known_entries(&mut output, &open);
+        output
     } else {
         // The whole-transcript prompt is dead weight from here on; the chunked
         // path re-packs the same lines under its own budget.
-        drop(request);
-        distill_chunked(
+        drop(bare);
+        let mut output = distill_chunked(
             runner,
             input.lines,
             input.prompt_date,
             DISTILL_INPUT_BUDGET_CHARS,
             input.flavor,
-        )?
+        )?;
+        // No chunk is ever shown the open commitments, so anything here was
+        // invented; and an `item` index cannot survive a merge that rewrites
+        // the action-item list anyway. Classification is a single-call
+        // capability by construction.
+        output.ledger_updates.clear();
+        output
     };
+    let ledger_updates = std::mem::take(&mut output.ledger_updates);
     // Render the body once: routing scores it and the note stores it, so the
     // text that decides where the note lands is exactly the text on disk.
     let body = render_body(&output);
@@ -1343,12 +1602,45 @@ pub(crate) fn distill_rendered(
         path,
         id,
         title: output.title,
+        ledger_updates,
     })
+}
+
+/// The project this transcript most likely belongs to, for choosing which open
+/// commitments to show the model.
+///
+/// Advisory by design, and separate from [`route_distilled`]: this runs on the
+/// raw transcript before the model has said anything, while routing runs on
+/// the rendered body afterwards and is what actually files the note. A vault
+/// whose signals will not load simply shows no commitments.
+fn guess_project(vault_root: &Path, transcript: &str) -> Option<routing::RouteGuess> {
+    let loaded = routing::load_project_signals(vault_root).ok()?;
+    routing::best_candidate(
+        NoteText {
+            title: None,
+            body: transcript,
+        },
+        &loaded.signals,
+    )
+}
+
+/// Drops classifications naming a commitment that was never shown to the model.
+fn retain_known_entries(output: &mut DistillOutput, open: &[OpenCommitment]) {
+    output
+        .ledger_updates
+        .retain(|update| open.iter().any(|entry| entry.entry_id == update.entry_id));
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The fetcher for a distill with no ledger behind it: every call site
+    /// that is not exercising the commitment context uses this, so the prompt
+    /// it sends is the plain one.
+    fn no_open_entries(_: &routing::RouteGuess) -> Vec<OpenCommitment> {
+        Vec::new()
+    }
+
     use crate::device::DeviceId;
     use crate::glossary::{Glossary, GlossaryTerm, OnConflict};
     use crate::note::project_dir;
@@ -1489,6 +1781,7 @@ mod tests {
             action_items: vec![],
             open_questions: vec![],
             tags: vec![],
+            ledger_updates: vec![],
         }
     }
 
@@ -1757,6 +2050,7 @@ mod tests {
             ],
             open_questions: Vec::new(),
             tags: Vec::new(),
+            ledger_updates: Vec::new(),
         };
 
         assert_eq!(
@@ -1782,6 +2076,7 @@ mod tests {
             action_items: Vec::new(),
             open_questions: vec!["Should we meet again?".to_string()],
             tags: Vec::new(),
+            ledger_updates: Vec::new(),
         };
 
         assert_eq!(
@@ -1859,8 +2154,14 @@ mod tests {
         std::fs::rename(&written, &imported).unwrap();
         let runner = MockRunner(Ok(full_output_json()));
 
-        let distilled = distill_session(&runner, vault.path(), &imported, &|_, _| inbox_routing())
-            .expect("distill should succeed");
+        let distilled = distill_session(
+            &runner,
+            vault.path(),
+            &imported,
+            &|_, _| inbox_routing(),
+            &no_open_entries,
+        )
+        .expect("distill should succeed");
 
         let mtime =
             DateTime::<Utc>::from(std::fs::metadata(&imported).unwrap().modified().unwrap());
@@ -1911,9 +2212,13 @@ mod tests {
         let session_path = write_session(vault.path(), None);
         let runner = MockRunner(Ok(full_output_json()));
 
-        let distilled = distill_session(&runner, vault.path(), &session_path, &|_, _| {
-            inbox_routing()
-        })
+        let distilled = distill_session(
+            &runner,
+            vault.path(),
+            &session_path,
+            &|_, _| inbox_routing(),
+            &no_open_entries,
+        )
         .expect("distill should succeed");
 
         assert_eq!(
@@ -1964,13 +2269,19 @@ mod tests {
         let session_path = write_session(vault.path(), None);
         let runner = MockRunner(Ok(full_output_json()));
 
-        let distilled = distill_session(&runner, vault.path(), &session_path, &|output, _| {
-            assert_eq!(output.summary, "Talked through the Q3 budget.");
-            Routing::Routed {
-                project: "Briarwood Golf".to_string(),
-                confidence: 0.94,
-            }
-        })
+        let distilled = distill_session(
+            &runner,
+            vault.path(),
+            &session_path,
+            &|output, _| {
+                assert_eq!(output.summary, "Talked through the Q3 budget.");
+                Routing::Routed {
+                    project: "Briarwood Golf".to_string(),
+                    confidence: 0.94,
+                }
+            },
+            &no_open_entries,
+        )
         .unwrap();
 
         let note = Note::from_markdown(&std::fs::read_to_string(&distilled.path).unwrap()).unwrap();
@@ -2252,9 +2563,15 @@ mod tests {
         }"#
         .to_string()));
 
-        let distilled = distill_session(&runner, vault.path(), &session_path, &|output, body| {
-            route_distilled(vault.path(), output, body, &RoutingConfig::default()).0
-        })
+        let distilled = distill_session(
+            &runner,
+            vault.path(),
+            &session_path,
+            &|output, body| {
+                route_distilled(vault.path(), output, body, &RoutingConfig::default()).0
+            },
+            &no_open_entries,
+        )
         .expect("distill should succeed");
 
         // Name in title (2*2) + three body terms + irrigation in title (1*2) =
@@ -2288,9 +2605,15 @@ mod tests {
         }"#
         .to_string()));
 
-        let distilled = distill_session(&runner, vault.path(), &session_path, &|output, body| {
-            route_distilled(vault.path(), output, body, &RoutingConfig::default()).0
-        })
+        let distilled = distill_session(
+            &runner,
+            vault.path(),
+            &session_path,
+            &|output, body| {
+                route_distilled(vault.path(), output, body, &RoutingConfig::default()).0
+            },
+            &no_open_entries,
+        )
         .unwrap();
 
         assert_eq!(
@@ -2318,9 +2641,15 @@ mod tests {
         }"#
         .to_string()));
 
-        let distilled = distill_session(&runner, vault.path(), &session_path, &|output, body| {
-            route_distilled(vault.path(), output, body, &RoutingConfig::default()).0
-        })
+        let distilled = distill_session(
+            &runner,
+            vault.path(),
+            &session_path,
+            &|output, body| {
+                route_distilled(vault.path(), output, body, &RoutingConfig::default()).0
+            },
+            &no_open_entries,
+        )
         .unwrap();
 
         let note = Note::from_markdown(&std::fs::read_to_string(&distilled.path).unwrap()).unwrap();
@@ -2359,9 +2688,15 @@ mod tests {
         // The production callback drops the diagnostics (`.0`); fail-soft means
         // the note still lands, and containment means it lands in its real
         // project, not forced to Inbox by an unrelated broken glossary.
-        let distilled = distill_session(&runner, vault.path(), &session_path, &|output, body| {
-            route_distilled(vault.path(), output, body, &RoutingConfig::default()).0
-        })
+        let distilled = distill_session(
+            &runner,
+            vault.path(),
+            &session_path,
+            &|output, body| {
+                route_distilled(vault.path(), output, body, &RoutingConfig::default()).0
+            },
+            &no_open_entries,
+        )
         .expect("a malformed glossary must not fail the distill");
 
         assert_eq!(
@@ -2383,9 +2718,13 @@ mod tests {
         let session_path = write_session(vault.path(), Some("briarwood golf sync"));
         let runner = MockRunner(Ok(r#"{"summary": "s"}"#.to_string()));
 
-        let distilled = distill_session(&runner, vault.path(), &session_path, &|_, _| {
-            inbox_routing()
-        })
+        let distilled = distill_session(
+            &runner,
+            vault.path(),
+            &session_path,
+            &|_, _| inbox_routing(),
+            &no_open_entries,
+        )
         .unwrap();
         assert_eq!(
             distilled.path,
@@ -2394,9 +2733,13 @@ mod tests {
 
         // No LLM title and no session slug: the writer falls back to the id.
         let bare_session = write_session(vault.path(), None);
-        let distilled = distill_session(&runner, vault.path(), &bare_session, &|_, _| {
-            inbox_routing()
-        })
+        let distilled = distill_session(
+            &runner,
+            vault.path(),
+            &bare_session,
+            &|_, _| inbox_routing(),
+            &no_open_entries,
+        )
         .unwrap();
         assert_eq!(
             distilled.path,
@@ -2418,9 +2761,13 @@ mod tests {
             r#"{{"title": "{long_title}", "summary": "s"}}"#
         )));
 
-        let distilled = distill_session(&runner, vault.path(), &session_path, &|_, _| {
-            inbox_routing()
-        })
+        let distilled = distill_session(
+            &runner,
+            vault.path(),
+            &session_path,
+            &|_, _| inbox_routing(),
+            &no_open_entries,
+        )
         .unwrap();
 
         // The filename slug is still capped for filesystem sanity...
@@ -2447,9 +2794,13 @@ mod tests {
         .unwrap();
 
         for session in [empty, whitespace] {
-            let err = distill_session(&PanicRunner, vault.path(), &session, &|_, _| {
-                inbox_routing()
-            })
+            let err = distill_session(
+                &PanicRunner,
+                vault.path(),
+                &session,
+                &|_, _| inbox_routing(),
+                &no_open_entries,
+            )
             .unwrap_err();
             assert!(matches!(err, DistillError::EmptyTranscript));
         }
@@ -2461,9 +2812,13 @@ mod tests {
         let session_path = write_session(vault.path(), None);
         let runner = MockRunner(Err(LlmRunError::Spawn("boom".to_owned())));
 
-        let err = distill_session(&runner, vault.path(), &session_path, &|_, _| {
-            inbox_routing()
-        })
+        let err = distill_session(
+            &runner,
+            vault.path(),
+            &session_path,
+            &|_, _| inbox_routing(),
+            &no_open_entries,
+        )
         .unwrap_err();
 
         assert!(matches!(err, DistillError::Run(_)));
@@ -2476,9 +2831,13 @@ mod tests {
         let session_path = write_session(vault.path(), None);
         let runner = MockRunner(Ok("that meeting was great, no JSON for you".to_owned()));
 
-        let err = distill_session(&runner, vault.path(), &session_path, &|_, _| {
-            inbox_routing()
-        })
+        let err = distill_session(
+            &runner,
+            vault.path(),
+            &session_path,
+            &|_, _| inbox_routing(),
+            &no_open_entries,
+        )
         .unwrap_err();
 
         assert!(matches!(err, DistillError::Parse(_)));
@@ -2491,9 +2850,13 @@ mod tests {
         let elsewhere = tempdir().unwrap();
         let session_path = write_session(elsewhere.path(), None);
 
-        let err = distill_session(&PanicRunner, vault.path(), &session_path, &|_, _| {
-            inbox_routing()
-        })
+        let err = distill_session(
+            &PanicRunner,
+            vault.path(),
+            &session_path,
+            &|_, _| inbox_routing(),
+            &no_open_entries,
+        )
         .unwrap_err();
 
         assert!(matches!(err, DistillError::SessionOutsideVault(_)));
@@ -2504,9 +2867,13 @@ mod tests {
         let vault = tempdir().unwrap();
         let missing = vault.path().join("sessions").join("nope.jsonl");
 
-        let err = distill_session(&PanicRunner, vault.path(), &missing, &|_, _| {
-            inbox_routing()
-        })
+        let err = distill_session(
+            &PanicRunner,
+            vault.path(),
+            &missing,
+            &|_, _| inbox_routing(),
+            &no_open_entries,
+        )
         .unwrap_err();
 
         assert!(matches!(err, DistillError::Session(_)));
@@ -2701,7 +3068,7 @@ explanation - only the JSON object."
             )
         );
 
-        let single = request_from_transcript("You: hello\n", "2026-07-12", &MEETING_FLAVOR);
+        let single = request_from_transcript("You: hello\n", "2026-07-12", &MEETING_FLAVOR, None);
         assert_eq!(
             single.prompt,
             "Meeting date: 2026-07-12\n\nTranscript:\nYou: hello\n"
@@ -2727,6 +3094,199 @@ consecutive parts. The partial results, in order:\n"
         ));
     }
 
+    // ------------------------------------------------------------------
+    // Ledger classifications
+    // ------------------------------------------------------------------
+
+    fn open_commitment(entry_id: &str, description: &str) -> OpenCommitment {
+        OpenCommitment {
+            entry_id: entry_id.to_string(),
+            owner: "You".to_string(),
+            description: description.to_string(),
+        }
+    }
+
+    #[test]
+    fn ledger_updates_parse_with_their_defaults() {
+        let output = parse_output(
+            r#"{"summary": "Talked it through.",
+                "ledger_updates": [
+                  {"entry": "le_aaa", "kind": "refresh"},
+                  {"entry": "le_bbb", "kind": "Completed", "confidence": 0.91,
+                   "quote": "sent it over  Tuesday"},
+                  {"entry": "le_ccc", "kind": "completed", "confidence": 5.0}
+                ]}"#,
+        )
+        .unwrap();
+
+        let updates = &output.ledger_updates;
+        assert_eq!(updates.len(), 3);
+
+        // No confidence stated: parks rather than closing, whatever the
+        // threshold is.
+        assert_eq!(updates[0].kind, LedgerUpdateKind::Refresh);
+        assert_eq!(updates[0].confidence, UNSTATED_CONFIDENCE);
+        assert_eq!(updates[0].item, None);
+        assert_eq!(updates[0].quote, None);
+
+        // Spelling is the model's, meaning is ours; the quote is collapsed
+        // like every other one-line field.
+        assert_eq!(updates[1].kind, LedgerUpdateKind::Completed);
+        assert_eq!(updates[1].confidence, 0.91);
+        assert_eq!(updates[1].quote.as_deref(), Some("sent it over Tuesday"));
+
+        // Out of range clamps rather than dropping: the model meant "very
+        // sure", and 5.0 is not a different claim.
+        assert_eq!(updates[2].confidence, 1.0);
+    }
+
+    #[test]
+    fn an_unusable_ledger_update_is_dropped_not_fatal() {
+        let output = parse_output(
+            r#"{"summary": "Talked it through.",
+                "ledger_updates": [
+                  {"entry": "", "kind": "refresh"},
+                  {"entry": "le_ok", "kind": "reconsidered"},
+                  {"entry": "le_supersede", "kind": "supersede"},
+                  {"entry": "le_keep", "kind": "refresh", "confidence": 0.4}
+                ]}"#,
+        )
+        .unwrap();
+
+        // An empty id, an unknown kind, and a supersede with nothing to
+        // supersede it: all gone, and the usable one survives beside them.
+        let updates = &output.ledger_updates;
+        assert_eq!(updates.len(), 1);
+        assert_eq!(updates[0].entry_id, "le_keep");
+    }
+
+    #[test]
+    fn item_indexes_survive_a_dropped_action_item() {
+        // The second item normalizes away (no description), so what the model
+        // called index 2 is index 1 by the time anything reads it. A naive
+        // pass-through would point this update at the wrong commitment.
+        let output = parse_output(
+            r#"{"summary": "Talked it through.",
+                "action_items": [
+                  {"description": "send the deck", "owner": "You"},
+                  {"description": "   ", "owner": "You"},
+                  {"description": "book the venue", "owner": "Priya"}
+                ],
+                "ledger_updates": [
+                  {"entry": "le_venue", "kind": "supersede", "item": 2},
+                  {"entry": "le_gone", "kind": "refresh", "item": 1}
+                ]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(output.action_items.len(), 2);
+        let venue = &output.ledger_updates[0];
+        assert_eq!(venue.item, Some(1));
+        assert_eq!(
+            output.action_items[venue.item.unwrap()].description,
+            "book the venue"
+        );
+
+        // The refresh named an item that no longer exists. The entry is still
+        // the point, so it survives as a bare re-mention.
+        let gone = &output.ledger_updates[1];
+        assert_eq!(gone.entry_id, "le_gone");
+        assert_eq!(gone.item, None);
+    }
+
+    #[test]
+    fn the_context_block_lists_what_the_model_may_refer_to() {
+        let block = ledger_context_block(&[
+            open_commitment("le_aaa", "send the signed budget memo to finance"),
+            open_commitment("le_bbb", "share the survey results"),
+        ])
+        .unwrap();
+
+        assert_eq!(
+            block,
+            "Open commitments already recorded for this project:\n[{\"entry_id\":\"le_aaa\",\"owner\":\"You\",\"description\":\"send the signed budget memo to finance\"},{\"entry_id\":\"le_bbb\",\"owner\":\"You\",\"description\":\"share the survey results\"}]"
+        );
+
+        // Nothing open, nothing said: the prompt stays exactly what it was.
+        assert!(ledger_context_block(&[]).is_none());
+    }
+
+    #[test]
+    fn the_context_block_is_bounded_by_count_and_by_length() {
+        let many: Vec<OpenCommitment> = (0..60)
+            .map(|i| open_commitment(&format!("le_{i:04}"), "send the deck"))
+            .collect();
+        let block = ledger_context_block(&many).unwrap();
+        assert_eq!(
+            block.matches("entry_id").count(),
+            LEDGER_CONTEXT_MAX_ENTRIES
+        );
+
+        // A handful of very long descriptions hits the character ceiling well
+        // before the entry ceiling.
+        let long = "x".repeat(4_000);
+        let bulky: Vec<OpenCommitment> = (0..10)
+            .map(|i| open_commitment(&format!("le_{i:04}"), &long))
+            .collect();
+        let block = ledger_context_block(&bulky).unwrap();
+        assert!(block.chars().count() <= LEDGER_CONTEXT_MAX_CHARS + 200);
+        assert!(block.matches("entry_id").count() < 10);
+    }
+
+    #[test]
+    fn a_prompt_with_commitments_keeps_the_transcript_last() {
+        let block = ledger_context_block(&[open_commitment("le_aaa", "send the deck")]).unwrap();
+        let request =
+            request_from_transcript("You: hello\n", "2026-07-12", &MEETING_FLAVOR, Some(&block));
+
+        assert_eq!(
+            request.prompt,
+            "Meeting date: 2026-07-12\n\nOpen commitments already recorded for this project:\n[{\"entry_id\":\"le_aaa\",\"owner\":\"You\",\"description\":\"send the deck\"}]\n\nTranscript:\nYou: hello\n"
+        );
+    }
+
+    #[test]
+    fn a_distill_only_reports_on_commitments_it_was_shown() {
+        let output_json = r#"{"summary": "Talked it through.",
+            "ledger_updates": [
+              {"entry": "le_real", "kind": "refresh"},
+              {"entry": "le_invented", "kind": "completed", "confidence": 0.99}
+            ]}"#;
+        let vault = tempdir().unwrap();
+        routing_fixture(vault.path());
+        let session_path = write_session_with(
+            vault.path(),
+            &[
+                segment(0, Channel::You, "the tee sheet and irrigation work"),
+                segment(
+                    1,
+                    Channel::Them,
+                    "GreenFlow and TeeTrack both need MERIDIAN",
+                ),
+            ],
+        );
+        let runner = MockRunner(Ok(output_json.to_string()));
+
+        let distilled = distill_session(
+            &runner,
+            vault.path(),
+            &session_path,
+            &|_, _| inbox_routing(),
+            &|guess| {
+                // The guess is what decides whose commitments are worth
+                // showing, and it is made before the model has said anything.
+                assert_eq!(guess.project, "Briarwood Golf");
+                vec![open_commitment("le_real", "send the deck")]
+            },
+        )
+        .unwrap();
+
+        // An id the model invented cannot reach anything that would look it
+        // up: it never appeared in the list the model was given.
+        assert_eq!(distilled.ledger_updates.len(), 1);
+        assert_eq!(distilled.ledger_updates[0].entry_id, "le_real");
+    }
+
     /// The assembled distill prompt is one flowing paragraph, not three parts
     /// with a seam: the split exists to share the shape spec, not to change
     /// what the model reads.
@@ -2736,7 +3296,7 @@ consecutive parts. The partial results, in order:\n"
 
         assert!(prompt.starts_with("You are a meeting-notes distiller."));
         assert!(prompt.contains("unattributed audio. Respond with ONLY"));
-        assert!(prompt.contains("topic tags>\"]}. Only report decisions"));
+        assert!(prompt.contains("ledger_updates must be empty. Only report decisions"));
         assert!(prompt.ends_with("only the JSON object."));
         assert!(!prompt.contains("  "), "no doubled space at a seam");
     }
@@ -3067,9 +3627,13 @@ consecutive parts. The partial results, in order:\n"
         let segments = raw_session::read_raw_session(&session_path).unwrap();
         let runner = SequenceRunner::ok(vec![full_output_json()]);
 
-        distill_session(&runner, vault.path(), &session_path, &|_, _| {
-            inbox_routing()
-        })
+        distill_session(
+            &runner,
+            vault.path(),
+            &session_path,
+            &|_, _| inbox_routing(),
+            &no_open_entries,
+        )
         .unwrap();
 
         // Byte-for-byte the request this pass has always sent, and only one.
@@ -3098,9 +3662,13 @@ consecutive parts. The partial results, in order:\n"
         let request = build_request(&segments, &local_day());
         assert_eq!(request.prompt.chars().count(), DISTILL_INPUT_BUDGET_CHARS);
 
-        distill_session(&runner, vault.path(), &session_path, &|_, _| {
-            inbox_routing()
-        })
+        distill_session(
+            &runner,
+            vault.path(),
+            &session_path,
+            &|_, _| inbox_routing(),
+            &no_open_entries,
+        )
         .unwrap();
 
         assert_eq!(runner.requests(), vec![request]);
@@ -3167,9 +3735,13 @@ consecutive parts. The partial results, in order:\n"
         );
         let runner = SequenceRunner::ok(responses);
 
-        let distilled = distill_session(&runner, vault.path(), &session_path, &|_, _| {
-            inbox_routing()
-        })
+        let distilled = distill_session(
+            &runner,
+            vault.path(),
+            &session_path,
+            &|_, _| inbox_routing(),
+            &no_open_entries,
+        )
         .unwrap();
 
         assert_eq!(runner.requests().len(), chunk_count + 1);
@@ -3195,9 +3767,13 @@ consecutive parts. The partial results, in order:\n"
             Err(LlmRunError::ClaudeError("overloaded".into())),
         ]);
 
-        let err = distill_session(&runner, vault.path(), &session_path, &|_, _| {
-            inbox_routing()
-        })
+        let err = distill_session(
+            &runner,
+            vault.path(),
+            &session_path,
+            &|_, _| inbox_routing(),
+            &no_open_entries,
+        )
         .unwrap_err();
 
         assert!(matches!(err, DistillError::Run(_)));

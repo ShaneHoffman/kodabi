@@ -492,6 +492,70 @@ impl Ledger {
         self.set_state(entry_id, EntryState::Snoozed, None, Some(until), None, now)
     }
 
+    /// Parks an entry for a human, with `reason` as the question being asked.
+    ///
+    /// The machine half of the confidence split: a provider that found
+    /// something but was not sure enough to act puts the entry here rather
+    /// than guessing. Re-parking an entry already in review replaces the
+    /// reason, so the newest question is the one shown.
+    pub fn send_to_review(
+        &mut self,
+        entry_id: &str,
+        reason: &str,
+        now: &str,
+    ) -> Result<LedgerEntry> {
+        self.set_state(
+            entry_id,
+            EntryState::NeedsReview,
+            None,
+            None,
+            Some(reason),
+            now,
+        )
+    }
+
+    /// Records that a note mentioned this commitment without carrying its line.
+    ///
+    /// The bare re-mention: somebody brought the commitment up, but no
+    /// checkbox in the new note is that commitment, so there is no ref to
+    /// link. `last_mention` only ever moves forward, so distilling an old
+    /// backlog cannot make a stale entry look fresh, and an entry parked for
+    /// review because its line vanished comes back to life on being spoken
+    /// about again.
+    ///
+    /// Deliberately does not move the entry's project the way a mention with a
+    /// ref does: with no line in the new note there is nothing anchoring the
+    /// commitment there.
+    pub fn record_mention(
+        &mut self,
+        entry_id: &str,
+        note_date_utc: &str,
+        now: &str,
+    ) -> Result<LedgerEntry> {
+        let (state, project) = Self::state_and_project(&self.conn, entry_id)?;
+        self.conn.execute(
+            "UPDATE ledger_entries
+             SET last_mention = max(last_mention, ?2), updated_at = ?3
+             WHERE entry_id = ?1",
+            params![entry_id, note_date_utc, now],
+        )?;
+        if state == EntryState::NeedsReview {
+            self.conn.execute(
+                "UPDATE ledger_entries
+                 SET state = 'open', review_reason = NULL, updated_at = ?2
+                 WHERE entry_id = ?1",
+                params![entry_id, now],
+            )?;
+        }
+        self.mark_dirty(&project);
+        let detail = self
+            .get_entry(entry_id)?
+            .ok_or_else(|| LedgerError::EntryNotFound {
+                entry_id: entry_id.to_string(),
+            })?;
+        Ok(detail.entry)
+    }
+
     /// Returns an entry to [`EntryState::Open`], clearing whatever the previous
     /// state carried. Removes the outgoing link that put it in
     /// [`EntryState::Superseded`], so the state and the graph stay consistent.
@@ -895,6 +959,7 @@ mod tests {
                 project: "Briarwood Golf",
                 note_date_utc: DAY,
                 items: &items,
+                link_hints: &[],
                 now: NOW,
             })
             .unwrap();
@@ -1155,6 +1220,7 @@ mod tests {
                 project: "Briarwood Golf",
                 note_date_utc: "2026-08-18T00:00:00Z",
                 items: &items,
+                link_hints: &[],
                 now: NOW,
             })
             .unwrap()
@@ -1193,6 +1259,7 @@ mod tests {
                 project: "Briarwood Golf",
                 note_date_utc: DAY,
                 items: &items,
+                link_hints: &[],
                 now: NOW,
             })
             .unwrap()
@@ -1215,6 +1282,7 @@ mod tests {
                 project: "Briarwood Golf",
                 note_date_utc: DAY,
                 items: &items,
+                link_hints: &[],
                 now: NOW,
             })
             .unwrap()
@@ -1261,6 +1329,7 @@ mod tests {
                 project: "Briarwood Golf",
                 note_date_utc: "2026-08-01T00:00:00Z",
                 items: &older,
+                link_hints: &[],
                 now: NOW,
             })
             .unwrap();
@@ -1270,6 +1339,7 @@ mod tests {
                 project: "Briarwood Golf/Range",
                 note_date_utc: "2026-08-10T00:00:00Z",
                 items: &newer,
+                link_hints: &[],
                 now: NOW,
             })
             .unwrap();
@@ -1351,6 +1421,7 @@ mod tests {
                 project: "Ops_West",
                 note_date_utc: DAY,
                 items: &items,
+                link_hints: &[],
                 now: NOW,
             })
             .unwrap();
@@ -1376,6 +1447,7 @@ mod tests {
                 project: "Café/Q3",
                 note_date_utc: DAY,
                 items: &items,
+                link_hints: &[],
                 now: NOW,
             })
             .unwrap();
@@ -1399,6 +1471,7 @@ mod tests {
                 project: "Briarwood Golf",
                 note_date_utc: DAY,
                 items: &items,
+                link_hints: &[],
                 now: NOW,
             })
             .unwrap()
@@ -1435,5 +1508,75 @@ mod tests {
             .close("le_missing00000", ClosedVia::Manual, NOW)
             .unwrap_err();
         assert!(matches!(err, LedgerError::EntryNotFound { .. }));
+    }
+
+    #[test]
+    fn send_to_review_parks_a_live_entry_and_refuses_a_settled_one() {
+        let (mut ledger, entry_id) = seeded();
+
+        let entry = ledger
+            .send_to_review(&entry_id, "a conversation reported this done", NOW)
+            .unwrap();
+        assert_eq!(entry.state, EntryState::NeedsReview);
+        assert_eq!(
+            entry.review_reason.as_deref(),
+            Some("a conversation reported this done")
+        );
+
+        // Re-parking replaces the question rather than stacking another.
+        let entry = ledger.send_to_review(&entry_id, "and again", NOW).unwrap();
+        assert_eq!(entry.review_reason.as_deref(), Some("and again"));
+
+        // A snoozed entry can still be parked; a closed one cannot, because
+        // the ledger does not get to reopen what a human settled.
+        ledger.close(&entry_id, ClosedVia::Manual, NOW).unwrap();
+        assert!(matches!(
+            ledger.send_to_review(&entry_id, "too late", NOW),
+            Err(LedgerError::IllegalTransition { .. })
+        ));
+    }
+
+    #[test]
+    fn record_mention_moves_the_clock_forward_only() {
+        let (mut ledger, entry_id) = seeded();
+        let before = ledger.get_entry(&entry_id).unwrap().unwrap().entry;
+
+        let entry = ledger
+            .record_mention(&entry_id, "2026-09-01T00:00:00Z", NOW)
+            .unwrap();
+        assert_eq!(entry.last_mention, "2026-09-01T00:00:00Z");
+
+        // An older note never drags it back: re-indexing a backlog must not
+        // rewrite when a commitment was last heard about.
+        let entry = ledger
+            .record_mention(&entry_id, "2026-01-01T00:00:00Z", NOW)
+            .unwrap();
+        assert_eq!(entry.last_mention, "2026-09-01T00:00:00Z");
+        assert_ne!(entry.last_mention, before.last_mention);
+    }
+
+    #[test]
+    fn record_mention_revives_an_entry_parked_for_review() {
+        let (mut ledger, entry_id) = seeded();
+        ledger
+            .send_to_review(&entry_id, "its line vanished", NOW)
+            .unwrap();
+
+        // Being spoken about again answers the question the review was asking.
+        let entry = ledger.record_mention(&entry_id, DAY, NOW).unwrap();
+        assert_eq!(entry.state, EntryState::Open);
+        assert_eq!(entry.review_reason, None);
+    }
+
+    #[test]
+    fn record_mention_leaves_a_snooze_alone() {
+        let (mut ledger, entry_id) = seeded();
+        ledger.snooze(&entry_id, "2026-12-01", NOW).unwrap();
+
+        // Mentioning something you deliberately shelved is not a reason to
+        // unshelve it: the snooze is the user's decision, not the ledger's.
+        let entry = ledger.record_mention(&entry_id, DAY, NOW).unwrap();
+        assert_eq!(entry.state, EntryState::Snoozed);
+        assert_eq!(entry.snoozed_until.as_deref(), Some("2026-12-01"));
     }
 }

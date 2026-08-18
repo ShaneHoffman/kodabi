@@ -28,15 +28,17 @@
 //! items through [`ledger_item_refs`](migrations), whose rows retire rather than
 //! disappear. [`sync`] is where a re-minted id is re-attached to its entry.
 
+pub mod distill_apply;
 mod migrations;
 pub mod snapshot;
 mod store;
 mod sync;
 pub mod view;
 
+pub use distill_apply::{apply_distill_follow_up, AppliedUpdates, AutoClose, DistillFollowUp};
 pub use snapshot::{ProjectSnapshot, RestoreReport, LEDGER_SNAPSHOT_FILE, LEDGER_SNAPSHOT_VERSION};
 pub use store::{EntryDetail, EntryFilter, EntryLink, Evidence, ItemRef, LedgerEntry};
-pub use sync::{NoteSync, SyncOutcome};
+pub use sync::{LinkHint, NoteSync, SyncOutcome};
 pub use view::{
     AgingConfig, AgingTier, Commitment, CommitmentItem, CommitmentSource, NoteContext,
     DEFAULT_AGING_AFTER_DAYS, DEFAULT_STALE_AFTER_DAYS,

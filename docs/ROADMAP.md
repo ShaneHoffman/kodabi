@@ -60,7 +60,11 @@ Pulled by daily use, not pushed by roadmap. Each earns its place only after the 
 
 - Commitment ledger (flagship) — *in progress*: the core model, the durable `ledger.db`, the vault
   snapshots, the ingest wiring and the Commitments view (the Mine / Waiting-on-them split, live
-  checkboxes that write the note, snooze and waive) have landed; GitHub evidence and aging remain
+  checkboxes that write the note, snooze and waive) have landed, as have aging tiers
+  (fresh / aging / stale, with the thresholds in Settings) and conversational evidence at distill
+  time (a later conversation, meeting or chat alike, refreshes, supersedes or closes a commitment an
+  earlier one recorded);
+  GitHub evidence remains
 - Azure DevOps board integration
 - Weekly digests per project
 - Decision log queries

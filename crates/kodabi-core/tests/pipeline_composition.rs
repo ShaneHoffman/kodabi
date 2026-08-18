@@ -48,12 +48,15 @@ use kodabi_core::chat::{ChatRecord, ChatTranscript, PermissionResolution};
 use kodabi_core::chat_distill;
 use kodabi_core::chats;
 use kodabi_core::device::DeviceId;
-use kodabi_core::distill::{self, DistillOutput};
+use kodabi_core::distill::{self, DistillOutput, OpenCommitment};
 use kodabi_core::embed::{index_note, FakeEmbedder};
 use kodabi_core::glossary::{Glossary, GlossaryTerm, OnConflict};
 use kodabi_core::index::{
     normalize_date_to_utc, IndexedNote, NoteIndex, NoteType as IndexedNoteType, OutstandingParams,
     ProjectScope, SearchParams, SearchResults, TagMatch,
+};
+use kodabi_core::ledger::{
+    self, ClosedVia, DistillFollowUp, EntryFilter, EntryState, Ledger, NoteSync,
 };
 use kodabi_core::llm::{HeadlessClaude, LlmRequest, LlmRunError};
 use kodabi_core::meeting;
@@ -399,6 +402,7 @@ fn a_meeting_transcript_distills_routes_writes_indexes_and_searches_back() {
         root,
         &session,
         &recording_route(root, &decided),
+        &no_open_entries,
     )
     .expect("distilling the session");
 
@@ -617,6 +621,7 @@ fn a_chat_transcript_distills_routes_writes_indexes_and_searches_back() {
         root,
         &chat,
         &recording_route(root, &decided),
+        &no_open_entries,
     )
     .expect("distilling the chat");
 
@@ -827,6 +832,7 @@ fn an_unroutable_transcript_lands_in_inbox_with_its_score_and_is_still_searchabl
         root,
         &session,
         &recording_route(root, &decided),
+        &no_open_entries,
     )
     .expect("distilling the session");
 
@@ -901,6 +907,7 @@ fn notes_written_by_the_pipeline_order_chronologically_in_the_index() {
         root,
         &earlier,
         &recording_route(root, &decided),
+        &no_open_entries,
     )
     .expect("distilling the earlier session");
     let second = distill::distill_session(
@@ -908,6 +915,7 @@ fn notes_written_by_the_pipeline_order_chronologically_in_the_index() {
         root,
         &later,
         &recording_route(root, &decided),
+        &no_open_entries,
     )
     .expect("distilling the later session");
 
@@ -954,6 +962,7 @@ fn a_chat_note_and_a_meeting_note_order_against_each_other() {
         root,
         &session,
         &recording_route(root, &decided),
+        &no_open_entries,
     )
     .expect("distilling the session");
     let chat_note = chat_distill::distill_chat(
@@ -961,6 +970,7 @@ fn a_chat_note_and_a_meeting_note_order_against_each_other() {
         root,
         &chat,
         &recording_route(root, &decided),
+        &no_open_entries,
     )
     .expect("distilling the chat");
 
@@ -981,4 +991,178 @@ fn a_chat_note_and_a_meeting_note_order_against_each_other() {
         "two date-recovery paths must yield comparable ordering keys: {:?}",
         recent.iter().map(|r| &r.date_utc).collect::<Vec<_>>()
     );
+}
+
+/// The fetcher for a distill with no ledger behind it: these tests exercise
+/// the note pipeline, not the commitment classifications, so the prompt they
+/// send is the plain one.
+fn no_open_entries(
+    _: &kodabi_core::routing::RouteGuess,
+) -> Vec<kodabi_core::distill::OpenCommitment> {
+    Vec::new()
+}
+
+/// The other half of the chain, added with the conversational-evidence pass:
+/// what a *later* meeting does to commitments an earlier one recorded.
+///
+/// This is the composition the unit tests structurally cannot see. The distill
+/// classifies against ids it was handed; the apply pass turns those into ledger
+/// state; the ledger names a source line in a note it does not own; and the
+/// vault writer edits that line. Four modules, one promise.
+#[test]
+fn a_later_meeting_closes_a_commitment_the_earlier_one_recorded() {
+    let vault = two_project_vault();
+    let root = vault.path();
+
+    // --- The earlier meeting, which recorded the promise -------------------
+    let first_session = write_session(root, instant_on(12), "kickoff", &briarwood_segments());
+    let decided = RefCell::new(None);
+    let first = distill::distill_session(
+        &MockRunner(briarwood_output()),
+        root,
+        &first_session,
+        &recording_route(root, &decided),
+        &no_open_entries,
+    )
+    .unwrap();
+
+    let first_listed = vault::find_note_anywhere(root, &first.id)
+        .unwrap()
+        .unwrap()
+        .1;
+    let first_facts = meeting::meeting_facts_for(&first_listed.note, root).unwrap();
+    let mut ledger = Ledger::open_in_memory().unwrap();
+    ledger
+        .sync_note_items(&NoteSync {
+            note_id: first.id.as_str(),
+            project: "Briarwood Golf",
+            note_date_utc: &normalize_date_to_utc(&first_listed.note.date).unwrap(),
+            items: &first_facts.action_items,
+            link_hints: &[],
+            now: "2026-08-12T12:00:00Z",
+        })
+        .unwrap();
+
+    // The commitment the second meeting will report done, and the exact text
+    // the distill will be shown.
+    let deck = first_facts
+        .action_items
+        .iter()
+        .find(|item| item.description.contains("tee sheet export"))
+        .expect("the earlier meeting recorded the export commitment");
+    let open: Vec<OpenCommitment> = ledger
+        .list_entries(&EntryFilter::default())
+        .unwrap()
+        .into_iter()
+        .map(|entry| OpenCommitment {
+            entry_id: entry.entry_id,
+            owner: entry.owner,
+            description: entry.description,
+        })
+        .collect();
+    let deck_entry = ledger
+        .entry_for_item(first.id.as_str(), &deck.id)
+        .unwrap()
+        .unwrap();
+
+    // --- The later meeting, which says it is already done ------------------
+    let second_session = write_session(root, instant_on(19), "follow-up", &briarwood_segments());
+    let follow_up_output = format!(
+        r#"{{
+            "title": "Irrigation follow-up",
+            "summary": "Checked in on the irrigation rebuild.",
+            "action_items": [
+                {{"owner": "Jane", "description": "confirm the sprinkler delivery date", "due_date": null}}
+            ],
+            "tags": ["irrigation"],
+            "ledger_updates": [
+                {{"entry": "{}", "kind": "completed", "confidence": 0.95,
+                  "quote": "sent the export over on Tuesday"}}
+            ]
+        }}"#,
+        deck_entry.entry_id
+    );
+    let decided = RefCell::new(None);
+    let second = distill::distill_session(
+        &MockRunner(follow_up_output),
+        root,
+        &second_session,
+        &recording_route(root, &decided),
+        &|_| open.clone(),
+    )
+    .unwrap();
+
+    // The classification survived the pass and names a real entry.
+    assert_eq!(second.ledger_updates.len(), 1);
+    assert_eq!(second.ledger_updates[0].entry_id, deck_entry.entry_id);
+
+    // --- Applying it ------------------------------------------------------
+    let second_listed = vault::find_note_anywhere(root, &second.id)
+        .unwrap()
+        .unwrap()
+        .1;
+    let second_facts = meeting::meeting_facts_for(&second_listed.note, root).unwrap();
+    let applied = ledger::apply_distill_follow_up(
+        &mut ledger,
+        &DistillFollowUp {
+            note_id: second.id.as_str(),
+            project: "Briarwood Golf",
+            note_date_utc: &normalize_date_to_utc(&second_listed.note.date).unwrap(),
+            items: &second_facts.action_items,
+            updates: &second.ledger_updates,
+        },
+        kodabi_core::ledger::DEFAULT_CONVERSATION_AUTOCLOSE,
+        "2026-08-19T12:00:00Z",
+    )
+    .unwrap();
+
+    assert_eq!(applied.auto_closed.len(), 1);
+    let close = &applied.auto_closed[0];
+    assert_eq!(close.entry.state, EntryState::Closed);
+    assert_eq!(close.entry.closed_via, Some(ClosedVia::Conversation));
+    // The line it names belongs to the *earlier* note, which is the whole
+    // reason the ledger holds a ref rather than a copy.
+    let (note_id, item_id) = close.source_ref.clone().expect("the line is still there");
+    assert_eq!(note_id, first.id.as_str());
+    assert_eq!(item_id, deck.id);
+
+    // --- The vault writer, closing the loop --------------------------------
+    let outcome = vault::set_action_item_done(root, &first.id, &item_id, true).unwrap();
+    assert!(matches!(outcome, vault::SetDoneOutcome::Updated(_)));
+    vault::annotate_action_item(
+        root,
+        &first.id,
+        &item_id,
+        "2026-08-19",
+        &format!(
+            "reported done in \"Irrigation follow-up\" ({}).",
+            second.id.as_str()
+        ),
+    )
+    .unwrap();
+
+    let body = std::fs::read_to_string(&first_listed.path).unwrap();
+    assert!(
+        body.contains("- [x] Jane to send the TeeTrack tee sheet export by 2026-08-15."),
+        "the earlier note's checkbox is ticked:\n{body}"
+    );
+    assert!(
+        body.contains("  - Closed 2026-08-19: reported done in"),
+        "and says who reported it:\n{body}"
+    );
+
+    // The ticked line still derives the same id, so the ledger's ref survives
+    // its own writer: this is what `set_action_item_done` preserves the bytes
+    // for, and the chain would silently orphan the entry otherwise.
+    let reread = vault::find_note_anywhere(root, &first.id)
+        .unwrap()
+        .unwrap()
+        .1;
+    let refacts = meeting::meeting_facts_for(&reread.note, root).unwrap();
+    let same = refacts
+        .action_items
+        .iter()
+        .find(|item| item.id == item_id)
+        .expect("the id survives the tick and the annotation");
+    assert!(same.done);
 }

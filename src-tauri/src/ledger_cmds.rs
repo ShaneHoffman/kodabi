@@ -310,11 +310,6 @@ const LEDGER_REFUSED: &str = "The commitment ledger isn't available this session
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// The device's local calendar day.
-///
-/// Local rather than UTC on purpose, and one of the sanctioned local reads
-/// (`.claude/rules/utc-timestamps.md`): a due date is a local calendar day, so
-/// "overdue" has to be judged against the day the person is living in.
 /// The user's aging thresholds, as the read model wants them.
 ///
 /// Read per call rather than cached: the Settings view can change these while
@@ -328,6 +323,11 @@ fn aging_config(app: &AppHandle) -> AgingConfig {
     }
 }
 
+/// The device's local calendar day.
+///
+/// Local rather than UTC on purpose, and one of the sanctioned local reads
+/// (`.claude/rules/utc-timestamps.md`): a due date is a local calendar day, so
+/// "overdue" has to be judged against the day the person is living in.
 fn local_today() -> chrono::NaiveDate {
     Local::now().date_naive()
 }
@@ -353,7 +353,7 @@ fn handles(app: &AppHandle) -> (LedgerClient, Option<IndexReadHandle>) {
 /// The same eager pair `note_cmds` does after a write: the index upsert keeps
 /// search current without waiting on the watcher, and the broadcast makes every
 /// open window refetch. The watcher's own later reconcile is then a no-op.
-fn reindex_and_broadcast(app: &AppHandle, listed: &ListedNote, kb: &std::path::Path) {
+pub(crate) fn reindex_and_broadcast(app: &AppHandle, listed: &ListedNote, kb: &std::path::Path) {
     let rel = listed.path.strip_prefix(kb).unwrap_or(&listed.path);
     let mut indexed = kodabi_core::index::IndexedNote::from_note(
         &listed.note,

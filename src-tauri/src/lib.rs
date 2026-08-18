@@ -4,6 +4,7 @@ mod capture_watchdog;
 mod chat_cmds;
 mod chat_distill_cmds;
 mod distill_cmds;
+mod distill_follow_up;
 mod events;
 mod glossary_cmds;
 mod index_cmds;

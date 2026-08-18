@@ -225,22 +225,36 @@ fn run(app: &AppHandle, chat_path: &Path) -> Result<PathBuf, ChatDistillFailure>
     let kb = knowledge_base_dir(app).map_err(ChatDistillFailure::Other)?;
     let runner = ClaudeRunner::new(ClaudeConfig::distill_from_env());
     let config = routing_config_from_env();
-    kodabi_core::chat_distill::distill_chat(&runner, &kb, chat_path, &|output, body| {
-        let (routing, diagnostics) = route_distilled(&kb, output, body, &config);
-        if let Some(err) = &diagnostics.discovery_failure {
-            let message =
-                format!("routing signals failed to load; filing this note to Inbox: {err}");
-            eprintln!("chat distill: {message}");
-            let _ = app.emit(
-                CHAT_DISTILL_STATE_EVENT,
-                ChatDistillStateEvent::RoutingFallback { message },
-            );
-        }
-        report_signal_failures("chat", &diagnostics.glossary_failures);
-        report_signal_failures("chat", &diagnostics.example_failures);
-        routing
+    kodabi_core::chat_distill::distill_chat(
+        &runner,
+        &kb,
+        chat_path,
+        &|output, body| {
+            let (routing, diagnostics) = route_distilled(&kb, output, body, &config);
+            if let Some(err) = &diagnostics.discovery_failure {
+                let message =
+                    format!("routing signals failed to load; filing this note to Inbox: {err}");
+                eprintln!("chat distill: {message}");
+                let _ = app.emit(
+                    CHAT_DISTILL_STATE_EVENT,
+                    ChatDistillStateEvent::RoutingFallback { message },
+                );
+            }
+            report_signal_failures("chat", &diagnostics.glossary_failures);
+            report_signal_failures("chat", &diagnostics.example_failures);
+            routing
+        },
+        &crate::distill_follow_up::open_commitments_fetcher(
+            app.state::<crate::ledger_state::LedgerState>().client(),
+            config.clone(),
+        ),
+    )
+    .map(|distilled| {
+        // Same as the meeting leg: the note is written, and the ledger half
+        // that follows can only ever cost itself.
+        crate::distill_follow_up::apply_after_distill(app, &kb, &distilled);
+        distilled.path
     })
-    .map(|distilled| distilled.path)
     .map_err(|err| match err {
         DistillError::ThinChat { .. } => ChatDistillFailure::Thin {
             reason: err.to_string(),
