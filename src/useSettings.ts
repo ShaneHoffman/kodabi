@@ -52,12 +52,23 @@ export type MicCheckResult = MicCheckOutcome & {
   measured_at: string;
 };
 
+/** Mirrors `LedgerSettings` in `crates/kodabi-core/src/settings.rs`: when an
+ * untouched commitment reads as aging then stale, and how sure a conversation
+ * has to be before a completion claim closes one without asking. */
+export type LedgerSettings = {
+  aging_after_days: number;
+  stale_after_days: number;
+  /** 0..1. At or below this a claim parks for review instead of closing. */
+  conversation_autoclose: number;
+};
+
 export type Settings = {
   consent_acknowledged: boolean;
   retention: RetentionPolicy;
   overlay: OverlaySettings;
   appearance: AppearanceSettings;
   mic_check: MicCheckResult | null;
+  ledger: LedgerSettings;
 };
 
 /** The theme choices, in the order they are offered. */
@@ -71,6 +82,10 @@ export const THEME_OPTIONS: { value: Theme; label: string }[] = [
  * commits one (FOUNDING_DOC §7's lean is "keep transcript N days"). */
 export const DEFAULT_KEEP_DAYS = 30;
 
+/** Mirrors `kodabi_core::ledger::DEFAULT_CONVERSATION_AUTOCLOSE`. Only a
+ * fallback for an unreadable field; the backend owns the real default. */
+export const DEFAULT_CONVERSATION_AUTOCLOSE = 0.8;
+
 /** The retention choices, shared by the consent nudge and the Settings view so
  * the two surfaces never drift. */
 export const RETENTION_OPTIONS: { value: RetentionKind; label: string }[] = [
@@ -83,6 +98,13 @@ export const RETENTION_OPTIONS: { value: RetentionKind; label: string }[] = [
  * blank or zero field never reaches the command as an invalid policy. */
 export function clampDays(days: number): number {
   return Number.isFinite(days) && days >= 1 ? Math.floor(days) : 1;
+}
+
+/** Clamps the auto-close confidence into the 0..1 the backend validates, so a
+ * blank or out-of-range field never reaches the command. */
+export function clampConfidence(confidence: number): number {
+  if (!Number.isFinite(confidence)) return DEFAULT_CONVERSATION_AUTOCLOSE;
+  return Math.min(1, Math.max(0, confidence));
 }
 
 /** Assembles a `RetentionPolicy` from a discriminant + a day count (the day
@@ -117,6 +139,13 @@ export function setCaptureOverlay(overlay: OverlaySettings): Promise<Settings> {
  * no other way to hear about it (src/theme.ts). */
 export function setAppearance(appearance: AppearanceSettings): Promise<Settings> {
   return invoke<Settings>("set_appearance", { appearance });
+}
+
+/** Sets the commitment aging thresholds and the auto-close confidence. The
+ * backend emits `ledger:changed` alongside `settings:changed`, so an open
+ * Commitments view re-reads its tiers rather than keeping the old ones. */
+export function setLedgerTuning(ledger: LedgerSettings): Promise<Settings> {
+  return invoke<Settings>("set_ledger_tuning", { ledger });
 }
 
 export function acknowledgeConsent(retention: RetentionPolicy): Promise<Settings> {

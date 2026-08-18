@@ -60,6 +60,13 @@ export type CommitmentEvidence = {
   observed_at: string;
 };
 
+/**
+ * How long a commitment has gone untouched, derived by the backend against the
+ * device's local today and the user's thresholds. Mirrors
+ * `kodabi_core::ledger::AgingTier`.
+ */
+export type CommitmentTier = "fresh" | "aging" | "stale";
+
 /** Mirrors `ledger_cmds::CommitmentDto`. */
 export type Commitment = {
   entry_id: string;
@@ -73,6 +80,10 @@ export type Commitment = {
   created_at: string;
   updated_at: string;
   last_mention: string;
+  /** When an evidence provider last checked this commitment, if one ever has.
+   * The other half of the aging anchor. */
+  last_evidence_check: string | null;
+  tier: CommitmentTier;
   snoozed_until: string | null;
   /** Whether a snooze's day has arrived. Evaluated by the backend at read time;
    * nothing writes when a snooze lapses, so a lapsed entry is still `snoozed`

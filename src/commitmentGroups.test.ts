@@ -28,6 +28,8 @@ function commitment(
     created_at: "2026-08-01T00:00:00Z",
     updated_at: "2026-08-01T00:00:00Z",
     last_mention: "2026-08-01T00:00:00Z",
+    last_evidence_check: null,
+    tier: "fresh",
     snoozed_until: null,
     snooze_lapsed: false,
     closed_via: null,
@@ -81,7 +83,7 @@ describe("arrangeCommitments", () => {
     expect(groups).toHaveLength(1);
   });
 
-  it("sorts needs-review, then overdue, then due soonest, then aging", () => {
+  it("sorts needs-review, then overdue, then due soonest, then stale, aging, fresh", () => {
     const { groups } = arrangeCommitments(
       [
         commitment({
@@ -94,6 +96,12 @@ describe("arrangeCommitments", () => {
         }),
         commitment({
           entry_id: "le_aging",
+          tier: "aging",
+          last_mention: "2026-08-01T00:00:00Z",
+        }),
+        commitment({
+          entry_id: "le_stale",
+          tier: "stale",
           last_mention: "2026-07-01T00:00:00Z",
         }),
         commitment({
@@ -109,9 +117,87 @@ describe("arrangeCommitments", () => {
       "le_review",
       "le_overdue",
       "le_soon",
+      "le_stale",
       "le_aging",
       "le_fresh",
     ]);
+  });
+
+  it("leaves a dated commitment above an undated stale one", () => {
+    // The contested call, pinned: tiers subdivide the undated band rather than
+    // reordering the dated one. A commitment with a date escalates on its own
+    // when that date passes; an undated one has only its tier.
+    const { groups } = arrangeCommitments(
+      [
+        commitment({
+          entry_id: "le_stale",
+          tier: "stale",
+          last_mention: "2026-01-01T00:00:00Z",
+        }),
+        commitment({
+          entry_id: "le_far",
+          item: item({ due_date: "2027-12-31", status: "open" }),
+        }),
+      ],
+      [],
+    );
+
+    expect(ids(groups[0].rows)).toEqual(["le_far", "le_stale"]);
+  });
+
+  it("orders one tier by the quietest first, counting an evidence check", () => {
+    const { groups } = arrangeCommitments(
+      [
+        commitment({
+          entry_id: "le_checked",
+          tier: "stale",
+          // The oldest mention of the three, but something looked for it
+          // recently, so it is not the quietest.
+          last_mention: "2026-06-01T00:00:00Z",
+          last_evidence_check: "2026-08-05T00:00:00Z",
+        }),
+        commitment({
+          entry_id: "le_quietest",
+          tier: "stale",
+          last_mention: "2026-07-01T00:00:00Z",
+        }),
+        commitment({
+          entry_id: "le_middle",
+          tier: "stale",
+          last_mention: "2026-08-01T00:00:00Z",
+        }),
+      ],
+      [],
+    );
+
+    expect(ids(groups[0].rows)).toEqual(["le_quietest", "le_middle", "le_checked"]);
+  });
+
+  it("files a lapsed snooze into its tier's band rather than back at the end", () => {
+    const { groups, snoozed } = arrangeCommitments(
+      [
+        commitment({ entry_id: "le_fresh" }),
+        commitment({
+          entry_id: "le_woken",
+          state: "snoozed",
+          snooze_lapsed: true,
+          tier: "stale",
+          last_mention: "2026-06-01T00:00:00Z",
+        }),
+        commitment({
+          entry_id: "le_shelved",
+          state: "snoozed",
+          snoozed_until: "2026-12-01",
+          tier: "stale",
+        }),
+      ],
+      [],
+    );
+
+    // A snooze that lapsed months later rejoins reading honestly: it kept
+    // aging on the shelf, so it leads rather than looking freshly minted.
+    expect(ids(groups[0].rows)).toEqual(["le_woken", "le_fresh"]);
+    expect(ids(snoozed)).toEqual(["le_shelved"]);
   });
 
   it("puts the longest overdue first and the soonest due first", () => {

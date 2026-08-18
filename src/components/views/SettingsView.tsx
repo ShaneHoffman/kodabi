@@ -4,14 +4,18 @@ import { CAPTURE_TOGGLE_SHORTCUT } from "../../captureControl";
 import { backendCopy } from "../../errorCopy";
 import {
   buildRetentionPolicy,
+  clampConfidence,
+  clampDays,
   DEFAULT_KEEP_DAYS,
   RETENTION_OPTIONS,
   runMicTest,
   setAppearance,
   setCaptureOverlay,
+  setLedgerTuning,
   setRetentionPolicy,
   THEME_OPTIONS,
   useSettings,
+  type LedgerSettings,
   type MicCheckResult,
   type OverlaySettings,
   type RetentionKind,
@@ -99,6 +103,55 @@ function Card({ title, children }: { title: string; children: ReactNode }) {
  * hairline unit rather than after it, so an error belongs visibly to the
  * control that raised it rather than to whatever follows.
  */
+/**
+ * A number a setting commits on Enter or blur.
+ *
+ * Extracted because the ledger card needs three of them and Retention's
+ * already-inline one made the shape: the same data face, the same right
+ * alignment so digits line up with themselves as they change, and the same
+ * two commit gestures. Blur alone would leave a keyboard user with no way to
+ * commit deliberately (docs/DESIGN_SYSTEM.md §6).
+ *
+ * The value is held as a raw string by the caller so the field can be cleared
+ * mid-edit rather than snapping to zero; the caller clamps on commit.
+ */
+function NumberField({
+  label,
+  value,
+  min,
+  max,
+  width = "w-20",
+  onChange,
+  onCommit,
+}: {
+  label: string;
+  value: string;
+  min: number;
+  max?: number;
+  width?: string;
+  onChange: (value: string) => void;
+  onCommit: () => void;
+}) {
+  return (
+    <input
+      type="number"
+      min={min}
+      max={max}
+      value={value}
+      aria-label={label}
+      className={`focus-ring ${width} rounded-button border border-edge bg-wash px-2.5 py-2 text-right font-data text-[12.5px] text-ink caret-kodama shadow-[inset_0_1px_0_var(--color-edge-lit)] transition-[border-color] duration-140 ease-out-strong outline-hidden focus:border-ink-faint`}
+      onChange={(event) => onChange(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          onCommit();
+        }
+      }}
+      onBlur={onCommit}
+    />
+  );
+}
+
 function Row({
   label,
   hint,
@@ -492,6 +545,78 @@ export function SettingsView() {
 
   const kind: RetentionKind = settings?.retention.policy ?? "keep_all";
 
+  // The ledger fields, raw strings for the same reason the day field is one.
+  // Seeded once from storage, so an echoed settings update never overwrites an
+  // edit still being typed.
+  const [agingDays, setAgingDays] = useState("");
+  const [staleDays, setStaleDays] = useState("");
+  const [autoclose, setAutoclose] = useState("");
+  const [seededLedger, setSeededLedger] = useState(false);
+  const [ledgerError, setLedgerError] = useState<string | null>(null);
+  const [ledgerSaved, setLedgerSaved] = useState(false);
+  const [ledgerSavedTick, setLedgerSavedTick] = useState(0);
+  const [savingLedger, setSavingLedger] = useState(false);
+  if (!seededLedger && settings) {
+    setSeededLedger(true);
+    setAgingDays(String(settings.ledger.aging_after_days));
+    setStaleDays(String(settings.ledger.stale_after_days));
+    setAutoclose(String(Math.round(settings.ledger.conversation_autoclose * 100)));
+  }
+
+  useTimeout(
+    () => setLedgerSaved(false),
+    ledgerSaved ? CONFIRMATION_MS : null,
+    ledgerSavedTick,
+  );
+
+  // Every ledger field commits the whole group, because the backend takes the
+  // three together and the two day thresholds are read against each other.
+  const applyLedger = async (next: Partial<LedgerSettings>) => {
+    // Enter commits and then blur commits again as focus leaves. The
+    // unchanged-value check below catches that once a save has landed; this
+    // catches the case where the second fires while the first is still in
+    // flight, which would otherwise be two writes of the same value.
+    if (!settings || savingLedger) return;
+    const merged: LedgerSettings = {
+      aging_after_days: clampDays(Number(agingDays)),
+      stale_after_days: clampDays(Number(staleDays)),
+      conversation_autoclose: clampConfidence(Number(autoclose) / 100),
+      ...next,
+    };
+    // Nothing to say when the committed value is what was already stored: a
+    // blur that changed nothing should not announce a save.
+    if (
+      merged.aging_after_days === settings.ledger.aging_after_days &&
+      merged.stale_after_days === settings.ledger.stale_after_days &&
+      merged.conversation_autoclose === settings.ledger.conversation_autoclose
+    ) {
+      return;
+    }
+    setLedgerError(null);
+    setSavingLedger(true);
+    try {
+      const updated = await setLedgerTuning(merged);
+      setSettings(updated);
+      // Re-seed from what actually persisted, so a clamped field shows the
+      // number the app is using rather than the one that was typed.
+      setAgingDays(String(updated.ledger.aging_after_days));
+      setStaleDays(String(updated.ledger.stale_after_days));
+      setAutoclose(String(Math.round(updated.ledger.conversation_autoclose * 100)));
+      setLedgerSaved(true);
+      setLedgerSavedTick((tick) => tick + 1);
+    } catch (err) {
+      setLedgerError(
+        backendCopy(
+          err,
+          "Couldn't save the commitment settings. The previous values still apply; try again.",
+        ),
+      );
+      setLedgerSaved(false);
+    } finally {
+      setSavingLedger(false);
+    }
+  };
+
   const runMicTestClick = async () => {
     setMicTestError(null);
     setRunningMicTest(true);
@@ -695,6 +820,72 @@ export function SettingsView() {
                   onBlur={() => apply("keep_days", Number(days), true)}
                 />
               )}
+            </Row>
+          </Card>
+
+          <Card title="Commitments">
+            <Row
+              label="Aging"
+              hint="Days without a mention before a commitment reads as aging in the Commitments view."
+            >
+              <NumberField
+                label="Days before aging"
+                value={agingDays}
+                min={1}
+                onChange={setAgingDays}
+                onCommit={() =>
+                  void applyLedger({ aging_after_days: clampDays(Number(agingDays)) })
+                }
+              />
+            </Row>
+
+            <Row
+              label="Stale"
+              hint="Days before it reads as stale and floats to the top of its group. Nothing is ever notified; the list just reorders."
+            >
+              <NumberField
+                label="Days before stale"
+                value={staleDays}
+                min={1}
+                onChange={setStaleDays}
+                onCommit={() =>
+                  void applyLedger({ stale_after_days: clampDays(Number(staleDays)) })
+                }
+              />
+            </Row>
+
+            <Row
+              label="Close from conversation"
+              hint="How sure a later conversation has to be that something was already done before Kodabi ticks it off for you. Below this, the claim waits for you to confirm it."
+              foot={
+                <>
+                  {ledgerSaved && <ConfirmLine>Saved.</ConfirmLine>}
+                  {ledgerError && (
+                    <StatusMessage variant="error" compact>
+                      {ledgerError}
+                    </StatusMessage>
+                  )}
+                </>
+              }
+            >
+              {/* A percentage rather than the stored 0..1: "80" is a number
+                  people have an intuition about, and the field is a confidence
+                  the way a forecast is. Converted on both sides so the wire
+                  keeps the fraction the backend validates. */}
+              <NumberField
+                label="Confidence percent"
+                value={autoclose}
+                min={0}
+                max={100}
+                width="w-16"
+                onChange={setAutoclose}
+                onCommit={() =>
+                  void applyLedger({
+                    conversation_autoclose: clampConfidence(Number(autoclose) / 100),
+                  })
+                }
+              />
+              <span className="font-data text-[12.5px] text-ink-faint">%</span>
             </Row>
           </Card>
 

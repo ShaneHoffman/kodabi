@@ -64,6 +64,7 @@ const DEFAULTS: Settings = {
   overlay: { manual_captures: false, auto_captures: true },
   appearance: { theme: "system" },
   mic_check: null,
+  ledger: { aging_after_days: 14, stale_after_days: 30, conversation_autoclose: 0.8 },
 };
 
 function settingsWith(overlay: OverlaySettings): Settings {
@@ -881,5 +882,60 @@ describe("SettingsView About card", () => {
     ).toBeInTheDocument();
     expect(within(about()).queryByText(/no route to host/)).toBeNull();
     logged.mockRestore();
+  });
+
+  it("saves the aging thresholds and the auto-close confidence", async () => {
+    const user = userEvent.setup();
+    const stored: Settings = {
+      ...DEFAULTS,
+      ledger: { aging_after_days: 7, stale_after_days: 30, conversation_autoclose: 0.8 },
+    };
+    onCommand("set_ledger_tuning", () => stored);
+    await renderSeeded();
+
+    const aging = screen.getByRole("spinbutton", { name: "Days before aging" });
+    await user.clear(aging);
+    await user.type(aging, "7{Enter}");
+
+    // The three go together: the backend takes one struct, and the two day
+    // thresholds are read against each other.
+    expect(invoke).toHaveBeenCalledWith("set_ledger_tuning", {
+      ledger: { aging_after_days: 7, stale_after_days: 30, conversation_autoclose: 0.8 },
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("Saved.");
+  });
+
+  it("sends the auto-close confidence as the fraction the backend validates", async () => {
+    const user = userEvent.setup();
+    const stored: Settings = {
+      ...DEFAULTS,
+      ledger: { aging_after_days: 14, stale_after_days: 30, conversation_autoclose: 0.95 },
+    };
+    onCommand("set_ledger_tuning", () => stored);
+    await renderSeeded();
+
+    // The field reads as a percentage because that is the number people have
+    // an intuition about; the wire keeps the fraction.
+    const confidence = screen.getByRole("spinbutton", { name: "Confidence percent" });
+    await user.clear(confidence);
+    await user.type(confidence, "95{Enter}");
+
+    expect(invoke).toHaveBeenCalledWith("set_ledger_tuning", {
+      ledger: { aging_after_days: 14, stale_after_days: 30, conversation_autoclose: 0.95 },
+    });
+  });
+
+  it("does not write when a commitment field is committed unchanged", async () => {
+    const user = userEvent.setup();
+    onCommand("set_ledger_tuning", () => DEFAULTS);
+    await renderSeeded();
+
+    // Tabbing through blurs the field, which commits it. A blur that changed
+    // nothing must not announce a save it did not make.
+    const aging = screen.getByRole("spinbutton", { name: "Days before aging" });
+    await user.click(aging);
+    await user.tab();
+
+    expect(invoke).not.toHaveBeenCalledWith("set_ledger_tuning", expect.anything());
   });
 });

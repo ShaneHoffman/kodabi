@@ -468,6 +468,15 @@ function CommitmentRow({
   const item = commitment.item;
   const review = needsReview(commitment);
   const claim = commitment.evidence[0];
+  // Fresh says nothing: it is the absence of a problem, and a row that reads
+  // "fresh" spends a line telling you everything is fine.
+  const tierLabel = commitment.tier === "fresh" ? null : commitment.tier;
+  const heard = [tierLabel, `heard ${formatInstant(commitment.last_mention)}`]
+    .filter(Boolean)
+    .join(" · ");
+  // Only stale earns the promotion, and only when overdue is not already
+  // holding the row's one promoted slot.
+  const promoteTier = commitment.tier === "stale" && item?.status !== "overdue";
 
   return (
     <>
@@ -523,13 +532,21 @@ function CommitmentRow({
                 overdue · due {formatDay(item.due_date)}
               </span>
             )}
+            {promoteTier && (
+              // Stale takes the same promotion overdue does, and for the same
+              // reason: age is weight and position, never a hue. A hue answers
+              // which project and nothing else (docs/DESIGN_SYSTEM.md §2), so
+              // there is deliberately no colour here. One promoted segment per
+              // row, which is why an overdue row leaves this faint.
+              <span className="text-ink-dim">{heard}</span>
+            )}
             <span>
               {[
                 item?.status !== "overdue" && item?.due_date
                   ? `due ${formatDay(item.due_date)}`
                   : null,
                 showProject ? commitment.project : null,
-                `heard ${formatInstant(commitment.last_mention)}`,
+                promoteTier ? null : heard,
               ]
                 .filter(Boolean)
                 .join(" · ")}
