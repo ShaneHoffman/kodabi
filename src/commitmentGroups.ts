@@ -245,6 +245,9 @@ export function formatConfidence(confidence: number): string {
  * evidence pass has to say so, or the undo beside it is unexplained. */
 export function settledBy(commitment: Commitment): string {
   if (commitment.state === "waived") return "waived";
+  // Untracked is not a closure and must not read as one: it says this was never
+  // your business, where waived says it was and stopped mattering.
+  if (commitment.state === "untracked") return "untracked";
   switch (commitment.closed_via) {
     case "github":
       return "closed from GitHub";

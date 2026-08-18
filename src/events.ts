@@ -32,7 +32,8 @@ export const MODELS_STATE_EVENT = "models:state";
 export const SESSIONS_CHANGED_EVENT = "sessions:changed";
 
 /** A commitment-ledger mutation a person made: a close, waive, snooze, reopen,
- * or an answered evidence claim. Distinct from `vault:changed` for the same
+ * untrack, an answered evidence claim, a manual track, or a change to a
+ * meeting's tracking mode. Distinct from `vault:changed` for the same
  * reason `sessions:changed` is: waiving or snoozing touches no note. A ticked
  * checkbox emits both, because it really does write Markdown. Mirrors
  * `events::LEDGER_CHANGED_EVENT`. */

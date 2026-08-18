@@ -63,7 +63,9 @@ Pulled by daily use, not pushed by roadmap. Each earns its place only after the 
   checkboxes that write the note, snooze and waive) have landed, as have aging tiers
   (fresh / aging / stale, with the thresholds in Settings) and conversational evidence at distill
   time (a later conversation, meeting or chat alike, refreshes, supersedes or closes a commitment an
-  earlier one recorded);
+  earlier one recorded), and the enrollment gate that separates extraction from tracking (a
+  per-meeting "context only" mode that enrols only what you were asked for directly, untrack as a
+  verb distinct from waive, and enrollment provenance on every entry);
   GitHub evidence remains
 - Azure DevOps board integration
 - Weekly digests per project

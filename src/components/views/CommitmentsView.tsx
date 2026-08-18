@@ -22,6 +22,7 @@ import {
   reopenCommitment,
   setCommitmentDone,
   snoozeCommitment,
+  untrackCommitment,
   useCommitments,
   waiveCommitment,
   type Commitment,
@@ -203,6 +204,14 @@ export function CommitmentsView({ slug }: Props) {
       () => waiveCommitment(commitment.entry_id),
     );
 
+  const untrack = (commitment: Commitment) =>
+    void run(
+      commitment,
+      "untrack",
+      "Couldn't untrack this commitment. The ledger is unchanged; try again.",
+      () => untrackCommitment(commitment.entry_id),
+    );
+
   /**
    * The undo, behind every settled row and every snooze.
    *
@@ -253,6 +262,7 @@ export function CommitmentsView({ slug }: Props) {
     onSnooze: snooze,
     onSnoozePick: setSnoozeTarget,
     onWaive: waive,
+    onUntrack: untrack,
     onConfirm: (target: Commitment, evidenceId: string) =>
       void run(
         target,
@@ -436,6 +446,7 @@ type RowProps = {
   onSnooze: (commitment: Commitment, until: string) => Promise<void>;
   onSnoozePick: (commitment: Commitment) => void;
   onWaive: (commitment: Commitment) => void;
+  onUntrack: (commitment: Commitment) => void;
   onConfirm: (commitment: Commitment, evidenceId: string) => void;
   onDismiss: (commitment: Commitment, evidenceId: string) => void;
 };
@@ -459,6 +470,7 @@ function CommitmentRow({
   onSnooze,
   onSnoozePick,
   onWaive,
+  onUntrack,
   onConfirm,
   onDismiss,
 }: RowProps) {
@@ -623,7 +635,9 @@ function CommitmentRow({
                   disabled={otherRowBusy}
                   loading={
                     busy &&
-                    (pending?.verb === "snooze" || pending?.verb === "waive")
+                    (pending?.verb === "snooze" ||
+                      pending?.verb === "waive" ||
+                      pending?.verb === "untrack")
                   }
                 >
                   ⋯
@@ -652,10 +666,15 @@ function CommitmentRow({
                 Snooze until a date…
               </Menu.Item>
               <Menu.Separator />
-              {/* No confirmation: waiving writes one ledger row, touches no
-                  note, and Reopen on the shelf below takes it straight back. A
-                  confirm here would teach a danger that is not there. */}
+              {/* No confirmation on either: each writes one ledger row, touches
+                  no note, and Reopen on the shelf below takes it straight back.
+                  A confirm here would teach a danger that is not there. */}
               <Menu.Item onClick={() => onWaive(commitment)}>Waive</Menu.Item>
+              {/* The two ways out of the working set, together, because the
+                  choice between them is what the reader is making: waive says
+                  this was mine and stopped mattering, untrack says it was never
+                  my business. */}
+              <Menu.Item onClick={() => onUntrack(commitment)}>Untrack</Menu.Item>
             </Menu.Content>
           </Menu.Root>
         )}

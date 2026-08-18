@@ -1,9 +1,7 @@
 import { useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
-import { LEDGER_CHANGED_EVENT } from "./events";
-import { useTauriEvent } from "./useTauriEvent";
-import { notifyVaultChanged, useVaultQuery } from "./useVaultQuery";
+import { useVaultQuery } from "./useVaultQuery";
 
 /*
  * The commitment wire shapes, mirroring the Rust DTOs in
@@ -23,7 +21,12 @@ export type CommitmentState =
   | "needs_review"
   | "snoozed"
   | "closed"
-  | "waived";
+  | "waived"
+  | "untracked";
+
+/** How an entry left the working set. Mirrors `ledger::UntrackedVia`: `manual`
+ * is a person's own untrack, `override` one a meeting's tracking mode applied. */
+export type UntrackedVia = "manual" | "override";
 
 /** Which way a commitment points. Mirrors `ledger::Direction`, and it is this
  * view's organizing principle rather than a filter. */
@@ -110,6 +113,7 @@ export type CommitmentEntry = {
   closed_via: ClosedVia | null;
   review_reason: string | null;
   updated_at: string;
+  untracked_via: UntrackedVia | null;
 };
 
 /** Mirrors `ledger_cmds::SetCommitmentDoneDto`. */
@@ -159,6 +163,18 @@ export function waiveCommitment(entryId: string): Promise<CommitmentEntry> {
   });
 }
 
+/** Removes a commitment from the working set: it never should have been in it.
+ *
+ * The sibling of `waiveCommitment`, and the difference is what each is about.
+ * Waiving is about the commitment (it was mine, it stopped mattering);
+ * untracking is about the ledger (this was never my business). The note is
+ * untouched either way. */
+export function untrackCommitment(entryId: string): Promise<CommitmentEntry> {
+  return invoke<CommitmentEntry>("untrack_commitment", {
+    input: { entry_id: entryId },
+  });
+}
+
 /** Returns a commitment to open: waking a snooze, taking back a waiver, or
  * undoing a closure an evidence pass made on its own. */
 export function reopenCommitment(entryId: string): Promise<CommitmentEntry> {
@@ -193,19 +209,19 @@ export function dismissCommitmentEvidence(
  *
  * Refetches on two signals. `vault:changed` arrives through the shell's bridge
  * and covers a ticked checkbox, which really does rewrite Markdown. A ledger
- * mutation writes no note, so it announces itself on its own channel; relaying
- * that onto the same bus reuses `useVaultQuery`'s response sequencing rather
- * than opening a second, unsequenced path to the same state. Composing two
- * blessed hooks is deliberate: this is not a new external system, so it earns no
- * bridge hook of its own (`.claude/rules/no-use-effect.md`). A second concurrent
- * consumer would change that answer, and then the relay moves to the shell.
+ * mutation writes no note, so it announces itself on its own channel, which
+ * `useLedgerChangedBridge` relays onto the same bus at the shell root.
+ *
+ * That relay used to live here, as a local composition of two blessed hooks,
+ * with a note saying a second concurrent consumer would move it to the shell.
+ * The note view's enrollment panel is that second consumer, so it moved: two
+ * copies of the relay would refetch twice for one mutation.
  */
 export function useCommitments(slug: string | null) {
   const { data, loading, error } = useVaultQuery(
     useCallback(() => listCommitments(slug), [slug]),
     "Couldn't load the commitment ledger. Your notes on disk are untouched; reopen this view to try again.",
   );
-  useTauriEvent(LEDGER_CHANGED_EVENT, () => notifyVaultChanged());
 
   return {
     entries: data?.entries ?? [],

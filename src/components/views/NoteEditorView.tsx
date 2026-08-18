@@ -18,6 +18,7 @@ import { DeleteNoteDialog } from "../dialogs/DeleteNoteDialog";
 import { Button } from "../ui/Button";
 import { StatusMessage } from "../ui/StatusMessage";
 import { NoteMarkdown } from "./NoteMarkdown";
+import { NoteCommitmentsPanel } from "./NoteCommitmentsPanel";
 import { PANEL_EYEBROW, SessionPanel, TranscriptTurns } from "./SessionPanel";
 
 type Props = {
@@ -336,6 +337,9 @@ function ReadNoteLayout({
 
           <aside aria-label="Note details" className="flex flex-col gap-3.5 self-start">
             <DetailsPanel note={note} project={project} />
+            {/* Renders nothing for a note that extracted no commitments, which
+                is most of them. */}
+            <NoteCommitmentsPanel noteId={note.id} />
             {session !== null && (
               <SessionPanel
                 artifacts={session.artifacts}

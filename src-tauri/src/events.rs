@@ -27,7 +27,8 @@ pub const MODELS_STATE_EVENT: &str = "models:state";
 pub const SESSIONS_CHANGED_EVENT: &str = "sessions:changed";
 
 /// Emitted after a commitment-ledger mutation a person made: a close, waive,
-/// snooze, reopen, or an answered evidence claim. Distinct from
+/// snooze, reopen, untrack, an answered evidence claim, a manual track, or a
+/// change to a meeting's tracking mode. Distinct from
 /// [`VAULT_CHANGED_EVENT`] for the same reason [`SESSIONS_CHANGED_EVENT`] is:
 /// waiving or snoozing touches no note, so claiming the vault changed would be
 /// a lie, and a surface listening for vault writes would refetch for nothing.

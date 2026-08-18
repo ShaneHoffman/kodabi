@@ -37,8 +37,8 @@ use std::time::{Duration, Instant};
 use chrono::{SecondsFormat, Utc};
 use kodabi_core::distill::LedgerUpdateDraft;
 use kodabi_core::ledger::{
-    self, AppliedUpdates, ClosedVia, DistillFollowUp, EntryDetail, EntryFilter, Evidence, Ledger,
-    LedgerEntry, NoteSync, LEDGER_DB_FILE,
+    self, AppliedUpdates, ClosedVia, DistillFollowUp, EnrollmentMode, EntryDetail, EntryFilter,
+    Evidence, Ledger, LedgerEntry, NoteSync, NoteTrackingOutcome, UntrackedVia, LEDGER_DB_FILE,
 };
 use kodabi_core::meeting::ActionItemFact;
 use kodabi_core::note::INBOX;
@@ -102,6 +102,9 @@ pub enum LedgerOp {
         entry_id: String,
         evidence_id: String,
     },
+    /// Remove from the working set: it never should have been in it. Distinct
+    /// from [`LedgerOp::Waive`], which says it was mine and stopped mattering.
+    Untrack { entry_id: String },
 }
 
 impl LedgerOp {
@@ -113,7 +116,8 @@ impl LedgerOp {
             | LedgerOp::Snooze { entry_id, .. }
             | LedgerOp::Reopen { entry_id }
             | LedgerOp::ConfirmEvidence { entry_id, .. }
-            | LedgerOp::DismissEvidence { entry_id, .. } => entry_id,
+            | LedgerOp::DismissEvidence { entry_id, .. }
+            | LedgerOp::Untrack { entry_id } => entry_id,
         }
     }
 }
@@ -161,6 +165,34 @@ enum LedgerJob {
         autoclose_threshold: f64,
         reply: Sender<ledger::Result<AppliedUpdates>>,
     },
+    /// Read one note's tracking override and the entries it produced, for the
+    /// note view's enrollment panel. One round trip rather than two, because
+    /// the panel always needs both.
+    NoteEnrollment {
+        note_id: String,
+        #[allow(clippy::type_complexity)]
+        reply: Sender<ledger::Result<(Option<EnrollmentMode>, Vec<EntryDetail>)>>,
+    },
+    /// Set (or clear) a note's tracking override and retro-apply it.
+    SetNoteTracking {
+        note_id: String,
+        project: String,
+        context_only: bool,
+        reply: Sender<ledger::Result<NoteTrackingOutcome>>,
+    },
+    /// Promote one extracted line by hand, whatever the mode says.
+    TrackItem {
+        request: Box<TrackItemRequest>,
+        reply: Sender<ledger::Result<LedgerEntry>>,
+    },
+}
+
+/// One manual promote, owned so it can cross the channel.
+pub struct TrackItemRequest {
+    pub note_id: String,
+    pub project: String,
+    pub note_date_utc: String,
+    pub item: ActionItemFact,
 }
 
 /// A [`DistillFollowUp`] that owns its strings, so it can cross the channel.
@@ -260,6 +292,41 @@ impl LedgerClient {
     /// Applies one mutation.
     pub fn mutate(&self, op: LedgerOp) -> std::result::Result<MutateReply, LedgerCallError> {
         self.request(|reply| LedgerJob::Mutate { op, reply })
+    }
+
+    /// One note's tracking override and the entries it produced.
+    #[allow(clippy::type_complexity)]
+    pub fn note_enrollment(
+        &self,
+        note_id: String,
+    ) -> std::result::Result<(Option<EnrollmentMode>, Vec<EntryDetail>), LedgerCallError> {
+        self.request(|reply| LedgerJob::NoteEnrollment { note_id, reply })
+    }
+
+    /// Sets (or clears) a note's tracking override, retro-applying it.
+    pub fn set_note_tracking(
+        &self,
+        note_id: String,
+        project: String,
+        context_only: bool,
+    ) -> std::result::Result<NoteTrackingOutcome, LedgerCallError> {
+        self.request(|reply| LedgerJob::SetNoteTracking {
+            note_id,
+            project,
+            context_only,
+            reply,
+        })
+    }
+
+    /// Promotes one extracted line by hand.
+    pub fn track_item(
+        &self,
+        request: TrackItemRequest,
+    ) -> std::result::Result<LedgerEntry, LedgerCallError> {
+        self.request(|reply| LedgerJob::TrackItem {
+            request: Box::new(request),
+            reply,
+        })
     }
 
     /// Syncs a distilled note and applies its commitment classifications.
@@ -554,6 +621,44 @@ fn handle_job(ledger: &mut Ledger, vault_root: Option<&Path>, job: LedgerJob) ->
             );
             let _ = reply.send(result);
         }
+        LedgerJob::NoteEnrollment { note_id, reply } => {
+            let result = ledger
+                .note_tracking_override(&note_id)
+                .and_then(|mode| Ok((mode, ledger.entries_for_note(&note_id)?)));
+            let _ = reply.send(result);
+        }
+        LedgerJob::SetNoteTracking {
+            note_id,
+            project,
+            context_only,
+            reply,
+        } => {
+            let now = now_utc();
+            let result = ledger.set_note_tracking(&note_id, &project, context_only, &now);
+            let _ = reply.send(result);
+        }
+        LedgerJob::TrackItem { request, reply } => {
+            let now = now_utc();
+            let result = ledger
+                .track_item(
+                    &request.note_id,
+                    &request.item,
+                    &request.project,
+                    &request.note_date_utc,
+                    &now,
+                )
+                // A promote is a person's judgement, so it counts as touching
+                // the entry: no later tracking flip may undo it. Re-read after,
+                // so the reply is the entry as it now stands.
+                .and_then(|entry| {
+                    ledger.mark_touched(&entry.entry_id)?;
+                    Ok(ledger
+                        .get_entry(&entry.entry_id)?
+                        .map(|detail| detail.entry)
+                        .unwrap_or(entry))
+                });
+            let _ = reply.send(result);
+        }
     }
     false
 }
@@ -564,6 +669,12 @@ fn handle_job(ledger: &mut Ledger, vault_root: Option<&Path>, job: LedgerJob) ->
 /// `now` is minted here rather than by the caller for the same reason
 /// [`sync_one`] does it: kodabi-core never reads the clock, and the worker is
 /// the shell-side owner of this database.
+///
+/// **Every successful op marks its entry touched**, and this is the one place
+/// that happens. The two-handle split makes it exact: [`LedgerClient`] carries a
+/// person's judgement and routes here, while the machine's paths ([`sync_one`],
+/// the distill follow-up) never do. That is what lets a tracking flip know which
+/// entries it may quietly override and which somebody has already decided about.
 fn apply_mutation(ledger: &mut Ledger, op: LedgerOp) -> ledger::Result<MutateReply> {
     let now = now_utc();
     let entry_id = op.entry_id().to_string();
@@ -584,11 +695,19 @@ fn apply_mutation(ledger: &mut Ledger, op: LedgerOp) -> ledger::Result<MutateRep
             entry_id,
             evidence_id,
         } => (ledger.dismiss_evidence(entry_id, evidence_id, &now)?, None),
+        LedgerOp::Untrack { entry_id } => {
+            (ledger.untrack(entry_id, UntrackedVia::Manual, &now)?, None)
+        }
     };
+
+    ledger.mark_touched(&entry_id)?;
 
     // Read back rather than tracked through the mutation: the live ref is a
     // property of the entry, and an entry whose source line is gone has none.
-    let active_ref = ledger.get_entry(&entry_id)?.and_then(|detail| {
+    // The re-read also picks up the `touched` flag just set, so the reply is
+    // the entry as it now stands rather than as the mutator left it.
+    let detail = ledger.get_entry(&entry_id)?;
+    let active_ref = detail.as_ref().and_then(|detail| {
         detail
             .item_refs
             .iter()
@@ -597,7 +716,7 @@ fn apply_mutation(ledger: &mut Ledger, op: LedgerOp) -> ledger::Result<MutateRep
     });
 
     Ok(MutateReply {
-        entry,
+        entry: detail.map(|detail| detail.entry).unwrap_or(entry),
         evidence,
         active_ref,
     })
@@ -727,6 +846,191 @@ mod tests {
         .unwrap();
         assert_eq!(details.len(), 1);
         details[0].entry.entry_id.clone()
+    }
+
+    #[test]
+    fn every_human_mutation_marks_its_entry_touched() {
+        // The seam retro-application depends on. A tracking flip may override
+        // an entry nobody has looked at and must never override one somebody
+        // has, so the flag has to be set by the path a person's judgement takes
+        // and by nothing else.
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+        let entry_id = seed_entry(&sender);
+
+        let details = request(&sender, |reply| LedgerJob::ListDetails {
+            filter: EntryFilter::default(),
+            reply,
+        })
+        .unwrap();
+        assert!(
+            !details[0].entry.touched,
+            "a sync is the machine, not a person"
+        );
+
+        let reply = request(&sender, |reply| LedgerJob::Mutate {
+            op: LedgerOp::Snooze {
+                entry_id: entry_id.clone(),
+                until: "2026-08-20".to_string(),
+            },
+            reply,
+        })
+        .unwrap();
+
+        assert!(
+            reply.entry.touched,
+            "the reply carries the entry as it now is"
+        );
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn an_untrack_through_the_worker_reaches_the_snapshot() {
+        let vault = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(vault.path().join("Ops")).unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+        let entry_id = seed_entry(&sender);
+
+        let reply = request(&sender, |reply| LedgerJob::Mutate {
+            op: LedgerOp::Untrack {
+                entry_id: entry_id.clone(),
+            },
+            reply,
+        })
+        .unwrap();
+        assert_eq!(reply.entry.state, EntryState::Untracked);
+        assert_eq!(reply.entry.untracked_via, Some(UntrackedVia::Manual));
+        // The refs stay live, which is what the caller needs to tell the note
+        // view which line this was.
+        assert!(reply.active_ref.is_some());
+
+        flush_and_wait(&sender);
+        let raw = std::fs::read_to_string(vault.path().join("Ops").join("_ledger.yml")).unwrap();
+        assert!(raw.contains("state: untracked"));
+        assert!(raw.contains("untracked_via: manual"));
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn a_tracking_flip_queued_before_a_sync_gates_that_sync() {
+        // The ordering `set_meeting_tracking` relies on: it sets the mode and
+        // then hands the same channel a re-sync, so the sync must see the new
+        // mode rather than racing it.
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+
+        let outcome = request(&sender, |reply| LedgerJob::SetNoteTracking {
+            note_id: "n_a1b2c3".to_string(),
+            project: "Ops".to_string(),
+            context_only: true,
+            reply,
+        })
+        .unwrap();
+        assert!(outcome.context_only);
+
+        sender
+            .send(LedgerJob::Sync(Box::new(facts_for(
+                "n_a1b2c3",
+                "Ops",
+                "a_111111",
+                "send the deck",
+            ))))
+            .unwrap();
+
+        let details = request(&sender, |reply| LedgerJob::ListDetails {
+            filter: EntryFilter::default(),
+            reply,
+        })
+        .unwrap();
+        assert!(
+            details.is_empty(),
+            "Priya's line is not mine, so a context-only meeting never enrolls it"
+        );
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn the_worker_answers_the_note_enrollment_read() {
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+        seed_entry(&sender);
+
+        let (mode, details) = request(&sender, |reply| LedgerJob::NoteEnrollment {
+            note_id: "n_a1b2c3".to_string(),
+            reply,
+        })
+        .unwrap();
+        assert_eq!(mode, None, "a note with no override reads as the default");
+        assert_eq!(details.len(), 1);
+
+        request(&sender, |reply| LedgerJob::SetNoteTracking {
+            note_id: "n_a1b2c3".to_string(),
+            project: "Ops".to_string(),
+            context_only: true,
+            reply,
+        })
+        .unwrap();
+
+        let (mode, details) = request(&sender, |reply| LedgerJob::NoteEnrollment {
+            note_id: "n_a1b2c3".to_string(),
+            reply,
+        })
+        .unwrap();
+        assert_eq!(mode, Some(EnrollmentMode::ContextOnly));
+        // Untracked by the flip, but still the note's entry: the panel has to
+        // show it as untracked rather than as never enrolled.
+        assert_eq!(details.len(), 1);
+        assert_eq!(details[0].entry.state, EntryState::Untracked);
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn a_manual_track_is_recorded_as_a_persons_judgement() {
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+        request(&sender, |reply| LedgerJob::SetNoteTracking {
+            note_id: "n_a1b2c3".to_string(),
+            project: "Ops".to_string(),
+            context_only: true,
+            reply,
+        })
+        .unwrap();
+        sender
+            .send(LedgerJob::Sync(Box::new(facts_for(
+                "n_a1b2c3",
+                "Ops",
+                "a_111111",
+                "send the deck",
+            ))))
+            .unwrap();
+
+        let entry = request(&sender, |reply| LedgerJob::TrackItem {
+            request: Box::new(TrackItemRequest {
+                note_id: "n_a1b2c3".to_string(),
+                project: "Ops".to_string(),
+                note_date_utc: "2026-08-01T00:00:00Z".to_string(),
+                item: fact("a_111111", "Priya", "send the deck"),
+            }),
+            reply,
+        })
+        .unwrap();
+
+        assert_eq!(entry.state, EntryState::Open);
+        assert!(
+            entry.touched,
+            "a promote is a judgement, so no later flip may undo it"
+        );
+
+        drop(sender);
+        worker.join().unwrap();
     }
 
     #[test]
