@@ -29,6 +29,7 @@
 //! disappear. [`sync`] is where a re-minted id is re-attached to its entry.
 
 pub mod distill_apply;
+mod enrollment;
 mod migrations;
 pub mod snapshot;
 mod store;
@@ -36,12 +37,13 @@ mod sync;
 pub mod view;
 
 pub use distill_apply::{apply_distill_follow_up, AppliedUpdates, AutoClose, DistillFollowUp};
+pub use enrollment::NoteTrackingOutcome;
 pub use snapshot::{ProjectSnapshot, RestoreReport, LEDGER_SNAPSHOT_FILE, LEDGER_SNAPSHOT_VERSION};
 pub use store::{EntryDetail, EntryFilter, EntryLink, Evidence, ItemRef, LedgerEntry};
 pub use sync::{LinkHint, NoteSync, SyncOutcome};
 pub use view::{
-    AgingConfig, AgingTier, Commitment, CommitmentItem, CommitmentSource, NoteContext,
-    DEFAULT_AGING_AFTER_DAYS, DEFAULT_STALE_AFTER_DAYS,
+    AgingConfig, AgingTier, Commitment, CommitmentItem, CommitmentSource, ItemTracking,
+    NoteContext, NoteItemEnrollment, DEFAULT_AGING_AFTER_DAYS, DEFAULT_STALE_AFTER_DAYS,
 };
 
 use std::collections::BTreeSet;
@@ -158,6 +160,23 @@ pub enum EntryState {
     /// Out of sight until [`LedgerEntry::snoozed_until`]. Expiry is evaluated at
     /// read time; nothing writes on the day it lapses.
     Snoozed,
+    /// Never belonged in the working set — distinct from [`Waived`], which says
+    /// it was mine and stopped being relevant. Provenance in
+    /// [`LedgerEntry::untracked_via`] separates a person's untrack from one a
+    /// meeting's tracking override applied.
+    ///
+    /// Its item refs stay **active**: an untracked entry still owns its line,
+    /// so a re-sync of the note hits [`sync`]'s present leg and can neither
+    /// mint a duplicate nor park it in
+    /// [`NeedsReview`](EntryState::NeedsReview) as vanished. (Retiring a ref is
+    /// always about the *line* going away, never about the entry's state, so
+    /// this is what every exit does — it is called out here because the
+    /// duplicate it prevents is one only this state could produce:
+    /// `match_live_entry` skips untracked entries, so a line that lost its ref
+    /// would be re-minted rather than re-matched.)
+    ///
+    /// [`Waived`]: EntryState::Waived
+    Untracked,
 }
 
 impl EntryState {
@@ -170,6 +189,7 @@ impl EntryState {
             EntryState::Superseded => "superseded",
             EntryState::Waived => "waived",
             EntryState::Snoozed => "snoozed",
+            EntryState::Untracked => "untracked",
         }
     }
 
@@ -182,6 +202,7 @@ impl EntryState {
             "superseded" => Ok(EntryState::Superseded),
             "waived" => Ok(EntryState::Waived),
             "snoozed" => Ok(EntryState::Snoozed),
+            "untracked" => Ok(EntryState::Untracked),
             other => Err(invalid_field(
                 "state",
                 format!("unknown entry state {other:?}"),
@@ -190,11 +211,20 @@ impl EntryState {
     }
 
     /// Whether this state is terminal — reachable back to `Open` only through
-    /// [`Ledger::reopen`] or [`Ledger::unlink_entries`], never by sync.
+    /// a deliberate act ([`Ledger::reopen`], [`Ledger::unlink_entries`],
+    /// [`Ledger::track_item`], or a tracking flip), never by sync.
+    ///
+    /// [`Untracked`](EntryState::Untracked) counts, and that one word buys three
+    /// behaviours: sync's vanish leg leaves it alone, a distill classification
+    /// naming it is skipped as already settled, and a link hint pointing at it
+    /// falls through to a fresh entry.
     pub fn is_terminal(self) -> bool {
         matches!(
             self,
-            EntryState::Closed | EntryState::Superseded | EntryState::Waived
+            EntryState::Closed
+                | EntryState::Superseded
+                | EntryState::Waived
+                | EntryState::Untracked
         )
     }
 }
@@ -369,6 +399,152 @@ impl LinkKind {
             other => Err(invalid_field(
                 "kind",
                 format!("unknown link kind {other:?}"),
+            )),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Enrollment
+// ---------------------------------------------------------------------------
+
+/// Whether a meeting's extracted items become tracked entries.
+///
+/// **Extraction is not tracking.** The distill pass always records what was
+/// said, and the note, the index, and the MCP read surface are identical either
+/// way. This decides only whether an extracted line earns a ledger entry — and
+/// an item with no entry is invisible to the aging and evidence passes, which
+/// is the whole point: a meeting attended for context should not fill the
+/// ledger with other people's commitments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnrollmentMode {
+    /// Every extracted item is enrolled. The global default.
+    Tracked,
+    /// Only items the local user owns ([`Direction::Mine`]) are enrolled.
+    ///
+    /// A direct ask is a commitment regardless of why you attended: "Shane, can
+    /// you send us that deck" is yours whether or not you were there to listen.
+    /// Everything else stays in the note and out of the working set.
+    ContextOnly,
+}
+
+impl EnrollmentMode {
+    /// The stored spelling, shared by SQLite's `CHECK` and the YAML snapshot.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EnrollmentMode::Tracked => "tracked",
+            EnrollmentMode::ContextOnly => "context_only",
+        }
+    }
+
+    /// Parses the stored spelling.
+    pub fn parse(raw: &str) -> Result<Self> {
+        match raw {
+            "tracked" => Ok(EnrollmentMode::Tracked),
+            "context_only" => Ok(EnrollmentMode::ContextOnly),
+            other => Err(invalid_field(
+                "mode",
+                format!("unknown enrollment mode {other:?}"),
+            )),
+        }
+    }
+
+    /// Whether `direction` enrolls under this mode.
+    pub fn enrolls(self, direction: Direction) -> bool {
+        match self {
+            EnrollmentMode::Tracked => true,
+            EnrollmentMode::ContextOnly => direction == Direction::Mine,
+        }
+    }
+}
+
+/// Resolves the enrollment mode that applies to one meeting.
+///
+/// **This function is the seam.** The precedence is per-meeting override, then
+/// the meeting category's default, then the global default of
+/// [`EnrollmentMode::Tracked`]. Today every caller passes `None` for
+/// `category_default` — meeting categories do not exist yet — so the category
+/// feature plugs in here and nowhere else, without reshaping the model.
+pub fn effective_mode(
+    note_override: Option<EnrollmentMode>,
+    category_default: Option<EnrollmentMode>,
+) -> EnrollmentMode {
+    note_override
+        .or(category_default)
+        .unwrap_or(EnrollmentMode::Tracked)
+}
+
+/// Why an entry is in the ledger — the answer to "why are you in my working
+/// set", which before this existed no row could give.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EnrolledVia {
+    /// Enrolled because nothing said otherwise: the global default.
+    #[default]
+    Default,
+    /// Enrolled under a meeting whose tracking override was set — so, a
+    /// [`Direction::Mine`] item in a context-only meeting.
+    Override,
+    /// Promoted by hand from the note, against whatever the mode said.
+    Manual,
+}
+
+impl EnrolledVia {
+    /// The stored spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            EnrolledVia::Default => "default",
+            EnrolledVia::Override => "override",
+            EnrolledVia::Manual => "manual",
+        }
+    }
+
+    /// Parses the stored spelling.
+    pub fn parse(raw: &str) -> Result<Self> {
+        match raw {
+            "default" => Ok(EnrolledVia::Default),
+            "override" => Ok(EnrolledVia::Override),
+            "manual" => Ok(EnrolledVia::Manual),
+            other => Err(invalid_field(
+                "enrolled_via",
+                format!("unknown enrollment provenance {other:?}"),
+            )),
+        }
+    }
+}
+
+/// How an entry left the working set, for the untracked half of the split.
+///
+/// The distinction is load-bearing for retro-application: flipping a meeting
+/// back to tracked revives what the override untracked and leaves a person's
+/// own untrack alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UntrackedVia {
+    /// A human untracked it.
+    Manual,
+    /// A meeting's tracking override untracked it.
+    Override,
+}
+
+impl UntrackedVia {
+    /// The stored spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UntrackedVia::Manual => "manual",
+            UntrackedVia::Override => "override",
+        }
+    }
+
+    /// Parses the stored spelling.
+    pub fn parse(raw: &str) -> Result<Self> {
+        match raw {
+            "manual" => Ok(UntrackedVia::Manual),
+            "override" => Ok(UntrackedVia::Override),
+            other => Err(invalid_field(
+                "untracked_via",
+                format!("unknown untrack provenance {other:?}"),
             )),
         }
     }

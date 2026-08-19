@@ -6,6 +6,7 @@ import { useNavigation, viewKey } from "../../useNavigation";
 import { useReduceMotion } from "../../useReduceMotion";
 import { useSessionsChangedBridge } from "../../useSessionsChangedBridge";
 import { useVaultChangedBridge } from "../../useVaultChangedBridge";
+import { useLedgerChangedBridge } from "../../useLedgerChangedBridge";
 import { AppErrorBoundary } from "./AppErrorBoundary";
 import { CapturePipelineProvider } from "../providers/CapturePipelineProvider";
 import { ModelStatusProvider } from "../providers/ModelStatusProvider";
@@ -45,6 +46,8 @@ export function AppShell() {
   useVaultChangedBridge();
   // ...and when the retention sweep prunes the raw sessions behind them.
   useSessionsChangedBridge();
+  // ...and when a ledger mutation that wrote no note changes what is tracked.
+  useLedgerChangedBridge();
 
   return (
     // The one capture/transcription/distill subscription, above the error

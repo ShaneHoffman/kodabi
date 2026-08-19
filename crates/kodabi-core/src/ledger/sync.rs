@@ -25,20 +25,46 @@
 //! 4. **Cross-note re-mention** — a new item whose owner and description exactly
 //!    match a live entry elsewhere is the same commitment said again: one entry,
 //!    a second ref, a bumped `last_mention`.
-//! 5. **Create** — anything left is a new commitment.
+//! 5. **Create** — anything left is a new commitment, *if the meeting's
+//!    enrollment mode says so*. See below.
 //! 6. **Retire** — anything still vanished loses its ref. An entry with no live
 //!    refs left goes to `needs_review` rather than being deleted or guessed at.
 //!
 //! Ambiguity always falls through to 5 + 6: a new entry plus a review flag. That
 //! is noisy but never wrong, which is the right way round for a store whose
 //! whole job is not losing commitments.
+//!
+//! ## The enrollment gate, and why it sits in tier 5 alone
+//!
+//! Extraction is unconditional; tracking is not
+//! ([`EnrollmentMode`](super::EnrollmentMode)). The mode is resolved here rather
+//! than passed in by the caller, because both ingest paths — the index worker
+//! and the distill follow-up — funnel through this function, and a gate either
+//! of them could forget to apply is not a gate.
+//!
+//! It gates **tier 5 only**, and each of the other tiers is deliberate:
+//!
+//! * **Present, tier A, tier B** already have an entry. The gate decides what
+//!   earns one, never what happens to one that exists — that is retro-application's
+//!   job, and it has rules about what a person has touched that sync cannot see.
+//! * **Re-mention** links a line to a commitment that is already tracked. A
+//!   context-only meeting that restates a live commitment is still evidence it
+//!   is alive, and dropping the mention would age the entry out for being
+//!   discussed in the wrong room.
+//! * **Retire** is untouched, which is what keeps an untracked entry safe: its
+//!   refs stay active, so it lands in tier 1 and never looks vanished.
+//!
+//! A gated item leaves no trace in the ledger at all — no entry, no ref — so a
+//! pass that gates everything is a no-op, and flipping the meeting to tracked
+//! later simply re-syncs and creates. Idempotence does the retro-application in
+//! that direction for free.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use rusqlite::{params, Connection, OptionalExtension};
 
 use super::store::normalize;
-use super::{mint_id, Direction, EntryState, Ledger, Result};
+use super::{mint_id, Direction, EnrolledVia, EnrollmentMode, EntryState, Ledger, Result};
 use crate::meeting::ActionItemFact;
 
 /// "This new line is that existing commitment, said again."
@@ -92,10 +118,19 @@ pub struct SyncOutcome {
     pub sent_to_review: Vec<String>,
     /// Items whose id was already linked, and stayed linked.
     pub unchanged: usize,
+    /// Items the meeting's enrollment mode kept out of the ledger.
+    ///
+    /// Reported for the log, not stored: an un-enrolled item has no row
+    /// anywhere, which is the point of the gate.
+    pub not_enrolled: usize,
 }
 
 impl SyncOutcome {
     /// Whether the pass wrote anything.
+    ///
+    /// `not_enrolled` is deliberately excluded: gating an item writes nothing,
+    /// so a pass that gates every item must stay silent or the snapshot
+    /// debounce would rearm on every reconcile of a context-only meeting.
     pub fn is_noop(&self) -> bool {
         self.created.is_empty()
             && self.relinked.is_empty()
@@ -151,6 +186,19 @@ fn reconcile(
     dirty: &mut BTreeSet<String>,
 ) -> Result<SyncOutcome> {
     let mut outcome = SyncOutcome::default();
+
+    // --- Resolve the meeting's enrollment mode ----------------------------
+    // Read once, inside the transaction, so every ingest path is gated the same
+    // way. `None` for the category slot until meeting categories exist.
+    let note_override = note_override(tx, sync.note_id)?;
+    let mode = super::effective_mode(note_override, None);
+    // An entry minted under an override is enrolled *because of* it — a Mine
+    // item in a context-only meeting. Without a row, the default enrolled it.
+    let enrolled_via = match note_override {
+        Some(_) => EnrolledVia::Override,
+        None => EnrolledVia::Default,
+    };
+    follow_override_project(tx, sync, dirty)?;
 
     // --- Partition -------------------------------------------------------
     let existing = active_refs(tx, sync.note_id)?;
@@ -293,23 +341,24 @@ fn reconcile(
                 outcome.rementioned.push(entry_id);
             }
             None => {
-                let entry_id = mint_id("le_")?;
-                tx.execute(
-                    "INSERT INTO ledger_entries
-                         (entry_id, state, direction, owner, description, owner_norm,
-                          description_norm, project, created_at, updated_at, last_mention)
-                     VALUES (?1, 'open', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9)",
-                    params![
-                        entry_id,
-                        Direction::from_owner(&item.owner).as_str(),
-                        item.owner,
-                        item.description,
-                        owner_norm,
-                        description_norm,
-                        sync.project,
-                        sync.now,
-                        sync.note_date_utc,
-                    ],
+                // The gate. An item the mode excludes gets no entry and no ref,
+                // so nothing downstream — aging, evidence, the Commitments
+                // view — ever sees it.
+                let direction = Direction::from_owner(&item.owner);
+                if !mode.enrolls(direction) {
+                    outcome.not_enrolled += 1;
+                    continue;
+                }
+                let entry_id = insert_open_entry(
+                    tx,
+                    NewEntry {
+                        item,
+                        direction,
+                        project: sync.project,
+                        last_mention: sync.note_date_utc,
+                        enrolled_via,
+                        now: sync.now,
+                    },
                 )?;
                 link_ref(tx, &entry_id, sync.note_id, &item.id, sync.now)?;
                 dirty.insert(sync.project.to_string());
@@ -341,6 +390,92 @@ fn reconcile(
     }
 
     Ok(outcome)
+}
+
+/// The tracking override a note carries, if any.
+pub(crate) fn note_override(tx: &Connection, note_id: &str) -> Result<Option<EnrollmentMode>> {
+    let raw: Option<String> = tx
+        .query_row(
+            "SELECT mode FROM ledger_note_overrides WHERE note_id = ?1",
+            [note_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    raw.map(|mode| EnrollmentMode::parse(&mode)).transpose()
+}
+
+/// Keeps an override row's project in step with the note it describes.
+///
+/// The override is stored per note but snapshotted per project, so a re-filed
+/// note whose override stayed behind would write its judgement into a folder it
+/// no longer lives in. Cheap and idempotent: it reads first and returns early
+/// unless the note actually moved.
+///
+/// Both projects are marked dirty when it does move, the same bookkeeping
+/// [`follow_project`] does for a re-filed entry: the old folder's snapshot still
+/// carries the override and the new folder's does not yet, so leaving either
+/// alone would restore the judgement into the wrong project.
+fn follow_override_project(
+    tx: &Connection,
+    sync: &NoteSync<'_>,
+    dirty: &mut BTreeSet<String>,
+) -> Result<()> {
+    if sync.project.is_empty() {
+        return Ok(());
+    }
+    let previous: Option<String> = tx
+        .query_row(
+            "SELECT project FROM ledger_note_overrides WHERE note_id = ?1",
+            [sync.note_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(previous) = previous.filter(|project| project != sync.project) else {
+        return Ok(());
+    };
+    tx.execute(
+        "UPDATE ledger_note_overrides SET project = ?2 WHERE note_id = ?1",
+        params![sync.note_id, sync.project],
+    )?;
+    dirty.insert(previous);
+    dirty.insert(sync.project.to_string());
+    Ok(())
+}
+
+/// The fields a freshly enrolled entry needs.
+pub(crate) struct NewEntry<'a> {
+    pub item: &'a ActionItemFact,
+    pub direction: Direction,
+    pub project: &'a str,
+    pub last_mention: &'a str,
+    pub enrolled_via: EnrolledVia,
+    pub now: &'a str,
+}
+
+/// Mints one open entry. The single INSERT both create sites share — sync's
+/// tier 5 and a manual promote — so an entry's shape cannot depend on which
+/// door it came through.
+pub(crate) fn insert_open_entry(tx: &Connection, new: NewEntry<'_>) -> Result<String> {
+    let entry_id = mint_id("le_")?;
+    tx.execute(
+        "INSERT INTO ledger_entries
+             (entry_id, state, direction, owner, description, owner_norm,
+              description_norm, project, created_at, updated_at, last_mention, enrolled_via)
+         VALUES (?1, 'open', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9, ?10)",
+        params![
+            entry_id,
+            new.direction.as_str(),
+            new.item.owner,
+            new.item.description,
+            normalize(&new.item.owner),
+            normalize(&new.item.description),
+            new.project,
+            new.now,
+            new.last_mention,
+            new.enrolled_via.as_str(),
+        ],
+    )?;
+    Ok(entry_id)
 }
 
 /// The `(item_id, entry_id)` pairs currently live in a note, in a stable order.
@@ -520,7 +655,7 @@ fn bump_mention(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ledger::{ClosedVia, EntryFilter};
+    use crate::ledger::{ClosedVia, EntryFilter, UntrackedVia};
 
     const NOW: &str = "2026-08-17T12:00:00Z";
     const DAY_ONE: &str = "2026-08-01T00:00:00Z";
@@ -554,6 +689,232 @@ mod tests {
                 now: NOW,
             })
             .unwrap()
+    }
+
+    /// Marks a note context-only the way the shell does, without the
+    /// retro-application (these tests are about the gate on the way in).
+    fn set_context_only(ledger: &mut Ledger, note_id: &str, project: &str) {
+        ledger
+            .connection_mut()
+            .execute(
+                "INSERT INTO ledger_note_overrides (note_id, project, mode, set_at)
+                 VALUES (?1, ?2, 'context_only', ?3)",
+                params![note_id, project, NOW],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn a_context_only_meeting_enrolls_only_what_is_mine() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        set_context_only(&mut ledger, "n_a1b2c3", "Briarwood Golf");
+        let items = vec![
+            fact("a_111111", "Priya", "send the revised deck"),
+            fact("a_222222", "You", "book the venue"),
+            fact("a_333333", "Unassigned", "chase the caterer"),
+        ];
+        let outcome = sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &items);
+
+        assert_eq!(outcome.created.len(), 1);
+        assert_eq!(outcome.not_enrolled, 2);
+
+        let entries = ledger.list_entries(&EntryFilter::default()).unwrap();
+        assert_eq!(entries.len(), 1, "only the direct ask is tracked");
+        assert_eq!(entries[0].owner, "You");
+        // Enrolled *because of* the override, which is what stops a later flip
+        // from treating it as something the default swept in.
+        assert_eq!(entries[0].enrolled_via, EnrolledVia::Override);
+
+        // A gated item leaves nothing at all behind, not even a retired ref.
+        let refs: i64 = ledger
+            .connection_mut()
+            .query_row(
+                "SELECT count(*) FROM ledger_item_refs WHERE item_id IN ('a_111111', 'a_333333')",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(refs, 0);
+    }
+
+    #[test]
+    fn a_gated_pass_is_a_noop_and_stays_one() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        set_context_only(&mut ledger, "n_a1b2c3", "Briarwood Golf");
+        let items = vec![fact("a_111111", "Priya", "send the revised deck")];
+
+        let first = sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &items);
+        assert_eq!(first.not_enrolled, 1);
+        // The debounce arms off dirty projects, so a pass that only gated must
+        // not read as work done.
+        assert!(first.is_noop());
+        assert!(ledger.dirty_projects().is_empty());
+
+        let second = sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &items);
+        assert!(second.is_noop());
+        assert_eq!(second.not_enrolled, 1);
+        assert_eq!(
+            ledger.list_entries(&EntryFilter::default()).unwrap().len(),
+            0
+        );
+    }
+
+    #[test]
+    fn a_context_only_meeting_still_re_mentions_a_tracked_commitment() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![fact("a_111111", "Priya", "send the revised deck")];
+        sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &items);
+
+        // The same commitment restated in a meeting attended for context. The
+        // gate decides what earns an entry, never whether a live one was
+        // mentioned, or a commitment would age out for being discussed in the
+        // wrong room.
+        set_context_only(&mut ledger, "n_d4e5f6", "Briarwood Golf");
+        let restated = vec![fact("a_444444", "Priya", "send the revised deck")];
+        let outcome = sync_note(
+            &mut ledger,
+            "n_d4e5f6",
+            "Briarwood Golf",
+            DAY_TWO,
+            &restated,
+        );
+
+        assert_eq!(outcome.rementioned.len(), 1);
+        assert_eq!(outcome.created.len(), 0);
+        assert_eq!(outcome.not_enrolled, 0);
+        let entries = ledger.list_entries(&EntryFilter::default()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].last_mention, DAY_TWO);
+    }
+
+    #[test]
+    fn an_edit_in_a_context_only_meeting_still_relinks_its_entry() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![fact("a_111111", "Priya", "send the revised deck")];
+        sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &items);
+
+        // Flipping the meeting later must not orphan the entry it already made:
+        // tier A owns an existing entry, and only retro-application may decide
+        // an existing entry's fate.
+        set_context_only(&mut ledger, "n_a1b2c3", "Briarwood Golf");
+        let edited = vec![fact("a_999999", "Priya", "send the revised deck v2")];
+        let outcome = sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &edited);
+
+        assert_eq!(outcome.relinked.len(), 1);
+        assert_eq!(outcome.not_enrolled, 0);
+        let entries = ledger.list_entries(&EntryFilter::default()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].description, "send the revised deck v2");
+        assert_eq!(entries[0].state, EntryState::Open);
+    }
+
+    #[test]
+    fn an_untracked_entry_rides_the_present_leg_and_is_never_reviewed() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![fact("a_111111", "Priya", "send the revised deck")];
+        let created = sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &items);
+        let entry_id = created.created[0].clone();
+        ledger
+            .untrack(&entry_id, UntrackedVia::Manual, NOW)
+            .unwrap();
+
+        // The refs stay active, so re-syncing the unchanged note sees the item
+        // as present rather than vanished. If it took the retire leg instead,
+        // the entry would be parked in needs_review and reappear in the view.
+        let outcome = sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &items);
+        assert!(outcome.is_noop());
+        assert_eq!(outcome.unchanged, 1);
+        assert!(outcome.sent_to_review.is_empty());
+
+        let entry = ledger.get_entry(&entry_id).unwrap().unwrap().entry;
+        assert_eq!(entry.state, EntryState::Untracked);
+    }
+
+    #[test]
+    fn an_untracked_commitment_restated_elsewhere_mints_a_fresh_entry() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![fact("a_111111", "Priya", "send the revised deck")];
+        let created = sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &items);
+        let untracked_id = created.created[0].clone();
+        ledger
+            .untrack(&untracked_id, UntrackedVia::Manual, NOW)
+            .unwrap();
+
+        // Same doctrine as a waived commitment: the old judgement was about the
+        // old instance. Silently folding the restatement into an invisible
+        // entry would lose it entirely.
+        let restated = vec![fact("a_444444", "Priya", "send the revised deck")];
+        let outcome = sync_note(
+            &mut ledger,
+            "n_d4e5f6",
+            "Briarwood Golf",
+            DAY_TWO,
+            &restated,
+        );
+
+        assert_eq!(outcome.created.len(), 1);
+        assert!(outcome.rementioned.is_empty());
+        assert_ne!(outcome.created[0], untracked_id);
+    }
+
+    #[test]
+    fn a_link_hint_naming_an_untracked_entry_falls_through() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![fact("a_111111", "Priya", "send the revised deck")];
+        let created = sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &items);
+        let untracked_id = created.created[0].clone();
+        ledger
+            .untrack(&untracked_id, UntrackedVia::Manual, NOW)
+            .unwrap();
+
+        let restated = vec![fact("a_444444", "Priya", "send the slide deck")];
+        let outcome = ledger
+            .sync_note_items(&NoteSync {
+                note_id: "n_d4e5f6",
+                project: "Briarwood Golf",
+                note_date_utc: DAY_TWO,
+                items: &restated,
+                link_hints: &[LinkHint {
+                    item_id: "a_444444".to_string(),
+                    entry_id: untracked_id.clone(),
+                }],
+                now: NOW,
+            })
+            .unwrap();
+
+        assert_eq!(
+            outcome.created.len(),
+            1,
+            "a hint never revives a settled entry"
+        );
+        assert_ne!(outcome.created[0], untracked_id);
+    }
+
+    #[test]
+    fn an_override_follows_its_note_to_a_new_project() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        set_context_only(&mut ledger, "n_a1b2c3", "Inbox");
+        let items = vec![fact("a_222222", "You", "book the venue")];
+
+        sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &items);
+
+        // The override is stored per note but snapshotted per project, so a
+        // re-filed note has to take its judgement with it.
+        let project: String = ledger
+            .connection_mut()
+            .query_row(
+                "SELECT project FROM ledger_note_overrides WHERE note_id = 'n_a1b2c3'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(project, "Briarwood Golf");
+        // Both snapshots are behind: the old folder's file still carries the
+        // override and the new folder's does not yet.
+        assert_eq!(
+            ledger.dirty_projects(),
+            vec!["Briarwood Golf".to_string(), "Inbox".to_string()]
+        );
     }
 
     #[test]

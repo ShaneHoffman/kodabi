@@ -218,8 +218,8 @@ index locally. The database is never synced.
 The one durable database, and deliberately **not** the index. `ledger.db` lives in the config dir
 beside `settings.toml` (`kodabi_core::ledger`, resolved through `sandbox::config_dir`), because it
 holds what Markdown cannot carry: a commitment's identity across edits of its own text, evidence
-gathered outside the vault, and the states a checkbox has no spelling for (snoozed, waived, closed
-*with provenance*, superseded by a later mention). The note's checkbox remains the sole truth for
+gathered outside the vault, and the states a checkbox has no spelling for (snoozed, waived,
+untracked, closed *with provenance*, superseded by a later mention). The note's checkbox remains the sole truth for
 done/not-done — the ledger stores no `done` column and a `- [x]` flip is invisible to it.
 
 That durability is why it is a separate file. The index may be nuked and rebuilt at will; these are
@@ -230,6 +230,33 @@ rebuilt from those snapshots at startup — a non-empty one always wins, since m
 histories is not something to guess at. Extracted items are referenced by their content-hashed `a_`
 ids, which are re-minted whenever a line's text is edited, so entries carry their own durable ids
 and re-link across those edits (`kodabi_core::ledger::sync`).
+
+**Extraction is not tracking.** The distill pass always records what was said, and the note, the
+index and the MCP read surface look the same either way; what the ledger holds is the separate
+question of what you are *tracking*. The gate sits at enrollment, in reconcile's create leg
+(`kodabi_core::ledger::sync`), and resolves through one seam: a per-meeting override, then the
+meeting category's default (not yet built), then the global default of `tracked`
+(`ledger::effective_mode`). The one override today is **context only**, which enrolls just the items
+you own, because a direct ask is a commitment regardless of why you attended; it is stored in
+`ledger_note_overrides` rather than in frontmatter, and rides the vault snapshot with everything
+else. An un-enrolled item gets no entry and no ref at all, so the aging and evidence passes never
+see it — that absence is the point, not an optimization. Because the mode is read inside the sync
+transaction, both ingest paths (the index worker and the distill follow-up) are gated by
+construction; and because sync is idempotent, flipping a meeting back to tracked enrolls what was
+skipped simply by re-syncing it.
+
+The gate applies to entry *creation* only. A re-mention still links and still bumps `last_mention`,
+so a live commitment restated in a context-only meeting does not age out for having been discussed
+in the wrong room, and an edit still relinks its existing entry. Changing a meeting's mode
+re-evaluates the entries it already produced in both directions
+(`kodabi_core::ledger::enrollment`), but a tracking mode is a *default*, and a default never
+overrules a person: any entry someone has acted on (`touched`, set only on the shell's
+human-judgement path) or promoted by hand is left exactly as it is. **Untracked** is its own state
+and its own verb, distinct from waived: waiving says this was mine and stopped mattering, untracking
+says it was never my business. Its item refs stay active, so a re-sync sees the line as present and
+can neither mint a duplicate nor park the entry as vanished. Every entry
+carries `enrolled_via` (`default` / `override` / `manual`) and, when untracked, `untracked_via`
+(`manual` / `override`), so any row can answer why it is in the ledger and how it left.
 
 The Commitments view reads it through `ledger_cmds`, whose organizing principle is the ledger's own
 `direction` column: what you owe and what you are waiting on are two groups on two planes, not a

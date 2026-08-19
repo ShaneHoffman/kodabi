@@ -37,8 +37,8 @@ use serde::{Deserialize, Serialize};
 
 use super::store::LedgerEntry;
 use super::{
-    is_minted_id, ClosedVia, Direction, EntryState, EvidenceSource, Ledger, LedgerError, LinkKind,
-    Result,
+    is_minted_id, ClosedVia, Direction, EnrolledVia, EnrollmentMode, EntryState, EvidenceSource,
+    Ledger, LedgerError, LinkKind, Result, UntrackedVia,
 };
 use crate::note::{project_dir, RESERVED_ROOT_DIRS};
 
@@ -57,7 +57,15 @@ pub const LEDGER_SNAPSHOT_FILE: &str = "_ledger.yml";
 /// Snapshot format version. A file numbered higher than this was written by a
 /// newer build and is **skipped, never partially read** — half-restoring a
 /// future format would silently drop whatever the new fields meant.
-pub const LEDGER_SNAPSHOT_VERSION: u32 = 1;
+///
+/// v2 added the enrollment gate's state: the `untracked` entry state, the
+/// provenance fields, and the per-note tracking overrides. The bump is about
+/// the *state*, not the fields — every new field is `#[serde(default)]`, so a v1
+/// file still restores cleanly here. What forced it is that a v1 build reading
+/// `state: untracked` fails to parse the enum and discards the **whole file** as
+/// malformed, warning about corruption that does not exist. Refusing it by
+/// version says the true thing instead.
+pub const LEDGER_SNAPSHOT_VERSION: u32 = 2;
 
 /// The on-disk path of a project's ledger snapshot.
 pub fn snapshot_path(project_folder: &Path) -> PathBuf {
@@ -70,6 +78,12 @@ pub struct ProjectSnapshot {
     pub version: u32,
     #[serde(default)]
     pub entries: Vec<SnapshotEntry>,
+    /// Tracking overrides for notes filed in this project.
+    ///
+    /// A judgement that exists nowhere else — it is deliberately not frontmatter
+    /// yet — so it belongs in the backup for the same reason the entries do.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub note_overrides: Vec<SnapshotNoteOverride>,
 }
 
 impl Default for ProjectSnapshot {
@@ -77,8 +91,21 @@ impl Default for ProjectSnapshot {
         Self {
             version: LEDGER_SNAPSHOT_VERSION,
             entries: Vec::new(),
+            note_overrides: Vec::new(),
         }
     }
+}
+
+/// One note's tracking override.
+///
+/// No `project` field, for the same reason [`SnapshotEntry`] has none: the
+/// folder is the project, so a renamed project's `fs::rename` carries this file
+/// without a rewrite. The column is refilled from the folder on restore.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SnapshotNoteOverride {
+    pub note_id: String,
+    pub mode: EnrollmentMode,
+    pub set_at: String,
 }
 
 /// One entry and everything hanging off it.
@@ -105,6 +132,14 @@ pub struct SnapshotEntry {
     pub closed_via: Option<ClosedVia>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_reason: Option<String>,
+    /// Omitted when it is the default, which is the overwhelming majority of
+    /// entries: the file stays as quiet as it was before v2.
+    #[serde(default, skip_serializing_if = "is_default_enrollment")]
+    pub enrolled_via: EnrolledVia,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub untracked_via: Option<UntrackedVia>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub touched: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub items: Vec<SnapshotItemRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -113,6 +148,17 @@ pub struct SnapshotEntry {
     /// entries live in different projects.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<SnapshotLink>,
+}
+
+/// Whether an entry's enrollment provenance is the default, for serde's
+/// `skip_serializing_if`.
+fn is_default_enrollment(via: &EnrolledVia) -> bool {
+    *via == EnrolledVia::Default
+}
+
+/// Whether a flag is unset, for serde's `skip_serializing_if`.
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// A reference to one extracted action item, live or retired.
@@ -171,18 +217,22 @@ pub struct RestoreReport {
 
 impl Ledger {
     /// Writes one project's snapshot, or removes the file when the project has
-    /// no entries left.
+    /// nothing left to record.
     ///
     /// Removing matters: a stale file left behind after every entry moved
     /// elsewhere would resurrect them on a future restore, in a project they no
     /// longer belong to. A project folder that does not exist is skipped rather
     /// than created — the ledger must never conjure a folder the user deleted.
+    ///
+    /// A project can hold overrides and no entries — a meeting marked context
+    /// only whose every item was then gated out is exactly that shape — so the
+    /// emptiness test asks about both.
     pub fn write_project_snapshot(&self, vault_root: &Path, project: &str) -> Result<()> {
         let folder = project_dir(vault_root, project);
         let path = snapshot_path(&folder);
         let snapshot = self.build_snapshot(project)?;
 
-        if snapshot.entries.is_empty() {
+        if snapshot.entries.is_empty() && snapshot.note_overrides.is_empty() {
             match fs::remove_file(&path) {
                 Ok(()) => return Ok(()),
                 Err(source) if source.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -264,6 +314,9 @@ impl Ledger {
                 snoozed_until: detail.entry.snoozed_until,
                 closed_via: detail.entry.closed_via,
                 review_reason: detail.entry.review_reason,
+                enrolled_via: detail.entry.enrolled_via,
+                untracked_via: detail.entry.untracked_via,
+                touched: detail.entry.touched,
                 items: detail
                     .item_refs
                     .into_iter()
@@ -297,9 +350,31 @@ impl Ledger {
                     .collect(),
             });
         }
+        let mut stmt = self.conn.prepare(
+            "SELECT note_id, mode, set_at FROM ledger_note_overrides
+             WHERE project = ?1 ORDER BY note_id",
+        )?;
+        let rows = stmt.query_map([project], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut note_overrides = Vec::new();
+        for row in rows {
+            let (note_id, mode, set_at) = row?;
+            note_overrides.push(SnapshotNoteOverride {
+                note_id,
+                mode: EnrollmentMode::parse(&mode)?,
+                set_at,
+            });
+        }
+
         Ok(ProjectSnapshot {
             version: LEDGER_SNAPSHOT_VERSION,
             entries: out,
+            note_overrides,
         })
     }
 
@@ -398,6 +473,9 @@ impl Ledger {
                         snoozed_until: entry.snoozed_until.clone(),
                         closed_via: entry.closed_via,
                         review_reason: entry.review_reason.clone(),
+                        enrolled_via: entry.enrolled_via,
+                        untracked_via: entry.untracked_via,
+                        touched: entry.touched,
                     },
                 );
                 // A row the schema refuses is a bad *file*, not a bad database:
@@ -464,6 +542,22 @@ impl Ledger {
                     pending_links.push((entry.entry_id.clone(), link.clone()));
                 }
                 report.entries_restored += 1;
+            }
+
+            // Tracking overrides. `OR IGNORE` for the same reason the entries
+            // use `seen`: if two files somehow claim one note, the first wins
+            // rather than the restore failing.
+            for override_row in &snapshot.note_overrides {
+                tx.execute(
+                    "INSERT OR IGNORE INTO ledger_note_overrides (note_id, project, mode, set_at)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    params![
+                        override_row.note_id,
+                        project,
+                        override_row.mode.as_str(),
+                        override_row.set_at,
+                    ],
+                )?;
             }
         }
 
@@ -584,6 +678,119 @@ mod tests {
             .unwrap();
         let entry_id = outcome.created[0].clone();
         (dir, ledger, entry_id)
+    }
+
+    #[test]
+    fn the_enrollment_state_round_trips_through_a_fresh_ledger() {
+        let (dir, mut ledger, entry_id) = vault_with_entry();
+        ledger
+            .set_note_tracking("n_a1b2c3", "Briarwood Golf", true, NOW)
+            .unwrap();
+        // The override untracked the entry (Priya's, not mine); touch it too, so
+        // all three new columns carry a non-default value.
+        ledger.mark_touched(&entry_id).unwrap();
+        ledger
+            .write_project_snapshot(dir.path(), "Briarwood Golf")
+            .unwrap();
+
+        let mut restored = Ledger::open_in_memory().unwrap();
+        let report = restored
+            .restore_from_snapshots_if_empty(dir.path())
+            .unwrap();
+        assert_eq!(report.entries_restored, 1);
+
+        let entry = restored.get_entry(&entry_id).unwrap().unwrap().entry;
+        assert_eq!(entry.state, EntryState::Untracked);
+        assert_eq!(entry.untracked_via, Some(UntrackedVia::Override));
+        assert!(entry.touched);
+        assert_eq!(
+            restored.note_tracking_override("n_a1b2c3").unwrap(),
+            Some(EnrollmentMode::ContextOnly),
+            "the judgement is in the backup, not only the database"
+        );
+    }
+
+    #[test]
+    fn a_v1_file_restores_with_the_new_fields_at_their_defaults() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("Briarwood Golf")).unwrap();
+        // Exactly what the shipped build wrote: version 1, no enrollment keys.
+        let v1 = "version: 1\n\
+                  entries:\n\
+                  - entry_id: le_aaaaaaaaaaaa\n  \
+                    state: open\n  \
+                    direction: theirs\n  \
+                    owner: Priya\n  \
+                    description: send the revised deck\n  \
+                    created_at: 2026-08-17T12:00:00Z\n  \
+                    updated_at: 2026-08-17T12:00:00Z\n  \
+                    last_mention: 2026-08-01T00:00:00Z\n";
+        fs::write(
+            dir.path().join("Briarwood Golf").join(LEDGER_SNAPSHOT_FILE),
+            v1,
+        )
+        .unwrap();
+
+        let mut restored = Ledger::open_in_memory().unwrap();
+        let report = restored
+            .restore_from_snapshots_if_empty(dir.path())
+            .unwrap();
+
+        assert_eq!(report.entries_restored, 1, "{:?}", report.warnings);
+        let entry = restored
+            .get_entry("le_aaaaaaaaaaaa")
+            .unwrap()
+            .unwrap()
+            .entry;
+        assert_eq!(entry.enrolled_via, EnrolledVia::Default);
+        assert_eq!(entry.untracked_via, None);
+        assert!(!entry.touched);
+    }
+
+    #[test]
+    fn a_quiet_entry_writes_none_of_the_new_keys() {
+        let (dir, ledger, _) = vault_with_entry();
+        ledger
+            .write_project_snapshot(dir.path(), "Briarwood Golf")
+            .unwrap();
+        let raw = fs::read_to_string(dir.path().join("Briarwood Golf").join(LEDGER_SNAPSHOT_FILE))
+            .unwrap();
+
+        assert!(raw.starts_with("version: 2"));
+        for key in ["enrolled_via", "untracked_via", "touched", "note_overrides"] {
+            assert!(!raw.contains(key), "{key} should be omitted when default");
+        }
+    }
+
+    #[test]
+    fn a_project_holding_only_an_override_still_writes_its_file() {
+        let dir = tempdir().unwrap();
+        fs::create_dir_all(dir.path().join("Briarwood Golf")).unwrap();
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        // A context-only meeting whose every item was gated out leaves no
+        // entries at all, and the judgement would be lost with the file.
+        ledger
+            .set_note_tracking("n_a1b2c3", "Briarwood Golf", true, NOW)
+            .unwrap();
+        ledger
+            .write_project_snapshot(dir.path(), "Briarwood Golf")
+            .unwrap();
+
+        let path = dir.path().join("Briarwood Golf").join(LEDGER_SNAPSHOT_FILE);
+        assert!(path.is_file());
+        let raw = fs::read_to_string(&path).unwrap();
+        assert!(raw.contains("note_overrides"));
+        // The invariant the whole file rests on: it never names its own project.
+        assert!(!raw.contains("Briarwood Golf"));
+
+        let mut restored = Ledger::open_in_memory().unwrap();
+        restored
+            .restore_from_snapshots_if_empty(dir.path())
+            .unwrap();
+        assert_eq!(
+            restored.note_tracking_override("n_a1b2c3").unwrap(),
+            Some(EnrollmentMode::ContextOnly)
+        );
     }
 
     #[test]

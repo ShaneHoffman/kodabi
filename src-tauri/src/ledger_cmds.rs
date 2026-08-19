@@ -36,7 +36,9 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::events::{LEDGER_CHANGED_EVENT, VAULT_CHANGED_EVENT};
 use crate::index_state::{IndexReadHandle, IndexState};
-use crate::ledger_state::{LedgerCallError, LedgerClient, LedgerOp, LedgerState, MutateReply};
+use crate::ledger_state::{
+    LedgerCallError, LedgerClient, LedgerOp, LedgerState, MutateReply, TrackItemRequest,
+};
 use crate::settings_cmds::SettingsState;
 use crate::transcribe::knowledge_base_dir;
 use crate::user_errors::{reported, user_sentence};
@@ -59,9 +61,18 @@ const LIVE_STATES: [EntryState; 3] = [
     EntryState::Snoozed,
 ];
 
-/// The states the settled shelf shows. Waived sits here with closed: both are
-/// judgements a person may want to take back, and `reopen` takes either back.
-const SETTLED_STATES: [EntryState; 2] = [EntryState::Closed, EntryState::Waived];
+/// The states the settled shelf shows. Waived and untracked sit here with
+/// closed: all three are judgements a person may want to take back, and
+/// `reopen` takes any of them back.
+///
+/// Untracked belongs on the shelf for the same reason a closure does. An entry
+/// that vanished with no trace would leave the person who untracked it by
+/// mistake nothing to undo in the view where they did it.
+const SETTLED_STATES: [EntryState; 3] = [
+    EntryState::Closed,
+    EntryState::Waived,
+    EntryState::Untracked,
+];
 
 // ---------------------------------------------------------------------------
 // Wire DTOs
@@ -154,6 +165,46 @@ pub struct CommitmentEntryDto {
     closed_via: Option<String>,
     review_reason: Option<String>,
     updated_at: String,
+    /// `manual | override`, present only on an untracked entry: what the shelf
+    /// row says about how it left the working set.
+    untracked_via: Option<String>,
+}
+
+/// One of a note's extracted lines, with whether the ledger is tracking it.
+/// Mirrors [`kodabi_core::ledger::view::NoteItemEnrollment`].
+#[derive(serde::Serialize)]
+pub struct NoteCommitmentItemDto {
+    item_id: String,
+    description: String,
+    owner: String,
+    due_date: Option<String>,
+    done: bool,
+    /// `mine | theirs | unassigned`, from the line's owner.
+    direction: String,
+    /// `tracked | untracked | not_enrolled`.
+    tracking: String,
+    untracked_via: Option<String>,
+    entry_id: Option<String>,
+    entry_state: Option<String>,
+}
+
+/// The note view's enrollment panel payload.
+#[derive(serde::Serialize)]
+pub struct NoteCommitmentsDto {
+    /// Whether this meeting carries the context-only override.
+    context_only: bool,
+    /// The note's extracted lines, in body order.
+    items: Vec<NoteCommitmentItemDto>,
+}
+
+/// What flipping a meeting's tracking did.
+#[derive(serde::Serialize)]
+pub struct MeetingTrackingDto {
+    context_only: bool,
+    /// How many still-open entries the flip removed from the working set.
+    untracked: usize,
+    /// How many it put back.
+    retracked: usize,
 }
 
 /// The checkbox write's outcome.
@@ -183,6 +234,22 @@ fn entry_dto(entry: &LedgerEntry) -> CommitmentEntryDto {
         closed_via: entry.closed_via.map(|via| via.as_str().to_string()),
         review_reason: entry.review_reason.clone(),
         updated_at: entry.updated_at.clone(),
+        untracked_via: entry.untracked_via.map(|via| via.as_str().to_string()),
+    }
+}
+
+fn note_item_dto(enrollment: view::NoteItemEnrollment) -> NoteCommitmentItemDto {
+    NoteCommitmentItemDto {
+        item_id: enrollment.item.id,
+        description: enrollment.item.description,
+        owner: enrollment.item.owner,
+        due_date: enrollment.item.due_date,
+        done: enrollment.item.done,
+        direction: enrollment.direction.as_str().to_string(),
+        tracking: enrollment.tracking.as_str().to_string(),
+        untracked_via: enrollment.untracked_via.map(|via| via.as_str().to_string()),
+        entry_id: enrollment.entry_id,
+        entry_state: enrollment.entry_state.map(|s| s.as_str().to_string()),
     }
 }
 
@@ -305,6 +372,11 @@ fn ledger_failure(cmd: &str, err: kodabi_core::ledger::LedgerError) -> String {
 const LEDGER_REFUSED: &str = "The commitment ledger isn't available this session, so this change \
                               wasn't saved. Restart Kodabi and try again; your notes are \
                               untouched.";
+
+/// The same, for a read: nothing was at stake, so the sentence promises less.
+const LEDGER_READ_REFUSED: &str =
+    "The commitment ledger isn't available this session, so tracking \
+                                   can't be shown. Restart Kodabi; your notes are untouched.";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -751,6 +823,218 @@ pub async fn dismiss_commitment_evidence(
     )
     .await?;
     Ok(entry_dto(&reply.entry))
+}
+
+/// Removes a commitment from the working set: it never should have been in it.
+///
+/// The sibling of `waive_commitment`, and the distinction is worth keeping in
+/// the two sentences the UI shows. Waiving is about the commitment (it was
+/// mine, it stopped mattering); untracking is about the ledger (this was never
+/// my business). Ledger-only, and reversible through the same Reopen.
+#[tauri::command]
+pub async fn untrack_commitment(
+    app: AppHandle,
+    input: CommitmentEntryInput,
+) -> Result<CommitmentEntryDto, String> {
+    let (client, _) = handles(&app);
+    let reply = mutate(
+        &app,
+        "untrack_commitment",
+        client,
+        LedgerOp::Untrack {
+            entry_id: input.entry_id,
+        },
+    )
+    .await?;
+    Ok(entry_dto(&reply.entry))
+}
+
+/// A request naming one note.
+#[derive(serde::Deserialize)]
+pub struct NoteCommitmentsInput {
+    note_id: String,
+}
+
+/// The note view's enrollment panel: this meeting's tracking mode and every
+/// extracted line with whether the ledger is tracking it.
+///
+/// Ledger first, then the index, per the module doc. An index that cannot
+/// supply the note's facts yields an empty list rather than an error: the note
+/// may be a type that carries no commitments, which is an ordinary answer.
+#[tauri::command]
+pub async fn list_note_commitments(
+    app: AppHandle,
+    input: NoteCommitmentsInput,
+) -> Result<NoteCommitmentsDto, String> {
+    let (client, index) = handles(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        let note_id = input.note_id;
+        let (mode, details) = client
+            .note_enrollment(note_id.clone())
+            .map_err(|err| ledger_error("list_note_commitments", err, LEDGER_READ_REFUSED))?;
+        let items = index
+            .and_then(|index| index.note_facts(&note_id))
+            .map(|facts| {
+                facts
+                    .items
+                    .into_iter()
+                    .map(|item| kodabi_core::index::ActionItemRow {
+                        id: item.id,
+                        description: item.description,
+                        owner: item.owner,
+                        due_date: item.due_date,
+                        done: item.done,
+                        extracted_date: item.extracted_date,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Ok(NoteCommitmentsDto {
+            context_only: mode == Some(kodabi_core::ledger::EnrollmentMode::ContextOnly),
+            items: view::assemble_note_items(&note_id, items, &details)
+                .into_iter()
+                .map(note_item_dto)
+                .collect(),
+        })
+    })
+    .await
+    .map_err(|err| {
+        reported(
+            "list_note_commitments",
+            err,
+            "Couldn't read this meeting's tracking. Reopen the note to try again.",
+        )
+    })?
+}
+
+/// A request setting one meeting's tracking mode.
+#[derive(serde::Deserialize)]
+pub struct MeetingTrackingInput {
+    note_id: String,
+    context_only: bool,
+}
+
+/// Sets whether a meeting is tracked in full or for direct asks only, and
+/// re-evaluates the entries it already produced.
+///
+/// **Reads the index before the ledger**, the one departure from the module
+/// doc's fixed order, and it is argued rather than accidental: the note's
+/// project, date and lines are *inputs* to the ledger write, so there is no
+/// order that puts the ledger first. The two acquisitions stay strictly
+/// sequential and never nested, which is the property the rule exists to
+/// protect.
+///
+/// The follow-up sync is what makes re-tracking whole. The ledger call revives
+/// what the override untracked; the sync's ordinary, idempotent create leg
+/// enrolls the items that were gated out and never got an entry at all. Both
+/// travel the same worker channel, so the sync cannot overtake the flip.
+#[tauri::command]
+pub async fn set_meeting_tracking(
+    app: AppHandle,
+    input: MeetingTrackingInput,
+) -> Result<MeetingTrackingDto, String> {
+    let (client, index) = handles(&app);
+    let handle = app.state::<LedgerState>().handle();
+    let facts = tauri::async_runtime::spawn_blocking({
+        let note_id = input.note_id.clone();
+        move || index.and_then(|index| index.note_facts(&note_id))
+    })
+    .await
+    .map_err(|err| {
+        reported(
+            "set_meeting_tracking",
+            err,
+            "Couldn't change this meeting's tracking. Reopen the note and try again.",
+        )
+    })?;
+    let Some(facts) = facts else {
+        return Err(
+            "Kodabi doesn't have this meeting indexed yet, so its tracking can't be \
+                    changed. Try again in a moment."
+                .to_string(),
+        );
+    };
+
+    let project = facts.project.clone();
+    let note_id = input.note_id.clone();
+    let context_only = input.context_only;
+    let outcome = tauri::async_runtime::spawn_blocking(move || {
+        client.set_note_tracking(note_id, project, context_only)
+    })
+    .await
+    .map_err(|err| {
+        reported(
+            "set_meeting_tracking",
+            err,
+            "Couldn't change this meeting's tracking. Reopen the note and try again.",
+        )
+    })?
+    .map_err(|err| ledger_error("set_meeting_tracking", err, LEDGER_REFUSED))?;
+
+    handle.sync(facts);
+    broadcast_ledger_changed(&app);
+    Ok(MeetingTrackingDto {
+        context_only: outcome.context_only,
+        untracked: outcome.untracked.len(),
+        retracked: outcome.retracked.len(),
+    })
+}
+
+/// A request naming one extracted line.
+#[derive(serde::Deserialize)]
+pub struct TrackItemInput {
+    note_id: String,
+    item_id: String,
+}
+
+/// Tracks one extracted line by hand, whatever the meeting's mode says.
+///
+/// Idempotent, and deliberately incapable of resurrecting a settled
+/// commitment: a note view left open while the entry was closed elsewhere can
+/// only re-affirm what is already true.
+#[tauri::command]
+pub async fn track_commitment_item(
+    app: AppHandle,
+    input: TrackItemInput,
+) -> Result<CommitmentEntryDto, String> {
+    let (client, index) = handles(&app);
+    let note_id = input.note_id.clone();
+    let item_id = input.item_id.clone();
+    let entry = tauri::async_runtime::spawn_blocking(move || {
+        let Some(facts) = index.and_then(|index| index.note_facts(&note_id)) else {
+            return Err(
+                "Kodabi doesn't have this meeting indexed yet, so this line can't be \
+                        tracked. Try again in a moment."
+                    .to_string(),
+            );
+        };
+        let Some(item) = facts.items.iter().find(|item| item.id == item_id).cloned() else {
+            return Err(
+                "That line changed since this note was loaded. Reopen the note and try \
+                        again."
+                    .to_string(),
+            );
+        };
+        client
+            .track_item(TrackItemRequest {
+                note_id: facts.note_id,
+                project: facts.project,
+                note_date_utc: facts.date_utc,
+                item,
+            })
+            .map_err(|err| ledger_error("track_commitment_item", err, LEDGER_REFUSED))
+    })
+    .await
+    .map_err(|err| {
+        reported(
+            "track_commitment_item",
+            err,
+            "Couldn't track this line. Reopen the note and try again.",
+        )
+    })??;
+
+    broadcast_ledger_changed(&app);
+    Ok(entry_dto(&entry))
 }
 
 /// Runs one mutation off the async runtime and announces it.

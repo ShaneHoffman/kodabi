@@ -18,7 +18,7 @@ use chrono::NaiveDate;
 
 use crate::index::{ActionItemRow, ActionItemStatus};
 
-use super::{EntryDetail, EntryState};
+use super::{Direction, EntryDetail, EntryState, UntrackedVia};
 
 /// What the index knows about one note a commitment points at.
 ///
@@ -189,6 +189,101 @@ pub struct Commitment {
     pub tier: AgingTier,
 }
 
+/// Whether one extracted line is in the working set, as the note view asks it.
+///
+/// Three answers, not two: "no entry" and "untracked" both mean the item is out
+/// of the ledger, but they are different offers. The first is an item the mode
+/// never enrolled; the second is one that was enrolled and then removed, which
+/// a reader may want to see acknowledged rather than silently identical to
+/// never having been tracked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ItemTracking {
+    /// Has a live entry.
+    Tracked,
+    /// Has an entry in [`EntryState::Untracked`].
+    Untracked,
+    /// Has no entry at all: the enrollment gate skipped it.
+    NotEnrolled,
+}
+
+impl ItemTracking {
+    /// The wire spelling.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ItemTracking::Tracked => "tracked",
+            ItemTracking::Untracked => "untracked",
+            ItemTracking::NotEnrolled => "not_enrolled",
+        }
+    }
+}
+
+/// One of a note's extracted lines, with its enrollment status.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoteItemEnrollment {
+    pub item: ActionItemRow,
+    /// Derived from the line's owner, not from the entry: an un-enrolled item
+    /// has no entry to ask, and the two always agree for one that does.
+    pub direction: Direction,
+    pub tracking: ItemTracking,
+    /// Why it left the working set; present only when `tracking` is
+    /// [`ItemTracking::Untracked`].
+    pub untracked_via: Option<UntrackedVia>,
+    pub entry_id: Option<String>,
+    pub entry_state: Option<EntryState>,
+}
+
+/// Joins a note's extracted lines to the entries they produced.
+///
+/// Keyed on **active refs only**, which is what makes this honest: a retired ref
+/// is the history of a line that was edited away, and matching it would report a
+/// line as tracked by an entry that has since moved on to different words.
+///
+/// Body order is preserved from `items`, so the note view lists lines in the
+/// order the reader sees them in the Markdown.
+pub fn assemble_note_items(
+    note_id: &str,
+    items: Vec<ActionItemRow>,
+    details: &[EntryDetail],
+) -> Vec<NoteItemEnrollment> {
+    let mut by_item: HashMap<&str, &EntryDetail> = HashMap::new();
+    for detail in details {
+        for item_ref in &detail.item_refs {
+            if item_ref.active && item_ref.note_id == note_id {
+                by_item.insert(item_ref.item_id.as_str(), detail);
+            }
+        }
+    }
+
+    items
+        .into_iter()
+        .map(|item| {
+            let matched = by_item.get(item.id.as_str());
+            let direction = Direction::from_owner(&item.owner);
+            match matched {
+                Some(detail) => NoteItemEnrollment {
+                    item,
+                    direction,
+                    tracking: match detail.entry.state {
+                        EntryState::Untracked => ItemTracking::Untracked,
+                        _ => ItemTracking::Tracked,
+                    },
+                    untracked_via: detail.entry.untracked_via,
+                    entry_id: Some(detail.entry.entry_id.clone()),
+                    entry_state: Some(detail.entry.state),
+                },
+                None => NoteItemEnrollment {
+                    item,
+                    direction,
+                    tracking: ItemTracking::NotEnrolled,
+                    untracked_via: None,
+                    entry_id: None,
+                    entry_state: None,
+                },
+            }
+        })
+        .collect()
+}
+
 /// Joins entries to their source lines and evaluates snooze expiry.
 ///
 /// `notes` is keyed by note id and may be missing entries entirely: a note that
@@ -302,7 +397,7 @@ pub fn recently_settled(
 mod tests {
     use super::*;
     use crate::ledger::sync::NoteSync;
-    use crate::ledger::{ClosedVia, Ledger};
+    use crate::ledger::{ClosedVia, Ledger, UntrackedVia};
     use crate::meeting::ActionItemFact;
 
     const NOW: &str = "2026-08-17T12:00:00Z";
@@ -365,6 +460,135 @@ mod tests {
             })
             .unwrap();
         (ledger, outcome.created[0].clone())
+    }
+
+    #[test]
+    fn note_items_report_tracked_untracked_and_never_enrolled() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        // A context-only meeting: only the direct ask is enrolled.
+        ledger
+            .set_note_tracking("n_a1b2c3", "Briarwood Golf", true, NOW)
+            .unwrap();
+        let items = vec![
+            fact("a_111111", "Priya", "send the revised deck"),
+            fact("a_222222", "You", "book the venue"),
+        ];
+        ledger
+            .sync_note_items(&NoteSync {
+                note_id: "n_a1b2c3",
+                project: "Briarwood Golf",
+                note_date_utc: DAY,
+                items: &items,
+                link_hints: &[],
+                now: NOW,
+            })
+            .unwrap();
+        let mine = ledger
+            .entry_for_item("n_a1b2c3", "a_222222")
+            .unwrap()
+            .unwrap();
+        ledger
+            .untrack(&mine.entry_id, UntrackedVia::Manual, NOW)
+            .unwrap();
+
+        let details = ledger.list_details(&Default::default()).unwrap();
+        let assembled = assemble_note_items(
+            "n_a1b2c3",
+            vec![
+                row("a_111111", "Priya", "send the revised deck", None, false),
+                row("a_222222", "You", "book the venue", None, false),
+            ],
+            &details,
+        );
+
+        // Body order is the reader's order.
+        assert_eq!(assembled[0].item.id, "a_111111");
+        assert_eq!(assembled[0].tracking, ItemTracking::NotEnrolled);
+        assert_eq!(assembled[0].direction, Direction::Theirs);
+        assert_eq!(assembled[0].entry_id, None);
+
+        assert_eq!(assembled[1].tracking, ItemTracking::Untracked);
+        assert_eq!(assembled[1].direction, Direction::Mine);
+        assert_eq!(assembled[1].untracked_via, Some(UntrackedVia::Manual));
+        assert_eq!(assembled[1].entry_state, Some(EntryState::Untracked));
+    }
+
+    #[test]
+    fn a_note_item_joins_only_through_its_own_active_ref() {
+        let (ledger, _) = seeded();
+        let details = ledger.list_details(&Default::default()).unwrap();
+
+        // The same line id read against a different note: a ref belongs to the
+        // note it was linked in, so this must not report as tracked.
+        let elsewhere = assemble_note_items(
+            "n_d4e5f6",
+            vec![row(
+                "a_111111",
+                "Priya",
+                "send the revised deck",
+                None,
+                false,
+            )],
+            &details,
+        );
+        assert_eq!(elsewhere[0].tracking, ItemTracking::NotEnrolled);
+
+        let here = assemble_note_items(
+            "n_a1b2c3",
+            vec![row(
+                "a_111111",
+                "Priya",
+                "send the revised deck",
+                None,
+                false,
+            )],
+            &details,
+        );
+        assert_eq!(here[0].tracking, ItemTracking::Tracked);
+        assert_eq!(here[0].untracked_via, None);
+    }
+
+    #[test]
+    fn an_edited_line_reads_as_not_enrolled_through_its_retired_ref() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![fact("a_111111", "Priya", "send the revised deck")];
+        ledger
+            .sync_note_items(&NoteSync {
+                note_id: "n_a1b2c3",
+                project: "Briarwood Golf",
+                note_date_utc: DAY,
+                items: &items,
+                link_hints: &[],
+                now: NOW,
+            })
+            .unwrap();
+        // Tier A relinks the entry to the new id and retires the old ref.
+        let edited = vec![fact("a_999999", "Priya", "send the revised deck v2")];
+        ledger
+            .sync_note_items(&NoteSync {
+                note_id: "n_a1b2c3",
+                project: "Briarwood Golf",
+                note_date_utc: DAY,
+                items: &edited,
+                link_hints: &[],
+                now: NOW,
+            })
+            .unwrap();
+
+        let details = ledger.list_details(&Default::default()).unwrap();
+        let assembled = assemble_note_items(
+            "n_a1b2c3",
+            vec![
+                row("a_999999", "Priya", "send the revised deck v2", None, false),
+                row("a_111111", "Priya", "send the revised deck", None, false),
+            ],
+            &details,
+        );
+
+        assert_eq!(assembled[0].tracking, ItemTracking::Tracked);
+        // A retired ref is the history of a line that was edited away; matching
+        // it would claim a line is tracked by an entry that moved on.
+        assert_eq!(assembled[1].tracking, ItemTracking::NotEnrolled);
     }
 
     #[test]

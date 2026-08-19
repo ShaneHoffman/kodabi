@@ -10,8 +10,8 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use unicode_normalization::UnicodeNormalization;
 
 use super::{
-    invalid_field, mint_id, ClosedVia, Direction, EntryState, EvidenceSource, Ledger, LedgerError,
-    LinkKind, Result,
+    invalid_field, mint_id, ClosedVia, Direction, EnrolledVia, EntryState, EvidenceSource, Ledger,
+    LedgerError, LinkKind, Result, UntrackedVia,
 };
 
 /// One tracked commitment.
@@ -62,6 +62,21 @@ pub struct LedgerEntry {
     pub closed_via: Option<ClosedVia>,
     /// Why the entry needs a human; present only in [`EntryState::NeedsReview`].
     pub review_reason: Option<String>,
+    /// Why this entry is in the ledger at all. Set once at creation and never
+    /// rewritten by a tracking flip; a manual promote is the one exception,
+    /// because it is the newest true answer to the question.
+    pub enrolled_via: EnrolledVia,
+    /// Present exactly when the state is [`EntryState::Untracked`].
+    pub untracked_via: Option<UntrackedVia>,
+    /// Whether a person has acted on this entry (closed, waived, snoozed,
+    /// reopened, judged evidence, tracked, untracked).
+    ///
+    /// Retro-application reads this and nothing else to decide what it may
+    /// override: a tracking flip is a default, and a default never overrules
+    /// someone who already looked. Set by the shell's mutation path, which is
+    /// the only place a human's judgement enters the ledger — the machine's
+    /// sync and distill paths never route through it.
+    pub touched: bool,
 }
 
 /// A link from an entry to one extracted action-item occurrence.
@@ -157,13 +172,15 @@ pub(crate) fn normalize(text: &str) -> String {
 /// The columns of `ledger_entries`, in the order [`row_to_entry`] reads them.
 const ENTRY_COLUMNS: &str = "entry_id, state, direction, owner, description, project, \
      created_at, updated_at, last_mention, last_evidence_check, snoozed_until, closed_via, \
-     review_reason";
+     review_reason, enrolled_via, untracked_via, touched";
 
 /// Maps a row selecting [`ENTRY_COLUMNS`] into a [`LedgerEntry`].
 fn row_to_entry(row: &Row<'_>) -> rusqlite::Result<LedgerEntry> {
     let state: String = row.get(1)?;
     let direction: String = row.get(2)?;
     let closed_via: Option<String> = row.get(11)?;
+    let enrolled_via: String = row.get(13)?;
+    let untracked_via: Option<String> = row.get(14)?;
     // A stored value that fails to parse means the database was written by a
     // future version or edited by hand; surface it as a SQLite-shaped error
     // rather than panicking inside the row mapper.
@@ -187,6 +204,12 @@ fn row_to_entry(row: &Row<'_>) -> rusqlite::Result<LedgerEntry> {
             .transpose()
             .map_err(to_sqlite)?,
         review_reason: row.get(12)?,
+        enrolled_via: EnrolledVia::parse(&enrolled_via).map_err(to_sqlite)?,
+        untracked_via: untracked_via
+            .map(|raw| UntrackedVia::parse(&raw))
+            .transpose()
+            .map_err(to_sqlite)?,
+        touched: row.get::<_, i64>(15)? != 0,
     })
 }
 
@@ -195,14 +218,20 @@ fn row_to_entry(row: &Row<'_>) -> rusqlite::Result<LedgerEntry> {
 /// The table, with `Superseded` reachable only through [`Ledger::link_entries`]
 /// so a link and a state can never disagree:
 ///
-/// | from → to      | Open | NeedsReview | Closed | Superseded | Waived | Snoozed |
-/// |----------------|------|-------------|--------|------------|--------|---------|
-/// | Open           | yes  | yes         | yes    | via link   | yes    | yes     |
-/// | NeedsReview    | yes  | yes         | yes    | via link   | yes    | no      |
-/// | Snoozed        | yes  | yes         | yes    | via link   | yes    | yes     |
-/// | Closed         | yes  | no          | yes    | no         | no     | no      |
-/// | Superseded     | via unlink | no    | no     | yes        | no     | no      |
-/// | Waived         | yes  | no          | no     | no         | yes    | no      |
+/// | from → to      | Open | NeedsReview | Closed | Superseded | Waived | Snoozed | Untracked |
+/// |----------------|------|-------------|--------|------------|--------|---------|-----------|
+/// | Open           | yes  | yes         | yes    | via link   | yes    | yes     | yes       |
+/// | NeedsReview    | yes  | yes         | yes    | via link   | yes    | no      | yes       |
+/// | Snoozed        | yes  | yes         | yes    | via link   | yes    | yes     | yes       |
+/// | Closed         | yes  | no          | yes    | no         | no     | no      | no        |
+/// | Superseded     | via unlink | no    | no     | yes        | no     | no      | no        |
+/// | Waived         | yes  | no          | no     | no         | yes    | no      | no        |
+/// | Untracked      | yes  | no          | no     | no         | no     | no      | yes       |
+///
+/// `Untracked` is only reachable from the live states: untracking something
+/// already closed or waived would overwrite a real judgement with a weaker one.
+/// Getting back out is the universal `Open` row, so a mistaken untrack is undone
+/// by the same Reopen every other exit uses.
 fn transition_allowed(from: EntryState, to: EntryState) -> bool {
     use EntryState::*;
     if from == to {
@@ -216,6 +245,7 @@ fn transition_allowed(from: EntryState, to: EntryState) -> bool {
         Closed | Waived => matches!(from, Open | NeedsReview | Snoozed),
         Snoozed => matches!(from, Open | Snoozed),
         Superseded => matches!(from, Open | NeedsReview | Snoozed),
+        Untracked => matches!(from, Open | NeedsReview | Snoozed),
     }
 }
 
@@ -472,12 +502,58 @@ impl Ledger {
 
     /// Marks an entry resolved, recording how that was established.
     pub fn close(&mut self, entry_id: &str, via: ClosedVia, now: &str) -> Result<LedgerEntry> {
-        self.set_state(entry_id, EntryState::Closed, Some(via), None, None, now)
+        self.set_state(
+            entry_id,
+            EntryState::Closed,
+            Some(via),
+            None,
+            None,
+            None,
+            now,
+        )
     }
 
     /// Marks an entry as deliberately not happening.
     pub fn waive(&mut self, entry_id: &str, now: &str) -> Result<LedgerEntry> {
-        self.set_state(entry_id, EntryState::Waived, None, None, None, now)
+        self.set_state(entry_id, EntryState::Waived, None, None, None, None, now)
+    }
+
+    /// Removes an entry from the working set: it never should have been in it.
+    ///
+    /// The distinction from [`Ledger::waive`] is the whole point and is worth
+    /// keeping straight: waiving says *this was mine and has stopped being
+    /// relevant*, which is a judgement about the commitment. Untracking says
+    /// *this was never my business*, which is a judgement about the ledger.
+    /// Conflating them would lose the only thing retro-application needs to
+    /// know when a meeting's tracking flips back.
+    ///
+    /// The entry's item refs are deliberately left active — see
+    /// [`EntryState::Untracked`].
+    pub fn untrack(&mut self, entry_id: &str, via: UntrackedVia, now: &str) -> Result<LedgerEntry> {
+        self.set_state(
+            entry_id,
+            EntryState::Untracked,
+            None,
+            None,
+            None,
+            Some(via),
+            now,
+        )
+    }
+
+    /// Records that a person has acted on this entry.
+    ///
+    /// **Deliberately does not bump `updated_at`.** The operation that preceded
+    /// this call already did, and a second bump would reorder the settled shelf
+    /// for what is really an annotation on the same act. Nor does it mark the
+    /// project dirty on its own: every caller is mid-mutation and has already
+    /// done so.
+    pub fn mark_touched(&mut self, entry_id: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE ledger_entries SET touched = 1 WHERE entry_id = ?1",
+            [entry_id],
+        )?;
+        Ok(())
     }
 
     /// Hides an entry until `until` (a local `YYYY-MM-DD` calendar day, like a
@@ -489,7 +565,15 @@ impl Ledger {
                 format!("expected a YYYY-MM-DD calendar day, got {until:?}"),
             ));
         }
-        self.set_state(entry_id, EntryState::Snoozed, None, Some(until), None, now)
+        self.set_state(
+            entry_id,
+            EntryState::Snoozed,
+            None,
+            Some(until),
+            None,
+            None,
+            now,
+        )
     }
 
     /// Parks an entry for a human, with `reason` as the question being asked.
@@ -510,6 +594,7 @@ impl Ledger {
             None,
             None,
             Some(reason),
+            None,
             now,
         )
     }
@@ -567,13 +652,19 @@ impl Ledger {
                 [entry_id],
             )?;
         }
-        let entry = self.set_state(entry_id, EntryState::Open, None, None, None, now)?;
+        let entry = self.set_state(entry_id, EntryState::Open, None, None, None, None, now)?;
         self.mark_dirty(&project);
         Ok(entry)
     }
 
     /// The one write path for `state` and its dependent columns, so the
     /// transition table and the `CHECK` constraints can never be bypassed.
+    ///
+    /// Every dependent column is written on every call, including the ones the
+    /// caller left `None`. That is what makes each exit clean up after the last:
+    /// reopening a snoozed entry clears its date, and reopening an untracked one
+    /// clears its provenance, without either path having to remember to.
+    #[allow(clippy::too_many_arguments)]
     fn set_state(
         &mut self,
         entry_id: &str,
@@ -581,6 +672,7 @@ impl Ledger {
         closed_via: Option<ClosedVia>,
         snoozed_until: Option<&str>,
         review_reason: Option<&str>,
+        untracked_via: Option<UntrackedVia>,
         now: &str,
     ) -> Result<LedgerEntry> {
         let (from, project) = Self::state_and_project(&self.conn, entry_id)?;
@@ -594,7 +686,7 @@ impl Ledger {
         self.conn.execute(
             "UPDATE ledger_entries
              SET state = ?2, closed_via = ?3, snoozed_until = ?4, review_reason = ?5,
-                 updated_at = ?6
+                 untracked_via = ?6, updated_at = ?7
              WHERE entry_id = ?1",
             params![
                 entry_id,
@@ -602,6 +694,7 @@ impl Ledger {
                 closed_via.map(ClosedVia::as_str),
                 snoozed_until,
                 review_reason,
+                untracked_via.map(UntrackedVia::as_str),
                 now,
             ],
         )?;
@@ -805,7 +898,7 @@ impl Ledger {
              VALUES (?1, ?2, ?3, ?4)",
             params![from, to, kind.as_str(), now],
         )?;
-        self.set_state(from, EntryState::Superseded, None, None, None, now)?;
+        self.set_state(from, EntryState::Superseded, None, None, None, None, now)?;
         self.mark_dirty(&from_project);
         self.mark_dirty(&to_project);
         Ok(EntryLink {
@@ -870,7 +963,7 @@ impl Ledger {
             params![entry_id, now],
         )?;
         if state == EntryState::NeedsReview {
-            self.set_state(entry_id, EntryState::Open, None, None, None, now)?;
+            self.set_state(entry_id, EntryState::Open, None, None, None, None, now)?;
         }
         self.mark_dirty(&project);
         Ok(())
@@ -888,8 +981,9 @@ impl Ledger {
             "INSERT INTO ledger_entries
                  (entry_id, state, direction, owner, description, owner_norm, description_norm,
                   project, created_at, updated_at, last_mention, last_evidence_check,
-                  snoozed_until, closed_via, review_reason)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                  snoozed_until, closed_via, review_reason, enrolled_via, untracked_via, touched)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+                     ?18)",
             params![
                 entry.entry_id,
                 entry.state.as_str(),
@@ -906,6 +1000,9 @@ impl Ledger {
                 entry.snoozed_until,
                 entry.closed_via.map(ClosedVia::as_str),
                 entry.review_reason,
+                entry.enrolled_via.as_str(),
+                entry.untracked_via.map(UntrackedVia::as_str),
+                i64::from(entry.touched),
             ],
         )?;
         Ok(())
@@ -1124,6 +1221,55 @@ mod tests {
     }
 
     #[test]
+    fn untracking_records_its_provenance_and_reopening_clears_it() {
+        let (mut ledger, entry_id) = seeded();
+
+        let entry = ledger
+            .untrack(&entry_id, UntrackedVia::Override, NOW)
+            .unwrap();
+        assert_eq!(entry.state, EntryState::Untracked);
+        assert_eq!(entry.untracked_via, Some(UntrackedVia::Override));
+        // Untrack is about the ledger, not about the commitment, so it makes no
+        // claim that anything was resolved.
+        assert_eq!(entry.closed_via, None);
+
+        let entry = ledger.reopen(&entry_id, NOW).unwrap();
+        assert_eq!(entry.state, EntryState::Open);
+        assert_eq!(entry.untracked_via, None, "the single writer cleans up");
+    }
+
+    #[test]
+    fn untracking_leaves_the_item_refs_active() {
+        let (mut ledger, entry_id) = seeded();
+        ledger
+            .untrack(&entry_id, UntrackedVia::Manual, NOW)
+            .unwrap();
+
+        let detail = ledger.get_entry(&entry_id).unwrap().unwrap();
+        assert!(
+            detail.item_refs.iter().any(|item| item.active),
+            "an untracked entry still owns its line, which is what keeps a \
+             re-sync from minting a duplicate or parking it in review"
+        );
+    }
+
+    #[test]
+    fn marking_touched_records_the_person_without_reordering_the_shelf() {
+        let (mut ledger, entry_id) = seeded();
+        let before = ledger.get_entry(&entry_id).unwrap().unwrap().entry;
+        assert!(!before.touched);
+
+        ledger.mark_touched(&entry_id).unwrap();
+
+        let after = ledger.get_entry(&entry_id).unwrap().unwrap().entry;
+        assert!(after.touched);
+        assert_eq!(
+            after.updated_at, before.updated_at,
+            "the op that preceded this already stamped it"
+        );
+    }
+
+    #[test]
     fn the_transition_table_is_enforced() {
         use EntryState::*;
         // Every pair the table forbids, checked through the public API.
@@ -1135,6 +1281,16 @@ mod tests {
             (Waived, NeedsReview),
             (Waived, Snoozed),
             (NeedsReview, Snoozed),
+            // Untracking something already settled would overwrite a real
+            // judgement with a weaker one.
+            (Closed, Untracked),
+            (Waived, Untracked),
+            (Superseded, Untracked),
+            // And an untracked entry leaves only by being tracked again.
+            (Untracked, Closed),
+            (Untracked, Waived),
+            (Untracked, Snoozed),
+            (Untracked, NeedsReview),
         ];
         for &(from, to) in cases {
             assert!(
@@ -1154,6 +1310,10 @@ mod tests {
             (Closed, Open),
             (Waived, Open),
             (Superseded, Open),
+            (Open, Untracked),
+            (NeedsReview, Untracked),
+            (Snoozed, Untracked),
+            (Untracked, Open),
         ] {
             assert!(
                 transition_allowed(from, to),

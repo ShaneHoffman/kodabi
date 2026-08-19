@@ -123,36 +123,42 @@ fn forward_reconciled(index: &Mutex<NoteIndex>, ledger: &LedgerHandle, ids: &[St
         return;
     }
     let idx = lock(index);
-    let mut batch = Vec::new();
-    for id in ids {
-        let Ok(Some(row)) = idx.get_note(id) else {
-            continue;
-        };
-        if !kodabi_core::meeting::derives_facts(row.note_type.into()) {
-            continue;
-        }
-        let Ok(items) = idx.get_action_items(id) else {
-            continue;
-        };
-        batch.push(NoteFacts {
-            note_id: row.id,
-            project: ledger_state::project_slug(row.project.as_deref()),
-            date_utc: row.date_utc,
-            items: items
-                .into_iter()
-                .map(|item| kodabi_core::meeting::ActionItemFact {
-                    id: item.id,
-                    description: item.description,
-                    owner: item.owner,
-                    due_date: item.due_date,
-                    done: item.done,
-                    extracted_date: item.extracted_date,
-                })
-                .collect(),
-        });
-    }
+    let batch: Vec<NoteFacts> = ids
+        .iter()
+        .filter_map(|id| note_facts_from(&idx, id))
+        .collect();
     drop(idx);
     ledger.sync_batch(batch);
+}
+
+/// Reads one note's ledger-shaped facts back out of the index.
+///
+/// Shared by [`forward_reconciled`] and [`IndexReadHandle::note_facts`], so a
+/// command that re-syncs one note builds exactly what the reconcile pass would
+/// have. Returns `None` for a note the index does not know, one whose type
+/// carries no commitments, or one whose rows cannot be read.
+fn note_facts_from(idx: &NoteIndex, id: &str) -> Option<NoteFacts> {
+    let row = idx.get_note(id).ok()??;
+    if !kodabi_core::meeting::derives_facts(row.note_type.into()) {
+        return None;
+    }
+    let items = idx.get_action_items(id).ok()?;
+    Some(NoteFacts {
+        note_id: row.id,
+        project: ledger_state::project_slug(row.project.as_deref()),
+        date_utc: row.date_utc,
+        items: items
+            .into_iter()
+            .map(|item| kodabi_core::meeting::ActionItemFact {
+                id: item.id,
+                description: item.description,
+                owner: item.owner,
+                due_date: item.due_date,
+                done: item.done,
+                extracted_date: item.extracted_date,
+            })
+            .collect(),
+    })
 }
 
 /// A cloneable read handle onto the index, for commands that query it.
@@ -223,6 +229,18 @@ impl IndexReadHandle {
             );
         }
         contexts
+    }
+
+    /// One note's ledger-shaped facts, or `None` when the index cannot supply
+    /// them (unknown note, a type that carries no commitments, a read error).
+    ///
+    /// The caller for this is a command that changed a note's enrollment and
+    /// has to re-sync it. [`NoteContext`] cannot stand in: it carries no
+    /// `date_utc`, and that is what becomes an entry's `last_mention`.
+    /// Blocking; call it off the IPC thread.
+    pub fn note_facts(&self, note_id: &str) -> Option<NoteFacts> {
+        let idx = lock(&self.index);
+        note_facts_from(&idx, note_id)
     }
 }
 

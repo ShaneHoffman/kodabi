@@ -15,6 +15,7 @@ import type {
   CommitmentsPayload,
 } from "../../useCommitments";
 import { useNavigation, type View } from "../../useNavigation";
+import { useLedgerChangedBridge } from "../../useLedgerChangedBridge";
 import { useVaultChangedBridge } from "../../useVaultChangedBridge";
 import { CapturePipelineProvider } from "../providers/CapturePipelineProvider";
 import { NavigationProvider } from "../providers/NavigationProvider";
@@ -84,8 +85,12 @@ function serve(payload: Partial<CommitmentsPayload>): void {
   }));
 }
 
+/** The two relays AppShell mounts. The ledger one lives at the shell root
+ * rather than inside useCommitments, because the note view's enrollment panel
+ * is a second consumer of the same event. */
 function VaultBridge() {
   useVaultChangedBridge();
+  useLedgerChangedBridge();
   return null;
 }
 
@@ -378,6 +383,64 @@ describe("CommitmentsView", () => {
       ).toBe(true),
     );
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("untracks from the row menu, beside waive", async () => {
+    const user = userEvent.setup();
+    serve({ entries: [commitment({ entry_id: "le_mine", item: item() })] });
+    onCommand("untrack_commitment", () => ({
+      entry_id: "le_mine",
+      state: "untracked",
+      snoozed_until: null,
+      closed_via: null,
+      review_reason: null,
+      updated_at: "2026-08-17T12:00:00Z",
+      untracked_via: "manual",
+    }));
+
+    await openCommitments(user);
+    await user.click(
+      await screen.findByRole("button", { name: 'Actions for "book the venue"' }),
+    );
+    // The two ways out of the working set sit together: the choice between them
+    // is the one the reader is making.
+    expect(await screen.findByRole("menuitem", { name: "Waive" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("menuitem", { name: "Untrack" }));
+
+    await waitFor(() =>
+      expect(
+        invoke.mock.calls.some(([command]) => command === "untrack_commitment"),
+      ).toBe(true),
+    );
+    // No confirmation, for the same reason waive has none: one ledger row, no
+    // note touched, and the shelf below takes it straight back.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("files an untracked entry on the settled shelf, saying so, with its undo", async () => {
+    const user = userEvent.setup();
+    serve({
+      settled: [
+        commitment({
+          entry_id: "le_untracked",
+          state: "untracked",
+          direction: "theirs",
+          owner: "Priya",
+          description: "send the revised deck",
+        }),
+      ],
+    });
+
+    await openCommitments(user);
+    await user.click(await screen.findByRole("button", { name: /Settled/ }));
+
+    expect(await screen.findByText("send the revised deck")).toBeInTheDocument();
+    // It must not read as a closure: untracked says this was never your
+    // business, where waived says it was and stopped mattering.
+    expect(screen.getByText(/untracked/)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Reopen|It is still open/ }),
+    ).toBeInTheDocument();
   });
 
   it("shows a parked claim with its evidence, and answers it either way", async () => {

@@ -345,7 +345,7 @@ fn apply_completion(
 mod tests {
     use super::*;
     use crate::distill::LedgerUpdateDraft;
-    use crate::ledger::{ClosedVia, EntryFilter, EvidenceSource, LinkKind};
+    use crate::ledger::{ClosedVia, EntryFilter, EvidenceSource, LinkKind, UntrackedVia};
 
     const NOW: &str = "2026-08-17T12:00:00Z";
     const DAY: &str = "2026-08-17T00:00:00Z";
@@ -624,6 +624,31 @@ mod tests {
             ledger.get_entry(&entry_id).unwrap().unwrap().entry.state,
             EntryState::Waived
         );
+    }
+
+    #[test]
+    fn an_untracked_commitment_is_left_out_of_the_conversation_entirely() {
+        let (mut ledger, entry_id) = seeded();
+        ledger
+            .untrack(&entry_id, UntrackedVia::Manual, NOW)
+            .unwrap();
+
+        // `is_terminal` covering Untracked is what buys this: a commitment the
+        // user removed from the working set must not be quietly resurrected,
+        // auto-closed, or superseded by a later conversation about it.
+        for kind in [
+            LedgerUpdateKind::Refresh,
+            LedgerUpdateKind::Completed,
+            LedgerUpdateKind::Supersede,
+        ] {
+            let applied = apply(&mut ledger, &[], &[update(&entry_id, kind, None, 0.99)]);
+            assert_eq!(applied.skipped.len(), 1, "{kind:?} should be skipped");
+            assert_eq!(applied.skipped[0].1, "already settled");
+            assert_eq!(
+                ledger.get_entry(&entry_id).unwrap().unwrap().entry.state,
+                EntryState::Untracked
+            );
+        }
     }
 
     #[test]

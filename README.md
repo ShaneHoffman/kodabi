@@ -91,7 +91,8 @@ toggles, which are per-device display preferences rather than settings about you
 
 The search index is derived: delete it and Kodabi rebuilds it from your notes. The commitment
 ledger is not derived. It tracks what was promised,
-what closed it, and what you snoozed or waived, none of which a checkbox in a note can say. So
+what closed it, what you snoozed or waived, and which meetings you chose not to track at all,
+none of which a checkbox in a note can say. So
 it keeps a copy of itself as a `_ledger.yml` file inside each project folder, which means
 backing up your notes backs up the ledger too, and a lost `ledger.db` is rebuilt from those
 files the next time Kodabi starts.
@@ -210,7 +211,8 @@ src/                    # React + TypeScript frontend. src/index.css is the only
 src-tauri/              # Tauri v2 binary crate — the desktop shell and its three
                         # windows (main, quick capture, capture overlay pill).
 crates/kodabi-core/     # Pure, UI-agnostic, unit-testable data layer: settings, the
-                        # SQLite note index, distill, and the MCP query surface.
+                        # SQLite note index, distill, the commitment ledger, and the
+                        # MCP query surface.
 crates/kodabi-audio/    # WASAPI loopback (system audio) and microphone capture via cpal,
                         # plus the two-channel combiner and the Settings mic test.
 crates/kodabi-aec/      # Acoustic echo cancellation — a safe wrapper over a vendored
