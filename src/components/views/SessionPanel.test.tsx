@@ -67,6 +67,9 @@ function serveNote(overrides: Partial<NoteDetail> = {}): void {
     tags: [],
     source: SOURCE,
     confidence: 0.41,
+    category: null,
+    category_confidence: null,
+    tracking: null,
     snippet: "",
     body_markdown: "The summary.",
     ...overrides,
@@ -242,10 +245,11 @@ describe("SessionPanel", () => {
 
     await screen.findByTestId("session-source-pruned");
     // A chip over an empty panel is worse than no chip. Only the note's own
-    // three controls remain.
+    // controls remain: the way out, the header's one cluster, and — because
+    // this fixture is a meeting — the details rail's kind picker.
     expect(screen.queryByTestId("session-source")).toBeNull();
     expect(screen.queryByTestId("session-audio")).toBeNull();
-    expect(screen.getAllByRole("button")).toHaveLength(3);
+    expect(screen.getAllByRole("button")).toHaveLength(4);
   });
 
   it("surfaces a failed reveal beside the control", async () => {
@@ -346,25 +350,29 @@ describe("NoteEditorView source pairing", () => {
   it("holds the composition ceiling on the app's heaviest note", async () => {
     // A distilled session note whose audio AND transcript both survived
     // retention is the maximal reading surface in the app. This is the lock on
-    // the number: the way out, the title row's one cluster, and one chip per
-    // artifact — five controls at rest, and anything that adds a sixth fails
-    // here first. Against docs/UI_CONVENTIONS.md, *Composition*: the back link
-    // sits outside the count (getting around is not acting), Edit and Delete
-    // are the view-owned header's single cluster, and each chip is one
-    // disclosure over one subordinate section that does not nest.
+    // the number: the way out, the title row's one cluster, one chip per
+    // artifact, and the details rail's kind picker — six controls at rest, and
+    // anything that adds a seventh fails here first. Against
+    // docs/UI_CONVENTIONS.md, *Composition*: the back link sits outside the
+    // count (getting around is not acting), Edit and Delete are the view-owned
+    // header's single cluster, each chip is one disclosure over one subordinate
+    // section that does not nest, and the kind picker is a row affordance on
+    // the fact it edits — a slot this view had not spent, which is why it did
+    // not grow the header instead.
     serveNote();
     serveArtifacts();
     renderNote();
 
     await screen.findByTestId("session-source");
     const controls = screen.getAllByRole("button");
-    expect(controls).toHaveLength(5);
+    expect(controls).toHaveLength(6);
     // BackLink's arrow is aria-hidden, so its name is the destination alone.
     expect(controls[0]).toHaveAccessibleName("Inbox");
     expect(controls[1]).toHaveAccessibleName("Edit");
     expect(controls[2]).toHaveAccessibleName("Delete note");
-    expect(controls[3]).toHaveTextContent("Audio");
-    expect(controls[4]).toHaveTextContent("Transcript");
+    expect(controls[3]).toHaveAccessibleName('Change the kind of "Budget sync"');
+    expect(controls[4]).toHaveTextContent("Audio");
+    expect(controls[5]).toHaveTextContent("Transcript");
   });
 
   it("never fetches artifacts for a keyword-sourced note", async () => {

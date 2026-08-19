@@ -14,10 +14,14 @@ import {
 import { useNavigation } from "../../useNavigation";
 import { matchScore, noteKind } from "../../noteMeta";
 import {
+  CATEGORY_OPTIONS,
+  categoryLabel,
   fileNoteToProject,
   INBOX_PROJECT,
   listNotes,
+  setNoteCategory,
   useProjectNotes,
+  type NoteCategory,
   type NoteSummary,
 } from "../../useNotes";
 import { folderHue, useProjects, type FolderHue, type Project } from "../../useProjects";
@@ -1076,6 +1080,22 @@ function InboxRow({
 
   const guess = suggestion(note);
 
+  /** Correcting a meeting's genre. Unlike `route` this sets no `leaving`: the
+   *  note stays in the Inbox — a kind is not a filing — so the row repaints in
+   *  place off the write's own `vault:changed` broadcast. */
+  const recategorize = (category: NoteCategory) => {
+    if (category === note.category) return;
+    setPending(true);
+    setError(null);
+    setNoteCategory({ id: note.id, category })
+      .catch((err: unknown) => {
+        setError(
+          backendCopy(err, "Couldn't change this meeting's kind. The note is unchanged; try again."),
+        );
+      })
+      .finally(() => setPending(false));
+  };
+
   const route = (slug: string) => {
     setPending(true);
     setError(null);
@@ -1156,7 +1176,15 @@ function InboxRow({
               {note.title}
             </span>
             <span className="mt-1.5 flex items-center gap-2.5 font-data text-[10.5px] text-ink-faint tabular-nums">
-              <span>{[noteKind(note.type), note.date.slice(0, 10)].filter(Boolean).join(" · ")}</span>
+              <span>
+                {[
+                  noteKind(note.type),
+                  note.category ? categoryLabel(note.category) : null,
+                  note.date.slice(0, 10),
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
               {/* The gauge and the words beside it are one fact twice: the
                   bar is the glance, the percentage is the reading. It is the
                   note's STORED score — why it landed in the Inbox — not the
@@ -1262,6 +1290,37 @@ function InboxRow({
                       </span>
                     </Menu.Item>
                   ))}
+                {/* The row's affordance ceiling is two (UI_CONVENTIONS §5) and
+                    filing and Delete already spend both, so the genre folds in
+                    here rather than growing a third control — and it belongs
+                    here, because the slot holds this row's verdicts about this
+                    note, which is what a kind is. It cannot ride the meta line
+                    instead: that text sits inside the row's own open-note
+                    <button>, and a button inside a button is invalid. */}
+                {note.type === "meeting" && (
+                  <>
+                    <Menu.Separator />
+                    <Menu.Item variant="foot" disabled>
+                      Meeting kind
+                    </Menu.Item>
+                    {CATEGORY_OPTIONS.map((option) => (
+                      <Menu.Item
+                        key={option.value}
+                        onClick={() => recategorize(option.value)}
+                      >
+                        <span className="truncate">{option.label}</span>
+                        {option.value === note.category && (
+                          <span
+                            aria-hidden="true"
+                            className="ml-auto pl-2 font-data text-[10.5px]"
+                          >
+                            ✓
+                          </span>
+                        )}
+                      </Menu.Item>
+                    ))}
+                  </>
+                )}
                 <Menu.Separator />
                 <Menu.Item variant="foot" onClick={() => setCreatingProject(true)}>
                   New project…

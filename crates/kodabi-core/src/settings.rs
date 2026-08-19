@@ -171,6 +171,62 @@ fn nonzero(days: u32) -> NonZeroU32 {
     NonZeroU32::new(days).expect("ledger day thresholds are non-zero constants")
 }
 
+/// One meeting genre's settings.
+///
+/// A struct with one field rather than a bare `Option`, because the *next*
+/// per-genre setting appends here instead of reshaping every call site — and
+/// because a named field says what the value means where a lone `Option` would
+/// not.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct CategoryPrefs {
+    /// The commitment-tracking mode meetings of this genre default to, or
+    /// `None` to fall through to the global default of
+    /// [`crate::ledger::EnrollmentMode::Tracked`].
+    ///
+    /// **Stored but not yet read.** It is the `category_default` slot in
+    /// [`crate::ledger::effective_mode`], which every caller still passes
+    /// `None` for; wiring it is the next ticket's job. Nothing in the UI writes
+    /// this yet either, which is why the Settings surface lists the genres
+    /// without offering a control for them.
+    pub enrollment_default: Option<crate::ledger::EnrollmentMode>,
+}
+
+/// Per-genre settings, one field per [`crate::note::MeetingCategory`].
+///
+/// Seven named fields rather than a map: [`Settings`] is `Copy`, which a
+/// `HashMap` would take away from every caller that passes settings by value,
+/// and the genre set is closed, so a map's only advantage — arbitrary keys —
+/// is one this type must not have. Adding a genre is a field here and a variant
+/// there, and the compiler finds the rest.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct CategorySettings {
+    pub standup: CategoryPrefs,
+    pub one_on_one: CategoryPrefs,
+    pub client: CategoryPrefs,
+    pub working_session: CategoryPrefs,
+    pub review: CategoryPrefs,
+    pub all_hands: CategoryPrefs,
+    pub observer: CategoryPrefs,
+}
+
+impl CategorySettings {
+    /// The settings for one genre.
+    pub fn for_category(&self, category: crate::note::MeetingCategory) -> CategoryPrefs {
+        use crate::note::MeetingCategory as C;
+        match category {
+            C::Standup => self.standup,
+            C::OneOnOne => self.one_on_one,
+            C::Client => self.client,
+            C::WorkingSession => self.working_session,
+            C::Review => self.review,
+            C::AllHands => self.all_hands,
+            C::Observer => self.observer,
+        }
+    }
+}
+
 /// The persisted app settings. `#[serde(default)]` makes every field optional
 /// on load, so an older file missing a field (or a future file with an extra
 /// one) still deserializes — forward/backward compatibility for a config the
@@ -194,10 +250,12 @@ pub struct Settings {
     /// The most recent Settings mic-test result, if the user has ever run
     /// one.
     pub mic_check: Option<MicCheckResult>,
-    /// Commitment-ledger tuning. Last field deliberately: serde emits fields
+    /// Commitment-ledger tuning.
+    pub ledger: LedgerSettings,
+    /// Per-meeting-genre settings. Last field deliberately: serde emits fields
     /// in declaration order, so appending leaves the existing JSON/TOML prefix
     /// byte-identical for anything mirroring the older shape.
-    pub ledger: LedgerSettings,
+    pub categories: CategorySettings,
 }
 
 /// Loads the settings stored at `config_path`, writing defaults on first run.
@@ -338,6 +396,7 @@ mod tests {
                 appearance: AppearanceSettings::default(),
                 mic_check: None,
                 ledger: LedgerSettings::default(),
+                categories: CategorySettings::default(),
             };
             save(&path, &settings).unwrap();
             assert_eq!(load_or_create(&path).unwrap(), settings);
@@ -363,6 +422,7 @@ mod tests {
             appearance: AppearanceSettings::default(),
             mic_check: None,
             ledger: LedgerSettings::default(),
+            categories: CategorySettings::default(),
         };
         save(&path, &settings).unwrap();
         assert_eq!(load_or_create(&path).unwrap(), settings);
@@ -381,6 +441,7 @@ mod tests {
             appearance: AppearanceSettings::default(),
             mic_check: None,
             ledger: LedgerSettings::default(),
+            categories: CategorySettings::default(),
         })
         .unwrap();
         assert!(toml.contains("consent_acknowledged = true"), "{toml}");
@@ -498,7 +559,7 @@ mod tests {
         let json = serde_json::to_string(&Settings::default()).unwrap();
         assert_eq!(
             json,
-            r#"{"consent_acknowledged":false,"retention":{"policy":"keep_all"},"overlay":{"manual_captures":false,"auto_captures":true},"appearance":{"theme":"system"},"mic_check":null,"ledger":{"aging_after_days":14,"stale_after_days":30,"conversation_autoclose":0.8}}"#
+            r#"{"consent_acknowledged":false,"retention":{"policy":"keep_all"},"overlay":{"manual_captures":false,"auto_captures":true},"appearance":{"theme":"system"},"mic_check":null,"ledger":{"aging_after_days":14,"stale_after_days":30,"conversation_autoclose":0.8},"categories":{"standup":{"enrollment_default":null},"one_on_one":{"enrollment_default":null},"client":{"enrollment_default":null},"working_session":{"enrollment_default":null},"review":{"enrollment_default":null},"all_hands":{"enrollment_default":null},"observer":{"enrollment_default":null}}}"#
         );
 
         let keep = serde_json::to_string(&Settings {
@@ -519,11 +580,12 @@ mod tests {
                     .with_timezone(&Utc),
             }),
             ledger: LedgerSettings::default(),
+            categories: CategorySettings::default(),
         })
         .unwrap();
         assert_eq!(
             keep,
-            r#"{"consent_acknowledged":true,"retention":{"policy":"keep_days","days":30},"overlay":{"manual_captures":true,"auto_captures":false},"appearance":{"theme":"dark"},"mic_check":{"outcome":"speakers","echo_db":12.5,"delay_ms":85.0,"measured_at":"2026-07-22T00:48:18Z"},"ledger":{"aging_after_days":14,"stale_after_days":30,"conversation_autoclose":0.8}}"#
+            r#"{"consent_acknowledged":true,"retention":{"policy":"keep_days","days":30},"overlay":{"manual_captures":true,"auto_captures":false},"appearance":{"theme":"dark"},"mic_check":{"outcome":"speakers","echo_db":12.5,"delay_ms":85.0,"measured_at":"2026-07-22T00:48:18Z"},"ledger":{"aging_after_days":14,"stale_after_days":30,"conversation_autoclose":0.8},"categories":{"standup":{"enrollment_default":null},"one_on_one":{"enrollment_default":null},"client":{"enrollment_default":null},"working_session":{"enrollment_default":null},"review":{"enrollment_default":null},"all_hands":{"enrollment_default":null},"observer":{"enrollment_default":null}}}"#
         );
     }
 
@@ -628,6 +690,56 @@ mod tests {
             ledger.conversation_autoclose,
             crate::ledger::DEFAULT_CONVERSATION_AUTOCLOSE
         );
+    }
+
+    #[test]
+    fn category_settings_round_trip_and_default_to_inherit() {
+        let dir = temp_dir("category-roundtrip");
+        let path = dir.join("settings.toml");
+
+        // Every genre starts at "inherit", which is what makes the stored shape
+        // inert until something reads it.
+        let defaults = Settings::default();
+        assert!(defaults
+            .categories
+            .for_category(crate::note::MeetingCategory::AllHands)
+            .enrollment_default
+            .is_none());
+
+        let settings = Settings {
+            categories: CategorySettings {
+                all_hands: CategoryPrefs {
+                    enrollment_default: Some(crate::ledger::EnrollmentMode::ContextOnly),
+                },
+                ..CategorySettings::default()
+            },
+            ..Settings::default()
+        };
+        save(&path, &settings).unwrap();
+        assert_eq!(load_or_create(&path).unwrap(), settings);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A settings file written before genres existed must still load: the
+    /// whole point of `#[serde(default)]` on the struct and on the field.
+    #[test]
+    fn a_settings_file_without_the_categories_table_still_loads() {
+        let dir = temp_dir("category-back-compat");
+        let path = dir.join("settings.toml");
+        fs::write(
+            &path,
+            "consent_acknowledged = true
+",
+        )
+        .unwrap();
+
+        let loaded = load_or_create(&path).unwrap();
+
+        assert!(loaded.consent_acknowledged);
+        assert_eq!(loaded.categories, CategorySettings::default());
+
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]

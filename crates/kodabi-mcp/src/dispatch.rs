@@ -94,6 +94,9 @@ mod tests {
                 tags: vec!["planning".to_string()],
                 source: "transcript".to_string(),
                 confidence: Some(0.9),
+                category: None,
+                category_confidence: None,
+                tracking: None,
                 body: "We agreed to ship Phase 3. Action: send the recap.".to_string(),
                 meeting: Some(MeetingFacts {
                     duration_seconds: Some(1800),
@@ -133,6 +136,9 @@ mod tests {
                 tags: vec![],
                 source: "quick-capture".to_string(),
                 confidence: None,
+                category: None,
+                category_confidence: None,
+                tracking: None,
                 body: "A standalone thought.".to_string(),
                 meeting: None,
             })
@@ -154,6 +160,9 @@ mod tests {
                 tags: vec![],
                 source: transcript_source,
                 confidence: None,
+                category: None,
+                category_confidence: None,
+                tracking: None,
                 body: "A retro with a transcript.".to_string(),
                 meeting: Some(MeetingFacts {
                     duration_seconds: Some(600),
@@ -179,6 +188,9 @@ mod tests {
                 tags: vec![],
                 source: "transcript".to_string(),
                 confidence: None,
+                category: None,
+                category_confidence: None,
+                tracking: None,
                 body: "Quarterly planning.".to_string(),
                 meeting: Some(MeetingFacts {
                     duration_seconds: None,
@@ -212,6 +224,9 @@ mod tests {
                 tags: vec![],
                 source: "chats/greenflow.jsonl".to_string(),
                 confidence: Some(0.8),
+                category: None,
+                category_confidence: None,
+                tracking: None,
                 body: "Talked through the controller options.".to_string(),
                 meeting: Some(MeetingFacts {
                     // Always `None` for a chat: there is no recording to measure.

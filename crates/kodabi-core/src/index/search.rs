@@ -221,6 +221,13 @@ pub struct SearchHit {
     pub source: String,
     /// Routing confidence 0..1, or `null` when none exists.
     pub confidence: Option<f64>,
+    /// The meeting's genre, or `null` when it carries none.
+    pub category: Option<crate::note::MeetingCategory>,
+    /// The classifier's confidence in `category`, or `null`.
+    pub category_confidence: Option<f64>,
+    /// The per-meeting tracking override in its frontmatter spelling, or `null`
+    /// when the note inherits.
+    pub tracking: Option<String>,
     /// Fused RRF relevance score; higher is better.
     pub score: f64,
     /// 1-based rank within the full fused result set.
@@ -275,7 +282,10 @@ struct CursorKey {
 /// rather than a body, so hydrating through the full list would read every
 /// hit's complete text — megabytes for a page of meeting notes — only to drop
 /// it. `date_utc` is likewise omitted; hits report the verbatim `date_raw`.
-const HIT_COLUMNS: &str = "id, path, title, type, project, date_raw, source, confidence";
+const HIT_COLUMNS: &str = concat!(
+    "id, path, title, type, project, date_raw, source, confidence, ",
+    "category, category_confidence, tracking"
+);
 
 /// A hydrated `notes` row for one hit. `tags` are filled separately, batched
 /// across the page.
@@ -288,6 +298,9 @@ struct HitRow {
     date: String,
     source: String,
     confidence: Option<f64>,
+    category: Option<crate::note::MeetingCategory>,
+    category_confidence: Option<f64>,
+    tracking: Option<String>,
     tags: Vec<String>,
 }
 
@@ -302,6 +315,9 @@ fn map_hit_row(row: &Row<'_>) -> rusqlite::Result<HitRow> {
         date: row.get("date_raw")?,
         source: row.get("source")?,
         confidence: row.get("confidence")?,
+        category: row.get("category")?,
+        category_confidence: row.get("category_confidence")?,
+        tracking: row.get("tracking")?,
         tags: Vec::new(),
     })
 }
@@ -449,6 +465,9 @@ impl NoteIndex {
                 tags: row.tags,
                 source: row.source,
                 confidence: row.confidence,
+                category: row.category,
+                category_confidence: row.category_confidence,
+                tracking: row.tracking,
                 score: *score,
                 rank: (start + offset + 1) as u32,
                 snippet: snippets.remove(*id).unwrap_or_default(),
@@ -985,6 +1004,9 @@ mod tests {
             tags: tags.iter().map(|t| t.to_string()).collect(),
             source: "manual".to_string(),
             confidence: None,
+            category: None,
+            category_confidence: None,
+            tracking: None,
             body: body.to_string(),
             meeting: None,
         }
@@ -2187,6 +2209,9 @@ mod tests {
             "tags",
             "source",
             "confidence",
+            "category",
+            "category_confidence",
+            "tracking",
             "score",
             "rank",
             "snippet",

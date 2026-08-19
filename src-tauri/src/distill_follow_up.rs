@@ -107,6 +107,8 @@ pub(crate) fn apply_after_distill(app: &AppHandle, kb: &Path, distilled: &Distil
             note_date_utc,
             items: facts.action_items,
             updates: distilled.ledger_updates.clone(),
+            // Straight off the note this distill just wrote.
+            note_override: listed.note.tracking,
         },
         threshold,
     ) {

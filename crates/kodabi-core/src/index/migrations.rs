@@ -21,6 +21,7 @@ fn migrations() -> Vec<fn() -> String> {
         migration_0001_initial_schema,
         migration_0002_chunked_embeddings,
         migration_0003_meeting_facts,
+        migration_0004_note_classification,
     ]
 }
 
@@ -202,6 +203,46 @@ CREATE INDEX idx_note_action_items_item_id ON note_action_items (item_id);
     .to_string()
 }
 
+/// v4: the two classification facets a note's frontmatter now carries — the
+/// meeting's genre (`category`, with the classifier's `category_confidence` in
+/// its own guess) and the per-meeting commitment-tracking override
+/// (`tracking`).
+///
+/// Purely additive: three nullable columns on `notes` plus an index on
+/// `category` for filtering. Nothing is lost on upgrade — a field database
+/// gains three `NULL` columns and backfills them the moment the startup
+/// reconcile re-reads each note, because frontmatter is the source of truth and
+/// the index is a rebuildable cache (FOUNDING_DOC §3.6). Notes written before
+/// this shipped carry neither key and correctly stay `NULL`.
+///
+/// `tracking` is the column the enrollment gate reads (`ledger::sync`), which
+/// is why it is here rather than in `ledger.db`: the gate resolves a note's mode
+/// from the facts the index already hands it, so the override now travels with
+/// the note file the way a re-route or a vault rebuild always assumed it would.
+/// It stores the **frontmatter** (kebab-case) spelling, like `source`, not the
+/// snake_case one `ledger.db`'s own `CHECK` uses.
+///
+/// The `CHECK` constraints restate closed sets that Rust already validates
+/// ([`crate::note::MeetingCategory`], [`crate::ledger::EnrollmentMode`]); they
+/// are cheap insurance against a hand-edited database, and match how
+/// `notes.type` has always been guarded.
+fn migration_0004_note_classification() -> String {
+    r#"
+ALTER TABLE notes ADD COLUMN category TEXT
+    CHECK (category IS NULL OR category IN (
+        'standup', 'one-on-one', 'client', 'working-session',
+        'review', 'all-hands', 'observer'
+    ));
+ALTER TABLE notes ADD COLUMN category_confidence REAL
+    CHECK (category_confidence IS NULL
+        OR (category_confidence >= 0.0 AND category_confidence <= 1.0));
+ALTER TABLE notes ADD COLUMN tracking TEXT
+    CHECK (tracking IS NULL OR tracking IN ('tracked', 'context-only'));
+CREATE INDEX idx_notes_category ON notes (category);
+"#
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::NoteIndex;
@@ -241,7 +282,7 @@ mod tests {
             assert!(table_exists(&index, table), "missing table {table}");
         }
 
-        assert_eq!(user_version(&index), 3);
+        assert_eq!(user_version(&index), 4);
     }
 
     #[test]
@@ -251,7 +292,7 @@ mod tests {
         // would if it tried to re-create existing tables).
         super::apply(&mut index.conn).unwrap();
 
-        assert_eq!(user_version(&index), 3);
+        assert_eq!(user_version(&index), 4);
     }
 
     #[test]
@@ -274,6 +315,10 @@ mod tests {
                  DROP TABLE note_chunks;
                  DROP TABLE notes_vec;
                  CREATE VIRTUAL TABLE notes_vec USING vec0(note_id TEXT PRIMARY KEY, embedding FLOAT[768]);
+                 DROP INDEX idx_notes_category;
+                 ALTER TABLE notes DROP COLUMN category;
+                 ALTER TABLE notes DROP COLUMN category_confidence;
+                 ALTER TABLE notes DROP COLUMN tracking;
                  PRAGMA user_version = 1;",
             )
             .unwrap();
@@ -291,7 +336,7 @@ mod tests {
 
         super::apply(&mut index.conn).unwrap();
 
-        assert_eq!(user_version(&index), 3);
+        assert_eq!(user_version(&index), 4);
         for table in [
             "note_chunks",
             "note_meetings",
@@ -324,7 +369,7 @@ mod tests {
     }
 
     #[test]
-    fn a_v2_database_upgrades_to_v3_on_open() {
+    fn a_v2_database_upgrades_to_the_latest_schema_on_open() {
         // Reconstruct a genuine v2 database: the meeting-facts tables did not
         // exist yet. Roll the freshly-opened (v3) database back to exactly that
         // shape so `apply` performs the real additive upgrade a field database
@@ -336,6 +381,10 @@ mod tests {
                 "DROP TABLE note_action_items;
                  DROP TABLE note_decisions;
                  DROP TABLE note_meetings;
+                 DROP INDEX idx_notes_category;
+                 ALTER TABLE notes DROP COLUMN category;
+                 ALTER TABLE notes DROP COLUMN category_confidence;
+                 ALTER TABLE notes DROP COLUMN tracking;
                  PRAGMA user_version = 2;",
             )
             .unwrap();
@@ -349,7 +398,7 @@ mod tests {
 
         super::apply(&mut index.conn).unwrap();
 
-        assert_eq!(user_version(&index), 3);
+        assert_eq!(user_version(&index), 4);
         for table in ["note_meetings", "note_decisions", "note_action_items"] {
             assert!(table_exists(&index, table), "missing table {table}");
         }
@@ -365,6 +414,128 @@ mod tests {
                      VALUES ('n_old', 0, 'a_abc123', 'send the deck', 'You', NULL, 0, '2026-01-01');",
             )
             .expect("the upgraded meeting-facts tables accept rows");
+    }
+
+    #[test]
+    fn a_v3_database_upgrades_to_v4_on_open() {
+        // Reconstruct a genuine v3 database: the three classification columns
+        // did not exist. Roll a freshly-opened (v4) database back to exactly
+        // that shape so `apply` performs the real additive upgrade a field
+        // database would, with a note already present.
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        index
+            .conn
+            .execute_batch(
+                "DROP INDEX idx_notes_category;
+                 ALTER TABLE notes DROP COLUMN category;
+                 ALTER TABLE notes DROP COLUMN category_confidence;
+                 ALTER TABLE notes DROP COLUMN tracking;
+                 PRAGMA user_version = 3;",
+            )
+            .unwrap();
+        index
+            .conn
+            .execute_batch(
+                "INSERT INTO notes (id, path, title, type, project, date_raw, date_utc, source, body)
+                 VALUES ('n_old', 'n_old.md', 'Old', 'meeting', NULL, '2026-01-01', '2026-01-01T00:00:00Z', 'manual', 'body');",
+            )
+            .expect("a v3 note row inserts");
+
+        super::apply(&mut index.conn).unwrap();
+
+        assert_eq!(user_version(&index), 4);
+        // The pre-existing row survives with NULL facets — nothing is lost, and
+        // the reconcile pass backfills it from frontmatter.
+        let (category, tracking): (Option<String>, Option<String>) = index
+            .conn
+            .query_row(
+                "SELECT category, tracking FROM notes WHERE id = 'n_old'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("the upgraded row reads back");
+        assert_eq!(category, None);
+        assert_eq!(tracking, None);
+
+        index
+            .conn
+            .execute_batch(
+                "UPDATE notes SET category = 'one-on-one', category_confidence = 0.8,
+                                  tracking = 'context-only' WHERE id = 'n_old';",
+            )
+            .expect("the upgraded columns accept valid values");
+    }
+
+    /// The `CHECK` constraints restate closed sets Rust owns, and SQL cannot
+    /// see the enums. Driving this from `MeetingCategory::ALL` (and both
+    /// `EnrollmentMode` variants) is what makes an added or renamed genre fail
+    /// here rather than as a constraint violation on a user's machine.
+    #[test]
+    fn every_enum_spelling_is_accepted_by_its_check_constraint() {
+        use crate::ledger::EnrollmentMode;
+        use crate::note::MeetingCategory;
+
+        let index = NoteIndex::open_in_memory().unwrap();
+        index
+            .conn
+            .execute_batch(
+                "INSERT INTO notes (id, path, title, type, project, date_raw, date_utc, source, body)
+                 VALUES ('n_enum1', 'n_enum1.md', 'Enum', 'meeting', NULL, '2026-01-01', '2026-01-01T00:00:00Z', 'manual', 'body');",
+            )
+            .unwrap();
+
+        for category in MeetingCategory::ALL {
+            index
+                .conn
+                .execute(
+                    "UPDATE notes SET category = ?1 WHERE id = 'n_enum1'",
+                    [category.as_str()],
+                )
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "the CHECK rejects {:?}, which MeetingCategory::ALL offers: {err}",
+                        category.as_str()
+                    )
+                });
+        }
+
+        for mode in [EnrollmentMode::Tracked, EnrollmentMode::ContextOnly] {
+            index
+                .conn
+                .execute(
+                    "UPDATE notes SET tracking = ?1 WHERE id = 'n_enum1'",
+                    [mode.as_frontmatter_str()],
+                )
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "the CHECK rejects {:?}, which EnrollmentMode writes to frontmatter: {err}",
+                        mode.as_frontmatter_str()
+                    )
+                });
+        }
+    }
+
+    #[test]
+    fn the_classification_columns_reject_values_outside_their_closed_sets() {
+        let index = NoteIndex::open_in_memory().unwrap();
+        index
+            .conn
+            .execute_batch(
+                "INSERT INTO notes (id, path, title, type, project, date_raw, date_utc, source, body)
+                 VALUES ('n_new', 'n_new.md', 'New', 'meeting', NULL, '2026-01-01', '2026-01-01T00:00:00Z', 'manual', 'body');",
+            )
+            .unwrap();
+
+        for bad in [
+            "UPDATE notes SET category = 'retro' WHERE id = 'n_new'",
+            "UPDATE notes SET category_confidence = 1.5 WHERE id = 'n_new'",
+            "UPDATE notes SET tracking = 'context_only' WHERE id = 'n_new'",
+        ] {
+            assert!(
+                index.conn.execute_batch(bad).is_err(),
+                "the CHECK constraint let this through: {bad}"
+            );
+        }
     }
 
     #[test]

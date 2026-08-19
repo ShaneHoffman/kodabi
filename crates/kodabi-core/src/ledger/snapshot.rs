@@ -78,10 +78,14 @@ pub struct ProjectSnapshot {
     pub version: u32,
     #[serde(default)]
     pub entries: Vec<SnapshotEntry>,
-    /// Tracking overrides for notes filed in this project.
+    /// Tracking overrides for notes filed in this project, as **pre-graduation**
+    /// files recorded them.
     ///
-    /// A judgement that exists nowhere else — it is deliberately not frontmatter
-    /// yet — so it belongs in the backup for the same reason the entries do.
+    /// Always empty on write now: the judgement lives in each note's frontmatter
+    /// (`tracking:`), and those notes sit in this same folder, so writing it here
+    /// too would put one fact in two files with no rule for which wins. Still
+    /// read, because an older `_ledger.yml` may hold the only surviving copy —
+    /// see [`SnapshotNoteOverride`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub note_overrides: Vec<SnapshotNoteOverride>,
 }
@@ -96,7 +100,13 @@ impl Default for ProjectSnapshot {
     }
 }
 
-/// One note's tracking override.
+/// One note's tracking override, as **pre-graduation** snapshots recorded it.
+///
+/// Read-only compatibility: the override now lives in the note's frontmatter
+/// (`tracking:`), so nothing writes this section any more. It is still parsed
+/// and restored, because an old `_ledger.yml` may hold the only surviving copy
+/// of a judgement, and this store carries rows forward rather than dropping
+/// them.
 ///
 /// No `project` field, for the same reason [`SnapshotEntry`] has none: the
 /// folder is the project, so a renamed project's `fs::rename` carries this file
@@ -350,31 +360,16 @@ impl Ledger {
                     .collect(),
             });
         }
-        let mut stmt = self.conn.prepare(
-            "SELECT note_id, mode, set_at FROM ledger_note_overrides
-             WHERE project = ?1 ORDER BY note_id",
-        )?;
-        let rows = stmt.query_map([project], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })?;
-        let mut note_overrides = Vec::new();
-        for row in rows {
-            let (note_id, mode, set_at) = row?;
-            note_overrides.push(SnapshotNoteOverride {
-                note_id,
-                mode: EnrollmentMode::parse(&mode)?,
-                set_at,
-            });
-        }
-
+        // Tracking overrides are deliberately **not** collected any more: the
+        // judgement lives in each note's frontmatter `tracking:` key, and the
+        // notes sit in this very folder. Snapshotting it here would mirror one
+        // fact into two files in the same directory, with no rule for which
+        // wins when a hand edit makes them disagree. The section stays in the
+        // format for reading old files (see `restore`).
         Ok(ProjectSnapshot {
             version: LEDGER_SNAPSHOT_VERSION,
             entries: out,
-            note_overrides,
+            note_overrides: Vec::new(),
         })
     }
 
@@ -544,9 +539,16 @@ impl Ledger {
                 report.entries_restored += 1;
             }
 
-            // Tracking overrides. `OR IGNORE` for the same reason the entries
-            // use `seen`: if two files somehow claim one note, the first wins
-            // rather than the restore failing.
+            // Tracking overrides from a **pre-graduation** snapshot. Nothing
+            // writes this section any more, but a `_ledger.yml` written before
+            // the override moved into frontmatter still carries judgements that
+            // exist nowhere else, and this store never drops one it cannot
+            // carry forward. They land in the legacy table, and the startup
+            // drain graduates them into the notes on the same launch.
+            //
+            // `OR IGNORE` for the same reason the entries use `seen`: if two
+            // files somehow claim one note, the first wins rather than the
+            // restore failing.
             for override_row in &snapshot.note_overrides {
                 tx.execute(
                     "INSERT OR IGNORE INTO ledger_note_overrides (note_id, project, mode, set_at)
@@ -673,6 +675,7 @@ mod tests {
                 note_date_utc: DAY,
                 items: &items,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap();
@@ -684,7 +687,7 @@ mod tests {
     fn the_enrollment_state_round_trips_through_a_fresh_ledger() {
         let (dir, mut ledger, entry_id) = vault_with_entry();
         ledger
-            .set_note_tracking("n_a1b2c3", "Briarwood Golf", true, NOW)
+            .retro_apply_note_tracking("n_a1b2c3", "Briarwood Golf", true, NOW)
             .unwrap();
         // The override untracked the entry (Priya's, not mine); touch it too, so
         // all three new columns carry a non-default value.
@@ -703,11 +706,12 @@ mod tests {
         assert_eq!(entry.state, EntryState::Untracked);
         assert_eq!(entry.untracked_via, Some(UntrackedVia::Override));
         assert!(entry.touched);
-        assert_eq!(
-            restored.note_tracking_override("n_a1b2c3").unwrap(),
-            Some(EnrollmentMode::ContextOnly),
-            "the judgement is in the backup, not only the database"
-        );
+        // The *judgement* is deliberately absent: it lives in the note's
+        // frontmatter, in this same folder, so snapshotting it here would put
+        // one fact in two files with no rule for which wins.
+        let raw = fs::read_to_string(dir.path().join("Briarwood Golf").join(LEDGER_SNAPSHOT_FILE))
+            .unwrap();
+        assert!(!raw.contains("note_overrides"), "{raw}");
     }
 
     #[test]
@@ -762,34 +766,30 @@ mod tests {
         }
     }
 
+    /// A `_ledger.yml` written before the override graduated into frontmatter
+    /// may hold the only surviving copy of a judgement, so the restore still
+    /// reads the section it no longer writes. The row lands in the legacy table
+    /// and the startup drain graduates it into the note.
     #[test]
-    fn a_project_holding_only_an_override_still_writes_its_file() {
+    fn a_pre_graduation_snapshot_restores_its_overrides_for_the_drain() {
         let dir = tempdir().unwrap();
-        fs::create_dir_all(dir.path().join("Briarwood Golf")).unwrap();
-        let mut ledger = Ledger::open_in_memory().unwrap();
-        // A context-only meeting whose every item was gated out leaves no
-        // entries at all, and the judgement would be lost with the file.
-        ledger
-            .set_note_tracking("n_a1b2c3", "Briarwood Golf", true, NOW)
-            .unwrap();
-        ledger
-            .write_project_snapshot(dir.path(), "Briarwood Golf")
-            .unwrap();
-
-        let path = dir.path().join("Briarwood Golf").join(LEDGER_SNAPSHOT_FILE);
-        assert!(path.is_file());
-        let raw = fs::read_to_string(&path).unwrap();
-        assert!(raw.contains("note_overrides"));
-        // The invariant the whole file rests on: it never names its own project.
-        assert!(!raw.contains("Briarwood Golf"));
+        let project_dir = dir.path().join("Briarwood Golf");
+        fs::create_dir_all(&project_dir).unwrap();
+        fs::write(
+            project_dir.join(LEDGER_SNAPSHOT_FILE),
+            "version: 2\nentries: []\nnote_overrides:\n  - note_id: n_a1b2c3\n    mode: context_only\n    set_at: 2026-08-18T12:00:00Z\n",
+        )
+        .unwrap();
 
         let mut restored = Ledger::open_in_memory().unwrap();
         restored
             .restore_from_snapshots_if_empty(dir.path())
             .unwrap();
+
         assert_eq!(
-            restored.note_tracking_override("n_a1b2c3").unwrap(),
-            Some(EnrollmentMode::ContextOnly)
+            restored.legacy_note_overrides().unwrap(),
+            vec![("n_a1b2c3".to_string(), EnrollmentMode::ContextOnly)],
+            "an old snapshot's judgement must survive into the drain"
         );
     }
 
@@ -858,6 +858,7 @@ mod tests {
                 note_date_utc: DAY,
                 items: &items,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap();
@@ -889,6 +890,7 @@ mod tests {
                 note_date_utc: DAY,
                 items: &items,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap();
@@ -982,6 +984,7 @@ mod tests {
                 note_date_utc: DAY,
                 items: &items,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap()
@@ -1033,6 +1036,7 @@ mod tests {
                     note_date_utc: DAY,
                     items: &items,
                     link_hints: &[],
+                    note_override: None,
                     now: NOW,
                 })
                 .unwrap();

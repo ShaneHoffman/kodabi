@@ -193,10 +193,21 @@ CREATE INDEX idx_ledger_entry_links_to ON ledger_entry_links (to_entry);
 ///   with no provenance would break retro-application, which revives what an
 ///   override untracked and must leave a person's own untrack alone.
 /// * **`ledger_note_overrides` stores `mode` as text rather than a boolean,**
-///   even though only `context_only` is reachable today (a plain `tracked`
-///   meeting simply has no row). Meeting categories will need to say "tracked,
-///   and I mean it, whatever the category defaults to", and that wants a value
-///   rather than another migration.
+///   even though only `context_only` was ever reachable through it (a plain
+///   `tracked` meeting simply had no row).
+///
+///   **This table is now legacy and nothing writes it.** The override moved
+///   into each note's frontmatter `tracking:` key when meeting categories
+///   landed, which is where the "tracked, and I mean it, whatever my category
+///   defaults to" value this text anticipated actually lives — frontmatter can
+///   hold it, and it travels with the note through a re-route or a rebuild,
+///   which a row keyed on a note id could only imitate with bookkeeping.
+///   Remaining rows are drained into their notes at startup
+///   (`ledger_state::drain_legacy_overrides`) and deleted as they graduate; a
+///   pre-graduation `_ledger.yml` restores into this table and drains the same
+///   way. The table itself stays until a later migration can prove every field
+///   database has emptied it — this store carries rows forward, it does not
+///   drop them.
 fn migration_0002_enrollment() -> String {
     r#"
 CREATE TABLE ledger_entries_new (

@@ -65,6 +65,15 @@ const DEFAULTS: Settings = {
   appearance: { theme: "system" },
   mic_check: null,
   ledger: { aging_after_days: 14, stale_after_days: 30, conversation_autoclose: 0.8 },
+  categories: {
+    standup: { enrollment_default: null },
+    one_on_one: { enrollment_default: null },
+    client: { enrollment_default: null },
+    working_session: { enrollment_default: null },
+    review: { enrollment_default: null },
+    all_hands: { enrollment_default: null },
+    observer: { enrollment_default: null },
+  },
 };
 
 function settingsWith(overlay: OverlaySettings): Settings {
@@ -973,5 +982,24 @@ describe("SettingsView About card", () => {
     const confidence = screen.getByRole("spinbutton", { name: "Confidence percent" });
     expect(aging.closest("div.border-t")).toContainElement(alert);
     expect(confidence.closest("div.border-t")).not.toContainElement(alert);
+  });
+});
+
+describe("SettingsView meeting kinds card", () => {
+  it("lists the meeting kinds without offering a control that does nothing", async () => {
+    await renderSeeded();
+
+    const kinds = card("Meeting kinds");
+    // The one place the taxonomy the note view and the Inbox speak is written
+    // down. It is deliberately read-only: what a per-kind setting will DO is
+    // the next change's decision, so a control here could only be a guess.
+    expect(
+      within(kinds).getByText(
+        "Stand-up · One-on-one · Client · Working session · Review · All hands · Observer",
+      ),
+    ).toBeInTheDocument();
+    expect(within(kinds).queryByRole("button")).toBeNull();
+    expect(within(kinds).queryByRole("switch")).toBeNull();
+    expect(within(kinds).queryByRole("combobox")).toBeNull();
   });
 });

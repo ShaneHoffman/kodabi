@@ -17,9 +17,31 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // ---- Schema the validator encodes (source of truth: docs/FRONTMATTER_SCHEMA.md) ----
-const CANONICAL = ['id', 'type', 'title', 'project', 'date', 'tags', 'source', 'confidence'];
+const CANONICAL = [
+  'id',
+  'type',
+  'category',
+  'tracking',
+  'title',
+  'project',
+  'date',
+  'tags',
+  'source',
+  'confidence',
+  'category_confidence',
+];
 const REQUIRED = ['id', 'type', 'project', 'date', 'source'];
 const TYPE_ENUM = ['meeting', 'note', 'chat'];
+const CATEGORY_ENUM = [
+  'standup',
+  'one-on-one',
+  'client',
+  'working-session',
+  'review',
+  'all-hands',
+  'observer',
+];
+const TRACKING_ENUM = ['tracked', 'context-only'];
 const ID_RE = /^n_[0-9a-z]{6,}$/;
 const TAG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -287,6 +309,43 @@ function validateContent(content) {
       add('ERROR', 'bad-type', 'type', `type '${v ?? ''}' is not one of ${TYPE_ENUM.join(' | ')}`, typeE.line);
   }
 
+  // category — a closed set, and a meetings-only facet.
+  const categoryE = byKey.get('category');
+  if (categoryE) {
+    const v = scalarValue(categoryE);
+    if (!v || !CATEGORY_ENUM.includes(v))
+      add(
+        'ERROR',
+        'bad-category',
+        'category',
+        `category '${v ?? ''}' is not one of ${CATEGORY_ENUM.join(' | ')}`,
+        categoryE.line,
+      );
+    const typeVal = typeE ? scalarValue(typeE) : null;
+    if (typeVal && typeVal !== 'meeting')
+      add(
+        'ERROR',
+        'category-on-non-meeting',
+        'category',
+        `category belongs to a meeting; this note is type '${typeVal}'`,
+        categoryE.line,
+      );
+  }
+
+  // tracking — the per-meeting commitment-tracking override.
+  const trackingE = byKey.get('tracking');
+  if (trackingE) {
+    const v = scalarValue(trackingE);
+    if (!v || !TRACKING_ENUM.includes(v))
+      add(
+        'ERROR',
+        'bad-tracking',
+        'tracking',
+        `tracking '${v ?? ''}' is not one of ${TRACKING_ENUM.join(' | ')}`,
+        trackingE.line,
+      );
+  }
+
   // project
   const projE = byKey.get('project');
   const projectVal = projE ? scalarValue(projE) : null;
@@ -471,6 +530,14 @@ function checkSchema() {
       const en = defs.NoteType?.enum || [];
       if (arraysEqual([...en].sort(), [...TYPE_ENUM].sort())) ok(`NoteType enum {${en.join(', ')}}`);
       else bad(`NoteType enum drift: doc {${en.join(', ')}} vs validator {${TYPE_ENUM.join(', ')}}`);
+
+      const cats = defs.MeetingCategory?.enum || [];
+      if (arraysEqual([...cats].sort(), [...CATEGORY_ENUM].sort()))
+        ok(`MeetingCategory enum {${cats.join(', ')}}`);
+      else
+        bad(
+          `MeetingCategory enum drift: doc {${cats.join(', ')}} vs validator {${CATEGORY_ENUM.join(', ')}}`,
+        );
     }
   } catch (e) {
     bad(`cannot read MCP_TOOL_SURFACE.md: ${e.message}`);

@@ -37,6 +37,9 @@ fn indexed(id: &str, title: &str, body: &str) -> IndexedNote {
         tags: vec![],
         source: "manual".to_string(),
         confidence: None,
+        category: None,
+        category_confidence: None,
+        tracking: None,
         body: body.to_string(),
         meeting: None,
     }

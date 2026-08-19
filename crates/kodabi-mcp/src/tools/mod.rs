@@ -22,7 +22,7 @@ use chrono::NaiveDate;
 use serde_json::Value;
 
 use kodabi_core::index::{ActionItemRow, ActionItemStatus, IndexError, NoteRow, NoteType};
-use kodabi_core::note::NoteError;
+use kodabi_core::note::{MeetingCategory, NoteError};
 use kodabi_core::project_context::ProjectContextError;
 use kodabi_core::sessions::SessionsError;
 use kodabi_core::vault::{GlossaryOpError, ListedNote};
@@ -154,6 +154,9 @@ struct NoteSummaryDto {
     tags: Vec<String>,
     source: String,
     confidence: Option<f64>,
+    category: Option<MeetingCategory>,
+    category_confidence: Option<f64>,
+    tracking: Option<String>,
 }
 
 impl From<&NoteRow> for NoteSummaryDto {
@@ -168,6 +171,9 @@ impl From<&NoteRow> for NoteSummaryDto {
             tags: row.tags.clone(),
             source: row.source.clone(),
             confidence: row.confidence,
+            category: row.category,
+            category_confidence: row.category_confidence,
+            tracking: row.tracking.clone(),
         }
     }
 }
@@ -252,6 +258,11 @@ impl NoteSummaryDto {
                 .collect(),
             source: note.source.as_yaml().to_string(),
             confidence: note.routing.confidence(),
+            category: note.category,
+            category_confidence: note.category_confidence,
+            tracking: note
+                .tracking
+                .map(|mode| mode.as_frontmatter_str().to_string()),
         }
     }
 }

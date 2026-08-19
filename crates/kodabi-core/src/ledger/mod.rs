@@ -37,7 +37,7 @@ mod sync;
 pub mod view;
 
 pub use distill_apply::{apply_distill_follow_up, AppliedUpdates, AutoClose, DistillFollowUp};
-pub use enrollment::NoteTrackingOutcome;
+pub use enrollment::{DrainOutcome, NoteTrackingOutcome};
 pub use snapshot::{ProjectSnapshot, RestoreReport, LEDGER_SNAPSHOT_FILE, LEDGER_SNAPSHOT_VERSION};
 pub use store::{EntryDetail, EntryFilter, EntryLink, Evidence, ItemRef, LedgerEntry};
 pub use sync::{LinkHint, NoteSync, SyncOutcome};
@@ -450,6 +450,34 @@ impl EnrollmentMode {
         }
     }
 
+    /// The frontmatter spelling, which is kebab-case rather than the snake_case
+    /// [`EnrollmentMode::as_str`] above.
+    ///
+    /// The note's `tracking:` key is read by humans in Obsidian and sits beside
+    /// `source: quick-capture` and kebab-case tags, so it follows the schema's
+    /// house style; SQLite's `CHECK`, the YAML snapshot and this enum's serde
+    /// representation keep the snake_case spelling they were written with. The
+    /// two spellings never meet: this pair is the only bridge.
+    pub fn as_frontmatter_str(self) -> &'static str {
+        match self {
+            EnrollmentMode::Tracked => "tracked",
+            EnrollmentMode::ContextOnly => "context-only",
+        }
+    }
+
+    /// Parses the frontmatter spelling (the inverse of
+    /// [`EnrollmentMode::as_frontmatter_str`]).
+    pub fn parse_frontmatter(raw: &str) -> Result<Self> {
+        match raw {
+            "tracked" => Ok(EnrollmentMode::Tracked),
+            "context-only" => Ok(EnrollmentMode::ContextOnly),
+            other => Err(invalid_field(
+                "tracking",
+                format!("tracking {other:?} must be one of tracked | context-only"),
+            )),
+        }
+    }
+
     /// Whether `direction` enrolls under this mode.
     pub fn enrolls(self, direction: Direction) -> bool {
         match self {
@@ -463,9 +491,14 @@ impl EnrollmentMode {
 ///
 /// **This function is the seam.** The precedence is per-meeting override, then
 /// the meeting category's default, then the global default of
-/// [`EnrollmentMode::Tracked`]. Today every caller passes `None` for
-/// `category_default` — meeting categories do not exist yet — so the category
-/// feature plugs in here and nowhere else, without reshaping the model.
+/// [`EnrollmentMode::Tracked`].
+///
+/// The per-meeting override arrives from the note's frontmatter `tracking:` key
+/// (via [`sync::NoteSync::note_override`]). Every caller still passes `None`
+/// for `category_default`: notes now carry a
+/// [`category`](crate::note::MeetingCategory), but nothing maps a category to a
+/// default mode yet — that is the one wire left to run, and it lands here and
+/// nowhere else.
 pub fn effective_mode(
     note_override: Option<EnrollmentMode>,
     category_default: Option<EnrollmentMode>,

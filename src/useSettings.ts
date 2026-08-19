@@ -62,6 +62,25 @@ export type LedgerSettings = {
   conversation_autoclose: number;
 };
 
+/** Mirrors `CategoryPrefs` in `crates/kodabi-core/src/settings.rs`. Stored, and
+ * deliberately not yet read: `enrollment_default` is the `category_default`
+ * slot in the ledger's `effective_mode`, which the next change wires up. */
+export type CategoryPrefs = {
+  enrollment_default: "tracked" | "context_only" | null;
+};
+
+/** Mirrors `CategorySettings` in `crates/kodabi-core/src/settings.rs`: one
+ * entry per meeting genre, keyed by the snake_case spelling of the variant. */
+export type CategorySettings = {
+  standup: CategoryPrefs;
+  one_on_one: CategoryPrefs;
+  client: CategoryPrefs;
+  working_session: CategoryPrefs;
+  review: CategoryPrefs;
+  all_hands: CategoryPrefs;
+  observer: CategoryPrefs;
+};
+
 export type Settings = {
   consent_acknowledged: boolean;
   retention: RetentionPolicy;
@@ -69,6 +88,7 @@ export type Settings = {
   appearance: AppearanceSettings;
   mic_check: MicCheckResult | null;
   ledger: LedgerSettings;
+  categories: CategorySettings;
 };
 
 /** The theme choices, in the order they are offered. */

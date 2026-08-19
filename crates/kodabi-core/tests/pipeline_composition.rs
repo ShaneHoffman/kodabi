@@ -375,7 +375,9 @@ fn briarwood_output() -> String {
             {"owner": null, "description": "book the follow-up walkthrough", "due_date": null}
         ],
         "open_questions": ["Who owns the tee sheet migration?"],
-        "tags": ["irrigation", "phase-2"]
+        "tags": ["irrigation", "phase-2"],
+        "category": "working-session",
+        "category_confidence": 0.77
     }"#
     .to_string()
 }
@@ -427,6 +429,13 @@ fn a_meeting_transcript_distills_routes_writes_indexes_and_searches_back() {
     let note = index_written_note(&mut index, root, &distilled.path);
     assert_eq!(note.note_type, NoteType::Meeting);
     assert_eq!(note.routing.project(), "Briarwood Golf");
+    // The classification rides the same pass: the model's genre reaches the
+    // note's frontmatter, and the score it came with reaches the key beside it.
+    assert_eq!(
+        note.category,
+        Some(kodabi_core::note::MeetingCategory::WorkingSession)
+    );
+    assert_eq!(note.category_confidence, Some(0.77));
     assert_close(
         note.routing.confidence().unwrap(),
         score,
@@ -593,7 +602,9 @@ fn briarwood_chat_output() -> String {
             {"owner": "Jane", "description": "ask MERIDIAN for a bridge line item", "due_date": "2026-08-07"}
         ],
         "open_questions": ["Does the TeeTrack tee sheet export need a matching schema change?"],
-        "tags": ["irrigation", "research"]
+        "tags": ["irrigation", "research"],
+        "category": "working-session",
+        "category_confidence": 0.9
     }"#
     .to_string()
 }
@@ -646,6 +657,12 @@ fn a_chat_transcript_distills_routes_writes_indexes_and_searches_back() {
     let note = index_written_note(&mut index, root, &distilled.path);
     assert_eq!(note.note_type, NoteType::Chat);
     assert_eq!(note.routing.project(), "Briarwood Golf");
+    // The response shape is shared with the meeting pass, so a chat distill can
+    // answer with a genre — and it is dropped. `category` is a meetings-only
+    // facet (docs/FRONTMATTER_SCHEMA.md), and writing one here would make the
+    // note fail its own validation.
+    assert_eq!(note.category, None);
+    assert_eq!(note.category_confidence, None);
     assert_close(
         note.routing.confidence().unwrap(),
         score,
@@ -1039,6 +1056,7 @@ fn a_later_meeting_closes_a_commitment_the_earlier_one_recorded() {
             note_date_utc: &normalize_date_to_utc(&first_listed.note.date).unwrap(),
             items: &first_facts.action_items,
             link_hints: &[],
+            note_override: None,
             now: "2026-08-12T12:00:00Z",
         })
         .unwrap();
@@ -1110,6 +1128,7 @@ fn a_later_meeting_closes_a_commitment_the_earlier_one_recorded() {
             note_date_utc: &normalize_date_to_utc(&second_listed.note.date).unwrap(),
             items: &second_facts.action_items,
             updates: &second.ledger_updates,
+            note_override: second_listed.note.tracking,
         },
         kodabi_core::ledger::DEFAULT_CONVERSATION_AUTOCLOSE,
         "2026-08-19T12:00:00Z",

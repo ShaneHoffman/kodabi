@@ -397,7 +397,7 @@ pub fn recently_settled(
 mod tests {
     use super::*;
     use crate::ledger::sync::NoteSync;
-    use crate::ledger::{ClosedVia, Ledger, UntrackedVia};
+    use crate::ledger::{ClosedVia, EnrollmentMode, Ledger, UntrackedVia};
     use crate::meeting::ActionItemFact;
 
     const NOW: &str = "2026-08-17T12:00:00Z";
@@ -456,6 +456,7 @@ mod tests {
                 note_date_utc: DAY,
                 items: &items,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap();
@@ -467,7 +468,7 @@ mod tests {
         let mut ledger = Ledger::open_in_memory().unwrap();
         // A context-only meeting: only the direct ask is enrolled.
         ledger
-            .set_note_tracking("n_a1b2c3", "Briarwood Golf", true, NOW)
+            .retro_apply_note_tracking("n_a1b2c3", "Briarwood Golf", true, NOW)
             .unwrap();
         let items = vec![
             fact("a_111111", "Priya", "send the revised deck"),
@@ -480,6 +481,7 @@ mod tests {
                 note_date_utc: DAY,
                 items: &items,
                 link_hints: &[],
+                note_override: Some(EnrollmentMode::ContextOnly),
                 now: NOW,
             })
             .unwrap();
@@ -559,6 +561,7 @@ mod tests {
                 note_date_utc: DAY,
                 items: &items,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap();
@@ -571,6 +574,7 @@ mod tests {
                 note_date_utc: DAY,
                 items: &edited,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap();
@@ -634,6 +638,7 @@ mod tests {
                 note_date_utc: DAY,
                 items: &[],
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap();

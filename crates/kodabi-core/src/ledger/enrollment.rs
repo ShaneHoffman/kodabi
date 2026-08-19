@@ -1,9 +1,16 @@
-//! Per-meeting tracking overrides, retro-application, and manual promotion.
+//! Retro-application of a changed tracking override, and manual promotion.
 //!
 //! [`sync`](super::sync) enforces the enrollment gate on the way *in*, deciding
 //! what earns an entry. This module owns the two things it cannot: changing a
 //! meeting's mind after the fact, and letting a person overrule the mode for one
 //! line.
+//!
+//! **The override itself is not stored in this crate's database.** It is a
+//! frontmatter key on the note ([`crate::vault::set_note_tracking`]), so it
+//! travels with the file; what lives here is the *consequence* — the entries a
+//! previous mode already minted, which no re-sync revisits on its own. The
+//! shell writes the note first and calls
+//! [`Ledger::retro_apply_note_tracking`] after.
 //!
 //! ## What retro-application may and may not touch
 //!
@@ -34,13 +41,16 @@
 //! that never got an entry at all. Nothing here needs to know which items those
 //! were.
 
+use std::path::Path;
+
 use rusqlite::params;
 
-use super::sync::{insert_open_entry, note_override, NewEntry};
+use super::sync::{insert_open_entry, NewEntry};
 use super::{
     Direction, EnrolledVia, EnrollmentMode, EntryState, Ledger, LedgerEntry, Result, UntrackedVia,
 };
 use crate::meeting::ActionItemFact;
+use crate::note::NoteId;
 
 /// What flipping one meeting's tracking did to the entries it had already
 /// produced.
@@ -55,23 +65,20 @@ pub struct NoteTrackingOutcome {
 }
 
 impl Ledger {
-    /// The tracking override this note carries, if it has set one.
-    pub fn note_tracking_override(&self, note_id: &str) -> Result<Option<EnrollmentMode>> {
-        note_override(&self.conn, note_id)
-    }
-
-    /// Sets (or clears) a meeting's tracking override and re-evaluates the
-    /// entries it already produced.
+    /// Re-evaluates the entries a meeting already produced, after its tracking
+    /// override changed in the note's frontmatter.
     ///
-    /// `context_only = false` **deletes** the row rather than storing
-    /// `'tracked'`: absence is the default, so a note that never opted in and
-    /// one that opted back out should be indistinguishable. The column still
-    /// admits `'tracked'` because meeting categories will need a note to say
-    /// "tracked, whatever my category defaults to".
+    /// **The judgement itself is not stored here.** It lives in the note's
+    /// `tracking:` key ([`crate::vault::set_note_tracking`]), so it survives a
+    /// re-route, a vault rebuild and a sync to another machine; this store owns
+    /// only the consequence — the entries that judgement already minted, which
+    /// no re-sync would revisit on its own because sync's gate decides what
+    /// *earns* an entry, never what happens to one that exists.
     ///
-    /// Idempotent in both directions: setting the mode a note already has finds
-    /// nothing left to change.
-    pub fn set_note_tracking(
+    /// Call it after the frontmatter write has succeeded. Idempotent in both
+    /// directions: re-applying the mode a note already had finds nothing left
+    /// to change.
+    pub fn retro_apply_note_tracking(
         &mut self,
         note_id: &str,
         project: &str,
@@ -84,22 +91,11 @@ impl Ledger {
         };
 
         if context_only {
-            self.conn.execute(
-                "INSERT INTO ledger_note_overrides (note_id, project, mode, set_at)
-                 VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT (note_id)
-                 DO UPDATE SET project = ?2, mode = ?3, set_at = ?4",
-                params![note_id, project, EnrollmentMode::ContextOnly.as_str(), now],
-            )?;
             for entry_id in self.overridable_entries(note_id)? {
                 self.untrack(&entry_id, UntrackedVia::Override, now)?;
                 outcome.untracked.push(entry_id);
             }
         } else {
-            self.conn.execute(
-                "DELETE FROM ledger_note_overrides WHERE note_id = ?1",
-                [note_id],
-            )?;
             for entry_id in self.override_untracked_entries(note_id)? {
                 self.reopen(&entry_id, now)?;
                 outcome.retracked.push(entry_id);
@@ -110,6 +106,37 @@ impl Ledger {
             self.mark_dirty(project);
         }
         Ok(outcome)
+    }
+
+    /// Every tracking override still parked in the legacy `ledger_note_overrides`
+    /// table, as `(note_id, mode)` — the startup drain's input.
+    ///
+    /// The table predates the frontmatter `tracking:` key and is no longer
+    /// written; see [`crate::ledger::migrations`]. Rows only ever leave it.
+    pub fn legacy_note_overrides(&self) -> Result<Vec<(String, EnrollmentMode)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT note_id, mode FROM ledger_note_overrides ORDER BY note_id")?;
+        let rows = stmt
+            .query_map([], |row| {
+                let note_id: String = row.get(0)?;
+                let mode: String = row.get(1)?;
+                Ok((note_id, mode))
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        rows.into_iter()
+            .map(|(note_id, mode)| Ok((note_id, EnrollmentMode::parse(&mode)?)))
+            .collect()
+    }
+
+    /// Drops one drained row from the legacy override table. Returns whether a
+    /// row was there to drop.
+    pub fn forget_legacy_note_override(&mut self, note_id: &str) -> Result<bool> {
+        let removed = self.conn.execute(
+            "DELETE FROM ledger_note_overrides WHERE note_id = ?1",
+            [note_id],
+        )?;
+        Ok(removed > 0)
     }
 
     /// Entries in this note that a context-only flip may untrack.
@@ -231,6 +258,99 @@ impl Ledger {
     }
 }
 
+/// What one drain pass did, for the caller's log line.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct DrainOutcome {
+    /// Overrides written into their notes' frontmatter.
+    pub graduated: usize,
+    /// Rows dropped without a write: the note is gone, or already says it.
+    pub discarded: usize,
+    /// Rows left for the next launch because something failed.
+    pub deferred: usize,
+}
+
+impl Ledger {
+    /// Graduates every tracking override still parked in the legacy
+    /// `ledger_note_overrides` table into its note's frontmatter, then drops
+    /// the row.
+    ///
+    /// The override used to live in `ledger.db`; it now lives in the note,
+    /// where it travels with the file. A migration could not perform this move
+    /// — migrations run inside the database and cannot reach the vault — and
+    /// this store's doctrine forbids dropping a row it cannot carry forward, so
+    /// the graduation happens here, where the vault and the ledger are both in
+    /// hand. The shell calls it once at startup, behind the snapshot restore
+    /// (which is the only thing that still *adds* rows to that table).
+    ///
+    /// Per note:
+    ///
+    /// * a note that has vanished loses its row — nothing is left to carry it;
+    /// * a note that already carries a `tracking:` key keeps it, because
+    ///   frontmatter is the truth now and a stale row must not overwrite a
+    ///   later, deliberate flip;
+    /// * anything else is written **and then retro-applied**, because the
+    ///   window between this launch and the write is one in which a sync may
+    ///   already have enrolled items the override should have gated.
+    ///
+    /// A note that fails keeps its row and is retried next launch. Rows only
+    /// ever leave this table, so a repeat run converges and a second run over
+    /// an already-drained vault writes nothing.
+    pub fn drain_legacy_note_overrides(
+        &mut self,
+        vault_root: &Path,
+        now: &str,
+    ) -> Result<DrainOutcome> {
+        let mut outcome = DrainOutcome::default();
+        let rows = self.legacy_note_overrides()?;
+        for (note_id, mode) in rows {
+            let Ok(parsed) = NoteId::parse(&note_id) else {
+                // An id the note layer will never match: nothing can carry it.
+                self.forget_legacy_note_override(&note_id)?;
+                outcome.discarded += 1;
+                continue;
+            };
+            let found = match crate::vault::find_note_anywhere(vault_root, &parsed) {
+                Ok(found) => found,
+                Err(err) => {
+                    eprintln!(
+                        "ledger: couldn't look up note {note_id} to graduate its tracking: {err}"
+                    );
+                    outcome.deferred += 1;
+                    continue;
+                }
+            };
+            let Some((project, listed)) = found else {
+                self.forget_legacy_note_override(&note_id)?;
+                outcome.discarded += 1;
+                continue;
+            };
+            if listed.note.tracking.is_some() {
+                self.forget_legacy_note_override(&note_id)?;
+                outcome.discarded += 1;
+                continue;
+            }
+            if let Err(err) = crate::vault::set_note_tracking(vault_root, &parsed, Some(mode)) {
+                eprintln!("ledger: couldn't write tracking into note {note_id}: {err}");
+                outcome.deferred += 1;
+                continue;
+            }
+            if let Err(err) = self.retro_apply_note_tracking(
+                &note_id,
+                &project,
+                mode == EnrollmentMode::ContextOnly,
+                now,
+            ) {
+                eprintln!("ledger: couldn't re-check note {note_id}'s commitments: {err}");
+                outcome.deferred += 1;
+                continue;
+            }
+            self.forget_legacy_note_override(&note_id)?;
+            outcome.graduated += 1;
+        }
+        Ok(outcome)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -268,6 +388,7 @@ mod tests {
                 note_date_utc: DAY_ONE,
                 items: &items,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap();
@@ -283,7 +404,7 @@ mod tests {
         let (mut ledger, _) = seeded();
 
         let outcome = ledger
-            .set_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
             .unwrap();
 
         assert!(outcome.context_only);
@@ -307,11 +428,11 @@ mod tests {
     fn flipping_back_revives_exactly_what_the_override_untracked() {
         let (mut ledger, _) = seeded();
         ledger
-            .set_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
             .unwrap();
 
         let outcome = ledger
-            .set_note_tracking(NOTE, PROJECT, false, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, false, LATER)
             .unwrap();
 
         assert!(!outcome.context_only);
@@ -321,7 +442,6 @@ mod tests {
             assert_eq!(entry.state, EntryState::Open, "{item_id} should be live");
             assert_eq!(entry.untracked_via, None, "{item_id} keeps no stale trace");
         }
-        assert_eq!(ledger.note_tracking_override(NOTE).unwrap(), None);
     }
 
     #[test]
@@ -338,12 +458,13 @@ mod tests {
                 note_date_utc: DAY_ONE,
                 items: &restated,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap();
 
         let outcome = ledger
-            .set_note_tracking("n_d4e5f6", PROJECT, true, LATER)
+            .retro_apply_note_tracking("n_d4e5f6", PROJECT, true, LATER)
             .unwrap();
 
         assert!(
@@ -362,7 +483,7 @@ mod tests {
         ledger.mark_touched(&touched).unwrap();
 
         let outcome = ledger
-            .set_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
             .unwrap();
 
         assert_eq!(
@@ -385,7 +506,7 @@ mod tests {
         ledger.waive(&waived, NOW).unwrap();
 
         let outcome = ledger
-            .set_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
             .unwrap();
 
         assert!(outcome.untracked.is_empty());
@@ -400,10 +521,10 @@ mod tests {
         ledger.untrack(&mine, UntrackedVia::Manual, NOW).unwrap();
 
         ledger
-            .set_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
             .unwrap();
         let outcome = ledger
-            .set_note_tracking(NOTE, PROJECT, false, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, false, LATER)
             .unwrap();
 
         assert!(
@@ -427,7 +548,7 @@ mod tests {
         assert_eq!(promoted.state, EntryState::Open);
 
         let outcome = ledger
-            .set_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
             .unwrap();
 
         assert!(!outcome.untracked.contains(&theirs));
@@ -438,10 +559,10 @@ mod tests {
     fn setting_the_same_mode_twice_changes_nothing() {
         let (mut ledger, _) = seeded();
         let first = ledger
-            .set_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
             .unwrap();
         let second = ledger
-            .set_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
             .unwrap();
 
         assert_eq!(first.untracked.len(), 2);
@@ -456,8 +577,12 @@ mod tests {
             fact("a_111111", "Priya", "send the revised deck"),
             fact("a_222222", "You", "book the venue"),
         ];
-        ledger.set_note_tracking(NOTE, PROJECT, true, NOW).unwrap();
-        let sync = |ledger: &mut Ledger| {
+        ledger
+            .retro_apply_note_tracking(NOTE, PROJECT, true, NOW)
+            .unwrap();
+        // The note's frontmatter is the gate's input, so each re-sync carries
+        // whatever the note says at that moment — exactly what the shell does.
+        let sync = |ledger: &mut Ledger, note_override: Option<EnrollmentMode>| {
             ledger
                 .sync_note_items(&NoteSync {
                     note_id: NOTE,
@@ -465,20 +590,21 @@ mod tests {
                     note_date_utc: DAY_ONE,
                     items: &items,
                     link_hints: &[],
+                    note_override,
                     now: NOW,
                 })
                 .unwrap()
         };
-        let gated = sync(&mut ledger);
+        let gated = sync(&mut ledger, Some(EnrollmentMode::ContextOnly));
         assert_eq!(gated.not_enrolled, 1);
         assert_eq!(gated.created.len(), 1);
 
         // The other half of retro-application: this module revives what it
         // untracked, and the shell's follow-up sync creates what never existed.
         ledger
-            .set_note_tracking(NOTE, PROJECT, false, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, false, LATER)
             .unwrap();
-        let after = sync(&mut ledger);
+        let after = sync(&mut ledger, None);
 
         assert_eq!(after.created.len(), 1, "the gated item enrolls now");
         assert_eq!(after.not_enrolled, 0);
@@ -495,7 +621,9 @@ mod tests {
     #[test]
     fn tracking_an_item_with_no_entry_mints_one_marked_manual() {
         let mut ledger = Ledger::open_in_memory().unwrap();
-        ledger.set_note_tracking(NOTE, PROJECT, true, NOW).unwrap();
+        ledger
+            .retro_apply_note_tracking(NOTE, PROJECT, true, NOW)
+            .unwrap();
         let item = fact("a_111111", "Priya", "send the revised deck");
         ledger
             .sync_note_items(&NoteSync {
@@ -504,6 +632,7 @@ mod tests {
                 note_date_utc: DAY_ONE,
                 items: std::slice::from_ref(&item),
                 link_hints: &[],
+                note_override: Some(EnrollmentMode::ContextOnly),
                 now: NOW,
             })
             .unwrap();
@@ -562,9 +691,162 @@ mod tests {
         ledger.clear_all_dirty();
 
         ledger
-            .set_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
             .unwrap();
 
         assert_eq!(ledger.dirty_projects(), vec![PROJECT.to_string()]);
+    }
+
+    // --- the legacy-override drain ----------------------------------------
+
+    /// Writes a meeting note into `vault/Ops`.
+    fn write_drain_meeting(vault: &Path, id: &str, tracking: Option<EnrollmentMode>) {
+        let written = crate::note::Note::new(
+            NoteId::parse(id).unwrap(),
+            crate::note::NoteType::Meeting,
+            crate::note::Routing::Manual {
+                project: PROJECT.to_string(),
+            },
+            "2026-08-18",
+            Vec::new(),
+            crate::note::Source::parse("transcript").unwrap(),
+            "Body.",
+        )
+        .unwrap()
+        .with_tracking(tracking);
+        crate::note::write_note(vault, &written, Some("Weekly sync")).unwrap();
+    }
+
+    /// Seeds a ledger the way a **pre-graduation** vault does: a `_ledger.yml`
+    /// carrying a `note_overrides` section, restored into an empty database.
+    /// That restore is the only route a legacy row can still take, which is
+    /// exactly what makes it the right fixture.
+    fn restore_pre_graduation_snapshot(vault: &Path, body: &str) -> Ledger {
+        let project_dir = vault.join(PROJECT);
+        std::fs::create_dir_all(&project_dir).unwrap();
+        std::fs::write(project_dir.join(crate::ledger::LEDGER_SNAPSHOT_FILE), body).unwrap();
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        ledger.restore_from_snapshots_if_empty(vault).unwrap();
+        ledger
+    }
+
+    const OVERRIDE_ONLY_SNAPSHOT: &str = "version: 2\nentries: []\nnote_overrides:\n  - note_id: n_a1b2c3\n    mode: context_only\n    set_at: 2026-08-18T12:00:00Z\n";
+
+    /// A pre-graduation snapshot holding a parked override *and* an entry the
+    /// override should have kept out.
+    const OVERRIDE_AND_ENTRY_SNAPSHOT: &str = "version: 2\nentries:\n  - entry_id: le_aaaaaaaaaaaa\n    state: open\n    direction: theirs\n    owner: Priya\n    description: send the deck\n    created_at: 2026-08-18T12:00:00Z\n    updated_at: 2026-08-18T12:00:00Z\n    last_mention: 2026-08-18T00:00:00Z\n    items:\n      - item_id: a_111111\n        note_id: n_a1b2c3\n        active: true\n        linked_at: 2026-08-18T12:00:00Z\nnote_overrides:\n  - note_id: n_a1b2c3\n    mode: context_only\n    set_at: 2026-08-18T12:00:00Z\n";
+
+    #[test]
+    fn the_drain_graduates_a_parked_override_into_its_note() {
+        let vault = tempfile::tempdir().unwrap();
+        write_drain_meeting(vault.path(), "n_a1b2c3", None);
+        let mut ledger = restore_pre_graduation_snapshot(vault.path(), OVERRIDE_ONLY_SNAPSHOT);
+        assert_eq!(ledger.legacy_note_overrides().unwrap().len(), 1);
+
+        let outcome = ledger
+            .drain_legacy_note_overrides(vault.path(), LATER)
+            .unwrap();
+
+        assert_eq!(outcome.graduated, 1);
+        let found =
+            crate::vault::find_note_anywhere(vault.path(), &NoteId::parse("n_a1b2c3").unwrap())
+                .unwrap()
+                .expect("the note is still there");
+        assert_eq!(
+            found.1.note.tracking,
+            Some(EnrollmentMode::ContextOnly),
+            "the judgement must survive into the note"
+        );
+        assert!(
+            ledger.legacy_note_overrides().unwrap().is_empty(),
+            "a graduated row is dropped"
+        );
+    }
+
+    #[test]
+    fn the_drain_re_evaluates_entries_the_override_should_have_gated() {
+        let vault = tempfile::tempdir().unwrap();
+        write_drain_meeting(vault.path(), "n_a1b2c3", None);
+        let mut ledger = restore_pre_graduation_snapshot(vault.path(), OVERRIDE_AND_ENTRY_SNAPSHOT);
+        assert_eq!(
+            ledger.entries_for_note("n_a1b2c3").unwrap()[0].entry.state,
+            EntryState::Open
+        );
+
+        ledger
+            .drain_legacy_note_overrides(vault.path(), LATER)
+            .unwrap();
+
+        let details = ledger.entries_for_note("n_a1b2c3").unwrap();
+        assert_eq!(details.len(), 1);
+        assert_eq!(
+            details[0].entry.state,
+            EntryState::Untracked,
+            "an entry minted while the override was still parked has to be re-checked"
+        );
+    }
+
+    #[test]
+    fn the_drain_leaves_a_note_that_already_carries_the_key_alone() {
+        let vault = tempfile::tempdir().unwrap();
+        // The note already says "tracked" — a later, deliberate flip back.
+        write_drain_meeting(vault.path(), "n_a1b2c3", Some(EnrollmentMode::Tracked));
+        let mut ledger = restore_pre_graduation_snapshot(vault.path(), OVERRIDE_ONLY_SNAPSHOT);
+
+        let outcome = ledger
+            .drain_legacy_note_overrides(vault.path(), LATER)
+            .unwrap();
+
+        assert_eq!(outcome.graduated, 0);
+        assert_eq!(outcome.discarded, 1);
+        let found =
+            crate::vault::find_note_anywhere(vault.path(), &NoteId::parse("n_a1b2c3").unwrap())
+                .unwrap()
+                .expect("the note is still there");
+        assert_eq!(
+            found.1.note.tracking,
+            Some(EnrollmentMode::Tracked),
+            "frontmatter is the truth; a stale row must not overwrite it"
+        );
+        assert!(ledger.legacy_note_overrides().unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_drain_drops_a_row_whose_note_is_gone() {
+        let vault = tempfile::tempdir().unwrap();
+        // No note written at all: nothing is left to carry the judgement.
+        let mut ledger = restore_pre_graduation_snapshot(vault.path(), OVERRIDE_ONLY_SNAPSHOT);
+
+        let outcome = ledger
+            .drain_legacy_note_overrides(vault.path(), LATER)
+            .unwrap();
+
+        assert_eq!(outcome.discarded, 1);
+        assert!(ledger.legacy_note_overrides().unwrap().is_empty());
+    }
+
+    #[test]
+    fn draining_twice_changes_nothing_the_second_time() {
+        let vault = tempfile::tempdir().unwrap();
+        write_drain_meeting(vault.path(), "n_a1b2c3", None);
+        let mut ledger = restore_pre_graduation_snapshot(vault.path(), OVERRIDE_ONLY_SNAPSHOT);
+
+        ledger
+            .drain_legacy_note_overrides(vault.path(), LATER)
+            .unwrap();
+        let path =
+            crate::vault::find_note_anywhere(vault.path(), &NoteId::parse("n_a1b2c3").unwrap())
+                .unwrap()
+                .unwrap()
+                .1
+                .path;
+        let content = std::fs::read_to_string(&path).unwrap();
+
+        let second = ledger
+            .drain_legacy_note_overrides(vault.path(), LATER)
+            .unwrap();
+
+        assert_eq!(second, DrainOutcome::default(), "an empty table is a no-op");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), content);
     }
 }

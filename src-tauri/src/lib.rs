@@ -294,6 +294,7 @@ pub fn run() {
             note_cmds::read_note,
             note_cmds::save_note,
             note_cmds::file_note_to_project,
+            note_cmds::set_note_category,
             note_cmds::delete_note,
             note_cmds::list_projects,
             note_cmds::create_project,

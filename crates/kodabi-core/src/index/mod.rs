@@ -223,6 +223,9 @@ mod tests {
                     tags: vec![],
                     source: "manual".to_string(),
                     confidence: None,
+                    category: None,
+                    category_confidence: None,
+                    tracking: None,
                     body: "durable body".to_string(),
                     meeting: None,
                 })

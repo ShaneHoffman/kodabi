@@ -20,6 +20,15 @@ const ACKNOWLEDGED: Settings = {
   appearance: { theme: "system" },
   mic_check: null,
   ledger: { aging_after_days: 14, stale_after_days: 30, conversation_autoclose: 0.8 },
+  categories: {
+    standup: { enrollment_default: null },
+    one_on_one: { enrollment_default: null },
+    client: { enrollment_default: null },
+    working_session: { enrollment_default: null },
+    review: { enrollment_default: null },
+    all_hands: { enrollment_default: null },
+    observer: { enrollment_default: null },
+  },
 };
 
 function primaryButton(): HTMLElement {

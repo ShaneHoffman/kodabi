@@ -77,6 +77,10 @@ pub struct NoteFacts {
     /// The note's `date_utc`, which becomes the entry's `last_mention`.
     pub date_utc: String,
     pub items: Vec<ActionItemFact>,
+    /// The note's frontmatter tracking override, or `None` to inherit. Read
+    /// from the index row the facts were derived from, which is itself read
+    /// from the note file — see `ledger::sync::NoteSync::note_override`.
+    pub note_override: Option<EnrollmentMode>,
 }
 
 /// A mutation a person asked for, addressed to one entry.
@@ -146,6 +150,9 @@ enum LedgerJob {
     NoteGone(String),
     /// Rebuild from the vault's snapshots, but only into an empty database.
     RestoreIfEmpty,
+    /// Graduate any tracking override still parked in the legacy
+    /// `ledger_note_overrides` table into its note's frontmatter.
+    DrainLegacyOverrides,
     /// Write every pending snapshot now and acknowledge.
     Flush(Sender<()>),
     /// Read entries matching a filter, hydrated, and reply.
@@ -165,16 +172,17 @@ enum LedgerJob {
         autoclose_threshold: f64,
         reply: Sender<ledger::Result<AppliedUpdates>>,
     },
-    /// Read one note's tracking override and the entries it produced, for the
-    /// note view's enrollment panel. One round trip rather than two, because
-    /// the panel always needs both.
-    NoteEnrollment {
+    /// Read the entries one note produced, for the note view's enrollment
+    /// panel. The panel's *mode* no longer comes from here: it is a frontmatter
+    /// key, so the caller reads it from the note's index row.
+    NoteEntries {
         note_id: String,
-        #[allow(clippy::type_complexity)]
-        reply: Sender<ledger::Result<(Option<EnrollmentMode>, Vec<EntryDetail>)>>,
+        reply: Sender<ledger::Result<Vec<EntryDetail>>>,
     },
-    /// Set (or clear) a note's tracking override and retro-apply it.
-    SetNoteTracking {
+    /// Re-evaluate the entries a note already produced, after its frontmatter
+    /// tracking override changed. The vault write happens first, in the
+    /// command; this is only its consequence.
+    RetroApplyNoteTracking {
         note_id: String,
         project: String,
         context_only: bool,
@@ -205,6 +213,9 @@ pub struct OwnedFollowUp {
     pub note_date_utc: String,
     pub items: Vec<ActionItemFact>,
     pub updates: Vec<LedgerUpdateDraft>,
+    /// The note's frontmatter tracking override, taken from the `Note` the
+    /// distill just wrote.
+    pub note_override: Option<EnrollmentMode>,
 }
 
 /// A handle to the background ledger worker, held as Tauri managed state.
@@ -294,23 +305,24 @@ impl LedgerClient {
         self.request(|reply| LedgerJob::Mutate { op, reply })
     }
 
-    /// One note's tracking override and the entries it produced.
-    #[allow(clippy::type_complexity)]
-    pub fn note_enrollment(
+    /// The entries one note produced. Its tracking *mode* is frontmatter, and
+    /// reaches the caller through the index row instead.
+    pub fn note_entries(
         &self,
         note_id: String,
-    ) -> std::result::Result<(Option<EnrollmentMode>, Vec<EntryDetail>), LedgerCallError> {
-        self.request(|reply| LedgerJob::NoteEnrollment { note_id, reply })
+    ) -> std::result::Result<Vec<EntryDetail>, LedgerCallError> {
+        self.request(|reply| LedgerJob::NoteEntries { note_id, reply })
     }
 
-    /// Sets (or clears) a note's tracking override, retro-applying it.
-    pub fn set_note_tracking(
+    /// Re-evaluates the entries a note already produced, after its frontmatter
+    /// tracking override changed. The caller writes the note first.
+    pub fn retro_apply_note_tracking(
         &self,
         note_id: String,
         project: String,
         context_only: bool,
     ) -> std::result::Result<NoteTrackingOutcome, LedgerCallError> {
-        self.request(|reply| LedgerJob::SetNoteTracking {
+        self.request(|reply| LedgerJob::RetroApplyNoteTracking {
             note_id,
             project,
             context_only,
@@ -391,6 +403,9 @@ impl LedgerState {
         // the first sync would otherwise make the database non-empty and defeat
         // the restore permanently.
         let _ = sender.send(LedgerJob::RestoreIfEmpty);
+        // Behind the restore on the same FIFO, so a pre-graduation `_ledger.yml`
+        // has already put its rows in the table by the time the drain reads it.
+        let _ = sender.send(LedgerJob::DrainLegacyOverrides);
 
         Self {
             sender: Some(Mutex::new(sender)),
@@ -585,6 +600,23 @@ fn handle_job(ledger: &mut Ledger, vault_root: Option<&Path>, job: LedgerJob) ->
                 Err(err) => eprintln!("ledger restore failed: {err}"),
             }
         }
+        LedgerJob::DrainLegacyOverrides => {
+            // A one-time move of the per-meeting tracking override out of this
+            // database and into the notes themselves; the whole contract lives
+            // in `kodabi_core::ledger`. Best-effort, like the restore above: a
+            // failure leaves the rows for the next launch.
+            let Some(root) = vault_root else {
+                return false;
+            };
+            match ledger.drain_legacy_note_overrides(root, &now_utc()) {
+                Ok(outcome) if outcome == ledger::DrainOutcome::default() => {}
+                Ok(outcome) => eprintln!(
+                    "ledger: moved {} tracking override(s) into their notes ({} dropped, {} deferred)",
+                    outcome.graduated, outcome.discarded, outcome.deferred
+                ),
+                Err(err) => eprintln!("ledger: couldn't drain the legacy tracking overrides: {err}"),
+            }
+        }
         LedgerJob::Flush(ack) => {
             flush_snapshots(ledger, vault_root);
             let _ = ack.send(());
@@ -615,26 +647,24 @@ fn handle_job(ledger: &mut Ledger, vault_root: Option<&Path>, job: LedgerJob) ->
                     note_date_utc: &follow_up.note_date_utc,
                     items: &follow_up.items,
                     updates: &follow_up.updates,
+                    note_override: follow_up.note_override,
                 },
                 autoclose_threshold,
                 &now,
             );
             let _ = reply.send(result);
         }
-        LedgerJob::NoteEnrollment { note_id, reply } => {
-            let result = ledger
-                .note_tracking_override(&note_id)
-                .and_then(|mode| Ok((mode, ledger.entries_for_note(&note_id)?)));
-            let _ = reply.send(result);
+        LedgerJob::NoteEntries { note_id, reply } => {
+            let _ = reply.send(ledger.entries_for_note(&note_id));
         }
-        LedgerJob::SetNoteTracking {
+        LedgerJob::RetroApplyNoteTracking {
             note_id,
             project,
             context_only,
             reply,
         } => {
             let now = now_utc();
-            let result = ledger.set_note_tracking(&note_id, &project, context_only, &now);
+            let result = ledger.retro_apply_note_tracking(&note_id, &project, context_only, &now);
             let _ = reply.send(result);
         }
         LedgerJob::TrackItem { request, reply } => {
@@ -733,6 +763,7 @@ fn sync_one(ledger: &mut Ledger, facts: &NoteFacts) {
         note_date_utc: &facts.date_utc,
         items: &facts.items,
         link_hints: &[],
+        note_override: facts.note_override,
         now: &now,
     });
     match result {
@@ -796,6 +827,7 @@ mod tests {
             project: project.to_string(),
             date_utc: "2026-08-01T00:00:00Z".to_string(),
             items: vec![fact(item, "Priya", description)],
+            note_override: None,
         }
     }
 
@@ -916,30 +948,16 @@ mod tests {
     }
 
     #[test]
-    fn a_tracking_flip_queued_before_a_sync_gates_that_sync() {
-        // The ordering `set_meeting_tracking` relies on: it sets the mode and
-        // then hands the same channel a re-sync, so the sync must see the new
-        // mode rather than racing it.
+    fn a_sync_carrying_a_context_only_note_is_gated() {
+        // What `set_meeting_tracking` relies on after the override moved into
+        // frontmatter: the mode rides in on the facts, so the sync that follows
+        // a flip reads the new value off the note rather than racing a write.
         let vault = tempfile::tempdir().unwrap();
         let (sender, worker) = spawn_worker(&vault);
 
-        let outcome = request(&sender, |reply| LedgerJob::SetNoteTracking {
-            note_id: "n_a1b2c3".to_string(),
-            project: "Ops".to_string(),
-            context_only: true,
-            reply,
-        })
-        .unwrap();
-        assert!(outcome.context_only);
-
-        sender
-            .send(LedgerJob::Sync(Box::new(facts_for(
-                "n_a1b2c3",
-                "Ops",
-                "a_111111",
-                "send the deck",
-            ))))
-            .unwrap();
+        let mut facts = facts_for("n_a1b2c3", "Ops", "a_111111", "send the deck");
+        facts.note_override = Some(EnrollmentMode::ContextOnly);
+        sender.send(LedgerJob::Sync(Box::new(facts))).unwrap();
 
         let details = request(&sender, |reply| LedgerJob::ListDetails {
             filter: EntryFilter::default(),
@@ -956,20 +974,21 @@ mod tests {
     }
 
     #[test]
-    fn the_worker_answers_the_note_enrollment_read() {
+    fn the_worker_answers_the_note_entries_read_and_retro_applies_a_flip() {
         let vault = tempfile::tempdir().unwrap();
         let (sender, worker) = spawn_worker(&vault);
         seed_entry(&sender);
 
-        let (mode, details) = request(&sender, |reply| LedgerJob::NoteEnrollment {
+        let details = request(&sender, |reply| LedgerJob::NoteEntries {
             note_id: "n_a1b2c3".to_string(),
             reply,
         })
         .unwrap();
-        assert_eq!(mode, None, "a note with no override reads as the default");
         assert_eq!(details.len(), 1);
 
-        request(&sender, |reply| LedgerJob::SetNoteTracking {
+        // The note's frontmatter has just been rewritten to context-only; the
+        // worker's job is the consequence, not the judgement.
+        request(&sender, |reply| LedgerJob::RetroApplyNoteTracking {
             note_id: "n_a1b2c3".to_string(),
             project: "Ops".to_string(),
             context_only: true,
@@ -977,12 +996,11 @@ mod tests {
         })
         .unwrap();
 
-        let (mode, details) = request(&sender, |reply| LedgerJob::NoteEnrollment {
+        let details = request(&sender, |reply| LedgerJob::NoteEntries {
             note_id: "n_a1b2c3".to_string(),
             reply,
         })
         .unwrap();
-        assert_eq!(mode, Some(EnrollmentMode::ContextOnly));
         // Untracked by the flip, but still the note's entry: the panel has to
         // show it as untracked rather than as never enrolled.
         assert_eq!(details.len(), 1);
@@ -996,21 +1014,10 @@ mod tests {
     fn a_manual_track_is_recorded_as_a_persons_judgement() {
         let vault = tempfile::tempdir().unwrap();
         let (sender, worker) = spawn_worker(&vault);
-        request(&sender, |reply| LedgerJob::SetNoteTracking {
-            note_id: "n_a1b2c3".to_string(),
-            project: "Ops".to_string(),
-            context_only: true,
-            reply,
-        })
-        .unwrap();
-        sender
-            .send(LedgerJob::Sync(Box::new(facts_for(
-                "n_a1b2c3",
-                "Ops",
-                "a_111111",
-                "send the deck",
-            ))))
-            .unwrap();
+        // A context-only meeting, so the gate keeps Priya's line out entirely.
+        let mut facts = facts_for("n_a1b2c3", "Ops", "a_111111", "send the deck");
+        facts.note_override = Some(EnrollmentMode::ContextOnly);
+        sender.send(LedgerJob::Sync(Box::new(facts))).unwrap();
 
         let entry = request(&sender, |reply| LedgerJob::TrackItem {
             request: Box::new(TrackItemRequest {
@@ -1391,6 +1398,7 @@ mod tests {
                     confidence: 0.95,
                     quote: None,
                 }],
+                note_override: None,
             }),
             autoclose_threshold: 0.8,
             reply,

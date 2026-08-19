@@ -54,9 +54,12 @@ use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Local, SecondsFormat, TimeZone, Utc};
 
+use crate::category_examples::CategoryFile;
 use crate::llm::{extract_balanced_spans, HeadlessClaude, LlmRequest, LlmRunError};
 use crate::naming;
-use crate::note::{self, Note, NoteError, NoteId, NoteType, Routing, Source, Tag, INBOX};
+use crate::note::{
+    self, MeetingCategory, Note, NoteError, NoteId, NoteType, Routing, Source, Tag, INBOX,
+};
 use crate::raw_session::{self, RawSessionError, TranscriptSegment};
 use crate::routing::{
     self, ExamplesLoadFailure, GlossaryLoadFailure, NoteText, RoutingConfig, RoutingError,
@@ -171,6 +174,14 @@ to be done, as a verb phrase like \\\"send the signed budget memo to finance\\\"
 and no due date inside it>\", \"due_date\": \"<YYYY-MM-DD when a date was stated or clearly \
 implied relative to the meeting date; otherwise null>\"}], \"open_questions\": [\"<questions \
 raised but left unresolved>\"], \"tags\": [\"<zero to five lowercase-kebab-case topic tags>\"], \
+\"category\": \"<the kind of meeting this was, exactly one of: standup | one-on-one | client | \
+working-session | review | all-hands | observer. standup is a short recurring status round; \
+one-on-one is a private conversation between two people; client is a conversation with an \
+external customer or partner; working-session is hands-on work done together; review is an \
+assessment of finished work; all-hands is a large company-wide or department-wide address; \
+observer is a meeting the local user only listened in on. null when none of them clearly \
+fits>\", \"category_confidence\": <0.0-1.0, how strongly the conversation supports that \
+category; null when category is null>, \
 \"ledger_updates\": [{\"entry\": \"<an id copied exactly from the open commitments listed \
 above>\", \"kind\": \"<refresh when it was mentioned as still outstanding, supersede when it \
 was replaced by a different action item you extracted, completed when the conversation says it was \
@@ -318,6 +329,17 @@ pub struct DistillOutput {
     /// Already-validated tags; the model's invalid candidates are dropped,
     /// not surfaced as errors.
     pub tags: Vec<Tag>,
+    /// The meeting's genre, as the model classified it. `None` when the model
+    /// declined to pick one or named something outside the closed set.
+    ///
+    /// Set on every flavor's output because the response shape is shared, but
+    /// only *written* for a meeting: [`distill_rendered`] drops it on the chat
+    /// path, where the facet has no meaning.
+    pub category: Option<MeetingCategory>,
+    /// How strongly the model backed [`DistillOutput::category`], clamped to
+    /// `0.0..=1.0`. [`UNSTATED_CONFIDENCE`] when a category came back without
+    /// one; `None` exactly when the category is `None`.
+    pub category_confidence: Option<f64>,
     /// What this conversation did to commitments the ledger already held.
     /// Empty unless open entries were shown to the model, and empty on the
     /// map-reduced path (see [`distill_rendered`]).
@@ -368,6 +390,10 @@ struct RawDistillOutput {
     open_questions: Vec<String>,
     #[serde(default)]
     tags: Vec<String>,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default)]
+    category_confidence: Option<f64>,
     #[serde(default)]
     ledger_updates: Vec<RawLedgerUpdate>,
 }
@@ -525,6 +551,73 @@ fn ledger_context_block(open: &[OpenCommitment]) -> Option<String> {
     Some(format!(
         "Open commitments already recorded for this project:\n{payload}"
     ))
+}
+
+/// How many recorded categorizations the prompt will show, and the character
+/// ceiling they share.
+///
+/// Far smaller than the ledger's bounds, and deliberately so: this block exists
+/// to teach a *recurring* meeting's genre, so the handful of most recent
+/// corrections carry nearly all the signal, and the rest would only spend
+/// transcript budget.
+const CATEGORY_CONTEXT_MAX_EXAMPLES: usize = 8;
+const CATEGORY_CONTEXT_MAX_CHARS: usize = 2_000;
+
+/// Renders a project's category prior and recent corrections as a prompt block,
+/// or `None` when it has neither.
+///
+/// Prose rather than the ledger block's JSON, because the two blocks want
+/// opposite things: a ledger update has to quote an id back byte-identically,
+/// while this is guidance the model weighs against the transcript. Saying so in
+/// sentences is what keeps it guidance — the transcript can always overrule a
+/// prior, and a note that reads as data invites the model to obey it instead.
+fn category_context_block(file: &CategoryFile) -> Option<String> {
+    let mut block = String::new();
+    if let Some(default) = file.default {
+        let _ = write!(
+            block,
+            "Meetings in this project are usually \"{}\".",
+            default.as_str()
+        );
+    }
+
+    let mut chars = block.chars().count();
+    let mut lines: Vec<String> = Vec::new();
+    for example in file.most_recent(CATEGORY_CONTEXT_MAX_EXAMPLES) {
+        let line = format!(
+            "- \"{}\" -> {}: {}",
+            example.title,
+            example.category.as_str(),
+            example.excerpt
+        );
+        let cost = line.chars().count() + 1;
+        if chars + cost > CATEGORY_CONTEXT_MAX_CHARS {
+            break;
+        }
+        chars += cost;
+        lines.push(line);
+    }
+
+    if !lines.is_empty() {
+        if !block.is_empty() {
+            block.push(' ');
+        }
+        let _ = write!(
+            block,
+            "Meetings in this project the user has categorized by hand:\n{}",
+            lines.join("\n")
+        );
+    }
+
+    if block.is_empty() {
+        return None;
+    }
+    let _ = write!(
+        block,
+        "\nTreat this as guidance about the project, not a rule: classify what \
+this conversation actually was."
+    );
+    Some(block)
 }
 
 /// The single-call request around an already-rendered transcript block. The
@@ -734,6 +827,7 @@ fn normalize_output(raw: RawDistillOutput) -> DistillOutput {
         }
     }
     let ledger_updates = normalize_ledger_updates(raw.ledger_updates, &kept_from);
+    let (category, category_confidence) = normalize_category(raw.category, raw.category_confidence);
 
     DistillOutput {
         title: normalize_title(raw.title),
@@ -750,8 +844,35 @@ fn normalize_output(raw: RawDistillOutput) -> DistillOutput {
             .filter_map(|q| normalize_sentence(q))
             .collect(),
         tags: normalize_tags(raw.tags),
+        category,
+        category_confidence,
         ledger_updates,
     }
+}
+
+/// Normalizes the model's genre classification, dropping the unusable rather
+/// than failing the distill (the same posture as an invalid tag).
+///
+/// A category outside the closed set — a hallucinated genre, or a spelling we
+/// do not know — takes its confidence with it: a score for a category we
+/// discarded describes nothing. A category that arrives without a usable
+/// confidence keeps [`UNSTATED_CONFIDENCE`], exactly as an unquantified ledger
+/// update does.
+fn normalize_category(
+    raw_category: Option<String>,
+    raw_confidence: Option<f64>,
+) -> (Option<MeetingCategory>, Option<f64>) {
+    let Some(category) = raw_category
+        .as_deref()
+        .and_then(MeetingCategory::parse_model)
+    else {
+        return (None, None);
+    };
+    let confidence = match raw_confidence {
+        Some(value) if value.is_finite() => value.clamp(0.0, 1.0),
+        _ => UNSTATED_CONFIDENCE,
+    };
+    (Some(category), Some(confidence))
 }
 
 /// Normalizes the model's commitment classifications, dropping the unusable.
@@ -1163,6 +1284,18 @@ struct MergePart<'a> {
     action_items: Vec<MergeActionItem<'a>>,
     open_questions: &'a [String],
     tags: Vec<&'a str>,
+    /// Each part's own genre call, carried into the merge so the merging model
+    /// weighs them and returns one answer for the whole meeting.
+    ///
+    /// Deliberately *unlike* `ledger_updates`, which the chunked path clears:
+    /// those name entry ids the chunks were never shown, so they cannot be
+    /// meaningful. A category is read off the conversation itself, and a long
+    /// meeting is precisely the case where the classification matters most, so
+    /// dropping it there would be the wrong trade.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    category: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    category_confidence: Option<f64>,
 }
 
 #[derive(serde::Serialize)]
@@ -1202,6 +1335,8 @@ fn build_merge_request(
                 .collect(),
             open_questions: &part.open_questions,
             tags: part.tags.iter().map(|tag| tag.as_str()).collect(),
+            category: part.category.map(|category| category.as_str()),
+            category_confidence: part.category_confidence,
         })
         .collect();
 
@@ -1527,27 +1662,55 @@ pub(crate) fn distill_rendered(
         // exist yet. A guess is the right instrument anyway — it only decides
         // which commitments are worth showing, and the model ignores the ones
         // the conversation never mentions.
-        let open = guess_project(vault_root, &transcript)
-            .map(|guess| open_entries(&guess))
-            .unwrap_or_default();
-        let request = match ledger_context_block(&open) {
-            // The note always wins over the context: a transcript already near
-            // the budget takes the plain prompt rather than being chunked for
-            // the sake of a block that only ever adds precision.
-            Some(block) => {
-                let with_context = request_from_transcript(
-                    &transcript,
-                    input.prompt_date,
-                    input.flavor,
-                    Some(&block),
-                );
-                if with_context.prompt.chars().count() <= DISTILL_INPUT_BUDGET_CHARS {
+        let guess = guess_project(vault_root, &transcript);
+        let open = guess.as_ref().map(open_entries).unwrap_or_default();
+        // The same guess picks whose category prior and corrections to show.
+        // A project whose file will not load simply contributes no block, the
+        // way an unloadable signal set simply shows no commitments.
+        let category_block = guess
+            .as_ref()
+            .filter(|_| input.note_type == NoteType::Meeting)
+            .and_then(|guess| {
+                let project_dir = note::project_dir(vault_root, &guess.project);
+                CategoryFile::load(&project_dir).ok()
+            })
+            .as_ref()
+            .and_then(category_context_block);
+        // The note always wins over the context: a transcript already near the
+        // budget takes the plain prompt rather than being chunked for the sake
+        // of blocks that only ever add precision. Both blocks together, then
+        // the ledger alone, then neither — the ledger block goes last because a
+        // missed commitment update silently loses a tracked promise, while a
+        // missed prior costs one classification the user can correct in a click.
+        let ledger_block = ledger_context_block(&open);
+        let fits =
+            |request: &LlmRequest| request.prompt.chars().count() <= DISTILL_INPUT_BUDGET_CHARS;
+        let build = |block: &str| {
+            request_from_transcript(&transcript, input.prompt_date, input.flavor, Some(block))
+        };
+        let request = match (&ledger_block, &category_block) {
+            (Some(ledger), Some(category)) => {
+                let both = build(&format!("{ledger}\n\n{category}"));
+                if fits(&both) {
+                    both
+                } else {
+                    let ledger_only = build(ledger);
+                    if fits(&ledger_only) {
+                        ledger_only
+                    } else {
+                        bare
+                    }
+                }
+            }
+            (Some(block), None) | (None, Some(block)) => {
+                let with_context = build(block);
+                if fits(&with_context) {
                     with_context
                 } else {
                     bare
                 }
             }
-            None => bare,
+            (None, None) => bare,
         };
         let mut output = parse_output(&runner.run(&request)?)?;
         // The model can only report on what it was shown. An id it invented,
@@ -1584,6 +1747,14 @@ pub(crate) fn distill_rendered(
     // it survives past the 40-char filename slug it also seeds. When the model
     // gave none, the title stays unset (the display layer de-slugs the filename)
     // — the caller's fallback below is a *slug* seed, not a display title.
+    // The genre is a meeting facet. The response shape is shared with the chat
+    // pass, so a chat distill may well return one; it is dropped here rather
+    // than in the parser, so the chat path's own tests can still see what the
+    // model said.
+    let category = (input.note_type == NoteType::Meeting)
+        .then_some(output.category)
+        .flatten();
+    let category_confidence = category.and(output.category_confidence);
     let note = Note::new(
         id.clone(),
         input.note_type,
@@ -1593,7 +1764,8 @@ pub(crate) fn distill_rendered(
         input.source,
         body,
     )?
-    .with_title(output.title.clone());
+    .with_title(output.title.clone())
+    .with_category(category, category_confidence)?;
 
     let title_seed = output.title.clone().or(input.title_seed_fallback);
     let path = note::write_note(vault_root, &note, title_seed.as_deref())?;
@@ -1781,6 +1953,8 @@ mod tests {
             action_items: vec![],
             open_questions: vec![],
             tags: vec![],
+            category: None,
+            category_confidence: None,
             ledger_updates: vec![],
         }
     }
@@ -1806,6 +1980,72 @@ mod tests {
         assert_eq!(output.open_questions, vec!["Who owns vendor outreach?"]);
         let tag_strs: Vec<&str> = output.tags.iter().map(Tag::as_str).collect();
         assert_eq!(tag_strs, vec!["budgeting", "phase-2"]);
+    }
+
+    // ------------------------------------------------------------------
+    // category classification
+    // ------------------------------------------------------------------
+
+    /// The model's JSON with a classification attached.
+    fn categorized_json(category: &str, confidence: &str) -> String {
+        format!(
+            r#"{{
+                "summary": "Talked through the Q3 budget.",
+                "category": {category},
+                "category_confidence": {confidence}
+            }}"#
+        )
+    }
+
+    #[test]
+    fn a_category_parses_with_its_confidence() {
+        let output = parse_output(&categorized_json("\"one-on-one\"", "0.82")).expect("parses");
+
+        assert_eq!(output.category, Some(MeetingCategory::OneOnOne));
+        assert_eq!(output.category_confidence, Some(0.82));
+    }
+
+    #[test]
+    fn a_category_without_a_confidence_parks_at_the_unstated_score() {
+        let output = parse_output(&categorized_json("\"standup\"", "null")).expect("parses");
+
+        assert_eq!(output.category, Some(MeetingCategory::Standup));
+        assert_eq!(output.category_confidence, Some(UNSTATED_CONFIDENCE));
+    }
+
+    #[test]
+    fn a_confidence_outside_the_range_is_clamped() {
+        let high = parse_output(&categorized_json("\"client\"", "1.7")).expect("parses");
+        assert_eq!(high.category_confidence, Some(1.0));
+
+        let low = parse_output(&categorized_json("\"client\"", "-0.4")).expect("parses");
+        assert_eq!(low.category_confidence, Some(0.0));
+    }
+
+    #[test]
+    fn a_category_outside_the_closed_set_is_dropped_with_its_confidence() {
+        let output = parse_output(&categorized_json("\"retro\"", "0.9")).expect("parses");
+
+        assert_eq!(output.category, None);
+        assert_eq!(
+            output.category_confidence, None,
+            "a score for a discarded category describes nothing"
+        );
+    }
+
+    #[test]
+    fn a_category_is_read_case_and_whitespace_insensitively() {
+        let output = parse_output(&categorized_json("\"  All-Hands \"", "0.5")).expect("parses");
+
+        assert_eq!(output.category, Some(MeetingCategory::AllHands));
+    }
+
+    #[test]
+    fn an_output_with_no_category_carries_neither_field() {
+        let output = parse_output(&full_output_json()).expect("parses");
+
+        assert_eq!(output.category, None);
+        assert_eq!(output.category_confidence, None);
     }
 
     #[test]
@@ -2050,6 +2290,8 @@ mod tests {
             ],
             open_questions: Vec::new(),
             tags: Vec::new(),
+            category: None,
+            category_confidence: None,
             ledger_updates: Vec::new(),
         };
 
@@ -2076,6 +2318,8 @@ mod tests {
             action_items: Vec::new(),
             open_questions: vec!["Should we meet again?".to_string()],
             tags: Vec::new(),
+            category: None,
+            category_confidence: None,
             ledger_updates: Vec::new(),
         };
 
@@ -3047,8 +3291,78 @@ mod tests {
         assert!(RESPONSE_SHAPE_SPEC.starts_with("Respond with ONLY a single JSON object"));
         assert!(RESPONSE_SHAPE_SPEC.contains("\"action_items\""));
         assert!(RESPONSE_SHAPE_SPEC.contains("\"tags\""));
+        assert!(RESPONSE_SHAPE_SPEC.contains("\"category\""));
         assert!(system_prompt(&MEETING_FLAVOR).contains(RESPONSE_SHAPE_SPEC));
         assert!(merge_system_prompt(&MEETING_FLAVOR).contains(RESPONSE_SHAPE_SPEC));
+    }
+
+    #[test]
+    fn a_project_with_no_prior_and_no_corrections_contributes_no_block() {
+        assert_eq!(category_context_block(&CategoryFile::default()), None);
+    }
+
+    #[test]
+    fn the_category_block_carries_the_prior_and_the_corrections() {
+        let mut file = CategoryFile::default();
+        file.default = Some(MeetingCategory::Client);
+        file.upsert(crate::category_examples::CategoryExample {
+            note_id: "n_a1b2c3".to_string(),
+            title: "Weekly sync with Acme".to_string(),
+            excerpt: "Went over the renewal.".to_string(),
+            category: MeetingCategory::Client,
+            corrected_at: "2026-08-19T12:00:00Z".to_string(),
+        });
+
+        let block = category_context_block(&file).expect("a block");
+
+        assert!(block.contains("usually \"client\""), "{block}");
+        assert!(
+            block.contains("\"Weekly sync with Acme\" -> client"),
+            "{block}"
+        );
+        assert!(
+            block.contains("not a rule"),
+            "the block must read as guidance: {block}"
+        );
+    }
+
+    #[test]
+    fn the_category_block_shows_only_the_most_recent_examples() {
+        let mut file = CategoryFile::default();
+        for index in 0..(CATEGORY_CONTEXT_MAX_EXAMPLES + 4) {
+            file.upsert(crate::category_examples::CategoryExample {
+                note_id: format!("n_{index:06}"),
+                title: format!("Meeting {index}"),
+                excerpt: "Body prose.".to_string(),
+                category: MeetingCategory::Review,
+                corrected_at: format!("2026-08-{:02}T12:00:00Z", index + 1),
+            });
+        }
+
+        let block = category_context_block(&file).expect("a block");
+
+        assert_eq!(
+            block.matches(" -> review:").count(),
+            CATEGORY_CONTEXT_MAX_EXAMPLES
+        );
+        // Newest first, so the oldest corrections are the ones left out.
+        assert!(block.contains("Meeting 11"), "{block}");
+        assert!(!block.contains("Meeting 0\""), "{block}");
+    }
+
+    /// The closed set the model is asked to choose from **is**
+    /// [`MeetingCategory`], so the two cannot be allowed to drift: renaming a
+    /// genre without rewording the prompt would leave the classifier offering a
+    /// value the parser then throws away on every meeting, silently.
+    #[test]
+    fn the_shape_spec_names_every_category() {
+        for category in MeetingCategory::ALL {
+            assert!(
+                RESPONSE_SHAPE_SPEC.contains(category.as_str()),
+                "the response shape spec never names {:?}",
+                category.as_str()
+            );
+        }
     }
 
     /// The [`PromptFlavor`] split is a refactor, not a rewording: the meeting
@@ -3092,6 +3406,54 @@ afterward. Report only what appears in this part.\n\nTranscript (part 1 of 2):\n
             "Meeting date: 2026-07-12\n\nThe meeting's transcript was distilled in 1 \
 consecutive parts. The partial results, in order:\n"
         ));
+    }
+
+    /// A long meeting is exactly where the classification matters most, so each
+    /// part's genre has to reach the merge call — unlike `ledger_updates`, which
+    /// the chunked path clears because no chunk was ever shown the entry ids
+    /// those name. Here the merging model weighs the parts and returns one
+    /// answer for the whole conversation.
+    #[test]
+    fn each_chunks_category_reaches_the_merge_payload() {
+        let mut first = distill_output(None, "First half.", &[]);
+        first.category = Some(MeetingCategory::Standup);
+        first.category_confidence = Some(0.4);
+        let mut second = distill_output(None, "Second half.", &[]);
+        second.category = Some(MeetingCategory::WorkingSession);
+        second.category_confidence = Some(0.9);
+
+        let merge = build_merge_request(&[first, second], "2026-07-12", &MEETING_FLAVOR).unwrap();
+
+        assert!(
+            merge.prompt.contains("\"category\":\"standup\""),
+            "{}",
+            merge.prompt
+        );
+        assert!(
+            merge.prompt.contains("\"category\":\"working-session\""),
+            "{}",
+            merge.prompt
+        );
+        assert!(
+            merge.prompt.contains("\"category_confidence\":0.9"),
+            "{}",
+            merge.prompt
+        );
+        // And the merge prompt still demands the full shape, so the call can
+        // answer with one category for the whole meeting.
+        assert!(merge_system_prompt(&MEETING_FLAVOR).contains("\"category\""));
+    }
+
+    #[test]
+    fn an_unclassified_chunk_contributes_no_category_keys() {
+        let merge = build_merge_request(
+            &[distill_output(None, "First half.", &[])],
+            "2026-07-12",
+            &MEETING_FLAVOR,
+        )
+        .unwrap();
+
+        assert!(!merge.prompt.contains("category"), "{}", merge.prompt);
     }
 
     // ------------------------------------------------------------------

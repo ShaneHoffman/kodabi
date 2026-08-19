@@ -23,6 +23,9 @@ function makeNote(
     tags: [],
     source: "manual",
     confidence: null,
+    category: null,
+    category_confidence: null,
+    tracking: null,
     snippet: "",
     guess: null,
     body_markdown: "Some body text.",
@@ -627,5 +630,149 @@ describe("NoteEditorView measure", () => {
     expect(grid).toHaveClass(RAIL_TRACK);
     expect(grid?.children).toHaveLength(1);
     expect(screen.queryByRole("complementary", { name: "Note details" })).toBeNull();
+  });
+});
+
+describe("NoteEditorView meeting kind", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  function meeting(overrides: Partial<NoteDetail> = {}): NoteDetail {
+    return makeNote({
+      id: "n_a1b2c3",
+      title: "Quarterly planning",
+      project: "briarwood-golf",
+      type: "meeting",
+      ...overrides,
+    });
+  }
+
+  function trigger(): HTMLElement {
+    return screen.getByRole("button", { name: 'Change the kind of "Quarterly planning"' });
+  }
+
+  it("shows the stored genre, and offers all seven", async () => {
+    const user = userEvent.setup();
+    renderNote("briarwood-golf", meeting({ category: "one-on-one" }));
+    await screen.findByRole("heading", { name: "Quarterly planning" });
+
+    const rail = screen.getByRole("complementary", { name: "Note details" });
+    expect(within(rail).getByText("Meeting kind")).toBeInTheDocument();
+    // The label, not the wire value: the frontmatter says `one-on-one`.
+    expect(trigger()).toHaveTextContent("One-on-one");
+
+    await user.click(trigger());
+    for (const label of [
+      "Stand-up",
+      "One-on-one",
+      "Client",
+      "Working session",
+      "Review",
+      "All hands",
+      "Observer",
+    ]) {
+      expect(await screen.findByRole("menuitem", { name: new RegExp(label) })).toBeInTheDocument();
+    }
+  });
+
+  it("says so plainly when nothing has classified the meeting", async () => {
+    renderNote("briarwood-golf", meeting({ category: null }));
+    await screen.findByRole("heading", { name: "Quarterly planning" });
+
+    expect(trigger()).toHaveTextContent("Not set");
+  });
+
+  it("marks a machine guess as one, and a confirmed kind not at all", async () => {
+    renderNote("briarwood-golf", meeting({ category: "client", category_confidence: 0.62 }));
+    await screen.findByRole("heading", { name: "Quarterly planning" });
+    // The classifier's own uncertainty, in the metadata register. It is the
+    // presence of the score that the backend clears on a human correction.
+    expect(screen.getByText("guessed")).toBeInTheDocument();
+  });
+
+  it("shows no guessed marker once a person has set the kind", async () => {
+    renderNote("briarwood-golf", meeting({ category: "client", category_confidence: null }));
+    await screen.findByRole("heading", { name: "Quarterly planning" });
+
+    expect(screen.queryByText("guessed")).toBeNull();
+  });
+
+  it("corrects the kind through the backend, applying nothing itself", async () => {
+    const user = userEvent.setup();
+    const note = meeting({ category: "client" });
+    onCommand("set_note_category", () => ({ ...note, category: "review" }));
+    renderNote("briarwood-golf", note);
+    await screen.findByRole("heading", { name: "Quarterly planning" });
+
+    await user.click(trigger());
+    await user.click(await screen.findByRole("menuitem", { name: /Review/ }));
+
+    await waitFor(() => {
+      expect(invokedCommands()).toContain("set_note_category");
+    });
+    expect(invoke).toHaveBeenCalledWith("set_note_category", {
+      input: { id: "n_a1b2c3", category: "review" },
+    });
+    // Nothing optimistic: the command broadcasts `vault:changed` and the
+    // refetch that follows is the truth, so the trigger still reads the value
+    // this render was given.
+    expect(trigger()).toHaveTextContent("Client");
+  });
+
+  it("does not call the backend for the kind the note already has", async () => {
+    const user = userEvent.setup();
+    renderNote("briarwood-golf", meeting({ category: "client" }));
+    await screen.findByRole("heading", { name: "Quarterly planning" });
+
+    await user.click(trigger());
+    await user.click(await screen.findByRole("menuitem", { name: /Client/ }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole("menu")).toBeNull();
+    });
+    expect(invokedCommands()).not.toContain("set_note_category");
+  });
+
+  it("surfaces a refused correction and leaves the note alone", async () => {
+    const user = userEvent.setup();
+    onCommand("set_note_category", () => {
+      throw "Couldn't change this meeting's kind. The note is unchanged; try again.";
+    });
+    renderNote("briarwood-golf", meeting({ category: "client" }));
+    await screen.findByRole("heading", { name: "Quarterly planning" });
+
+    await user.click(trigger());
+    await user.click(await screen.findByRole("menuitem", { name: /Review/ }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(
+      "Couldn't change this meeting's kind. The note is unchanged; try again.",
+    );
+    expect(trigger()).toHaveTextContent("Client");
+  });
+
+  it("offers no kind row on a note that is not a meeting", async () => {
+    renderNote(
+      "briarwood-golf",
+      makeNote({ id: "n_d4e5f6", title: "An idea", project: "briarwood-golf", type: "note" }),
+    );
+    await screen.findByRole("heading", { name: "An idea" });
+
+    expect(screen.queryByText("Meeting kind")).toBeNull();
+  });
+
+  it("reads as plain text while composing, where a rewrite would race the save", async () => {
+    const user = userEvent.setup();
+    renderNote("briarwood-golf", meeting({ category: "review" }));
+    await screen.findByRole("heading", { name: "Quarterly planning" });
+
+    await user.click(screen.getByRole("button", { name: "Edit" }));
+
+    const rail = await screen.findByRole("complementary", { name: "Note details" });
+    expect(within(rail).getByText("Review")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: 'Change the kind of "Quarterly planning"' }),
+    ).toBeNull();
   });
 });

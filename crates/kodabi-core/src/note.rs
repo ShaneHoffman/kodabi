@@ -5,8 +5,9 @@
 //! and free of lock-in.
 //!
 //! This module is the schema's first real consumer: it emits the frontmatter
-//! keys in their locked canonical order — `id, type, title, project, date,
-//! tags, source, confidence` — with the field-presence rules the schema
+//! keys in their locked canonical order — `id, type, category, tracking, title,
+//! project, date, tags, source, confidence, category_confidence` — with the
+//! field-presence rules the schema
 //! specifies, and round-trips (`struct → md → struct`). The frontmatter fields
 //! mirror the MCP `NoteSummary` shape (`docs/MCP_TOOL_SURFACE.md`); the two
 //! specs must stay in agreement.
@@ -229,6 +230,112 @@ impl NoteType {
                 format!("type {other:?} must be one of meeting | note | chat"),
             )),
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// MeetingCategory
+// ---------------------------------------------------------------------------
+
+/// The closed set of meeting genres (`docs/FRONTMATTER_SCHEMA.md`) — the second
+/// facet beside [`NoteType`], answering "what kind of meeting was this" rather
+/// than "what kind of document is this".
+///
+/// Closed on purpose: the classifier picks from a fixed list, so its answer is
+/// checkable and a corrected value means the same thing next week. The wire
+/// strings are the frontmatter spellings and the only place a rename has to
+/// happen — [`MeetingCategory::ALL`] feeds every enumeration (the distill
+/// prompt's contract, the settings surface, the validator's drift check), so a
+/// list that drifts from this enum fails a test rather than shipping.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MeetingCategory {
+    Standup,
+    OneOnOne,
+    Client,
+    WorkingSession,
+    Review,
+    AllHands,
+    Observer,
+}
+
+impl MeetingCategory {
+    /// Every category, in the order every surface offers them.
+    pub const ALL: [MeetingCategory; 7] = [
+        MeetingCategory::Standup,
+        MeetingCategory::OneOnOne,
+        MeetingCategory::Client,
+        MeetingCategory::WorkingSession,
+        MeetingCategory::Review,
+        MeetingCategory::AllHands,
+        MeetingCategory::Observer,
+    ];
+
+    /// The frontmatter spelling of this category.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MeetingCategory::Standup => "standup",
+            MeetingCategory::OneOnOne => "one-on-one",
+            MeetingCategory::Client => "client",
+            MeetingCategory::WorkingSession => "working-session",
+            MeetingCategory::Review => "review",
+            MeetingCategory::AllHands => "all-hands",
+            MeetingCategory::Observer => "observer",
+        }
+    }
+
+    /// Parses the frontmatter spelling; rejects anything outside the closed set
+    /// (including wrong case like `Standup`). Strict because a stored value is
+    /// either one of ours or a mistake worth naming.
+    pub fn parse(s: &str) -> Result<Self> {
+        MeetingCategory::ALL
+            .into_iter()
+            .find(|category| category.as_str() == s)
+            .ok_or_else(|| {
+                invalid(
+                    "category",
+                    format!(
+                        "category {s:?} must be one of {}",
+                        MeetingCategory::ALL
+                            .iter()
+                            .map(|c| c.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    ),
+                )
+            })
+    }
+
+    /// Parses a *model-authored* spelling leniently: surrounding whitespace and
+    /// letter case are forgiven, and anything still unrecognized is `None`
+    /// rather than an error.
+    ///
+    /// The distill pass must never fail a whole meeting over one hallucinated
+    /// classification — an unusable category is dropped and the note simply
+    /// carries none, exactly as an unusable tag is dropped. Frontmatter on disk
+    /// gets the strict [`MeetingCategory::parse`] instead.
+    pub fn parse_model(raw: &str) -> Option<Self> {
+        let normalized = raw.trim().to_ascii_lowercase();
+        MeetingCategory::ALL
+            .into_iter()
+            .find(|category| category.as_str() == normalized)
+    }
+}
+
+impl serde::Serialize for MeetingCategory {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MeetingCategory {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        MeetingCategory::parse(&raw).map_err(serde::de::Error::custom)
     }
 }
 
@@ -488,6 +595,23 @@ pub struct Note {
     /// 40-char filename slug. `None` for a legacy or hand-made note that never
     /// wrote the key — the display layer then de-slugs the filename stem.
     pub title: Option<String>,
+    /// The meeting's genre. `Some` only on a `meeting` note (enforced by
+    /// [`Note::validate`]); `None` on a meeting nothing has classified yet.
+    pub category: Option<MeetingCategory>,
+    /// How strongly the distill pass believed its own [`Note::category`] guess.
+    /// Present only alongside a machine-set category: a human correction stores
+    /// the category and **clears** this, exactly as a hand-filed note carries a
+    /// project with no routing `confidence`.
+    pub category_confidence: Option<f64>,
+    /// The per-meeting commitment-tracking override, or `None` to inherit (the
+    /// category's default, then the global default of
+    /// [`crate::ledger::EnrollmentMode::Tracked`] — see
+    /// [`crate::ledger::effective_mode`]).
+    ///
+    /// This lives in frontmatter rather than ledger state because it is a
+    /// judgement about the *note*, so it belongs with the note: it survives a
+    /// re-route, a vault rebuild and a sync to another machine for free.
+    pub tracking: Option<crate::ledger::EnrollmentMode>,
     pub routing: Routing,
     /// ISO 8601, stored **verbatim** — a full RFC 3339 timestamp with offset
     /// when a time is known, or a date-only `YYYY-MM-DD` otherwise. Never
@@ -517,6 +641,9 @@ impl Note {
             id,
             note_type,
             title: None,
+            category: None,
+            category_confidence: None,
+            tracking: None,
             routing,
             date: date.into(),
             tags,
@@ -539,6 +666,33 @@ impl Note {
         self
     }
 
+    /// Sets the meeting genre and the classifier's confidence in it, then
+    /// re-validates (a category belongs only to a `meeting`, and a confidence
+    /// only alongside a category). Fallible where [`Note::with_title`] is not,
+    /// because both of those are cross-field rules `new` cannot see.
+    ///
+    /// Pass `None` for `confidence` when a *human* set the category: a
+    /// correction is a fact, not an estimate.
+    pub fn with_category(
+        mut self,
+        category: Option<MeetingCategory>,
+        confidence: Option<f64>,
+    ) -> Result<Self> {
+        self.category = category;
+        self.category_confidence = confidence;
+        self.validate()?;
+        Ok(self)
+    }
+
+    /// Sets (or with `None` clears) the per-meeting tracking override. Clearing
+    /// removes the key entirely, which reads as "inherit" — deliberately
+    /// indistinguishable from never having set one.
+    #[must_use]
+    pub fn with_tracking(mut self, tracking: Option<crate::ledger::EnrollmentMode>) -> Self {
+        self.tracking = tracking;
+        self
+    }
+
     /// Applies an edit, preserving `id`, `source`, and routing (project +
     /// confidence) verbatim and replacing only the editable fields; the result
     /// is re-validated. This is the edit path's preservation contract — it
@@ -551,6 +705,13 @@ impl Note {
         // creation slug either way: renaming it would break the note↔source
         // pairing and every link to the old path.
         let title = edit.title.or(self.title);
+        // The classification facets are not editable fields, so they carry over
+        // verbatim — except when the edit changes the note out of `meeting`, in
+        // which case a category would be invalid rather than merely stale.
+        let keeps_category = edit.note_type == NoteType::Meeting;
+        let category = keeps_category.then_some(self.category).flatten();
+        let category_confidence = keeps_category.then_some(self.category_confidence).flatten();
+        let tracking = self.tracking;
         Note::new(
             self.id,
             edit.note_type,
@@ -560,7 +721,8 @@ impl Note {
             self.source,
             edit.body,
         )
-        .map(|note| note.with_title(title))
+        .map(|note| note.with_title(title).with_tracking(tracking))
+        .and_then(|note| note.with_category(category, category_confidence))
     }
 
     /// Checks every field against the schema. The type of each field already
@@ -591,6 +753,29 @@ impl Note {
         if let Source::RawArtifact(path) = &self.source {
             validate_raw_artifact(path)?;
         }
+        if self.category.is_some() && self.note_type != NoteType::Meeting {
+            return Err(invalid(
+                "category",
+                format!(
+                    "a category belongs to a meeting; this note is type {}",
+                    self.note_type.as_str()
+                ),
+            ));
+        }
+        if let Some(confidence) = self.category_confidence {
+            if self.category.is_none() {
+                return Err(invalid(
+                    "category_confidence",
+                    "category_confidence needs the category it scores",
+                ));
+            }
+            if !confidence.is_finite() || !(0.0..=1.0).contains(&confidence) {
+                return Err(invalid(
+                    "category_confidence",
+                    format!("category_confidence {confidence} must be within 0.0..=1.0"),
+                ));
+            }
+        }
         Ok(())
     }
 
@@ -604,6 +789,15 @@ impl Note {
         // `true`, or one containing `: `) round-trips as a string.
         let _ = writeln!(fm, "id: {}", self.id);
         let _ = writeln!(fm, "type: {}", self.note_type.as_str());
+        // `category` and `tracking` refine `type` (which kind of meeting, and
+        // whether it feeds the ledger), so they sit with it. Both are closed
+        // enums, hence plain-safe and emitted raw like `type` itself.
+        if let Some(category) = &self.category {
+            let _ = writeln!(fm, "category: {}", category.as_str());
+        }
+        if let Some(tracking) = self.tracking {
+            let _ = writeln!(fm, "tracking: {}", tracking.as_frontmatter_str());
+        }
         // `title` is optional; when present it sits after `type` in the
         // canonical order and goes through the YAML serializer so a value
         // needing quotes (a colon, a leading `[`) round-trips as a string.
@@ -625,6 +819,12 @@ impl Note {
         let _ = writeln!(fm, "source: {}", emit_scalar_str(self.source.as_yaml()));
         if let Some(confidence) = self.routing.confidence() {
             let _ = writeln!(fm, "confidence: {}", emit_scalar_f64(confidence));
+        }
+        // `category_confidence` trails last, beside the routing `confidence` it
+        // mirrors: the machine-uncertainty appendix, after every field a human
+        // reads first.
+        if let Some(confidence) = self.category_confidence {
+            let _ = writeln!(fm, "category_confidence: {}", emit_scalar_f64(confidence));
         }
         fm.push_str("---\n");
 
@@ -659,9 +859,29 @@ impl Note {
             .collect::<Result<Vec<_>>>()?;
         let source = Source::parse(&raw.source)?;
         let routing = Routing::from_project_and_confidence(raw.project, raw.confidence)?;
+        let category = raw
+            .category
+            .as_deref()
+            .map(MeetingCategory::parse)
+            .transpose()?;
+        let tracking = raw
+            .tracking
+            .as_deref()
+            .map(crate::ledger::EnrollmentMode::parse_frontmatter)
+            .transpose()
+            .map_err(|_| {
+                invalid(
+                    "tracking",
+                    format!(
+                        "tracking {:?} must be one of tracked | context-only",
+                        raw.tracking.unwrap_or_default()
+                    ),
+                )
+            })?;
 
         Note::new(id, note_type, routing, raw.date, tags, source, body)
-            .map(|note| note.with_title(raw.title))
+            .map(|note| note.with_title(raw.title).with_tracking(tracking))
+            .and_then(|note| note.with_category(category, raw.category_confidence))
     }
 }
 
@@ -675,6 +895,10 @@ struct RawFrontmatter {
     note_type: String,
     #[serde(default)]
     title: Option<String>,
+    #[serde(default)]
+    category: Option<String>,
+    #[serde(default)]
+    tracking: Option<String>,
     project: String,
     date: String,
     #[serde(default)]
@@ -682,6 +906,8 @@ struct RawFrontmatter {
     source: String,
     #[serde(default)]
     confidence: Option<f64>,
+    #[serde(default)]
+    category_confidence: Option<f64>,
 }
 
 /// Serializes a single string scalar to its minimal correct YAML form (quoting
@@ -2299,5 +2525,162 @@ contractor shortlist.
             bad_date,
             Err(NoteError::InvalidField { field: "date", .. })
         ));
+    }
+
+    // --- category + tracking ----------------------------------------------
+
+    #[test]
+    fn round_trips_a_classified_meeting() {
+        let note = meeting_note()
+            .with_tracking(Some(crate::ledger::EnrollmentMode::ContextOnly))
+            .with_category(Some(MeetingCategory::OneOnOne), Some(0.82))
+            .unwrap();
+
+        assert_eq!(Note::from_markdown(&note.to_markdown()).unwrap(), note);
+    }
+
+    #[test]
+    fn the_classification_keys_sit_in_canonical_order() {
+        let md = meeting_note()
+            .with_tracking(Some(crate::ledger::EnrollmentMode::Tracked))
+            .with_category(Some(MeetingCategory::WorkingSession), Some(0.5))
+            .unwrap()
+            .to_markdown();
+
+        let position = |key: &str| md.find(key).unwrap_or_else(|| panic!("missing {key}"));
+        assert!(position("type:") < position("category:"));
+        assert!(position("category:") < position("tracking:"));
+        assert!(position("tracking:") < position("title:"));
+        assert!(position("confidence:") < position("category_confidence:"));
+        assert!(md.contains("category: working-session"));
+        assert!(md.contains("tracking: tracked"));
+    }
+
+    #[test]
+    fn an_unclassified_meeting_omits_all_three_keys() {
+        let md = meeting_note().to_markdown();
+
+        for key in ["category:", "tracking:", "category_confidence:"] {
+            assert!(!md.contains(key), "unexpected {key} in\n{md}");
+        }
+    }
+
+    #[test]
+    fn a_category_on_a_non_meeting_is_rejected() {
+        let err = note_inbox()
+            .with_category(Some(MeetingCategory::Standup), None)
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            NoteError::InvalidField {
+                field: "category",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_category_confidence_without_a_category_is_rejected() {
+        let err = meeting_note().with_category(None, Some(0.5)).unwrap_err();
+
+        assert!(matches!(
+            err,
+            NoteError::InvalidField {
+                field: "category_confidence",
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn a_category_confidence_outside_the_range_is_rejected() {
+        for bad in [-0.1, 1.1, f64::NAN] {
+            assert!(
+                meeting_note()
+                    .with_category(Some(MeetingCategory::Client), Some(bad))
+                    .is_err(),
+                "{bad} should be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn frontmatter_parsing_of_the_closed_sets_is_strict() {
+        assert!(MeetingCategory::parse("Standup").is_err());
+        assert!(MeetingCategory::parse("retro").is_err());
+        assert_eq!(
+            MeetingCategory::parse("working-session").unwrap(),
+            MeetingCategory::WorkingSession
+        );
+
+        let md = meeting_note()
+            .to_markdown()
+            .replace("type: meeting\n", "type: meeting\ncategory: retro\n");
+        assert!(Note::from_markdown(&md).is_err());
+
+        let bad_tracking = meeting_note()
+            .to_markdown()
+            .replace("type: meeting\n", "type: meeting\ntracking: context_only\n");
+        assert!(
+            Note::from_markdown(&bad_tracking).is_err(),
+            "frontmatter takes the kebab spelling, not the ledger's snake one"
+        );
+    }
+
+    #[test]
+    fn an_edit_preserves_the_facets_and_drops_a_category_that_stops_applying() {
+        let note = meeting_note()
+            .with_tracking(Some(crate::ledger::EnrollmentMode::ContextOnly))
+            .with_category(Some(MeetingCategory::Review), Some(0.6))
+            .unwrap();
+
+        // An ordinary edit leaves both facets alone.
+        let edited = note
+            .clone()
+            .with_edits(NoteEdit {
+                note_type: NoteType::Meeting,
+                title: None,
+                date: note.date.clone(),
+                tags: note.tags.clone(),
+                body: "Rewritten body.".to_string(),
+            })
+            .unwrap();
+        assert_eq!(edited.category, Some(MeetingCategory::Review));
+        assert_eq!(edited.category_confidence, Some(0.6));
+        assert_eq!(
+            edited.tracking,
+            Some(crate::ledger::EnrollmentMode::ContextOnly)
+        );
+
+        // Editing the note out of `meeting` makes a category invalid rather
+        // than merely stale, so it goes; the tracking override does not, since
+        // a chat feeds the ledger too.
+        let retyped = note
+            .clone()
+            .with_edits(NoteEdit {
+                note_type: NoteType::Note,
+                title: None,
+                date: note.date.clone(),
+                tags: note.tags.clone(),
+                body: "Rewritten body.".to_string(),
+            })
+            .unwrap();
+        assert_eq!(retyped.category, None);
+        assert_eq!(retyped.category_confidence, None);
+        assert_eq!(
+            retyped.tracking,
+            Some(crate::ledger::EnrollmentMode::ContextOnly)
+        );
+    }
+
+    #[test]
+    fn a_model_spelling_is_read_leniently_and_a_stored_one_is_not() {
+        assert_eq!(
+            MeetingCategory::parse_model("  All-Hands "),
+            Some(MeetingCategory::AllHands)
+        );
+        assert_eq!(MeetingCategory::parse_model("retro"), None);
+        assert!(MeetingCategory::parse("  all-hands ").is_err());
     }
 }
