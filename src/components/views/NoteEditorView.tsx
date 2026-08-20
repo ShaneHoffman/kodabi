@@ -344,7 +344,13 @@ function ReadNoteLayout({
             <DetailsPanel note={note} project={project} />
             {/* Renders nothing for a note that extracted no commitments, which
                 is most of them. */}
-            <NoteCommitmentsPanel noteId={note.id} />
+            {/* The mode comes off the note the view already read from disk,
+                not from the panel's own index-backed payload: the file is the
+                source of truth and reaches here first (see the panel's doc). */}
+            <NoteCommitmentsPanel
+              noteId={note.id}
+              contextOnly={note.tracking === "context-only"}
+            />
             {session !== null && (
               <SessionPanel
                 artifacts={session.artifacts}

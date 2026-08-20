@@ -31,10 +31,23 @@ const ITEM_META = "mt-0.5 font-data text-[10px] text-ink-faint tabular-nums";
  * Renders nothing at all for a note with no extracted lines and no override,
  * which is most notes: a panel that says "no commitments" on a shopping list is
  * noise, not an empty state.
+ *
+ * `contextOnly` arrives as a prop rather than out of `useNoteCommitments`
+ * because the mode is a frontmatter key: the caller already holds the note as
+ * `read_note` read it off disk, while the panel's own payload derives the mode
+ * from the index row, which the tracking write only reaches through the
+ * background index worker. Reading it back there would let the refetch that
+ * this panel's own switch triggers land before the row is updated, snapping the
+ * switch back to a value the file does not say.
  */
-export function NoteCommitmentsPanel({ noteId }: { noteId: string }) {
-  const { contextOnly, items, response, loading, error } =
-    useNoteCommitments(noteId);
+export function NoteCommitmentsPanel({
+  noteId,
+  contextOnly,
+}: {
+  noteId: string;
+  contextOnly: boolean;
+}) {
+  const { items, response, loading, error } = useNoteCommitments(noteId);
   const [flipping, setFlipping] = useState(false);
   const [pendingItem, setPendingItem] = useState<string | null>(null);
   const [panelError, setPanelError] = useState<string | null>(null);

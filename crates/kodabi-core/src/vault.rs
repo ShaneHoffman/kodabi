@@ -661,17 +661,29 @@ pub fn file_note_to_project(
         (new_path, true)
     };
 
-    // ⑧ On a move out of a real project, first drop the note's stale entry from
-    // that project's log, *before* writing the new one — so if the write below
-    // fails the note is left with no correction record (the documented
-    // "signal may be missing" mode) rather than one in two logs at once. Skip
-    // the save when nothing was removed, so no empty log file sprouts.
+    // ⑧ On a move out of a real project, first drop the note's stale entries
+    // from that project's per-project logs, *before* writing the new one — so
+    // if the write below fails the note is left with no correction record (the
+    // documented "signal may be missing" mode) rather than one in two logs at
+    // once. Skip each save when nothing was removed, so no empty log file
+    // sprouts.
     if moved {
         if let Some(prev) = &previous_project {
             let prev_dir = note::project_dir(vault_root, prev);
             let mut prev_log = RoutingExamples::load(&prev_dir).map_err(routing_example_err)?;
             if prev_log.remove(id.as_str()) {
                 prev_log.save(&prev_dir).map_err(routing_example_err)?;
+            }
+            // The category example goes for the same reason. It teaches "a
+            // meeting titled like this, *in this project*, is genre G", and the
+            // note it was drawn from has left — so the claim is no longer about
+            // anything here, yet `distill` would keep rendering it into every
+            // future prompt for this folder. Nothing is written into the target:
+            // recording an example is what `set_note_category` does, and the
+            // correction that made this one was about the old folder.
+            let mut prev_categories = CategoryFile::load(&prev_dir).map_err(category_file_err)?;
+            if prev_categories.remove(id.as_str()) {
+                prev_categories.save(&prev_dir).map_err(category_file_err)?;
             }
         }
     }
@@ -5167,6 +5179,51 @@ mod tests {
         assert_eq!(reread.title.as_deref(), Some("Quarterly review"));
         assert_eq!(reread.category, Some(MeetingCategory::Review));
         assert_eq!(reread.tracking, Some(ledger::EnrollmentMode::ContextOnly));
+    }
+
+    /// The category example is a claim about a *project*, so it cannot outlive
+    /// the note's membership of one. Left behind, it would be rendered into
+    /// every future distill prompt for the old folder as guidance drawn from a
+    /// meeting that is no longer in it — the same reason the routing log drops
+    /// its entry on a move, one line above it.
+    #[test]
+    fn a_reroute_drops_the_notes_category_example_from_the_old_project() {
+        let vault = tempdir().unwrap();
+        write(
+            vault.path(),
+            "Growth",
+            "n_seedbb",
+            "2026-07-01",
+            Some("seed"),
+        );
+        write_classified_meeting(vault.path(), "Ops", "n_catfff", "Weekly sync", None, None);
+        let id = NoteId::parse("n_catfff").unwrap();
+        set_note_category(vault.path(), &id, MeetingCategory::Client).unwrap();
+        assert_eq!(
+            CategoryFile::load(&vault.path().join("Ops"))
+                .unwrap()
+                .examples()
+                .len(),
+            1
+        );
+
+        file_note_to_project(vault.path(), &id, "Growth", &FileNoteOptions::default())
+            .unwrap()
+            .expect("the note exists");
+
+        assert!(
+            CategoryFile::load(&vault.path().join("Ops"))
+                .unwrap()
+                .examples()
+                .is_empty(),
+            "the old project keeps no example for a note that has left it"
+        );
+        // And nothing is invented in the new home: recording an example is what
+        // a correction does, and none was made here.
+        assert!(CategoryFile::load(&vault.path().join("Growth"))
+            .unwrap()
+            .examples()
+            .is_empty());
     }
 
     #[test]

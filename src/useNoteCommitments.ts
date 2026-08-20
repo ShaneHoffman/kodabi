@@ -80,12 +80,20 @@ export function trackCommitmentItem(
 }
 
 /**
- * One note's tracking mode and the enrollment status of each of its lines.
+ * The enrollment status of each of a note's extracted lines.
  *
  * Refetches on the shared vault bus, which `useLedgerChangedBridge` relays
  * `ledger:changed` onto, so flipping the mode here or untracking an entry in
  * the Commitments view both land without either surface knowing about the
  * other.
+ *
+ * **The mode itself is deliberately not returned.** `context_only` on the
+ * payload is derived from the note's index row, which the tracking write
+ * updates through the background index worker — so a refetch triggered by that
+ * write's own broadcast can, and under any index load does, read the row from
+ * before it. The judgement lives in the note's frontmatter (`tracking:`), and
+ * `read_note` hands the view that value straight from the file, so callers pass
+ * it down instead of reading the cache back.
  */
 export function useNoteCommitments(noteId: string) {
   const { data, loading, error } = useVaultQuery(
@@ -94,7 +102,6 @@ export function useNoteCommitments(noteId: string) {
   );
 
   return {
-    contextOnly: data?.context_only ?? false,
     items: data?.items ?? [],
     /** The response object itself, for pruning per-row state during render. */
     response: data,
