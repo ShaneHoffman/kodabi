@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NoteEditorView } from "./NoteEditorView";
 import { INITIAL_VIEW, NavigationContext, type View } from "../../useNavigation";
 import type { NoteDetail } from "../../useNotes";
+import type { CategorySettings } from "../../useSettings";
 import { invoke, invokedCommands, onCommand, resetTauriMocks } from "../../test/tauri";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
@@ -774,5 +775,118 @@ describe("NoteEditorView meeting kind", () => {
     expect(
       screen.queryByRole("button", { name: 'Change the kind of "Quarterly planning"' }),
     ).toBeNull();
+  });
+});
+
+describe("NoteEditorView enrollment inheritance", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  /** The seven kinds, all inheriting: the shape every settings file in the
+   * field has, so this is the case the built-in defaults have to reach. */
+  const INHERITING: CategorySettings = {
+    standup: { enrollment_default: null },
+    one_on_one: { enrollment_default: null },
+    client: { enrollment_default: null },
+    working_session: { enrollment_default: null },
+    review: { enrollment_default: null },
+    all_hands: { enrollment_default: null },
+    observer: { enrollment_default: null },
+  };
+
+  function serveSettings(categories = INHERITING): void {
+    onCommand("get_settings", () => ({
+      consent_acknowledged: true,
+      retention: { policy: "keep_all" },
+      overlay: { manual_captures: false, auto_captures: true },
+      appearance: { theme: "system" },
+      mic_check: null,
+      ledger: { aging_after_days: 14, stale_after_days: 30, conversation_autoclose: 0.8 },
+      categories,
+    }));
+    // One enrolled line, so the panel renders whichever way the mode resolves:
+    // a tracked meeting with nothing extracted shows no panel at all, which
+    // would make the two "outranks" cases pass for the wrong reason.
+    onCommand("list_note_commitments", () => ({
+      context_only: false,
+      items: [
+        {
+          item_id: "a_111111",
+          description: "book the venue",
+          owner: "You",
+          due_date: null,
+          done: false,
+          direction: "mine",
+          tracking: "tracked",
+          untracked_via: null,
+          entry_id: "le_aaaaaaaaaaaa",
+          entry_state: "open",
+        },
+      ],
+    }));
+  }
+
+  it("reads an unset tracking key as the meeting kind's default", async () => {
+    // An observer meeting nobody has judged: absent `tracking:` means "whatever
+    // my kind says", not "tracked", so the switch has to show the mode the
+    // ledger is actually gating with.
+    serveSettings();
+    renderNote(
+      "briarwood-golf",
+      makeNote({
+        id: "n_a1b2c3",
+        title: "Quarterly planning",
+        project: "briarwood-golf",
+        type: "meeting",
+        category: "observer",
+      }),
+    );
+
+    expect(await screen.findByRole("switch", { name: "Context only" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
+  it("lets the meeting's own switch outrank its kind", async () => {
+    serveSettings();
+    renderNote(
+      "briarwood-golf",
+      makeNote({
+        id: "n_a1b2c3",
+        title: "Quarterly planning",
+        project: "briarwood-golf",
+        type: "meeting",
+        category: "observer",
+        tracking: "tracked",
+      }),
+    );
+
+    // "Track this all-hands in full" is a decision about this meeting, and it
+    // wins over the genre both here and in the gate.
+    expect(await screen.findByRole("switch", { name: "Context only" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
+  });
+
+  it("lets a stored preference overrule the built-in default", async () => {
+    serveSettings({ ...INHERITING, observer: { enrollment_default: "tracked" } });
+    renderNote(
+      "briarwood-golf",
+      makeNote({
+        id: "n_a1b2c3",
+        title: "Quarterly planning",
+        project: "briarwood-golf",
+        type: "meeting",
+        category: "observer",
+      }),
+    );
+
+    expect(await screen.findByRole("switch", { name: "Context only" })).toHaveAttribute(
+      "aria-checked",
+      "false",
+    );
   });
 });

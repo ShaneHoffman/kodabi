@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { backendCopy } from "./errorCopy";
 import { SETTINGS_CHANGED_EVENT } from "./events";
+import type { NoteCategory } from "./useNotes";
 
 /*
  * The settings wire shapes, mirroring the Rust DTOs in
@@ -62,9 +63,10 @@ export type LedgerSettings = {
   conversation_autoclose: number;
 };
 
-/** Mirrors `CategoryPrefs` in `crates/kodabi-core/src/settings.rs`. Stored, and
- * deliberately not yet read: `enrollment_default` is the `category_default`
- * slot in the ledger's `effective_mode`, which the next change wires up. */
+/** Mirrors `CategoryPrefs` in `crates/kodabi-core/src/settings.rs`.
+ * `enrollment_default` fills the `category_default` slot in the ledger's
+ * `effective_mode`; `null` means the genre inherits the built-in default below
+ * rather than meaning "tracked". */
 export type CategoryPrefs = {
   enrollment_default: "tracked" | "context_only" | null;
 };
@@ -79,6 +81,37 @@ export type CategorySettings = {
   review: CategoryPrefs;
   all_hands: CategoryPrefs;
   observer: CategoryPrefs;
+};
+
+/** Which meeting kind a per-kind preference belongs to: the settings struct's
+ * snake_case key, from the kebab-case spelling the frontmatter and the wire
+ * use. Both spellings are the schema's, and this is the one place they meet on
+ * this side, so a view never writes the mapping out again. */
+export const CATEGORY_SETTING_KEYS: Record<NoteCategory, keyof CategorySettings> = {
+  standup: "standup",
+  "one-on-one": "one_on_one",
+  client: "client",
+  "working-session": "working_session",
+  review: "review",
+  "all-hands": "all_hands",
+  observer: "observer",
+};
+
+/** What each genre enrolls when the user has not chosen. Mirrors
+ * `kodabi_core::ledger::builtin_category_default`, which is the authority: two
+ * genres are attended rather than transacted, so they contribute only what was
+ * asked of you directly. Kept here so Settings can name the inherited value. */
+export const BUILTIN_CATEGORY_DEFAULTS: Record<
+  keyof CategorySettings,
+  "tracked" | "context_only"
+> = {
+  standup: "tracked",
+  one_on_one: "tracked",
+  client: "tracked",
+  working_session: "tracked",
+  review: "tracked",
+  all_hands: "context_only",
+  observer: "context_only",
 };
 
 export type Settings = {
@@ -166,6 +199,14 @@ export function setAppearance(appearance: AppearanceSettings): Promise<Settings>
  * Commitments view re-reads its tiers rather than keeping the old ones. */
 export function setLedgerTuning(ledger: LedgerSettings): Promise<Settings> {
   return invoke<Settings>("set_ledger_tuning", { ledger });
+}
+
+/** Sets the per-genre enrollment defaults. Prospective by design: the backend
+ * emits only `settings:changed`, because nothing in the ledger has moved yet.
+ * Existing meetings are re-evaluated when one is recategorized or its own
+ * tracking switch is flipped. */
+export function setCategoryPrefs(categories: CategorySettings): Promise<Settings> {
+  return invoke<Settings>("set_category_prefs", { categories });
 }
 
 export function acknowledgeConsent(retention: RetentionPolicy): Promise<Settings> {

@@ -60,11 +60,12 @@ use kodabi_core::ledger::{
 };
 use kodabi_core::llm::{HeadlessClaude, LlmRequest, LlmRunError};
 use kodabi_core::meeting;
-use kodabi_core::note::{Note, NoteType, Routing, INBOX};
+use kodabi_core::note::{MeetingCategory, Note, NoteType, Routing, INBOX};
 use kodabi_core::raw_session::{self, TranscriptSegment};
 use kodabi_core::routing::{RoutingConfig, DEFAULT_THRESHOLD};
 use kodabi_core::routing_examples::{RoutingExample, RoutingExamples};
 use kodabi_core::sessions;
+use kodabi_core::settings::CategorySettings;
 use kodabi_core::transcription::Channel;
 use kodabi_core::vault;
 
@@ -1057,6 +1058,7 @@ fn a_later_meeting_closes_a_commitment_the_earlier_one_recorded() {
             items: &first_facts.action_items,
             link_hints: &[],
             note_override: None,
+            category_default: None,
             now: "2026-08-12T12:00:00Z",
         })
         .unwrap();
@@ -1129,6 +1131,10 @@ fn a_later_meeting_closes_a_commitment_the_earlier_one_recorded() {
             items: &second_facts.action_items,
             updates: &second.ledger_updates,
             note_override: second_listed.note.tracking,
+            category_default: kodabi_core::ledger::category_default_for(
+                second_listed.note.category,
+                &kodabi_core::settings::CategorySettings::default(),
+            ),
         },
         kodabi_core::ledger::DEFAULT_CONVERSATION_AUTOCLOSE,
         "2026-08-19T12:00:00Z",
@@ -1184,4 +1190,130 @@ fn a_later_meeting_closes_a_commitment_the_earlier_one_recorded() {
         .find(|item| item.id == item_id)
         .expect("the id survives the tick and the annotation");
     assert!(same.done);
+}
+
+/// Recategorizing a meeting re-evaluates the commitments it already produced,
+/// in both directions.
+///
+/// The composition the unit tests cannot reach: a real note file whose
+/// `category:` the user corrects, the settings lookup that turns that genre into
+/// a mode, and the two halves the command layer runs in order — the retro
+/// untracks the strays, and the ordinary idempotent re-sync enrols what the
+/// gated pass never created.
+#[test]
+fn recategorizing_a_meeting_re_evaluates_what_it_already_put_in_the_ledger() {
+    let vault = two_project_vault();
+    let root = vault.path();
+    let session = write_session(root, instant_on(12), "kickoff", &briarwood_segments());
+    let decided = RefCell::new(None);
+    let distilled = distill::distill_session(
+        &MockRunner(briarwood_output()),
+        root,
+        &session,
+        &recording_route(root, &decided),
+        &no_open_entries,
+    )
+    .unwrap();
+
+    // The distill classified it a working session, which tracks in full.
+    let listed = vault::find_note_anywhere(root, &distilled.id)
+        .unwrap()
+        .unwrap()
+        .1;
+    assert_eq!(listed.note.category, Some(MeetingCategory::WorkingSession));
+
+    let categories = CategorySettings::default();
+    let facts = meeting::meeting_facts_for(&listed.note, root).unwrap();
+    let date_utc = normalize_date_to_utc(&listed.note.date).unwrap();
+    let sync_under = |ledger: &mut Ledger, note: &kodabi_core::note::Note| {
+        ledger
+            .sync_note_items(&NoteSync {
+                note_id: distilled.id.as_str(),
+                project: "Briarwood Golf",
+                note_date_utc: &date_utc,
+                items: &facts.action_items,
+                link_hints: &[],
+                note_override: note.tracking,
+                category_default: ledger::category_default_for(note.category, &categories),
+                now: "2026-08-12T12:00:00Z",
+            })
+            .unwrap()
+    };
+
+    let mut ledger = Ledger::open_in_memory().unwrap();
+    let created = sync_under(&mut ledger, &listed.note);
+    assert_eq!(created.created.len(), 2, "a working session tracks in full");
+    assert_eq!(created.not_enrolled, 0);
+
+    // --- The correction: this was a room I sat in ---------------------------
+    let recategorized = vault::set_note_category(root, &distilled.id, MeetingCategory::Observer)
+        .unwrap()
+        .unwrap();
+    assert_eq!(recategorized.note.category, Some(MeetingCategory::Observer));
+    // Nobody pinned this meeting's own tracking, so its genre decides.
+    assert_eq!(recategorized.note.tracking, None);
+    let mode = ledger::effective_mode(
+        recategorized.note.tracking,
+        ledger::category_default_for(recategorized.note.category, &categories),
+    );
+    assert_eq!(mode, ledger::EnrollmentMode::ContextOnly);
+
+    // Half one: the strays leave. Neither line is mine (Jane's, and one nobody
+    // claimed), so an observer meeting has no business tracking either.
+    let outcome = ledger
+        .retro_apply_note_tracking(
+            distilled.id.as_str(),
+            "Briarwood Golf",
+            mode == ledger::EnrollmentMode::ContextOnly,
+            ledger::RetroSource::Category,
+            "2026-08-19T12:00:00Z",
+        )
+        .unwrap();
+    assert_eq!(outcome.untracked.len(), 2);
+    // Half two: the re-sync that follows the write mints nothing new. It does
+    // not report them gated either, and that is the untracked-keeps-its-refs
+    // invariant showing through: their refs are still active, so the lines land
+    // in tier 1 as present rather than reaching the create leg at all. That is
+    // exactly what stops a re-sync minting a second entry for each of them.
+    let after = sync_under(&mut ledger, &recategorized.note);
+    assert!(
+        after.created.is_empty(),
+        "the gate keeps them out on re-sync"
+    );
+    assert_eq!(after.unchanged, 2);
+    let live = ledger
+        .list_entries(&EntryFilter {
+            states: Some(vec![EntryState::Open]),
+            ..EntryFilter::default()
+        })
+        .unwrap();
+    assert!(live.is_empty(), "nothing of an observer meeting's is live");
+
+    // --- And back again, which has to restore exactly what it removed -------
+    let restored = vault::set_note_category(root, &distilled.id, MeetingCategory::Client)
+        .unwrap()
+        .unwrap();
+    let back = ledger
+        .retro_apply_note_tracking(
+            distilled.id.as_str(),
+            "Briarwood Golf",
+            false,
+            ledger::RetroSource::Category,
+            "2026-08-20T12:00:00Z",
+        )
+        .unwrap();
+    assert_eq!(back.retracked.len(), 2);
+    let after_back = sync_under(&mut ledger, &restored.note);
+    assert_eq!(
+        after_back.created.len(),
+        0,
+        "revived, never minted a second time"
+    );
+    let live = ledger
+        .list_entries(&EntryFilter {
+            states: Some(vec![EntryState::Open]),
+            ..EntryFilter::default()
+        })
+        .unwrap();
+    assert_eq!(live.len(), 2);
 }

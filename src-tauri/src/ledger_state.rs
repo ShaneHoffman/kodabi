@@ -38,7 +38,8 @@ use chrono::{SecondsFormat, Utc};
 use kodabi_core::distill::LedgerUpdateDraft;
 use kodabi_core::ledger::{
     self, AppliedUpdates, ClosedVia, DistillFollowUp, EnrollmentMode, EntryDetail, EntryFilter,
-    Evidence, Ledger, LedgerEntry, NoteSync, NoteTrackingOutcome, UntrackedVia, LEDGER_DB_FILE,
+    Evidence, Ledger, LedgerEntry, NoteSync, NoteTrackingOutcome, RetroSource, UntrackedVia,
+    LEDGER_DB_FILE,
 };
 use kodabi_core::meeting::ActionItemFact;
 use kodabi_core::note::INBOX;
@@ -81,6 +82,14 @@ pub struct NoteFacts {
     /// from the index row the facts were derived from, which is itself read
     /// from the note file — see `ledger::sync::NoteSync::note_override`.
     pub note_override: Option<EnrollmentMode>,
+    /// The default this note's meeting category carries, resolved against the
+    /// user's settings before the facts left the shell — see
+    /// `ledger::sync::NoteSync::category_default`.
+    ///
+    /// Resolved here rather than in the worker because the worker holds no
+    /// `AppHandle` and so cannot reach `SettingsState`; this is the same shape
+    /// as `LedgerJob::DistillFollowUp`'s `autoclose_threshold`.
+    pub category_default: Option<EnrollmentMode>,
 }
 
 /// A mutation a person asked for, addressed to one entry.
@@ -179,13 +188,15 @@ enum LedgerJob {
         note_id: String,
         reply: Sender<ledger::Result<Vec<EntryDetail>>>,
     },
-    /// Re-evaluate the entries a note already produced, after its frontmatter
-    /// tracking override changed. The vault write happens first, in the
-    /// command; this is only its consequence.
+    /// Re-evaluate the entries a note already produced, after its effective
+    /// enrollment mode changed — its frontmatter override was flipped, or it was
+    /// recategorized. The vault write happens first, in the command; this is
+    /// only its consequence.
     RetroApplyNoteTracking {
         note_id: String,
         project: String,
         context_only: bool,
+        source: RetroSource,
         reply: Sender<ledger::Result<NoteTrackingOutcome>>,
     },
     /// Promote one extracted line by hand, whatever the mode says.
@@ -216,6 +227,9 @@ pub struct OwnedFollowUp {
     /// The note's frontmatter tracking override, taken from the `Note` the
     /// distill just wrote.
     pub note_override: Option<EnrollmentMode>,
+    /// The default that note's meeting category resolved to, read from the
+    /// same `Note` against the user's settings.
+    pub category_default: Option<EnrollmentMode>,
 }
 
 /// A handle to the background ledger worker, held as Tauri managed state.
@@ -314,18 +328,21 @@ impl LedgerClient {
         self.request(|reply| LedgerJob::NoteEntries { note_id, reply })
     }
 
-    /// Re-evaluates the entries a note already produced, after its frontmatter
-    /// tracking override changed. The caller writes the note first.
+    /// Re-evaluates the entries a note already produced, after its effective
+    /// enrollment mode changed. The caller writes the note first, and passes the
+    /// *effective* mode plus which half of the chain decided it.
     pub fn retro_apply_note_tracking(
         &self,
         note_id: String,
         project: String,
         context_only: bool,
+        source: RetroSource,
     ) -> std::result::Result<NoteTrackingOutcome, LedgerCallError> {
         self.request(|reply| LedgerJob::RetroApplyNoteTracking {
             note_id,
             project,
             context_only,
+            source,
             reply,
         })
     }
@@ -648,6 +665,7 @@ fn handle_job(ledger: &mut Ledger, vault_root: Option<&Path>, job: LedgerJob) ->
                     items: &follow_up.items,
                     updates: &follow_up.updates,
                     note_override: follow_up.note_override,
+                    category_default: follow_up.category_default,
                 },
                 autoclose_threshold,
                 &now,
@@ -661,10 +679,12 @@ fn handle_job(ledger: &mut Ledger, vault_root: Option<&Path>, job: LedgerJob) ->
             note_id,
             project,
             context_only,
+            source,
             reply,
         } => {
             let now = now_utc();
-            let result = ledger.retro_apply_note_tracking(&note_id, &project, context_only, &now);
+            let result =
+                ledger.retro_apply_note_tracking(&note_id, &project, context_only, source, &now);
             let _ = reply.send(result);
         }
         LedgerJob::TrackItem { request, reply } => {
@@ -764,6 +784,7 @@ fn sync_one(ledger: &mut Ledger, facts: &NoteFacts) {
         items: &facts.items,
         link_hints: &[],
         note_override: facts.note_override,
+        category_default: facts.category_default,
         now: &now,
     });
     match result {
@@ -828,6 +849,7 @@ mod tests {
             date_utc: "2026-08-01T00:00:00Z".to_string(),
             items: vec![fact(item, "Priya", description)],
             note_override: None,
+            category_default: None,
         }
     }
 
@@ -974,6 +996,63 @@ mod tests {
     }
 
     #[test]
+    fn a_sync_carrying_a_gating_category_is_gated_the_same_way() {
+        // The category half of the chain travels on the facts exactly as the
+        // override does, resolved by the shell before the job was queued: the
+        // worker holds no `AppHandle` and reads no settings of its own.
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+
+        let mut facts = facts_for("n_a1b2c3", "Ops", "a_111111", "send the deck");
+        facts.category_default = Some(EnrollmentMode::ContextOnly);
+        sender.send(LedgerJob::Sync(Box::new(facts))).unwrap();
+
+        let details = request(&sender, |reply| LedgerJob::ListDetails {
+            filter: EntryFilter::default(),
+            reply,
+        })
+        .unwrap();
+        assert!(
+            details.is_empty(),
+            "an all-hands never enrols someone else's commitment"
+        );
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn a_retro_application_carries_the_source_that_asked_for_it() {
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+        seed_entry(&sender);
+
+        let outcome = request(&sender, |reply| LedgerJob::RetroApplyNoteTracking {
+            note_id: "n_a1b2c3".to_string(),
+            project: "Ops".to_string(),
+            context_only: true,
+            source: RetroSource::Category,
+            reply,
+        })
+        .unwrap();
+        assert_eq!(outcome.untracked.len(), 1);
+
+        let details = request(&sender, |reply| LedgerJob::NoteEntries {
+            note_id: "n_a1b2c3".to_string(),
+            reply,
+        })
+        .unwrap();
+        assert_eq!(
+            details[0].entry.untracked_via,
+            Some(UntrackedVia::Category),
+            "a recategorization says so, so the row can explain itself"
+        );
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
     fn the_worker_answers_the_note_entries_read_and_retro_applies_a_flip() {
         let vault = tempfile::tempdir().unwrap();
         let (sender, worker) = spawn_worker(&vault);
@@ -992,6 +1071,7 @@ mod tests {
             note_id: "n_a1b2c3".to_string(),
             project: "Ops".to_string(),
             context_only: true,
+            source: RetroSource::Override,
             reply,
         })
         .unwrap();
@@ -1399,6 +1479,7 @@ mod tests {
                     quote: None,
                 }],
                 note_override: None,
+                category_default: None,
             }),
             autoclose_threshold: 0.8,
             reply,

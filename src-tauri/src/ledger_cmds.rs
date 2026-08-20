@@ -25,11 +25,11 @@ use std::collections::{BTreeSet, HashMap};
 use chrono::{Duration, Local, SecondsFormat, Utc};
 use kodabi_core::index::ActionItemStatus;
 use kodabi_core::ledger::view::{self, Commitment};
-use kodabi_core::ledger::EnrollmentMode;
 use kodabi_core::ledger::{
     AgingConfig, ClosedVia, EntryDetail, EntryFilter, EntryState, Evidence, LedgerEntry,
     NoteContext,
 };
+use kodabi_core::ledger::{EnrollmentMode, RetroSource};
 use kodabi_core::meeting;
 use kodabi_core::note::{self, NoteId, INBOX};
 use kodabi_core::vault::{self, AnnotateOutcome, ListedNote, SetDoneOutcome};
@@ -135,6 +135,9 @@ pub struct CommitmentSourceDto {
     title: String,
     project: Option<String>,
     path: String,
+    /// The source meeting's genre in its kebab-case wire spelling, or `null`
+    /// where the note carries none.
+    category: Option<String>,
 }
 
 /// One evidence claim. Mirrors [`kodabi_core::ledger::Evidence`].
@@ -166,8 +169,8 @@ pub struct CommitmentEntryDto {
     closed_via: Option<String>,
     review_reason: Option<String>,
     updated_at: String,
-    /// `manual | override`, present only on an untracked entry: what the shelf
-    /// row says about how it left the working set.
+    /// `manual | override | category`, present only on an untracked entry: what
+    /// the shelf row says about how it left the working set.
     untracked_via: Option<String>,
 }
 
@@ -300,6 +303,9 @@ fn commitment_dto(commitment: Commitment) -> CommitmentDto {
             title: source.title,
             project: source.project,
             path: source.path,
+            category: source
+                .category
+                .map(|category| category.as_str().to_string()),
         }),
         evidence: detail
             .evidence
@@ -324,7 +330,7 @@ fn commitment_dto(commitment: Commitment) -> CommitmentDto {
 /// `refused` is what to say when the ledger never opened, and is per-command
 /// because the honest half of that sentence ("your notes are untouched", "this
 /// change wasn't saved") depends on what the command would have done.
-fn ledger_error(cmd: &str, err: LedgerCallError, refused: &str) -> String {
+pub(crate) fn ledger_error(cmd: &str, err: LedgerCallError, refused: &str) -> String {
     match err {
         LedgerCallError::Unavailable => reported(cmd, "commitment ledger unavailable", refused),
         // Deliberately not "nothing was saved": a queued job is not cancelled
@@ -872,13 +878,19 @@ pub async fn list_note_commitments(
     input: NoteCommitmentsInput,
 ) -> Result<NoteCommitmentsDto, String> {
     let (client, index) = handles(&app);
+    let categories = app.state::<SettingsState>().snapshot().categories;
     tauri::async_runtime::spawn_blocking(move || {
         let note_id = input.note_id;
         let details = client
             .note_entries(note_id.clone())
             .map_err(|err| ledger_error("list_note_commitments", err, LEDGER_READ_REFUSED))?;
-        let facts = index.and_then(|index| index.note_facts(&note_id));
-        let mode = facts.as_ref().and_then(|facts| facts.note_override);
+        let facts = index.and_then(|index| index.note_facts(&note_id, &categories));
+        // The *effective* mode, so the panel reports what actually gates this
+        // meeting: a note with no override of its own still reads as context
+        // only when its category says so.
+        let mode = facts.as_ref().map(|facts| {
+            kodabi_core::ledger::effective_mode(facts.note_override, facts.category_default)
+        });
         let items = facts
             .map(|facts| {
                 facts
@@ -928,6 +940,14 @@ pub struct MeetingTrackingInput {
 /// where it survives a re-route, a vault rebuild, and a sync to another
 /// machine. The ledger keeps only the consequence.
 ///
+/// **Both directions write a value; neither clears the key.** Since a meeting's
+/// category now carries a default of its own, an absent `tracking:` is not
+/// "tracked" but "whatever my kind says" — so switching context-only *off* by
+/// clearing it would leave an all-hands exactly as gated as before. Flipping the
+/// switch is a decision about this meeting, and it outranks the genre from then
+/// on. There is deliberately no affordance here for returning a meeting to
+/// inheriting its kind.
+///
 /// Order, and why: the ledger's availability is checked first, so a refusal
 /// costs nothing; the vault write comes next, and a failure there leaves
 /// everything unchanged; the retro-application follows and is *awaited*, so the
@@ -971,10 +991,20 @@ pub async fn set_meeting_tracking(
     let listed = tauri::async_runtime::spawn_blocking({
         let kb = kb.clone();
         move || {
+            // Pinned in both directions, never cleared. Clearing would hand the
+            // meeting back to its category's default, and on an all-hands or an
+            // observer meeting that default *is* context-only — so switching
+            // "context only" off would move the switch and change nothing. A
+            // flip is a judgement about this meeting, so it outranks the genre
+            // from here on.
             vault::set_note_tracking(
                 &kb,
                 &note_id,
-                context_only.then_some(EnrollmentMode::ContextOnly),
+                Some(if context_only {
+                    EnrollmentMode::ContextOnly
+                } else {
+                    EnrollmentMode::Tracked
+                }),
             )
         }
     })
@@ -1001,7 +1031,15 @@ pub async fn set_meeting_tracking(
     let outcome = tauri::async_runtime::spawn_blocking({
         let note_id = input.note_id.clone();
         let project = project.clone();
-        move || client.retro_apply_note_tracking(note_id, project, context_only)
+        move || {
+            client.retro_apply_note_tracking(
+                note_id,
+                project,
+                context_only,
+                // The meeting's own switch decided, whatever its genre says.
+                RetroSource::Override,
+            )
+        }
     })
     .await
     .map_err(|err| {
@@ -1054,8 +1092,9 @@ pub async fn track_commitment_item(
     let (client, index) = handles(&app);
     let note_id = input.note_id.clone();
     let item_id = input.item_id.clone();
+    let categories = app.state::<SettingsState>().snapshot().categories;
     let entry = tauri::async_runtime::spawn_blocking(move || {
-        let Some(facts) = index.and_then(|index| index.note_facts(&note_id)) else {
+        let Some(facts) = index.and_then(|index| index.note_facts(&note_id, &categories)) else {
             return Err(
                 "Kodabi doesn't have this meeting indexed yet, so this line can't be \
                         tracked. Try again in a moment."

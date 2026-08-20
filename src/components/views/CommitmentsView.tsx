@@ -16,6 +16,7 @@ import {
 } from "../../commitmentGroups";
 import { backendCopy } from "../../errorCopy";
 import { useNavigation, type View } from "../../useNavigation";
+import { categoryLabel } from "../../useNotes";
 import {
   confirmCommitmentEvidence,
   dismissCommitmentEvidence,
@@ -558,6 +559,13 @@ function CommitmentRow({
                   ? `due ${formatDay(item.due_date)}`
                   : null,
                 showProject ? commitment.project : null,
+                // What kind of room this came out of. Always faint, never
+                // promoted: it is context for a commitment, not a claim on
+                // attention, and the row's one promoted slot belongs to overdue
+                // or stale.
+                commitment.source?.category
+                  ? categoryLabel(commitment.source.category)
+                  : null,
                 promoteTier ? null : heard,
               ]
                 .filter(Boolean)
@@ -728,8 +736,15 @@ function ShelfRow({
               {[
                 commitmentOwner(commitment),
                 meta,
+                // Same quiet segment the live rows carry, so a shelved row
+                // still says what kind of room it came out of.
+                commitment.source?.category
+                  ? categoryLabel(commitment.source.category)
+                  : null,
                 formatInstant(commitment.updated_at),
-              ].join(" · ")}
+              ]
+                .filter(Boolean)
+                .join(" · ")}
             </span>
           </span>
         </button>

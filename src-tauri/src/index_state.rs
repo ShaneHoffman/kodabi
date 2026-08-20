@@ -32,6 +32,7 @@ use kodabi_core::embed::{self, Embedder};
 use kodabi_core::index::{IndexedNote, NoteIndex, SearchOptions, SearchParams, SearchResults};
 use kodabi_core::ledger::NoteContext;
 use kodabi_core::reconcile;
+use kodabi_core::settings::CategorySettings;
 use kodabi_core::watch::{self, VaultWatcher};
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -96,7 +97,7 @@ pub struct IndexState {
 /// Reconcile's unchanged-note fast path is deliberately not a gap: facts are a
 /// pure function of the note's body, and item ids are content hashes, so a note
 /// whose body did not change re-derives to exactly what the ledger already has.
-fn forward_to_ledger(ledger: &LedgerHandle, note: &IndexedNote) {
+fn forward_to_ledger(ledger: &LedgerHandle, note: &IndexedNote, categories: &CategorySettings) {
     let Some(facts) = &note.meeting else {
         return; // a type that carries no commitments (`meeting::derives_facts`)
     };
@@ -114,6 +115,10 @@ fn forward_to_ledger(ledger: &LedgerHandle, note: &IndexedNote) {
             .tracking
             .as_deref()
             .and_then(|raw| kodabi_core::ledger::EnrollmentMode::parse_frontmatter(raw).ok()),
+        // The other half of the chain, resolved here because the ledger worker
+        // cannot reach the settings. A note with no category resolves to `None`
+        // and falls through to the global default.
+        category_default: kodabi_core::ledger::category_default_for(note.category, categories),
     });
 }
 
@@ -124,17 +129,35 @@ fn forward_to_ledger(ledger: &LedgerHandle, note: &IndexedNote) {
 /// ledger. It is cheap (rows the pass just wrote, under a lock it already
 /// holds), and `sync_note_items` is idempotent, so a redundant forward costs a
 /// transaction and changes nothing.
-fn forward_reconciled(index: &Mutex<NoteIndex>, ledger: &LedgerHandle, ids: &[String]) {
+fn forward_reconciled(
+    index: &Mutex<NoteIndex>,
+    ledger: &LedgerHandle,
+    ids: &[String],
+    categories: &CategorySettings,
+) {
     if ids.is_empty() {
         return;
     }
     let idx = lock(index);
     let batch: Vec<NoteFacts> = ids
         .iter()
-        .filter_map(|id| note_facts_from(&idx, id))
+        .filter_map(|id| note_facts_from(&idx, id, categories))
         .collect();
     drop(idx);
     ledger.sync_batch(batch);
+}
+
+/// The user's per-category settings, for resolving the enrollment chain's
+/// category slot.
+///
+/// Read per job rather than cached, for the same reason `ledger_cmds`'
+/// `aging_config` is: the Settings view can change a category's default while
+/// the worker is running, and the next note through the door should be gated by
+/// the new value.
+fn category_settings(app: &AppHandle) -> CategorySettings {
+    app.state::<crate::settings_cmds::SettingsState>()
+        .snapshot()
+        .categories
 }
 
 /// Reads one note's ledger-shaped facts back out of the index.
@@ -143,7 +166,7 @@ fn forward_reconciled(index: &Mutex<NoteIndex>, ledger: &LedgerHandle, ids: &[St
 /// command that re-syncs one note builds exactly what the reconcile pass would
 /// have. Returns `None` for a note the index does not know, one whose type
 /// carries no commitments, or one whose rows cannot be read.
-fn note_facts_from(idx: &NoteIndex, id: &str) -> Option<NoteFacts> {
+fn note_facts_from(idx: &NoteIndex, id: &str, categories: &CategorySettings) -> Option<NoteFacts> {
     let row = idx.get_note(id).ok()??;
     if !kodabi_core::meeting::derives_facts(row.note_type.into()) {
         return None;
@@ -157,11 +180,13 @@ fn note_facts_from(idx: &NoteIndex, id: &str) -> Option<NoteFacts> {
         .tracking
         .as_deref()
         .and_then(|raw| kodabi_core::ledger::EnrollmentMode::parse_frontmatter(raw).ok());
+    let category_default = kodabi_core::ledger::category_default_for(row.category, categories);
     Some(NoteFacts {
         note_id: row.id,
         project: ledger_state::project_slug(row.project.as_deref()),
         date_utc: row.date_utc,
         note_override,
+        category_default,
         items: items
             .into_iter()
             .map(|item| kodabi_core::meeting::ActionItemFact {
@@ -239,6 +264,7 @@ impl IndexReadHandle {
                     title: row.title,
                     project: row.project,
                     path: row.path,
+                    category: row.category,
                     items,
                 },
             );
@@ -253,9 +279,13 @@ impl IndexReadHandle {
     /// has to re-sync it. [`NoteContext`] cannot stand in: it carries no
     /// `date_utc`, and that is what becomes an entry's `last_mention`.
     /// Blocking; call it off the IPC thread.
-    pub fn note_facts(&self, note_id: &str) -> Option<NoteFacts> {
+    ///
+    /// `categories` is the caller's settings snapshot: resolving the category
+    /// half of the enrollment chain needs it, and this handle deliberately holds
+    /// no `AppHandle`.
+    pub fn note_facts(&self, note_id: &str, categories: &CategorySettings) -> Option<NoteFacts> {
         let idx = lock(&self.index);
-        note_facts_from(&idx, note_id)
+        note_facts_from(&idx, note_id, categories)
     }
 }
 
@@ -415,10 +445,14 @@ fn run_worker(
     ledger: LedgerHandle,
 ) {
     for job in jobs {
+        // Read per job, not once per worker: a category's enrollment default is
+        // a live setting, so the next note synced after a change is gated by the
+        // new value without restarting anything.
+        let categories = category_settings(&app);
         match job {
             Job::Note(note) => {
                 process_note(&index, embedder.as_deref(), &note);
-                forward_to_ledger(&ledger, &note);
+                forward_to_ledger(&ledger, &note, &categories);
             }
             Job::DeleteNote(id) => {
                 process_delete(&index, &id);
@@ -483,14 +517,14 @@ fn run_reconcile(
             // Every note whose facts were re-derived, plus every note that left
             // the vault, reaches the ledger before the embed sweep — the
             // commitments matter more than the vectors, and the sweep is slow.
-            forward_reconciled(index, ledger, &report.upserted_ids);
+            forward_reconciled(index, ledger, &report.upserted_ids, &category_settings(app));
             for id in &report.deleted_ids {
                 ledger.note_gone(id);
             }
             // Meeting notes skipped by the fast path (unchanged on disk) still
             // need their facts derived after the v3 migration — backfill them.
             let backfilled = backfill_meeting_facts(index, root);
-            forward_reconciled(index, ledger, &backfilled);
+            forward_reconciled(index, ledger, &backfilled, &category_settings(app));
             if let Some(embedder) = embedder {
                 reconcile_missing(index, embedder);
             }
@@ -532,12 +566,12 @@ fn run_rebuild(
     };
     match report {
         Ok(report) => {
-            forward_reconciled(index, ledger, &report.upserted_ids);
+            forward_reconciled(index, ledger, &report.upserted_ids, &category_settings(app));
             for id in &report.deleted_ids {
                 ledger.note_gone(id);
             }
             let backfilled = backfill_meeting_facts(index, root);
-            forward_reconciled(index, ledger, &backfilled);
+            forward_reconciled(index, ledger, &backfilled, &category_settings(app));
             if let Some(embedder) = embedder {
                 reconcile_missing(index, embedder);
             }

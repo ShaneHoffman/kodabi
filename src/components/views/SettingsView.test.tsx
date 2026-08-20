@@ -986,20 +986,81 @@ describe("SettingsView About card", () => {
 });
 
 describe("SettingsView meeting kinds card", () => {
-  it("lists the meeting kinds without offering a control that does nothing", async () => {
+  it("offers every kind a choice, and names what each one inherits", async () => {
     await renderSeeded();
 
     const kinds = card("Meeting kinds");
-    // The one place the taxonomy the note view and the Inbox speak is written
-    // down. It is deliberately read-only: what a per-kind setting will DO is
-    // the next change's decision, so a control here could only be a guess.
+    for (const label of [
+      "Stand-up",
+      "One-on-one",
+      "Client",
+      "Working session",
+      "Review",
+      "All hands",
+      "Observer",
+    ]) {
+      expect(within(kinds).getByText(label)).toBeInTheDocument();
+    }
+
+    // Unset reads as the built-in rather than as blank, and the built-in is not
+    // the same sentence for every kind: two genres are attended rather than
+    // worked in. This is what stops "Standard" meaning nothing.
+    const values = within(kinds)
+      .getAllByRole("combobox")
+      .map((select) => select.textContent);
+    expect(values).toHaveLength(7);
+    expect(values.filter((value) => value === "Standard (everything)")).toHaveLength(5);
     expect(
-      within(kinds).getByText(
-        "Stand-up · One-on-one · Client · Working session · Review · All hands · Observer",
-      ),
-    ).toBeInTheDocument();
-    expect(within(kinds).queryByRole("button")).toBeNull();
-    expect(within(kinds).queryByRole("switch")).toBeNull();
-    expect(within(kinds).queryByRole("combobox")).toBeNull();
+      values.filter((value) => value === "Standard (only direct asks)"),
+    ).toHaveLength(2);
+  });
+
+  it("pins one kind without disturbing the others", async () => {
+    const user = userEvent.setup();
+    let sent: unknown = null;
+    onCommand("set_category_prefs", (args) => {
+      sent = args;
+      return DEFAULTS;
+    });
+    await renderSeeded();
+
+    const kinds = card("Meeting kinds");
+    // The Client row: fifth in `CATEGORY_OPTIONS` order is Review, so address
+    // the control by its own accessible name rather than by position.
+    const client = within(kinds).getByRole("combobox", { name: "Client commitments" });
+    await user.click(client);
+    await user.click(await screen.findByRole("option", { name: "Only direct asks" }));
+
+    // The command takes the whole group, so the six untouched kinds have to
+    // ride along still inheriting: pinning one must not pin them all.
+    expect(sent).toEqual({
+      categories: {
+        ...DEFAULTS.categories,
+        client: { enrollment_default: "context_only" },
+      },
+    });
+  });
+
+  it("says so when a meeting-kind write fails", async () => {
+    const user = userEvent.setup();
+    onCommand("set_category_prefs", () => {
+      throw "Couldn't save the meeting-kind settings. The previous values still apply; try again.";
+    });
+    await renderSeeded();
+
+    const kinds = card("Meeting kinds");
+    const observer = within(kinds).getByRole("combobox", { name: "Observer commitments" });
+    await user.click(observer);
+    await user.click(await screen.findByRole("option", { name: "Track everything" }));
+
+    const message = await within(kinds).findByText(
+      "Couldn't save the meeting-kind settings. The previous values still apply; try again.",
+    );
+    expect(message).toBeInTheDocument();
+    // Under the row that raised it, not at the head of a seven-row card: a
+    // message six rows above its control reads as belonging to the card.
+    expect(
+      observer.compareDocumentPosition(message) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });

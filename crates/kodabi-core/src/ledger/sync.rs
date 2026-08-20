@@ -42,12 +42,14 @@
 //! and the distill follow-up — are gated identically; a gate either of them
 //! could forget to apply is not a gate.
 //!
-//! The override itself now arrives as an input ([`NoteSync::note_override`])
-//! rather than being read from a table here, because it lives in the note's
-//! frontmatter and this store cannot read the vault. What keeps that safe is
-//! that the field is not optional: [`NoteSync`] has no `Default`, so a producer
-//! that forgets the override does not compile. Resolution — the part a caller
-//! could get *wrong* rather than merely forget — stayed here.
+//! Both halves of the chain now arrive as inputs — the per-meeting override
+//! ([`NoteSync::note_override`], which lives in the note's frontmatter) and the
+//! meeting category's default ([`NoteSync::category_default`], which lives in
+//! the settings file) — because this store can read neither the vault nor the
+//! settings. What keeps that safe is that neither field is optional:
+//! [`NoteSync`] has no `Default`, so a producer that forgets either does not
+//! compile. Resolution — the part a caller could get *wrong* rather than merely
+//! forget — stayed here, in [`effective_mode`](super::effective_mode).
 //!
 //! It gates **tier 5 only**, and each of the other tiers is deliberate:
 //!
@@ -117,6 +119,17 @@ pub struct NoteSync<'a> {
     /// it has to arrive as an input; making it un-omittable is how the gate
     /// stays impossible to skip.
     pub note_override: Option<EnrollmentMode>,
+    /// The default the note's meeting *category* carries, already resolved
+    /// against the user's settings by the shell
+    /// ([`crate::ledger::category_default_for`]); `None` when the note has no
+    /// category to inherit from, which is every chat and any meeting the
+    /// classifier left unlabelled.
+    ///
+    /// Resolved rather than raw for the same reason `note_override` is an input
+    /// at all: the setting lives in a file this store cannot read. It is a plain
+    /// field on the same no-`Default` struct, so the compiler holds the second
+    /// half of the chain to the same standard as the first.
+    pub category_default: Option<EnrollmentMode>,
     /// RFC 3339 UTC, for `created_at` / `updated_at` / ref timestamps.
     pub now: &'a str,
 }
@@ -194,6 +207,7 @@ impl Ledger {
             link_hints: &[],
             // No items means nothing can be enrolled, so the gate is moot.
             note_override: None,
+            category_default: None,
             now,
         })
     }
@@ -209,19 +223,26 @@ fn reconcile(
 
     // --- Resolve the meeting's enrollment mode ----------------------------
     // Resolved once, inside the transaction, so every ingest path is gated the
-    // same way. The override rides in on `NoteSync` because it now lives in the
-    // note's frontmatter, which this store cannot read; `None` for the category
-    // slot until meeting categories carry a default.
+    // same way. Both halves of the chain ride in on `NoteSync` because both live
+    // where this store cannot read them: the override in the note's frontmatter,
+    // the category default in the settings file.
     let note_override = sync.note_override;
-    let mode = super::effective_mode(note_override, None);
-    // An entry minted under a *gating* override is enrolled because of it — a
-    // Mine item in a context-only meeting. An explicit `tracked` enrolls
-    // nothing the default would not have, so it stays `Default`: recording it
-    // as an override would misreport why the entry is here and would exclude it
-    // from `overridable_entries`, which only ever retro-untracks what the
-    // default enrolled.
-    let enrolled_via = match note_override {
-        Some(EnrollmentMode::ContextOnly) => EnrolledVia::Override,
+    let category_default = sync.category_default;
+    let mode = super::effective_mode(note_override, category_default);
+    // An entry minted under a *gating* source is enrolled because of it — a Mine
+    // item in a meeting that tracks direct asks only. Which source gets the
+    // credit follows the chain: an override outranks a category default, and
+    // whichever one decided, it is only recorded when it actually gated.
+    //
+    // A source that resolves to `tracked` enrolls nothing the global default
+    // would not have, so it stays `Default`: recording it otherwise would
+    // misreport why the entry is here, and would exclude it from
+    // `overridable_entries`, which retro-untracks what a machine default
+    // enrolled — including, crucially, entries minted before this meeting was
+    // recategorized, which say `default` and must stay sweepable.
+    let enrolled_via = match (note_override, category_default) {
+        (Some(EnrollmentMode::ContextOnly), _) => EnrolledVia::Override,
+        (None, Some(EnrollmentMode::ContextOnly)) => EnrolledVia::Category,
         _ => EnrolledVia::Default,
     };
 
@@ -661,6 +682,7 @@ mod tests {
                 note_date_utc: date,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 items,
                 now: NOW,
             })
@@ -677,6 +699,21 @@ mod tests {
         items: &[ActionItemFact],
         note_override: Option<EnrollmentMode>,
     ) -> SyncOutcome {
+        sync_note_gated_by(ledger, note_id, project, date, items, note_override, None)
+    }
+
+    /// Syncs a note under both halves of the enrollment chain: its own override
+    /// and the default its meeting category resolved to.
+    #[allow(clippy::too_many_arguments)]
+    fn sync_note_gated_by(
+        ledger: &mut Ledger,
+        note_id: &str,
+        project: &str,
+        date: &str,
+        items: &[ActionItemFact],
+        note_override: Option<EnrollmentMode>,
+        category_default: Option<EnrollmentMode>,
+    ) -> SyncOutcome {
         ledger
             .sync_note_items(&NoteSync {
                 note_id,
@@ -684,6 +721,7 @@ mod tests {
                 note_date_utc: date,
                 link_hints: &[],
                 note_override,
+                category_default,
                 items,
                 now: NOW,
             })
@@ -890,6 +928,7 @@ mod tests {
                     entry_id: untracked_id.clone(),
                 }],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap();
@@ -925,6 +964,108 @@ mod tests {
         assert_eq!(outcome.not_enrolled, 0);
         let entries = ledger.list_entries(&EntryFilter::default()).unwrap();
         assert_eq!(entries[0].enrolled_via, EnrolledVia::Default);
+    }
+
+    #[test]
+    fn a_category_default_gates_exactly_as_an_override_does() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![
+            fact("a_111111", "Priya", "send the revised deck"),
+            fact("a_222222", "You", "book the venue"),
+        ];
+
+        // An all-hands with no opinion of its own: the genre decides.
+        let outcome = sync_note_gated_by(
+            &mut ledger,
+            "n_a1b2c3",
+            "Briarwood Golf",
+            DAY_ONE,
+            &items,
+            None,
+            Some(EnrollmentMode::ContextOnly),
+        );
+
+        assert_eq!(outcome.not_enrolled, 1, "Priya's line stays in the note");
+        assert_eq!(outcome.created.len(), 1);
+        let entries = ledger.list_entries(&EntryFilter::default()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].direction, Direction::Mine);
+        // The category is why this one is here, and the row can say so.
+        assert_eq!(entries[0].enrolled_via, EnrolledVia::Category);
+    }
+
+    #[test]
+    fn a_meetings_own_override_outranks_its_category() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![fact("a_111111", "Priya", "send the revised deck")];
+
+        // "Track this all-hands in full" — the per-meeting judgement wins, and
+        // records as a plain default because it enrolled nothing the global
+        // default would not have.
+        let outcome = sync_note_gated_by(
+            &mut ledger,
+            "n_a1b2c3",
+            "Briarwood Golf",
+            DAY_ONE,
+            &items,
+            Some(EnrollmentMode::Tracked),
+            Some(EnrollmentMode::ContextOnly),
+        );
+
+        assert_eq!(outcome.created.len(), 1);
+        assert_eq!(outcome.not_enrolled, 0);
+        let entries = ledger.list_entries(&EntryFilter::default()).unwrap();
+        assert_eq!(entries[0].enrolled_via, EnrolledVia::Default);
+    }
+
+    #[test]
+    fn a_gating_override_outranks_a_tracking_category() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![fact("a_222222", "You", "book the venue")];
+
+        // The mirror case: a context-only switch on a standup. The override
+        // gated, so the override is the provenance.
+        sync_note_gated_by(
+            &mut ledger,
+            "n_a1b2c3",
+            "Briarwood Golf",
+            DAY_ONE,
+            &items,
+            Some(EnrollmentMode::ContextOnly),
+            Some(EnrollmentMode::Tracked),
+        );
+
+        let entries = ledger.list_entries(&EntryFilter::default()).unwrap();
+        assert_eq!(entries[0].enrolled_via, EnrolledVia::Override);
+    }
+
+    #[test]
+    fn a_category_that_tracks_enrolls_everything_as_a_plain_default() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![
+            fact("a_111111", "Priya", "send the revised deck"),
+            fact("a_222222", "You", "book the venue"),
+        ];
+
+        let outcome = sync_note_gated_by(
+            &mut ledger,
+            "n_a1b2c3",
+            "Briarwood Golf",
+            DAY_ONE,
+            &items,
+            None,
+            Some(EnrollmentMode::Tracked),
+        );
+
+        assert_eq!(outcome.created.len(), 2);
+        assert_eq!(outcome.not_enrolled, 0);
+        let entries = ledger.list_entries(&EntryFilter::default()).unwrap();
+        // Both plain defaults: nothing gated, so nothing claims the credit —
+        // and, load-bearingly, both stay sweepable if the meeting is later
+        // recategorized into a genre that does gate.
+        assert!(entries
+            .iter()
+            .all(|entry| entry.enrolled_via == EnrolledVia::Default));
     }
 
     #[test]
@@ -1328,6 +1469,7 @@ mod tests {
                 note_date_utc: date,
                 link_hints: hints,
                 note_override: None,
+                category_default: None,
                 items,
                 now: NOW,
             })

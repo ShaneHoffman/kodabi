@@ -234,33 +234,53 @@ and re-link across those edits (`kodabi_core::ledger::sync`).
 **Extraction is not tracking.** The distill pass always records what was said, and the note, the
 index and the MCP read surface look the same either way; what the ledger holds is the separate
 question of what you are *tracking*. The gate sits at enrollment, in reconcile's create leg
-(`kodabi_core::ledger::sync`), and resolves through one seam: a per-meeting override, then the
-meeting category's default (the category exists now, but nothing maps one to a mode yet), then the
-global default of `tracked` (`ledger::effective_mode`). The one override today is **context only**,
-which enrolls just the items you own, because a direct ask is a commitment regardless of why you
-attended. It is stored in the note's **frontmatter** (`tracking:`), not in a ledger table: it is a
-judgement about the meeting, so it belongs with the meeting, and it then survives a re-route, a
-vault rebuild and a sync to another machine without any bookkeeping to keep a row's project in step.
+(`kodabi_core::ledger::sync`), and resolves through one seam and one chain: a per-meeting override,
+then the meeting category's default, then the global default of `tracked`
+(`ledger::effective_mode`). The one non-default mode is **context only**, which enrolls just the
+items you own, because a direct ask is a commitment regardless of why you attended.
+
+The per-meeting override is stored in the note's **frontmatter** (`tracking:`), not in a ledger
+table: it is a judgement about the meeting, so it belongs with the meeting, and it then survives a
+re-route, a vault rebuild and a sync to another machine without any bookkeeping to keep a row's
+project in step. The category default is a user setting, one per genre
+(`settings::CategorySettings`), and an unset one inherits a built-in
+(`ledger::builtin_category_default`): `all-hands` and `observer` track direct asks only, the other
+five track in full. An unset preference therefore means *inherit that built-in*, never "tracked" —
+which is what lets the defaults reach the settings files already in the field, none of which carry
+the key. Changing a genre's default is deliberately **prospective**: it decides what the next sync
+does, and does not sweep the entries existing meetings already produced.
+
 An un-enrolled item gets no entry and no ref at all, so the aging and evidence passes never see it —
-that absence is the point, not an optimization. The mode reaches the gate on the note's facts
-(`NoteSync.note_override`, read from the index row that mirrors the file) and is resolved once
-inside the sync transaction, so both ingest paths (the index worker and the distill follow-up) are
-gated identically; the field is not defaultable, so a producer that forgets it does not compile.
-Because sync is idempotent, flipping a meeting back to tracked enrols what was skipped simply by
+that absence is the point, not an optimization. Both halves of the chain reach the gate on the note's
+facts (`NoteSync.note_override` from the index row that mirrors the file, `NoteSync.category_default`
+resolved by the shell, which is the only layer that can read the settings), and the mode is resolved
+once inside the sync transaction, so both ingest paths (the index worker and the distill follow-up)
+are gated identically; neither field is defaultable, so a producer that forgets one does not compile.
+Because sync is idempotent, returning a meeting to tracked enrols what was skipped simply by
 re-syncing it.
 
 The gate applies to entry *creation* only. A re-mention still links and still bumps `last_mention`,
 so a live commitment restated in a context-only meeting does not age out for having been discussed
-in the wrong room, and an edit still relinks its existing entry. Changing a meeting's mode
+in the wrong room, and an edit still relinks its existing entry. Changing a meeting's effective mode
 re-evaluates the entries it already produced in both directions
-(`kodabi_core::ledger::enrollment`), but a tracking mode is a *default*, and a default never
-overrules a person: any entry someone has acted on (`touched`, set only on the shell's
+(`kodabi_core::ledger::enrollment`) — flipping its own switch does, and so does **recategorizing
+it**, which is the only thing a category change sweeps. Both run at the command layer, awaited before
+the re-index that follows: the retro un-enrols the strays, and that re-index's ordinary create leg,
+now carrying the new default, enrols what the old mode kept out. A mode is a *default*, though, and a
+default never overrules a person: any entry someone has acted on (`touched`, set only on the shell's
 human-judgement path) or promoted by hand is left exactly as it is. **Untracked** is its own state
 and its own verb, distinct from waived: waiving says this was mine and stopped mattering, untracking
 says it was never my business. Its item refs stay active, so a re-sync sees the line as present and
 can neither mint a duplicate nor park the entry as vanished. Every entry
-carries `enrolled_via` (`default` / `override` / `manual`) and, when untracked, `untracked_via`
-(`manual` / `override`), so any row can answer why it is in the ledger and how it left.
+carries `enrolled_via` (`default` / `override` / `manual` / `category`) and, when untracked,
+`untracked_via` (`manual` / `override` / `category`), so any row can answer why it is in the ledger
+and how it left. The sweeps match both *machine* provenances in each direction rather than only the
+source that changed, which is what lets a recategorization reach entries minted long before under a
+different genre; `manual` is out of reach either way.
+
+One drift is accepted and named: recategorizing a note by hand in Obsidian re-syncs through the
+watcher, so it enrols the missing, but no retro runs, so it leaves the strays tracked until that
+meeting is touched in the app.
 
 **Meetings have a genre, and it is correctable.** Beside the document `type` (meeting / note /
 chat), a meeting note carries a `category`: `standup`, `one-on-one`, `client`, `working-session`,
@@ -281,9 +301,11 @@ transcript can always overrule the prior. This is deliberately weaker than the r
 arithmetic use of `_routing_examples.yml` — a genre is chosen by a model reading a conversation, so
 its memory is prose the model reads too.
 
-Nothing consumes the category for behavior yet: it is the level future behavior attaches at, and
-`ledger::effective_mode`'s `category_default` slot is where the first consumer (a per-genre
-enrollment default) plugs in.
+The genre's first consumer is the enrollment gate above: each kind carries a `tracked | context-only`
+default, edited in Settings, filling `ledger::effective_mode`'s `category_default` slot. So a
+correction is not only a better label, it changes what that meeting contributes to your commitments,
+retroactively and in both directions. The category also rides the Commitments view's source line, as
+a quiet faint segment, so a row can say what kind of room it came out of.
 
 The Commitments view reads it through `ledger_cmds`, whose organizing principle is the ledger's own
 `direction` column: what you owe and what you are waiting on are two groups on two planes, not a

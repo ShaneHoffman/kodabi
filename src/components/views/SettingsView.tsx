@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { CAPTURE_TOGGLE_SHORTCUT } from "../../captureControl";
 import { backendCopy } from "../../errorCopy";
 import {
+  BUILTIN_CATEGORY_DEFAULTS,
+  CATEGORY_SETTING_KEYS,
   buildRetentionPolicy,
   clampConfidence,
   clampDays,
@@ -11,10 +13,12 @@ import {
   runMicTest,
   setAppearance,
   setCaptureOverlay,
+  setCategoryPrefs,
   setLedgerTuning,
   setRetentionPolicy,
   THEME_OPTIONS,
   useSettings,
+  type CategorySettings,
   type LedgerSettings,
   type MicCheckResult,
   type OverlaySettings,
@@ -155,6 +159,26 @@ function NumberField({
 
 /** Which of the Commitments card's three fields a commit came from. */
 type LedgerField = keyof LedgerSettings;
+
+/** Which meeting kind a per-kind write is for. */
+type CategoryKey = keyof CategorySettings;
+
+/** The three choices a kind offers, with the inherit option naming what it
+ * inherits so the row reads as settled rather than blank. */
+function enrollmentOptions(key: CategoryKey): { value: string; label: string }[] {
+  const builtin = BUILTIN_CATEGORY_DEFAULTS[key];
+  return [
+    {
+      value: "",
+      label:
+        builtin === "context_only"
+          ? "Standard (only direct asks)"
+          : "Standard (everything)",
+    },
+    { value: "tracked", label: "Track everything" },
+    { value: "context_only", label: "Only direct asks" },
+  ];
+}
 
 /**
  * A number field's committed value, falling back to what is stored when the
@@ -578,6 +602,15 @@ export function SettingsView() {
   // is the row's own status line, and an error two rows below the control that
   // raised it reads as belonging to the wrong setting.
   const [ledgerFoot, setLedgerFoot] = useState<LedgerField>("aging_after_days");
+  // The failing kind travels with its message, for the reason `ledgerFoot`
+  // exists: this card is seven rows tall, so an error parked at its head reads
+  // as a claim about the card rather than about the write that raised it.
+  const [categoryError, setCategoryError] = useState<{
+    key: CategoryKey;
+    message: string;
+  } | null>(null);
+  // Which kind is mid-write, so only that row's Select reads as busy.
+  const [savingCategory, setSavingCategory] = useState<CategoryKey | null>(null);
   if (!seededLedger && settings) {
     setSeededLedger(true);
     setAgingDays(String(settings.ledger.aging_after_days));
@@ -657,6 +690,35 @@ export function SettingsView() {
       setLedgerSaved(false);
     } finally {
       setSavingLedger(false);
+    }
+  };
+
+  // One kind at a time, but the command takes the whole group, so the others
+  // ride along unchanged. `""` is the inherit choice and stores `null`, which
+  // is what lets a later change to the built-in defaults reach a user who never
+  // touched this control.
+  const applyCategory = async (key: CategoryKey, value: string) => {
+    if (!settings || savingCategory) return;
+    const chosen = value === "" ? null : (value as "tracked" | "context_only");
+    if (settings.categories[key].enrollment_default === chosen) return;
+    setCategoryError(null);
+    setSavingCategory(key);
+    try {
+      const updated = await setCategoryPrefs({
+        ...settings.categories,
+        [key]: { enrollment_default: chosen },
+      });
+      setSettings(updated);
+    } catch (err) {
+      setCategoryError({
+        key,
+        message: backendCopy(
+          err,
+          "Couldn't save the meeting-kind settings. The previous values still apply; try again.",
+        ),
+      });
+    } finally {
+      setSavingCategory(null);
     }
   };
 
@@ -921,22 +983,44 @@ export function SettingsView() {
             </Row>
           </Card>
 
-          {/* No control, on purpose. The per-genre setting behind this card is
-              stored already (`Settings.categories`), but what it will DO is the
-              next change's decision, so a control here could only be labelled
-              with a guess. A switch that flips and settles nothing is worse
-              than a sentence saying what is coming. What the card earns now is
-              the taxonomy itself: this is the one place the seven kinds the
-              note view and the Inbox have started speaking are written down. */}
+          {/* The card the taxonomy earned. Each kind now decides what reaches
+              your commitments, which is the one behavior a genre was always
+              going to carry. The mode is deliberately never named "observer"
+              here: one of the seven kinds is literally called Observer, and a
+              control whose value and whose subject share a word teaches nobody
+              anything. It speaks as what it does instead. */}
           <Card title="Meeting kinds">
             <Row
-              label="Kinds Kodabi files meetings under"
-              hint="Kodabi picks one when it writes the note. Correct it from the note or from the Inbox, and it learns the correction for that project. Per-kind behavior arrives in a later update."
-            >
-              <span className="min-w-0 text-right font-data text-[11px] text-ink-faint">
-                {CATEGORY_OPTIONS.map((option) => option.label).join(" · ")}
-              </span>
-            </Row>
+              label="What each kind adds to your commitments"
+              hint="Kodabi picks the kind when it writes the note; correct it from the note or the Inbox. Only direct asks keeps other people's items out, and something asked of you directly is tracked either way. A meeting's own tracking switch always wins over its kind."
+            />
+            {CATEGORY_OPTIONS.map((option) => {
+              const key = CATEGORY_SETTING_KEYS[option.value];
+              return (
+                <Row
+                  key={option.value}
+                  label={option.label}
+                  // The row's own status line, so the message sits under the
+                  // Select that raised it rather than six rows above it.
+                  foot={
+                    categoryError?.key === key && (
+                      <StatusMessage variant="error" compact>
+                        {categoryError.message}
+                      </StatusMessage>
+                    )
+                  }
+                >
+                  <Select
+                    hideLabel
+                    label={`${option.label} commitments`}
+                    value={settings.categories[key].enrollment_default ?? ""}
+                    onChange={(value) => void applyCategory(key, value)}
+                    options={enrollmentOptions(key)}
+                    busy={savingCategory === key}
+                  />
+                </Row>
+              );
+            })}
           </Card>
 
           <Card title="Appearance">
