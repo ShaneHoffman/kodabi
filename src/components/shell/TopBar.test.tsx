@@ -201,10 +201,10 @@ describe("TopBar", () => {
     expect(screen.getByRole("status")).not.toHaveTextContent("Transcription not ready");
   });
 
-  it("teaches the capture chord on an idle pill with nothing else to say", async () => {
-    // The one surface in the main window that names the hotkey, so a first-run
-    // user meets it on the indicator the hotkey operates rather than only in a
-    // Settings row they have no reason to open.
+  it("says nothing else on an idle pill with nothing to report", async () => {
+    // The pill used to teach the capture chord here, permanently. It reads as
+    // an idle indicator, not a tutorial, so the teaching line is gone: with
+    // models ready and no failure, the detail slot stays empty.
     serveVault();
     onCommand("model_status", () => ({
       ready: true,
@@ -216,17 +216,19 @@ describe("TopBar", () => {
     }));
     renderShell();
 
-    await waitFor(() => {
-      expect(screen.getByRole("status")).toHaveTextContent("Ctrl+Shift+K starts a capture");
+    expect(await screen.findByRole("status")).toHaveTextContent("Not listening");
+    await act(async () => {
+      await Promise.resolve();
     });
-    expect(screen.getByRole("status")).toHaveTextContent("Not listening");
+    expect(screen.getByRole("status")).not.toHaveTextContent("starts a capture");
+    expect(screen.getByRole("status")).not.toHaveTextContent("Ctrl+Shift+K");
   });
 
-  it("teaches the tray instead when the chord never bound", async () => {
+  it("stays quiet on an idle pill even when the chord never bound", async () => {
     // Registration is best-effort at startup, so the chord is a claim the OS
-    // can have refused. The teaching slot keeps teaching either way: what
-    // changes is which path it points at, since a key that does nothing is a
-    // worse lesson than none.
+    // can have refused — which the pill used to answer with a tray-menu
+    // fallback. Settings carries that now (the Global shortcut row's foot
+    // names the tray menu when the bind failed), so the pill says nothing.
     serveVault();
     onCommand("shortcut_status", () => ({ captureToggle: false, quickCapture: true }));
     onCommand("model_status", () => ({
@@ -239,112 +241,31 @@ describe("TopBar", () => {
     }));
     renderShell();
 
-    await waitFor(() => {
-      expect(screen.getByRole("status")).toHaveTextContent("The tray menu starts a capture");
-    });
-    expect(screen.getByRole("status")).not.toHaveTextContent("Ctrl+Shift+K");
-  });
-
-  it("keeps the chord when the bind is confirmed", async () => {
-    serveVault();
-    onCommand("shortcut_status", () => ({ captureToggle: true, quickCapture: true }));
-    onCommand("model_status", () => ({
-      ready: true,
-      bytesRequired: 0,
-      bytesPresent: 0,
-      sets: [],
-      downloading: false,
-      modelsDir: "C:\\app\\.models",
-    }));
-    renderShell();
-
-    await waitFor(() => {
-      expect(screen.getByRole("status")).toHaveTextContent("Ctrl+Shift+K starts a capture");
-    });
-  });
-
-  it("drops the chord hint once the capture it teaches is running", async () => {
-    // Teaching outranks nothing, but only while the teaching is true: the hint
-    // is withheld on every engaged pill, and a recording one is the plainest
-    // case (its detail slot closes too).
-    serveVault();
-    onCommand("model_status", () => ({
-      ready: true,
-      bytesRequired: 0,
-      bytesPresent: 0,
-      sets: [],
-      downloading: false,
-      modelsDir: "C:\\app\\.models",
-    }));
-    renderShell();
-    await waitFor(() => {
-      expect(screen.getByRole("status")).toHaveTextContent("Ctrl+Shift+K starts a capture");
-    });
-
-    act(() => {
-      emitFromBackend(CAPTURE_STATE_EVENT, {
-        phase: "listening",
-        sources: { loopback: "live", microphone: "live" },
-      });
-    });
-
-    expect(screen.getByRole("status")).not.toHaveTextContent("Ctrl+Shift+K");
-  });
-
-  it("drops the chord hint on a capture that is engaged but recording nothing", async () => {
-    // The case the pill's own live/not-live test cannot carry: `degraded` with
-    // no source live is engaged and reaching disk with nothing, so the detail
-    // slot stays open, and it can stay open for as long as the devices are
-    // gone. A press there stops that capture (the tray says "Stop capture" for
-    // every phase but idle), so the slot must not offer to start one. Same
-    // reasoning covers the `starting` window.
-    serveVault();
-    onCommand("model_status", () => ({
-      ready: true,
-      bytesRequired: 0,
-      bytesPresent: 0,
-      sets: [],
-      downloading: false,
-      modelsDir: "C:\\app\\.models",
-    }));
-    renderShell();
-    await waitFor(() => {
-      expect(screen.getByRole("status")).toHaveTextContent("Ctrl+Shift+K starts a capture");
-    });
-
-    act(() => {
-      emitFromBackend(CAPTURE_STATE_EVENT, {
-        phase: "degraded",
-        sources: { loopback: "stalled", microphone: "stalled" },
-      });
-    });
-
-    // Gone on the live state, before the headline's debounce has caught up...
-    expect(screen.getByRole("status")).not.toHaveTextContent("Ctrl+Shift+K");
-    // ...and still gone once it has, which is the reading that would persist.
-    await waitFor(
-      () => {
-        expect(screen.getByRole("status")).toHaveTextContent("Reconnecting");
-      },
-      { timeout: 2000 },
-    );
-    expect(screen.getByRole("status")).not.toHaveTextContent("Ctrl+Shift+K");
-  });
-
-  it("keeps a real problem ahead of the chord hint", async () => {
-    // The detail slot holds one line, so the chain has to rank: something wrong
-    // always outranks something to learn.
-    serveVault();
-    onCommand("model_status", () => ({
-      ready: true,
-      bytesRequired: 0,
-      bytesPresent: 0,
-      sets: [],
-      downloading: false,
-      modelsDir: "C:\\app\\.models",
-    }));
-    renderShell();
     expect(await screen.findByRole("status")).toHaveTextContent("Not listening");
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByRole("status")).not.toHaveTextContent("tray menu");
+    expect(screen.getByRole("status")).not.toHaveTextContent("Ctrl+Shift+K");
+  });
+
+  it("keeps a real problem ahead of the models line", async () => {
+    // The detail slot holds one line, so the chain has to rank: a capture
+    // failure is about the recording itself and always outranks the models
+    // line, which is about what happens afterwards.
+    serveVault();
+    onCommand("model_status", () => ({
+      ready: false,
+      bytesRequired: 762_000_000,
+      bytesPresent: 0,
+      sets: [],
+      downloading: false,
+      modelsDir: "C:\\app\\.models",
+    }));
+    renderShell();
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent("Transcription not ready yet");
+    });
 
     act(() => {
       emitFromBackend(CAPTURE_STATE_EVENT, {
@@ -359,7 +280,7 @@ describe("TopBar", () => {
       },
       { timeout: 2000 },
     );
-    expect(screen.getByRole("status")).not.toHaveTextContent("Ctrl+Shift+K");
+    expect(screen.getByRole("status")).not.toHaveTextContent("Transcription not ready");
   });
 
   it("minimizes, and closes to the tray", async () => {
