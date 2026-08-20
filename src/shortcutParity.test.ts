@@ -9,11 +9,11 @@ import { QUICK_CAPTURE_SHORTCUT } from "./quickCapture";
  *
  * Two OS-global accelerators are registered in Rust at startup and mirrored as
  * string constants here, because the frontend has to print them: the palette
- * hints, the TopBar nudge, and Settings' Capture card, which is the one place
- * the app writes its shortcuts down. Nothing checked that the mirror was still
- * true. Change `DEFAULT_QUICK_CAPTURE_SHORTCUT` in Rust and every gate stays
- * green while Settings confidently documents a chord that does nothing — the
- * worst shape of failure for a card whose entire job is to be believed.
+ * hints and Settings' Capture card, which is the one place the app writes its
+ * shortcuts down. Nothing checked that the mirror was still true. Change
+ * `DEFAULT_QUICK_CAPTURE_SHORTCUT` in Rust and every gate stays green while
+ * Settings confidently documents a chord that does nothing — the worst shape
+ * of failure for a card whose entire job is to be believed.
  *
  * Same shape as the invoke-string guard next door: read the Rust source, no
  * dependency, runs in `pnpm test`. The end-to-end tier cannot close this one —

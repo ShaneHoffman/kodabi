@@ -1012,10 +1012,12 @@ export function SettingsView() {
               // (the read has not landed, or failed) — `useShortcutStatus`
               // explains why no evidence must not read as bad news.
               //
-              // The fallback is the tray *menu*, matching the TopBar's hint:
-              // the icon's left click shows the main window and its menu is
-              // right-click only (`show_menu_on_left_click(false)` in
-              // `capture_control.rs`), so naming the icon would replace one
+              // The fallback is the tray *menu*, and this row is the only place
+              // that names it — the status pill used to carry the same fallback
+              // and no longer says anything on an idle pill. The tray *menu*,
+              // not the icon: the icon's left click shows the main window and
+              // its menu is right-click only (`show_menu_on_left_click(false)`
+              // in `capture_control.rs`), so naming the icon would replace one
               // dead instruction with another.
               foot={
                 shortcutStatus !== null &&

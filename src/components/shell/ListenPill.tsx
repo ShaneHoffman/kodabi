@@ -54,7 +54,10 @@ type Props = {
    * Note what "live" is and isn't: it means audio is reaching disk, NOT that a
    * capture is engaged. `starting` and `reconnecting` are engaged and still
    * render this line, so a caller whose copy is only true of an idle pill has
-   * to gate on the phase itself — TopBar's chord hint does exactly that.
+   * to gate on the phase itself — this control will not do it for them. No
+   * current caller needs to: `captureLabel().detail` is phase-derived by
+   * construction, and TopBar's models line is a fact about transcription that
+   * holds in every phase.
    */
   detail?: string | null;
   /** Whole seconds recorded, from useElapsed. Shown only while live. */
