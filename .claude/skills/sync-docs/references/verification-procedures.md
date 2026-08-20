@@ -15,8 +15,9 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 ## Anchor 1 — Frontmatter schema ↔ MCP tool surface
 
 - **Source of truth:** `docs/FRONTMATTER_SCHEMA.md` (the note frontmatter field set,
-  key order `id, type, project, date, tags, source, confidence`, the `NoteId`
-  pattern `^n_[0-9a-z]{6,}$`, the `NoteType` enum).
+  key order `id, type, category, tracking, title, project, date, tags, source,
+  confidence, category_confidence`, the `NoteId` pattern `^n_[0-9a-z]{6,}$`, the
+  `NoteType` and `MeetingCategory` enums).
 - **Mirror:** `docs/MCP_TOOL_SURFACE.md`, the `$defs.NoteSummary` shape.
 - **Verify:** run
   `node .claude/skills/frontmatter-validator/validate.mjs --check-schema`.

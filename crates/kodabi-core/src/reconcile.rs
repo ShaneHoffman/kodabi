@@ -222,6 +222,9 @@ fn row_matches(row: &NoteRow, note: &IndexedNote) -> bool {
         && row.date == note.date
         && row.source == note.source
         && row.confidence == note.confidence
+        && row.category == note.category
+        && row.category_confidence == note.category_confidence
+        && row.tracking == note.tracking
         && row.body == note.body
         && tags_match(&row.tags, &note.tags)
 }
@@ -480,6 +483,49 @@ mod tests {
         assert_eq!(report.upserted, 0);
         // The unchanged fast-path never touched the row, so the chunk survives.
         assert!(index.note_has_chunks("n_keep01").unwrap());
+    }
+
+    /// A classification facet is a persisted field like any other, so the
+    /// unchanged fast path must not skip a note whose *only* change is one.
+    ///
+    /// This is the path a hand-typed `tracking: context-only` in Obsidian takes,
+    /// and the one that carries a vault synced in from a machine that already
+    /// classifies — if `row_matches` ignored these columns the index would keep
+    /// serving the stale value forever, and the enrollment gate reads it.
+    #[test]
+    fn a_classification_only_edit_still_reaches_the_index() {
+        let dir = tempdir().unwrap();
+        let vault = dir.path();
+        let path = write(vault, "n_cat001", "Growth", "stable body", &[]);
+
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        reconcile(vault, &mut index).unwrap();
+
+        // Re-write the same note as a categorized, context-only meeting: same
+        // title, same body, same everything the older `row_matches` compared.
+        let note = Note::from_markdown(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let edited = note
+            .with_edits(crate::note::NoteEdit {
+                note_type: NoteType::Meeting,
+                title: None,
+                date: "2026-07-11".to_string(),
+                tags: vec![],
+                body: "stable body".to_string(),
+            })
+            .unwrap()
+            .with_tracking(Some(crate::ledger::EnrollmentMode::ContextOnly))
+            .with_category(Some(crate::note::MeetingCategory::Standup), Some(0.7))
+            .unwrap();
+        crate::note::save_note_at(&path, &edited).unwrap();
+
+        let report = reconcile(vault, &mut index).unwrap();
+
+        assert_eq!(report.upserted, 1, "the facet change must be written");
+        assert_eq!(report.unchanged, 0);
+        let row = index.get_note("n_cat001").unwrap().unwrap();
+        assert_eq!(row.category, Some(crate::note::MeetingCategory::Standup));
+        assert_eq!(row.category_confidence, Some(0.7));
+        assert_eq!(row.tracking.as_deref(), Some("context-only"));
     }
 
     #[test]

@@ -13,11 +13,13 @@ use std::time::SystemTime;
 
 use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 
+use crate::category_examples::{self, CategoryExample, CategoryFile, CategoryFileError};
 use crate::glossary;
 use crate::ledger;
 use crate::meeting;
 use crate::note::{
-    self, Note, NoteEdit, NoteError, NoteId, NoteType, Result, Routing, Source, INBOX,
+    self, MeetingCategory, Note, NoteEdit, NoteError, NoteId, NoteType, Result, Routing, Source,
+    INBOX,
 };
 use crate::routing;
 use crate::routing_examples::{self, RoutingExample, RoutingExamples, RoutingExamplesError};
@@ -625,23 +627,22 @@ pub fn file_note_to_project(
     let previous_path = listed.path.clone();
     let previous_project = (source_project != INBOX).then(|| source_project.clone());
 
-    // ⑤ Rebuild the note with the new routing; every other field verbatim.
-    // `Note::new` validates the confidence range.
+    // ⑤ Re-route the note, keeping every other field verbatim. Assigning the
+    // routing in place (the `rename_project` pattern) rather than rebuilding
+    // through `Note::new` is load-bearing: `new` takes only the seven fields it
+    // validates, so a rebuild silently drops every optional one — `title` did
+    // exactly that until this was fixed, and `category` / `tracking` would
+    // follow. A frontmatter-borne tracking override that vanished on a re-route
+    // would defeat the whole point of storing it in the note.
     let confidence = options.confidence.unwrap_or(1.0);
     let example_excerpt = routing_examples::excerpt(&listed.note.body);
     let example_title = listed.title.clone();
-    let moved_note = Note::new(
-        listed.note.id.clone(),
-        listed.note.note_type,
-        Routing::Routed {
-            project: target.clone(),
-            confidence,
-        },
-        listed.note.date.clone(),
-        listed.note.tags.clone(),
-        listed.note.source.clone(),
-        listed.note.body.clone(),
-    )?;
+    let mut moved_note = listed.note.clone();
+    moved_note.routing = Routing::Routed {
+        project: target.clone(),
+        confidence,
+    };
+    moved_note.validate()?;
 
     // ⑥ Enforce create_project *before* any directory is created (the writer
     // would otherwise auto-create the folder). A same-project re-file always
@@ -660,17 +661,29 @@ pub fn file_note_to_project(
         (new_path, true)
     };
 
-    // ⑧ On a move out of a real project, first drop the note's stale entry from
-    // that project's log, *before* writing the new one — so if the write below
-    // fails the note is left with no correction record (the documented
-    // "signal may be missing" mode) rather than one in two logs at once. Skip
-    // the save when nothing was removed, so no empty log file sprouts.
+    // ⑧ On a move out of a real project, first drop the note's stale entries
+    // from that project's per-project logs, *before* writing the new one — so
+    // if the write below fails the note is left with no correction record (the
+    // documented "signal may be missing" mode) rather than one in two logs at
+    // once. Skip each save when nothing was removed, so no empty log file
+    // sprouts.
     if moved {
         if let Some(prev) = &previous_project {
             let prev_dir = note::project_dir(vault_root, prev);
             let mut prev_log = RoutingExamples::load(&prev_dir).map_err(routing_example_err)?;
             if prev_log.remove(id.as_str()) {
                 prev_log.save(&prev_dir).map_err(routing_example_err)?;
+            }
+            // The category example goes for the same reason. It teaches "a
+            // meeting titled like this, *in this project*, is genre G", and the
+            // note it was drawn from has left — so the claim is no longer about
+            // anything here, yet `distill` would keep rendering it into every
+            // future prompt for this folder. Nothing is written into the target:
+            // recording an example is what `set_note_category` does, and the
+            // correction that made this one was about the old folder.
+            let mut prev_categories = CategoryFile::load(&prev_dir).map_err(category_file_err)?;
+            if prev_categories.remove(id.as_str()) {
+                prev_categories.save(&prev_dir).map_err(category_file_err)?;
             }
         }
     }
@@ -715,6 +728,128 @@ fn routing_example_err(err: RoutingExamplesError) -> NoteError {
             source: io::Error::other(source.to_string()),
         },
     }
+}
+
+/// Collapses a category-file error into a [`NoteError`], exactly as
+/// [`routing_example_err`] does for the routing log: an I/O error keeps its
+/// path; a YAML error becomes an I/O error carrying its message.
+fn category_file_err(err: CategoryFileError) -> NoteError {
+    match err {
+        CategoryFileError::Io { path, source } => NoteError::Io { path, source },
+        CategoryFileError::Yaml { path, source } => NoteError::Io {
+            path,
+            source: io::Error::other(source.to_string()),
+        },
+    }
+}
+
+/// Sets the meeting genre of note `id` — the classification correction loop's
+/// write half. Locates the note vault-wide, rewrites its frontmatter `category`
+/// (clearing `category_confidence`, since a human correction is a fact and not
+/// an estimate), and records the correction as an example in the note's own
+/// project folder so the classifier recognizes the same meeting next week.
+/// Returns `Ok(None)` when no note carries the id (mirroring
+/// [`save_note_edit`]).
+///
+/// The note does not move and is not renamed — a category says what a meeting
+/// *was*, not where it belongs.
+///
+/// **Inbox notes record no example.** The Inbox holds no per-project
+/// infrastructure files (it is a waiting room, not a project), and an example
+/// written into whichever project the note might later land in would be
+/// training data for a project the note is not in. Filing the note and then
+/// correcting it records the example normally.
+///
+/// **Failure consistency:** mirrors [`file_note_to_project`]. A failure before
+/// or during the frontmatter rewrite leaves the note untouched. A failure while
+/// writing the derived category file (after a completed rewrite) returns an
+/// error but does *not* roll the rewrite back — the note's own frontmatter is
+/// the source of truth and stays correct; only the correction signal may be
+/// missing.
+pub fn set_note_category(
+    vault_root: &Path,
+    id: &NoteId,
+    category: MeetingCategory,
+) -> Result<Option<ListedNote>> {
+    let Some((project, listed)) = find_note_anywhere(vault_root, id)? else {
+        return Ok(None);
+    };
+
+    if listed.note.note_type != NoteType::Meeting {
+        // This detail is what the user reads: `user_errors::note_error` renders
+        // an `InvalidField` detail verbatim, on the principle that a complaint
+        // about the user's own input answers for itself. So it carries no note
+        // id and no field name.
+        return Err(NoteError::InvalidField {
+            field: "category",
+            detail: format!(
+                "only a meeting has a kind, and this note is a {}",
+                listed.note.note_type.as_str()
+            ),
+        });
+    }
+
+    let example_title = listed.title.clone();
+    let example_excerpt = routing_examples::excerpt(&listed.note.body);
+    let path = listed.path.clone();
+    // A human correction stores the category and clears the machine's
+    // confidence in its own guess.
+    let note = listed.note.clone().with_category(Some(category), None)?;
+    note::save_note_at(&path, &note)?;
+
+    if project != INBOX {
+        let project_dir = note::project_dir(vault_root, &project);
+        let mut file = CategoryFile::load(&project_dir).map_err(category_file_err)?;
+        file.upsert(CategoryExample {
+            note_id: id.as_str().to_string(),
+            title: example_title.clone(),
+            excerpt: example_excerpt,
+            category,
+            corrected_at: Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+        });
+        file.save(&project_dir).map_err(category_file_err)?;
+    }
+
+    Ok(Some(ListedNote {
+        title: effective_title(&note, &path),
+        path,
+        note,
+    }))
+}
+
+/// Sets (or with `None` clears) the per-meeting commitment-tracking override in
+/// note `id`'s frontmatter. Returns `Ok(None)` when no note carries the id.
+///
+/// This is the storage half of the enrollment gate: the *judgement* lives here,
+/// in the note, while re-evaluating the ledger entries that judgement already
+/// produced stays in [`crate::ledger`]. Writing the same value twice rewrites
+/// nothing, so a repeat call is free.
+///
+/// Like every writer here it modifies the loaded note in place rather than
+/// rebuilding through `Note::new`, so no optional frontmatter field can be
+/// dropped on the way through.
+pub fn set_note_tracking(
+    vault_root: &Path,
+    id: &NoteId,
+    tracking: Option<ledger::EnrollmentMode>,
+) -> Result<Option<ListedNote>> {
+    let Some((_, listed)) = find_note_anywhere(vault_root, id)? else {
+        return Ok(None);
+    };
+
+    if listed.note.tracking == tracking {
+        return Ok(Some(listed));
+    }
+
+    let path = listed.path.clone();
+    let note = listed.note.clone().with_tracking(tracking);
+    note::save_note_at(&path, &note)?;
+
+    Ok(Some(ListedNote {
+        title: effective_title(&note, &path),
+        path,
+        note,
+    }))
 }
 
 /// Creates an empty project folder (and any missing parents) under the vault
@@ -1573,8 +1708,9 @@ pub fn delete_note(vault_root: &Path, id: &NoteId) -> Result<Option<DeletedNote>
 }
 
 /// The files Kodabi itself plants in a project folder and may therefore delete
-/// with it: the glossary, routing-examples, and commitment-ledger files, plus
-/// their (and the note writer's) crash-leftover scratch temps.
+/// with it: the glossary, routing-examples, meeting-category, and
+/// commitment-ledger files, plus their (and the note writer's) crash-leftover
+/// scratch temps.
 ///
 /// Anything else in the folder is a user's own file, and `delete_project`
 /// refuses to remove a folder holding one. So **a new infrastructure file must
@@ -1583,11 +1719,13 @@ pub fn delete_note(vault_root: &Path, id: &NoteId) -> Result<Option<DeletedNote>
 fn is_removable_infra(name: &str) -> bool {
     name == glossary::GLOSSARY_FILE
         || name == routing_examples::ROUTING_EXAMPLES_FILE
+        || name == category_examples::CATEGORY_FILE
         || name == ledger::LEDGER_SNAPSHOT_FILE
         || (name.ends_with(".tmp")
             && (name.starts_with(".note.")
                 || name.starts_with(glossary::GLOSSARY_FILE)
                 || name.starts_with(routing_examples::ROUTING_EXAMPLES_FILE)
+                || name.starts_with(category_examples::CATEGORY_FILE)
                 || name.starts_with(ledger::LEDGER_SNAPSHOT_FILE)))
 }
 
@@ -4791,5 +4929,313 @@ mod tests {
 
         let err = remove_glossary_term(vault.path(), Some("Growth"), "nonexistent").unwrap_err();
         assert!(matches!(err, GlossaryOpError::NotFound { .. }));
+    }
+
+    // --- meeting category + tracking --------------------------------------
+
+    /// A meeting note in `project` carrying whichever facets the test needs.
+    fn write_classified_meeting(
+        vault: &Path,
+        project: &str,
+        id: &str,
+        title: &str,
+        category: Option<MeetingCategory>,
+        tracking: Option<ledger::EnrollmentMode>,
+    ) -> PathBuf {
+        let note = Note::new(
+            NoteId::parse(id).unwrap(),
+            NoteType::Meeting,
+            Routing::Manual {
+                project: project.to_string(),
+            },
+            "2026-08-19",
+            Vec::new(),
+            Source::parse("transcript").unwrap(),
+            "Talked about the renewal.",
+        )
+        .unwrap()
+        .with_title(Some(title.to_string()))
+        .with_tracking(tracking)
+        .with_category(category, category.map(|_| 0.8))
+        .unwrap();
+        note::write_note(vault, &note, Some(title)).unwrap()
+    }
+
+    #[test]
+    fn setting_a_category_rewrites_the_note_and_records_the_example() {
+        let vault = tempdir().unwrap();
+        write_classified_meeting(
+            vault.path(),
+            "Ops",
+            "n_cataaa",
+            "Weekly sync",
+            Some(MeetingCategory::Review),
+            None,
+        );
+        let id = NoteId::parse("n_cataaa").unwrap();
+
+        let listed = set_note_category(vault.path(), &id, MeetingCategory::Standup)
+            .unwrap()
+            .expect("the note exists");
+
+        assert_eq!(listed.note.category, Some(MeetingCategory::Standup));
+        assert_eq!(
+            listed.note.category_confidence, None,
+            "a human correction is a fact, not an estimate"
+        );
+        // On disk, not just in the returned value.
+        let reread = Note::from_markdown(&fs::read_to_string(&listed.path).unwrap()).unwrap();
+        assert_eq!(reread.category, Some(MeetingCategory::Standup));
+        assert_eq!(reread.title.as_deref(), Some("Weekly sync"));
+
+        let file = CategoryFile::load(&vault.path().join("Ops")).unwrap();
+        assert_eq!(file.examples().len(), 1);
+        assert_eq!(file.examples()[0].note_id, "n_cataaa");
+        assert_eq!(file.examples()[0].category, MeetingCategory::Standup);
+        assert_eq!(file.examples()[0].title, "Weekly sync");
+    }
+
+    #[test]
+    fn recategorizing_the_same_note_overwrites_its_example() {
+        let vault = tempdir().unwrap();
+        write_classified_meeting(vault.path(), "Ops", "n_catbbb", "Weekly sync", None, None);
+        let id = NoteId::parse("n_catbbb").unwrap();
+
+        set_note_category(vault.path(), &id, MeetingCategory::Standup).unwrap();
+        set_note_category(vault.path(), &id, MeetingCategory::Client).unwrap();
+
+        let file = CategoryFile::load(&vault.path().join("Ops")).unwrap();
+        assert_eq!(file.examples().len(), 1);
+        assert_eq!(file.examples()[0].category, MeetingCategory::Client);
+    }
+
+    #[test]
+    fn an_inbox_note_is_categorized_without_recording_an_example() {
+        let vault = tempdir().unwrap();
+        let note = Note::new(
+            NoteId::parse("n_catccc").unwrap(),
+            NoteType::Meeting,
+            Routing::Routed {
+                project: INBOX.to_string(),
+                confidence: 0.2,
+            },
+            "2026-08-19",
+            Vec::new(),
+            Source::parse("transcript").unwrap(),
+            "Body.",
+        )
+        .unwrap();
+        note::write_note(vault.path(), &note, Some("Unfiled")).unwrap();
+        let id = NoteId::parse("n_catccc").unwrap();
+
+        let listed = set_note_category(vault.path(), &id, MeetingCategory::Observer)
+            .unwrap()
+            .expect("the note exists");
+
+        assert_eq!(listed.note.category, Some(MeetingCategory::Observer));
+        // The Inbox is a waiting room, not a project: it holds no infra files,
+        // and an example written into a project the note is not in would be
+        // training data for the wrong folder.
+        assert!(!category_examples::category_path(&vault.path().join(INBOX)).exists());
+    }
+
+    #[test]
+    fn a_non_meeting_note_refuses_a_category_and_is_left_alone() {
+        let vault = tempdir().unwrap();
+        let path = write(
+            vault.path(),
+            "Ops",
+            "n_catddd",
+            "2026-08-19",
+            Some("Just a note"),
+        );
+        let before = fs::read_to_string(&path).unwrap();
+        let id = NoteId::parse("n_catddd").unwrap();
+
+        let err = set_note_category(vault.path(), &id, MeetingCategory::Standup).unwrap_err();
+
+        assert!(matches!(
+            err,
+            NoteError::InvalidField {
+                field: "category",
+                ..
+            }
+        ));
+        assert_eq!(fs::read_to_string(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn categorizing_an_unknown_id_reports_nothing_rather_than_failing() {
+        let vault = tempdir().unwrap();
+        let id = NoteId::parse("n_nobody").unwrap();
+
+        assert!(
+            set_note_category(vault.path(), &id, MeetingCategory::Client)
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn setting_and_clearing_tracking_rewrites_only_that_key() {
+        let vault = tempdir().unwrap();
+        write_classified_meeting(
+            vault.path(),
+            "Ops",
+            "n_traaaa",
+            "Weekly sync",
+            Some(MeetingCategory::AllHands),
+            None,
+        );
+        let id = NoteId::parse("n_traaaa").unwrap();
+
+        let set = set_note_tracking(vault.path(), &id, Some(ledger::EnrollmentMode::ContextOnly))
+            .unwrap()
+            .expect("the note exists");
+        assert_eq!(set.note.tracking, Some(ledger::EnrollmentMode::ContextOnly));
+        assert_eq!(
+            set.note.category,
+            Some(MeetingCategory::AllHands),
+            "the other facet is untouched"
+        );
+        let reread = Note::from_markdown(&fs::read_to_string(&set.path).unwrap()).unwrap();
+        assert_eq!(reread.tracking, Some(ledger::EnrollmentMode::ContextOnly));
+
+        // Clearing removes the key entirely: "opted back out" must be
+        // indistinguishable from "never opted in".
+        let cleared = set_note_tracking(vault.path(), &id, None)
+            .unwrap()
+            .expect("the note exists");
+        assert_eq!(cleared.note.tracking, None);
+        assert!(!fs::read_to_string(&cleared.path)
+            .unwrap()
+            .contains("tracking:"));
+    }
+
+    #[test]
+    fn setting_the_tracking_a_note_already_has_writes_nothing() {
+        let vault = tempdir().unwrap();
+        let path = write_classified_meeting(
+            vault.path(),
+            "Ops",
+            "n_trbbbb",
+            "Weekly sync",
+            None,
+            Some(ledger::EnrollmentMode::ContextOnly),
+        );
+        let before = fs::read_to_string(&path).unwrap();
+
+        let id = NoteId::parse("n_trbbbb").unwrap();
+        let listed =
+            set_note_tracking(vault.path(), &id, Some(ledger::EnrollmentMode::ContextOnly))
+                .unwrap()
+                .expect("the note exists");
+
+        assert_eq!(
+            listed.note.tracking,
+            Some(ledger::EnrollmentMode::ContextOnly)
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap(), before);
+    }
+
+    /// The regression that made frontmatter storage worth doing: a re-route
+    /// rebuilt the note through `Note::new`, which takes only the seven fields
+    /// it validates, so every optional one was silently dropped. `title` did
+    /// exactly that; a tracking override that vanished when a note was filed
+    /// would have defeated the whole point of moving it out of the database.
+    #[test]
+    fn a_reroute_preserves_the_title_and_both_classification_facets() {
+        let vault = tempdir().unwrap();
+        write(
+            vault.path(),
+            "Growth",
+            "n_seedaa",
+            "2026-07-01",
+            Some("seed"),
+        );
+        write_classified_meeting(
+            vault.path(),
+            "Ops",
+            "n_movecc",
+            "Quarterly review",
+            Some(MeetingCategory::Review),
+            Some(ledger::EnrollmentMode::ContextOnly),
+        );
+        let id = NoteId::parse("n_movecc").unwrap();
+
+        let routed = file_note_to_project(vault.path(), &id, "Growth", &FileNoteOptions::default())
+            .unwrap()
+            .expect("the note exists");
+
+        assert_eq!(routed.note.note.title.as_deref(), Some("Quarterly review"));
+        assert_eq!(routed.note.note.category, Some(MeetingCategory::Review));
+        assert_eq!(routed.note.note.category_confidence, Some(0.8));
+        assert_eq!(
+            routed.note.note.tracking,
+            Some(ledger::EnrollmentMode::ContextOnly)
+        );
+        // And on disk in the new home, which is what the index re-reads.
+        let reread = Note::from_markdown(&fs::read_to_string(&routed.note.path).unwrap()).unwrap();
+        assert_eq!(reread.title.as_deref(), Some("Quarterly review"));
+        assert_eq!(reread.category, Some(MeetingCategory::Review));
+        assert_eq!(reread.tracking, Some(ledger::EnrollmentMode::ContextOnly));
+    }
+
+    /// The category example is a claim about a *project*, so it cannot outlive
+    /// the note's membership of one. Left behind, it would be rendered into
+    /// every future distill prompt for the old folder as guidance drawn from a
+    /// meeting that is no longer in it — the same reason the routing log drops
+    /// its entry on a move, one line above it.
+    #[test]
+    fn a_reroute_drops_the_notes_category_example_from_the_old_project() {
+        let vault = tempdir().unwrap();
+        write(
+            vault.path(),
+            "Growth",
+            "n_seedbb",
+            "2026-07-01",
+            Some("seed"),
+        );
+        write_classified_meeting(vault.path(), "Ops", "n_catfff", "Weekly sync", None, None);
+        let id = NoteId::parse("n_catfff").unwrap();
+        set_note_category(vault.path(), &id, MeetingCategory::Client).unwrap();
+        assert_eq!(
+            CategoryFile::load(&vault.path().join("Ops"))
+                .unwrap()
+                .examples()
+                .len(),
+            1
+        );
+
+        file_note_to_project(vault.path(), &id, "Growth", &FileNoteOptions::default())
+            .unwrap()
+            .expect("the note exists");
+
+        assert!(
+            CategoryFile::load(&vault.path().join("Ops"))
+                .unwrap()
+                .examples()
+                .is_empty(),
+            "the old project keeps no example for a note that has left it"
+        );
+        // And nothing is invented in the new home: recording an example is what
+        // a correction does, and none was made here.
+        assert!(CategoryFile::load(&vault.path().join("Growth"))
+            .unwrap()
+            .examples()
+            .is_empty());
+    }
+
+    #[test]
+    fn a_project_holding_a_category_file_is_still_deletable() {
+        let vault = tempdir().unwrap();
+        write_classified_meeting(vault.path(), "Ops", "n_cateee", "Weekly sync", None, None);
+        let id = NoteId::parse("n_cateee").unwrap();
+        set_note_category(vault.path(), &id, MeetingCategory::Standup).unwrap();
+        assert!(category_examples::category_path(&vault.path().join("Ops")).is_file());
+
+        delete_project(vault.path(), "Ops").unwrap();
+
+        assert!(!vault.path().join("Ops").exists());
     }
 }

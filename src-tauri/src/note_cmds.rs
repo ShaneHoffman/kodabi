@@ -11,7 +11,9 @@ use std::path::Path;
 
 use kodabi_core::index::IndexedNote;
 use kodabi_core::meeting;
-use kodabi_core::note::{self, Note, NoteEdit, NoteId, NoteType, Routing, Source, Tag};
+use kodabi_core::note::{
+    self, MeetingCategory, Note, NoteEdit, NoteId, NoteType, Routing, Source, Tag,
+};
 use kodabi_core::sessions;
 use kodabi_core::vault::{self, FileNoteOptions, ListedNote, ProjectInfo, RoutedNote};
 use tauri::{AppHandle, Emitter, Manager};
@@ -35,15 +37,20 @@ fn broadcast_vault_changed(app: &AppHandle) {
     let _ = app.emit(VAULT_CHANGED_EVENT, ());
 }
 
-/// Lands one moved or re-filed note's row on the background index worker.
+/// Lands one moved, re-filed or rewritten note's row on the background index
+/// worker.
 ///
-/// Every command that relocates a note does this eagerly rather than leaving it
-/// to the file watcher, so the change reflects in search at once and still
-/// converges if the watcher never started. The upsert is keyed by the note's
-/// stable `id`, so a note that only moved updates its existing row instead of
-/// being deleted and reinserted — which is what keeps its embeddings alive.
-/// Best-effort by construction: the `.md` file is already the source of truth,
-/// so a failed index write may never fail the command (see `index_state`).
+/// Every command that relocates or rewrites a note does this eagerly rather
+/// than leaving it to the file watcher, so the change reflects in search at
+/// once and still converges if the watcher never started. The upsert is keyed
+/// by the note's stable `id`, so a note that only moved updates its existing
+/// row instead of being deleted and reinserted — which is what keeps its
+/// embeddings alive. Best-effort by construction: the `.md` file is already the
+/// source of truth, so a failed index write may never fail the command (see
+/// `index_state`).
+///
+/// `ledger_cmds` has its own `reindex_and_broadcast`, which pairs this with the
+/// broadcast because every write it makes wants both.
 fn index_moved_note(index: &IndexState, listed: &ListedNote, kb: &Path) {
     let rel = listed.path.strip_prefix(kb).unwrap_or(&listed.path);
     let mut indexed = IndexedNote::from_note(
@@ -268,6 +275,13 @@ pub struct NoteSummaryDto {
     tags: Vec<String>,
     source: String,
     confidence: Option<f64>,
+    /// The meeting's genre, or `null` on a note that carries none.
+    category: Option<String>,
+    /// The classifier's confidence in `category`; `null` once a human set it.
+    category_confidence: Option<f64>,
+    /// The per-meeting tracking override, in its frontmatter spelling; `null`
+    /// when the note inherits.
+    tracking: Option<String>,
     snippet: String,
     guess: Option<RouteGuessDto>,
 }
@@ -518,6 +532,62 @@ pub async fn file_note_to_project(
     broadcast_vault_changed(&app);
 
     Ok(file_note_outcome(routed, &kb))
+}
+
+/// A recategorization request: which meeting, and the genre the user picked.
+#[derive(serde::Deserialize)]
+pub struct SetCategoryInput {
+    id: String,
+    category: String,
+}
+
+/// Sets a meeting's genre — the classification correction loop. Rewrites the
+/// note's frontmatter `category` (clearing the classifier's
+/// `category_confidence`, since a human correction is a fact rather than an
+/// estimate) and records the correction as an example in the note's project, so
+/// the same meeting is recognized next week. The whole mutation and its
+/// failure-consistency contract live in `vault::set_note_category`; this
+/// command only parses the wire strings and projects the result.
+///
+/// The note does not move: a category says what a meeting *was*, not where it
+/// belongs.
+#[tauri::command]
+pub async fn set_note_category(
+    app: AppHandle,
+    input: SetCategoryInput,
+) -> Result<NoteSummaryDto, String> {
+    let kb = knowledge_base_dir(&app)?;
+    let id = parse_note_id(&input.id)?;
+    // `reported`, not `note_error`: an unknown wire value cannot come from the
+    // closed picker, so it is a bug rather than something the user typed, and
+    // the core's field-shaped detail is the wrong thing to show them.
+    let category = MeetingCategory::parse(&input.category).map_err(|err| {
+        reported(
+            "set_note_category",
+            err,
+            "That isn't a meeting kind Kodabi knows. Reopen the note and try again.",
+        )
+    })?;
+
+    let listed = vault::set_note_category(&kb, &id, category)
+        .map_err(|err| {
+            note_error(
+                "set_note_category",
+                err,
+                "Couldn't change this meeting's kind. The note is unchanged; try again.",
+            )
+        })?
+        .ok_or_else(|| {
+            "This note is no longer in the vault. It may have been deleted; refresh the list."
+                .to_string()
+        })?;
+
+    // The note stays where it is, so this is a plain rewrite: the upsert is
+    // keyed by the stable `id` and updates the same row.
+    index_moved_note(&app.state::<IndexState>(), &listed, &kb);
+    broadcast_vault_changed(&app);
+
+    Ok(note_summary(&listed, &kb))
 }
 
 /// Projects a [`RoutedNote`] to the wire outcome: the routed note as a
@@ -790,6 +860,15 @@ fn note_summary(listed: &ListedNote, kb: &Path) -> NoteSummaryDto {
             .collect(),
         source: listed.note.source.as_yaml().to_string(),
         confidence: listed.note.routing.confidence(),
+        category: listed
+            .note
+            .category
+            .map(|category| category.as_str().to_string()),
+        category_confidence: listed.note.category_confidence,
+        tracking: listed
+            .note
+            .tracking
+            .map(|mode| mode.as_frontmatter_str().to_string()),
         snippet: snippet(&listed.note.body),
         // Filled in by `list_notes` for Inbox rows only; every other projection
         // of a note (read, save, file) answers "where is it", not "where might

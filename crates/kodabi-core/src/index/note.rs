@@ -116,6 +116,23 @@ impl FromSql for NoteType {
     }
 }
 
+/// The index reuses [`crate::note::MeetingCategory`] rather than mirroring it.
+/// `NoteType`'s duplicate above is cross-module legacy, not a pattern: one enum
+/// means the frontmatter spelling, the SQL `CHECK` and the MCP wire value can
+/// never drift apart.
+impl ToSql for crate::note::MeetingCategory {
+    fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+        Ok(ToSqlOutput::from(self.as_str()))
+    }
+}
+
+impl FromSql for crate::note::MeetingCategory {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        let raw = value.as_str()?;
+        crate::note::MeetingCategory::parse(raw).map_err(|err| FromSqlError::Other(Box::new(err)))
+    }
+}
+
 /// A note to insert or update in the index — the parsed frontmatter (`id`,
 /// `type`, `project`, `date`, `tags`, `source`, `confidence`) plus the derived
 /// fields the query surface needs (`path`, `title`, `body`).
@@ -142,6 +159,16 @@ pub struct IndexedNote {
     pub source: String,
     /// Routing confidence 0.0–1.0, or `None` when hand-filed/imported.
     pub confidence: Option<f64>,
+    /// The meeting's genre, or `None` on an unclassified meeting or a note that
+    /// carries no category at all.
+    pub category: Option<crate::note::MeetingCategory>,
+    /// The classifier's confidence in [`IndexedNote::category`], `None` once a
+    /// human has set the category by hand.
+    pub category_confidence: Option<f64>,
+    /// The per-meeting commitment-tracking override, stored in its frontmatter
+    /// (kebab-case) spelling; `None` means the note inherits. The enrollment
+    /// gate reads this column — see `ledger::effective_mode`.
+    pub tracking: Option<String>,
     /// Note body (frontmatter stripped) — the full-text search content.
     pub body: String,
     /// Structured facts (decisions, action items, and for a meeting the duration
@@ -178,6 +205,11 @@ impl IndexedNote {
             tags: note.tags.iter().map(|t| t.as_str().to_string()).collect(),
             source: note.source.as_yaml().to_string(),
             confidence: note.routing.confidence(),
+            category: note.category,
+            category_confidence: note.category_confidence,
+            tracking: note
+                .tracking
+                .map(|mode| mode.as_frontmatter_str().to_string()),
             body: note.body.clone(),
             meeting: None,
         }
@@ -322,6 +354,10 @@ pub struct NoteRow {
     pub tags: Vec<String>,
     pub source: String,
     pub confidence: Option<f64>,
+    pub category: Option<crate::note::MeetingCategory>,
+    pub category_confidence: Option<f64>,
+    /// The tracking override in its frontmatter spelling, or `None` to inherit.
+    pub tracking: Option<String>,
     pub body: String,
 }
 

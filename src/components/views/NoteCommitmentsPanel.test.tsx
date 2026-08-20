@@ -36,8 +36,8 @@ function serve(payload: Partial<NoteCommitmentsPayload>): void {
   }));
 }
 
-function renderPanel() {
-  render(<NoteCommitmentsPanel noteId="n_a1b2c3" />);
+function renderPanel(contextOnly = false) {
+  render(<NoteCommitmentsPanel noteId="n_a1b2c3" contextOnly={contextOnly} />);
 }
 
 describe("NoteCommitmentsPanel", () => {
@@ -102,7 +102,7 @@ describe("NoteCommitmentsPanel", () => {
         }),
       ],
     });
-    renderPanel();
+    renderPanel(true);
 
     expect(await screen.findByText("Commitments")).toBeInTheDocument();
     expect(screen.getByText("book the venue")).toBeInTheDocument();
@@ -111,6 +111,30 @@ describe("NoteCommitmentsPanel", () => {
     // Track is offered on the two that are out and not on the one that is in:
     // untracking a tracked line belongs to the Commitments view.
     expect(screen.getAllByRole("button", { name: "Track" })).toHaveLength(2);
+  });
+
+  it("reads the mode off the note, not the index-backed payload", async () => {
+    // The write that flips this switch rewrites the note's frontmatter and then
+    // hands the index worker a job; the broadcast that makes this panel refetch
+    // does not wait for it. So the payload can still carry the old mode while
+    // the file already carries the new one, and the file is the truth.
+    serve({ context_only: false, items: [line({ item_id: "a_111111" })] });
+    renderPanel(true);
+
+    expect(await screen.findByRole("switch", { name: "Context only" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+  });
+
+  it("shows the panel for a context-only meeting that enrolled nothing", async () => {
+    // Every line gated out leaves no items at all, and the switch still has to
+    // be there to flip back — which it only can if the mode does not come from
+    // the payload that has none.
+    serve({ context_only: false, items: [] });
+    renderPanel(true);
+
+    expect(await screen.findByRole("switch", { name: "Context only" })).toBeInTheDocument();
   });
 
   it("flips the meeting's tracking through the switch", async () => {
@@ -161,7 +185,7 @@ describe("NoteCommitmentsPanel", () => {
       updated_at: "2026-08-18T09:00:00Z",
       untracked_via: null,
     }));
-    renderPanel();
+    renderPanel(true);
 
     await user.click(await screen.findByRole("button", { name: "Track" }));
 

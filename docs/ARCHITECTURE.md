@@ -199,10 +199,10 @@ Notes are Markdown + YAML frontmatter in per-project folders. The frontmatter fi
 [`FRONTMATTER_SCHEMA.md`](FRONTMATTER_SCHEMA.md) (and mirrors the MCP `NoteSummary` shape — editing
 one requires checking the other); filenames carry a timestamp and device ID so two machines can
 never collide ([`FILENAME_SCHEME.md`](FILENAME_SCHEME.md)). Each project folder also carries its own
-`_glossary.yml`, `_routing_examples.yml` and `_ledger.yml`, which is what keeps them per-project
-isolated and makes them sync with the knowledge. None of the three names its own project — the
-folder it sits in is the project — which is what lets a project rename move the folder and carry
-them along untouched.
+`_glossary.yml`, `_routing_examples.yml`, `_category.yml` and `_ledger.yml`, which is what keeps
+them per-project isolated and makes them sync with the knowledge. None of the four names its own
+project — the folder it sits in is the project — which is what lets a project rename move the folder
+and carry them along untouched.
 
 The derived index is SQLite: **FTS5** for full-text and **sqlite-vec** for semantic search over
 384-dimensional bge-small embeddings, chunked per note. A file watcher re-indexes on change, and the
@@ -235,15 +235,19 @@ and re-link across those edits (`kodabi_core::ledger::sync`).
 index and the MCP read surface look the same either way; what the ledger holds is the separate
 question of what you are *tracking*. The gate sits at enrollment, in reconcile's create leg
 (`kodabi_core::ledger::sync`), and resolves through one seam: a per-meeting override, then the
-meeting category's default (not yet built), then the global default of `tracked`
-(`ledger::effective_mode`). The one override today is **context only**, which enrolls just the items
-you own, because a direct ask is a commitment regardless of why you attended; it is stored in
-`ledger_note_overrides` rather than in frontmatter, and rides the vault snapshot with everything
-else. An un-enrolled item gets no entry and no ref at all, so the aging and evidence passes never
-see it — that absence is the point, not an optimization. Because the mode is read inside the sync
-transaction, both ingest paths (the index worker and the distill follow-up) are gated by
-construction; and because sync is idempotent, flipping a meeting back to tracked enrolls what was
-skipped simply by re-syncing it.
+meeting category's default (the category exists now, but nothing maps one to a mode yet), then the
+global default of `tracked` (`ledger::effective_mode`). The one override today is **context only**,
+which enrolls just the items you own, because a direct ask is a commitment regardless of why you
+attended. It is stored in the note's **frontmatter** (`tracking:`), not in a ledger table: it is a
+judgement about the meeting, so it belongs with the meeting, and it then survives a re-route, a
+vault rebuild and a sync to another machine without any bookkeeping to keep a row's project in step.
+An un-enrolled item gets no entry and no ref at all, so the aging and evidence passes never see it —
+that absence is the point, not an optimization. The mode reaches the gate on the note's facts
+(`NoteSync.note_override`, read from the index row that mirrors the file) and is resolved once
+inside the sync transaction, so both ingest paths (the index worker and the distill follow-up) are
+gated identically; the field is not defaultable, so a producer that forgets it does not compile.
+Because sync is idempotent, flipping a meeting back to tracked enrols what was skipped simply by
+re-syncing it.
 
 The gate applies to entry *creation* only. A re-mention still links and still bumps `last_mention`,
 so a live commitment restated in a context-only meeting does not age out for having been discussed
@@ -257,6 +261,29 @@ says it was never my business. Its item refs stay active, so a re-sync sees the 
 can neither mint a duplicate nor park the entry as vanished. Every entry
 carries `enrolled_via` (`default` / `override` / `manual`) and, when untracked, `untracked_via`
 (`manual` / `override`), so any row can answer why it is in the ledger and how it left.
+
+**Meetings have a genre, and it is correctable.** Beside the document `type` (meeting / note /
+chat), a meeting note carries a `category`: `standup`, `one-on-one`, `client`, `working-session`,
+`review`, `all-hands`, or `observer` (`kodabi_core::note::MeetingCategory`). A closed set, so the
+classification is checkable and a corrected value means the same thing next week. The distill pass
+picks one as part of its single JSON response (the shared `RESPONSE_SHAPE_SPEC`, so the merge call
+on a long meeting returns one answer for the whole conversation rather than losing it per chunk),
+and records how sure it was in `category_confidence`.
+
+Corrections are first-class, and they teach. Recategorizing a note (`vault::set_note_category`,
+behind the `set_note_category` command) rewrites the frontmatter, clears `category_confidence` —
+a human correction is a fact, not an estimate — and appends the correction to `_category.yml` in
+the note's own project folder, beside `_glossary.yml` and `_routing_examples.yml`. That file also
+holds an optional `default:` prior. Both are rendered into the next distill prompt for a note
+routing to that project, as *guidance* rather than as a rule: recurring meetings are the point, so
+the same project plus a similar title should land on the genre the user picked last time, while the
+transcript can always overrule the prior. This is deliberately weaker than the routing scorer's
+arithmetic use of `_routing_examples.yml` — a genre is chosen by a model reading a conversation, so
+its memory is prose the model reads too.
+
+Nothing consumes the category for behavior yet: it is the level future behavior attaches at, and
+`ledger::effective_mode`'s `category_default` slot is where the first consumer (a per-genre
+enrollment default) plugs in.
 
 The Commitments view reads it through `ledger_cmds`, whose organizing principle is the ledger's own
 `direction` column: what you owe and what you are waiting on are two groups on two planes, not a

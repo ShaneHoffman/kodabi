@@ -73,6 +73,6 @@ writer's output — say whether the writer or the note needs the fix.
 node .claude/skills/frontmatter-validator/test.mjs
 ```
 
-Runs the bundled fixtures (the three schema examples as valid cases, four injected violations as
-failing cases) plus the schema-mirror check, and exits non-zero on any regression. Run it after
+Runs the bundled fixtures (the schema's own examples as valid cases, one injected violation per
+rule as failing cases) plus the schema-mirror check, and exits non-zero on any regression. Run it after
 changing `validate.mjs` or the schema.

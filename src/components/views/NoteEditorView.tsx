@@ -2,11 +2,15 @@ import { useRef, useState, type FormEvent, type ReactNode } from "react";
 import { clsx } from "clsx";
 import { useNavigation, type View } from "../../useNavigation";
 import {
+  CATEGORY_OPTIONS,
+  categoryLabel,
   createNote,
   INBOX_PROJECT,
   saveNote,
+  setNoteCategory,
   todayIsoDate,
   useNote,
+  type NoteCategory,
   type NoteDetail,
   type NoteType,
 } from "../../useNotes";
@@ -16,6 +20,7 @@ import { applyMarkup, selectionAnchor } from "../../textareaCaret";
 import { backendCopy } from "../../errorCopy";
 import { DeleteNoteDialog } from "../dialogs/DeleteNoteDialog";
 import { Button } from "../ui/Button";
+import { Menu } from "../ui/Menu";
 import { StatusMessage } from "../ui/StatusMessage";
 import { NoteMarkdown } from "./NoteMarkdown";
 import { NoteCommitmentsPanel } from "./NoteCommitmentsPanel";
@@ -339,7 +344,13 @@ function ReadNoteLayout({
             <DetailsPanel note={note} project={project} />
             {/* Renders nothing for a note that extracted no commitments, which
                 is most of them. */}
-            <NoteCommitmentsPanel noteId={note.id} />
+            {/* The mode comes off the note the view already read from disk,
+                not from the panel's own index-backed payload: the file is the
+                source of truth and reaches here first (see the panel's doc). */}
+            <NoteCommitmentsPanel
+              noteId={note.id}
+              contextOnly={note.tracking === "context-only"}
+            />
             {session !== null && (
               <SessionPanel
                 artifacts={session.artifacts}
@@ -395,10 +406,15 @@ function DetailsPanel({
   note,
   project,
   showTags = true,
+  allowCategoryChange = true,
 }: {
   note: NoteDetail;
   project: string;
   showTags?: boolean;
+  /** Compose mode passes `false`. `set_note_category` rewrites the file at
+   *  once, and a rewrite landing under unsaved edits would race the save that
+   *  follows; in compose the kind reads as plain text. */
+  allowCategoryChange?: boolean;
 }) {
   const unfiled = project === INBOX_PROJECT;
   return (
@@ -436,6 +452,18 @@ function DetailsPanel({
           )}
         </Row>
         <Row label="Kind">{note.type}</Row>
+        {/* The genre sits beside the kind it refines, not instead of it: they
+            answer different questions (what sort of document, then what sort of
+            meeting). Meetings only — `category` is a meetings-only facet
+            (docs/FRONTMATTER_SCHEMA.md). */}
+        {note.type === "meeting" &&
+          (allowCategoryChange ? (
+            <CategoryRow note={note} />
+          ) : (
+            <Row label="Meeting kind">
+              {note.category ? categoryLabel(note.category) : "Not set"}
+            </Row>
+          ))}
         <Row label="Captured">
           {/* The date only: a frontmatter `date` is either a local calendar day
               or an offset-bearing timestamp (docs/FRONTMATTER_SCHEMA.md), and
@@ -458,6 +486,96 @@ function DetailsPanel({
         )}
       </dl>
     </section>
+  );
+}
+
+/**
+ * The Details panel's meeting-kind row, and the one place a genre is corrected
+ * from the note screen.
+ *
+ * The affordance sits ON the fact it edits rather than in a header cluster: the
+ * view-owned header is closed at two buttons by its own contract above, and a
+ * genre is a detail, so the detail's value becomes the control. That spends no
+ * new slot (UI_CONVENTIONS §5).
+ *
+ * Nothing is applied optimistically. `set_note_category` broadcasts
+ * `vault:changed` itself, so the refetch that follows is the truth — the same
+ * bargain `NoteCommitmentsPanel` strikes, and for the same reason: a value this
+ * view invented would disagree with the file the moment the write failed.
+ */
+function CategoryRow({ note }: { note: NoteDetail }) {
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // A refetch that lands new frontmatter has answered whatever the last attempt
+  // failed at, so the stale message goes with it. Adjust-during-render, keyed on
+  // the response object — never an effect (`.claude/rules/no-use-effect.md`).
+  const [previousNote, setPreviousNote] = useState(note);
+  if (previousNote !== note) {
+    setPreviousNote(note);
+    if (error !== null) setError(null);
+  }
+
+  const choose = (category: NoteCategory) => {
+    if (category === note.category) return;
+    setPending(true);
+    setError(null);
+    setNoteCategory({ id: note.id, category })
+      .catch((err: unknown) => {
+        setError(
+          backendCopy(err, "Couldn't change this meeting's kind. The note is unchanged; try again."),
+        );
+      })
+      .finally(() => setPending(false));
+  };
+
+  return (
+    <>
+      <Row label="Meeting kind">
+        <span className="flex min-w-0 items-center justify-end gap-2">
+          {/* The classifier's own uncertainty, in the metadata register. A word
+              rather than a percentage: a genre is one of seven, and a number
+              would promise a precision the classifier does not have. It
+              disappears the moment a person confirms the kind, because the
+              backend clears the score on a correction. */}
+          {note.category_confidence !== null && (
+            <span className="font-data text-[10.5px] text-ink-faint">guessed</span>
+          )}
+          <Menu.Root>
+            <Menu.Trigger
+              render={
+                <Button
+                  variant="chip"
+                  loading={pending}
+                  loadingLabel="Saving…"
+                  aria-label={`Change the kind of "${note.title}"`}
+                >
+                  {note.category ? categoryLabel(note.category) : "Not set"}{" "}
+                  <span aria-hidden="true">▾</span>
+                </Button>
+              }
+            />
+            <Menu.Content align="end">
+              {CATEGORY_OPTIONS.map((option) => (
+                <Menu.Item key={option.value} onClick={() => choose(option.value)}>
+                  <span className="truncate">{option.label}</span>
+                  {option.value === note.category && (
+                    <span aria-hidden="true" className="ml-auto pl-2 font-data text-[10.5px]">
+                      ✓
+                    </span>
+                  )}
+                </Menu.Item>
+              ))}
+            </Menu.Content>
+          </Menu.Root>
+        </span>
+      </Row>
+      {error !== null && (
+        <dd className="col-span-2 pb-2">
+          <StatusMessage variant="error">{error}</StatusMessage>
+        </dd>
+      )}
+    </>
   );
 }
 
@@ -873,7 +991,12 @@ function EditNote({
           </div>
 
           <aside aria-label="Note details" className="flex flex-col gap-3.5 self-start">
-            <DetailsPanel note={note} project={project} showTags={false} />
+            <DetailsPanel
+              note={note}
+              project={project}
+              showTags={false}
+              allowCategoryChange={false}
+            />
           </aside>
         </div>
 

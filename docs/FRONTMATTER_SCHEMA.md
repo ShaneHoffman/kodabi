@@ -24,18 +24,21 @@ base depends on Kodabi continuing to exist).
 
 ## Fields
 
-Canonical key order the writer emits: **`id, type, title, project, date, tags, source, confidence`**.
+Canonical key order the writer emits: **`id, type, category, tracking, title, project, date, tags, source, confidence, category_confidence`**.
 
 | Field | Type | Required | Allowed values / format |
 | --- | --- | --- | --- |
 | `id` | string | yes | `n_` + base36 (`^n_[0-9a-z]{6,}$`), e.g. `n_a1b2c3`; generated once at creation, **never rewritten** on move or re-route |
 | `type` | string enum | yes | `meeting` \| `note` \| `chat` (closed set) |
+| `category` | string enum | no | The meeting's genre: `standup` \| `one-on-one` \| `client` \| `working-session` \| `review` \| `all-hands` \| `observer` (closed set). **Meetings only**; omit the key on any other type, and on a meeting nothing has classified |
+| `tracking` | string enum | no | The per-meeting commitment-tracking override: `tracked` \| `context-only`. Omit the key to inherit (the category's default, then the global default of full tracking) |
 | `title` | string | no | The human display title; free text, capped at 120 characters. Omit the key for a note without one — the display layer then de-slugs the filename |
 | `project` | string | yes | A project name; the sentinel `Inbox` when unrouted |
 | `date` | string (ISO 8601) | yes | Timestamp with offset when a time is known (`2026-07-09T14:00:00-07:00`); date-only (`2026-07-11`) otherwise |
 | `tags` | list of strings | no | Lowercase kebab-case, no leading `#`; omit the key entirely when there are no tags |
 | `source` | string | yes | A keyword — `transcript` \| `quick-capture` \| `chat` \| `import` \| `manual` — **or** a repo-relative path to the raw artifact when one exists |
 | `confidence` | float | conditional | `0.0`–`1.0`, the routing score |
+| `category_confidence` | float | conditional | `0.0`–`1.0`, how strongly the classifier backed `category`. Requires `category`; **removed** when a person sets the category by hand |
 
 **Notes on individual fields:**
 
@@ -116,11 +119,57 @@ Canonical key order the writer emits: **`id, type, title, project, date, tags, s
   routing score (auto or a `1.0` correction) backs `project`. Emitted as a YAML float that always
   carries a decimal point (`1.0`, never `1`); range `0.0`–`1.0`.
 
+- **`category`** — the meeting's **genre**: a second facet beside `type`, answering "what kind of
+  meeting was this" rather than "what kind of document is this". Closed set on purpose, so the
+  classifier's answer is checkable and a corrected value means the same thing next week:
+  `standup` (a short recurring status round), `one-on-one` (a private conversation between two
+  people), `client` (a conversation with an external customer or partner), `working-session`
+  (hands-on work done together), `review` (an assessment of finished work), `all-hands` (a large
+  company-wide or department-wide address), `observer` (a meeting attended only to listen in).
+
+  **Meetings only.** The key is invalid on a `note` or a `chat`, and editing a meeting into another
+  type drops it. It is also omitted on a meeting nothing has classified — an old note, or one whose
+  distill declined to pick.
+
+  Written by the distill pass and correctable in one click from the note view or the Inbox; each
+  correction is recorded as an example in the project's `_category.yml`, which feeds the classifier
+  the next time a note routes there. The taxonomy is the level future behavior attaches at (the
+  commitment ledger's per-category enrollment default is the first consumer), but **nothing reads it
+  for behavior yet**.
+
+- **`tracking`** — the per-meeting **commitment-tracking override**: `tracked` (every extracted item
+  is enrolled in the ledger) or `context-only` (only items the local user owns are). Omit the key to
+  **inherit** — the meeting category's default, then the global default of `tracked`.
+
+  Absence is deliberately indistinguishable from having opted back out, which is why the UI's switch
+  *removes* the key rather than writing `tracked`. The explicit `tracked` value exists for the case
+  categories introduce: "track this one, whatever my category defaults to."
+
+  Called *per-meeting* because that is what the surface offers and what the word means to a reader,
+  but unlike `category` it is **not restricted to `type: meeting`**: a chat carries action items and
+  feeds the ledger the same way (`meeting::derives_facts`), so the same override has to be able to
+  apply to one. Nothing writes it on a chat today.
+
+  It lives here rather than in the ledger database because it is a judgement about the *note*, so it
+  travels with the file: a re-route, a vault rebuild, or a sync to another machine all carry it for
+  free. Extraction is unconditional either way — an untracked meeting still gets a full note with
+  every action item in its body; only ledger enrolment is gated (see
+  [`ARCHITECTURE.md`](ARCHITECTURE.md), "Extraction is not tracking").
+
+- **`category_confidence`** — how strongly the distill pass backed its own `category` guess, on the
+  same `0.0`–`1.0` scale and emitted the same way as `confidence` (always with a decimal point).
+  Requires `category`: a score for a category that is not there describes nothing.
+
+  **Removed when a person sets the category by hand**, which is the same rule `confidence` follows in
+  reverse — a machine guess carries its uncertainty, a human correction is a fact and carries none.
+  So the key's presence is exactly the answer to "did anyone confirm this genre".
+
 ---
 
 ## Examples
 
-One example per `type`, each exercising a different combination of field states.
+One example per `type`, plus a classified meeting, each exercising a different combination of
+field states.
 
 ### `meeting` — auto-routed, high confidence, traceable to a raw recording
 
@@ -151,6 +200,40 @@ contractor shortlist.
 - [ ] Jane to send the signed budget memo to finance by 2026-07-11.
 - [ ] Priya to request formal bids from GreenFlow and two alternates.
 ```
+
+### `meeting` — classified, and attended for context only
+
+```markdown
+---
+id: n_j1k2l3
+type: meeting
+category: all-hands
+tracking: context-only
+title: Q3 company all hands
+project: Briarwood Golf
+date: 2026-08-19T10:00:00-07:00
+tags: [company]
+source: sessions/20260819T170000000Z-k4m2xp7q-q3-all-hands.jsonl
+confidence: 0.71
+category_confidence: 0.88
+---
+
+# Summary
+
+Leadership walked through Q3 results and the Q4 hiring plan.
+
+## Action items
+
+- [ ] Priya to circulate the revised hiring plan.
+- [ ] You to send the course renovation numbers to Priya by 2026-08-22.
+```
+
+Both new facets are visible here, and they answer different questions. `category: all-hands` is the
+distill pass's classification, with `category_confidence: 0.88` recording how sure it was — the
+score would be gone had a person set the genre by hand. `tracking: context-only` is a judgement a
+person made: this was a meeting attended to listen, so only the direct ask (`You to send the course
+renovation numbers`) is enrolled in the commitment ledger. Priya's line stays in the note exactly as
+extracted; extraction is unconditional, and only tracking is gated.
 
 ### `note` — quick-capture, low confidence, unrouted to Inbox
 
@@ -261,8 +344,8 @@ are the placement and byte-level rules it establishes.
   falls back to `{id}.md`. A name clash gets an increasing numeric suffix (`weekly-sync-2.md`) and
   never overwrites. The path is informational and changes on move; the `id` never does.
 - **Serialization contract.** Opening `---` fence line, then the present keys in the canonical order
-  above (`title` and the two conditional keys `tags`/`confidence` are emitted only when present),
-  closing `---` fence line, then one blank separator line, the body, and a single trailing newline.
+  above (the optional and conditional keys — `category`, `tracking`, `title`, `tags`, `confidence`,
+  `category_confidence` — are emitted only when present), closing `---` fence line, then one blank separator line, the body, and a single trailing newline.
   An empty body ends the file at the closing `---`. The body is stored trimmed of surrounding blank
   lines. Only the **first** `---`-on-its-own-line after the opening fence closes the frontmatter, so
   a `---` horizontal rule inside the body is preserved verbatim. Scalar values that would otherwise
@@ -278,8 +361,9 @@ are the placement and byte-level rules it establishes.
   every note it produces — end-of-meeting notes, quick-capture notes, and (later) distilled chat
   sessions. **Implemented** in `kodabi-core::note` (struct → md → struct round-trip), wrapped by the
   thin `write_note` Tauri command.
-- **→ Phase 2 file watcher & full rebuild command:** parses `id`, `type`, `title`, `project`,
-  `date`, `tags`, and `confidence` out of frontmatter to populate the SQLite FTS5 + `sqlite-vec` index
+- **→ Phase 2 file watcher & full rebuild command:** parses `id`, `type`, `category`, `tracking`,
+  `title`, `project`, `date`, `tags`, `confidence`, and `category_confidence` out of frontmatter to
+  populate the SQLite FTS5 + `sqlite-vec` index
   (`date` is indexed so results can be ordered and range-filtered by recency without re-reading files;
   `title` is indexed for full-text search and falls back to the de-slugged filename when absent);
   because the files are the source of truth, a full rebuild can always reconstruct the index from them
@@ -287,6 +371,9 @@ are the placement and byte-level rules it establishes.
 - **→ Phase 3 MCP tools:** `search_notes`, `file_note_to_project`, `list_projects`, and
   `get_project_context` all route and filter over these fields (ticket P0-10, the MCP tool
   surface, is explicitly informed by this schema).
+- **→ Phase 5 commitment ledger:** reads `tracking` (through the index row) to gate which extracted
+  items earn a ledger entry — the note file, not a database table, is where that judgement lives.
+  `category` is the level the *next* default attaches at and has no behavior consumer yet.
 
 ---
 

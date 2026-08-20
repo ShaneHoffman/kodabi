@@ -172,6 +172,9 @@ mod tests {
             tags: vec![],
             source: "manual".to_string(),
             confidence: None,
+            category: None,
+            category_confidence: None,
+            tracking: None,
             body: format!("body of {id}"),
             meeting: None,
         }

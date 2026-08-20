@@ -122,6 +122,9 @@ fn stdio_server_handshakes_reads_and_writes_with_clean_stdout() {
                 tags: vec![],
                 source: "manual".to_string(),
                 confidence: None,
+                category: None,
+                category_confidence: None,
+                tracking: None,
                 body: "The quarterly plan.".to_string(),
                 // A meeting with one overdue action item, so the milestone tool
                 // (`list_outstanding_items`) has something real to serve

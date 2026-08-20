@@ -143,6 +143,9 @@ pub struct NoteSummary {
     pub tags: Vec<String>,
     pub source: String,
     pub confidence: Option<f64>,
+    pub category: Option<crate::note::MeetingCategory>,
+    pub category_confidence: Option<f64>,
+    pub tracking: Option<String>,
 }
 
 impl From<&NoteRow> for NoteSummary {
@@ -157,6 +160,9 @@ impl From<&NoteRow> for NoteSummary {
             tags: row.tags.clone(),
             source: row.source.clone(),
             confidence: row.confidence,
+            category: row.category,
+            category_confidence: row.category_confidence,
+            tracking: row.tracking.clone(),
         }
     }
 }
@@ -380,6 +386,9 @@ mod tests {
             tags: vec![],
             source: "transcript".to_string(),
             confidence: Some(0.8),
+            category: None,
+            category_confidence: None,
+            tracking: None,
             body: format!("body of {id}"),
             meeting: None,
         }

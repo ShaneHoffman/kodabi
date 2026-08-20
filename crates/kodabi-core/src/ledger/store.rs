@@ -1057,6 +1057,7 @@ mod tests {
                 note_date_utc: DAY,
                 items: &items,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap();
@@ -1381,6 +1382,7 @@ mod tests {
                 note_date_utc: "2026-08-18T00:00:00Z",
                 items: &items,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap()
@@ -1420,6 +1422,7 @@ mod tests {
                 note_date_utc: DAY,
                 items: &items,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap()
@@ -1443,6 +1446,7 @@ mod tests {
                 note_date_utc: DAY,
                 items: &items,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap()
@@ -1490,6 +1494,7 @@ mod tests {
                 note_date_utc: "2026-08-01T00:00:00Z",
                 items: &older,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap();
@@ -1500,6 +1505,7 @@ mod tests {
                 note_date_utc: "2026-08-10T00:00:00Z",
                 items: &newer,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap();
@@ -1582,6 +1588,7 @@ mod tests {
                 note_date_utc: DAY,
                 items: &items,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap();
@@ -1608,6 +1615,7 @@ mod tests {
                 note_date_utc: DAY,
                 items: &items,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap();
@@ -1632,6 +1640,7 @@ mod tests {
                 note_date_utc: DAY,
                 items: &items,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap()

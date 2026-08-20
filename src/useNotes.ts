@@ -28,6 +28,42 @@ export type RouteGuess = {
   confidence: number;
 };
 
+/** Mirrors `MeetingCategory` in `crates/kodabi-core/src/note.rs` (and the
+ * `MeetingCategory` `$def` in `docs/MCP_TOOL_SURFACE.md`): the meeting's genre,
+ * the second facet beside `type`. A closed set, so a corrected value means the
+ * same thing next week. These kebab-case strings are the frontmatter values;
+ * their labels live in `CATEGORY_OPTIONS` below. */
+export type NoteCategory =
+  | "standup"
+  | "one-on-one"
+  | "client"
+  | "working-session"
+  | "review"
+  | "all-hands"
+  | "observer";
+
+/** The seven meeting kinds, in the order every surface offers them.
+ *
+ * One table, shared by the note view's picker, the Inbox row menu and the
+ * Settings card, so the three can never drift — the same reason
+ * `useSettings.ts` keeps `THEME_OPTIONS` and `RETENTION_OPTIONS`. The labels
+ * are user-facing copy: change them here and nowhere else. */
+export const CATEGORY_OPTIONS: { value: NoteCategory; label: string }[] = [
+  { value: "standup", label: "Stand-up" },
+  { value: "one-on-one", label: "One-on-one" },
+  { value: "client", label: "Client" },
+  { value: "working-session", label: "Working session" },
+  { value: "review", label: "Review" },
+  { value: "all-hands", label: "All hands" },
+  { value: "observer", label: "Observer" },
+];
+
+/** The display label for a category, falling back to the raw wire value so a
+ * note written by a newer build never renders as blank. */
+export function categoryLabel(category: NoteCategory): string {
+  return CATEGORY_OPTIONS.find((o) => o.value === category)?.label ?? category;
+}
+
 export type NoteSummary = {
   id: string;
   path: string;
@@ -38,6 +74,14 @@ export type NoteSummary = {
   tags: string[];
   source: string;
   confidence: number | null;
+  /** The meeting's genre; `null` on an unclassified meeting or any other type. */
+  category: NoteCategory | null;
+  /** How strongly the distill pass backed `category`. `null` once a person has
+   * set the category by hand, so its presence answers "did anyone confirm
+   * this". */
+  category_confidence: number | null;
+  /** The per-meeting commitment-tracking override, or `null` to inherit. */
+  tracking: "tracked" | "context-only" | null;
   /** A derived one-line body preview for list rows — a UI-only extension
    * beyond the doc'd MCP `NoteSummary`, never stored. */
   snippet: string;
@@ -55,8 +99,13 @@ export type NoteDetail = NoteSummary & { body_markdown: string };
  * filename fell back to the id (listing derives titles from filenames). The
  * two list-only extensions are omitted because the Rust `WrittenNote` doesn't
  * send them — a write echoes the note it just made, and neither a body preview
- * nor a routing guess is a fact about it. */
-export type CreatedNote = Omit<NoteSummary, "title" | "snippet" | "guess"> & {
+ * nor a routing guess is a fact about it. The three classification facets are
+ * omitted for a different reason: a note this call just created carries none of
+ * them, so sending three nulls would be noise rather than news. */
+export type CreatedNote = Omit<
+  NoteSummary,
+  "title" | "snippet" | "guess" | "category" | "category_confidence" | "tracking"
+> & {
   title: string | null;
 };
 
@@ -113,6 +162,19 @@ export function fileNoteToProject(input: {
   project: string;
 }): Promise<FileNoteOutcome> {
   return invoke<FileNoteOutcome>("file_note_to_project", { input });
+}
+
+/** One-click human correction of a meeting's kind. The backend rewrites the
+ * note's frontmatter, clears the classifier's confidence in its own guess,
+ * records the correction as an example that teaches the classifier, and
+ * broadcasts `vault:changed` itself — so call sites apply nothing optimistically
+ * and wire no refetch. Mirrors `SetCategoryInput` in
+ * `src-tauri/src/note_cmds.rs`. */
+export function setNoteCategory(input: {
+  id: string;
+  category: NoteCategory;
+}): Promise<NoteSummary> {
+  return invoke<NoteSummary>("set_note_category", { input });
 }
 
 export function saveNote(input: SaveNoteInput): Promise<NoteDetail> {

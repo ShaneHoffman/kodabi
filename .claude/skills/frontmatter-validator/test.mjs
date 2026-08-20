@@ -30,7 +30,13 @@ function check(name, cond, detail) {
 }
 
 console.log('valid fixtures (expect zero errors):');
-for (const f of ['valid/meeting.md', 'valid/note.md', 'valid/chat.md', 'valid/inline-comments.md']) {
+for (const f of [
+  'valid/meeting.md',
+  'valid/note.md',
+  'valid/chat.md',
+  'valid/inline-comments.md',
+  'valid/classified-meeting.md',
+]) {
   const errs = errors(fx(f));
   check(`${f} passes`, errs.length === 0, errs.map((e) => `${e.code}: ${e.message}`).join('; '));
 }
@@ -49,6 +55,18 @@ check(
 check(
   'invalid/inbox-missing-confidence.md flags inbox-confidence',
   hasError(fx('invalid/inbox-missing-confidence.md'), 'inbox-confidence'),
+);
+check(
+  'invalid/bad-category.md flags bad category',
+  hasError(fx('invalid/bad-category.md'), 'bad-category'),
+);
+check(
+  'invalid/category-on-note.md flags a category on a non-meeting',
+  hasError(fx('invalid/category-on-note.md'), 'category-on-non-meeting'),
+);
+check(
+  'invalid/bad-tracking.md flags the ledger spelling',
+  hasError(fx('invalid/bad-tracking.md'), 'bad-tracking'),
 );
 
 console.log('warning fixtures (expect a non-fatal WARN, zero errors):');

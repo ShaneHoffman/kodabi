@@ -52,6 +52,9 @@ function makeNote(overrides: Partial<NoteSummary> & { id: string; title: string 
     tags: [],
     source: "manual",
     confidence: 0.41,
+    category: null,
+    category_confidence: null,
+    tracking: null,
     snippet: "",
     // No suggestion by default: the router having nothing to say is the case
     // most of these tests are not about.
@@ -310,6 +313,98 @@ describe("InboxView", () => {
 
     // The majority case: a `note` segment on every row would be noise.
     expect(await screen.findByText("2026-07-01")).toBeInTheDocument();
+  });
+
+
+  describe("the meeting kind", () => {
+    const MEETING = makeNote({
+      id: "n_m11111",
+      title: "Weekly sync",
+      type: "meeting",
+      category: "standup",
+    });
+
+    function fileMenu(title: string): HTMLElement {
+      return screen.getByRole("button", { name: `File "${title}" to project` });
+    }
+
+    it("names a classified meeting's genre on its row", async () => {
+      serveVault([MEETING]);
+
+      renderInbox();
+
+      expect(await screen.findByText("meeting · Stand-up · 2026-07-01")).toBeInTheDocument();
+    });
+
+    it("says nothing extra for a meeting nothing has classified", async () => {
+      serveVault([makeNote({ id: "n_m22222", title: "Weekly sync", type: "meeting" })]);
+
+      renderInbox();
+
+      expect(await screen.findByText("meeting · 2026-07-01")).toBeInTheDocument();
+    });
+
+    it("folds the kinds into the row's existing File menu", async () => {
+      const user = userEvent.setup();
+      serveVault([MEETING]);
+      renderInbox();
+      await screen.findByText("Weekly sync");
+
+      // The row's two affordances are spent on File and Delete, so a third
+      // control would break the ceiling; the kinds ride the menu instead.
+      await user.click(fileMenu("Weekly sync"));
+
+      expect(await screen.findByRole("menuitem", { name: /Working session/ })).toBeInTheDocument();
+      expect(screen.getByRole("menuitem", { name: /briarwood-golf/ })).toBeInTheDocument();
+    });
+
+    it("offers no kinds on a row that is not a meeting", async () => {
+      const user = userEvent.setup();
+      serveVault([PLANNING]);
+      renderInbox();
+      await screen.findByText("Quarterly planning");
+
+      await user.click(fileMenu("Quarterly planning"));
+
+      await screen.findByRole("menuitem", { name: /briarwood-golf/ });
+      expect(screen.queryByRole("menuitem", { name: /Working session/ })).toBeNull();
+    });
+
+    it("recategorizes without filing the note away", async () => {
+      const user = userEvent.setup();
+      serveVault([MEETING]);
+      onCommand("set_note_category", () => ({ ...MEETING, category: "review" }));
+      renderInbox();
+      await screen.findByText("Weekly sync");
+
+      await user.click(fileMenu("Weekly sync"));
+      await user.click(await screen.findByRole("menuitem", { name: /Review/ }));
+
+      await waitFor(() => {
+        expect(invokedCommands()).toContain("set_note_category");
+      });
+      // A kind is not a filing: the row stays put rather than playing its
+      // departure, and nothing was filed.
+      expect(invokedCommands()).not.toContain("file_note_to_project");
+      expect(screen.getByText("Weekly sync")).toBeInTheDocument();
+    });
+
+    it("surfaces a refused recategorization on the row", async () => {
+      const user = userEvent.setup();
+      serveVault([MEETING]);
+      onCommand("set_note_category", () => {
+        throw "Couldn't change this meeting's kind. The note is unchanged; try again.";
+      });
+      renderInbox();
+      await screen.findByText("Weekly sync");
+
+      await user.click(fileMenu("Weekly sync"));
+      await user.click(await screen.findByRole("menuitem", { name: /Review/ }));
+
+      expect(await screen.findByRole("alert")).toHaveTextContent(
+        "Couldn't change this meeting's kind. The note is unchanged; try again.",
+      );
+    });
   });
 
   describe("the router's guess", () => {

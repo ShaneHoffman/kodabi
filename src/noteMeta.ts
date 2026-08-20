@@ -1,4 +1,4 @@
-import type { NoteSummary } from "./useNotes";
+import { categoryLabel, type NoteSummary } from "./useNotes";
 
 /** The separator between meta segments, in one place so the three surfaces
  * that render a meta line can't drift apart on punctuation. */
@@ -37,9 +37,22 @@ export function noteMeta(
  * tags are DROPPED: inside a project, the shared filing is the thing you
  * already know, so repeating it on every row is noise the calm register cannot
  * afford. The day is sliced the same way `noteMeta` slices it.
+ *
+ * A classified meeting names its genre between the two: the same argument that
+ * puts the kind first applies to the sub-kind, and a row that says
+ * "meeting · Stand-up" answers what sort of thing this is more completely than
+ * one that stops at "meeting".
  */
-export function projectRowMeta(note: Pick<NoteSummary, "date" | "type">): string {
-  return [noteKind(note.type), note.date.slice(0, 10)].filter((part) => !!part).join(SEPARATOR);
+export function projectRowMeta(
+  note: Pick<NoteSummary, "date" | "type" | "category">,
+): string {
+  return [
+    noteKind(note.type),
+    note.category ? categoryLabel(note.category) : null,
+    note.date.slice(0, 10),
+  ]
+    .filter((part) => !!part)
+    .join(SEPARATOR);
 }
 
 /** The router's confidence in where it filed a note, as a display string. A

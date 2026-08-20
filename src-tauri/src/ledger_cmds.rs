@@ -25,6 +25,7 @@ use std::collections::{BTreeSet, HashMap};
 use chrono::{Duration, Local, SecondsFormat, Utc};
 use kodabi_core::index::ActionItemStatus;
 use kodabi_core::ledger::view::{self, Commitment};
+use kodabi_core::ledger::EnrollmentMode;
 use kodabi_core::ledger::{
     AgingConfig, ClosedVia, EntryDetail, EntryFilter, EntryState, Evidence, LedgerEntry,
     NoteContext,
@@ -41,7 +42,7 @@ use crate::ledger_state::{
 };
 use crate::settings_cmds::SettingsState;
 use crate::transcribe::knowledge_base_dir;
-use crate::user_errors::{reported, user_sentence};
+use crate::user_errors::{note_error, reported, user_sentence};
 
 /// How far back the settled shelf reaches.
 ///
@@ -861,6 +862,10 @@ pub struct NoteCommitmentsInput {
 /// Ledger first, then the index, per the module doc. An index that cannot
 /// supply the note's facts yields an empty list rather than an error: the note
 /// may be a type that carries no commitments, which is an ordinary answer.
+///
+/// The *mode* comes from those same index facts rather than from the ledger,
+/// because it is a frontmatter key now; the index row mirrors the note file,
+/// and reading it here keeps the panel showing what the note actually says.
 #[tauri::command]
 pub async fn list_note_commitments(
     app: AppHandle,
@@ -869,11 +874,12 @@ pub async fn list_note_commitments(
     let (client, index) = handles(&app);
     tauri::async_runtime::spawn_blocking(move || {
         let note_id = input.note_id;
-        let (mode, details) = client
-            .note_enrollment(note_id.clone())
+        let details = client
+            .note_entries(note_id.clone())
             .map_err(|err| ledger_error("list_note_commitments", err, LEDGER_READ_REFUSED))?;
-        let items = index
-            .and_then(|index| index.note_facts(&note_id))
+        let facts = index.and_then(|index| index.note_facts(&note_id));
+        let mode = facts.as_ref().and_then(|facts| facts.note_override);
+        let items = facts
             .map(|facts| {
                 facts
                     .items
@@ -890,7 +896,7 @@ pub async fn list_note_commitments(
             })
             .unwrap_or_default();
         Ok(NoteCommitmentsDto {
-            context_only: mode == Some(kodabi_core::ledger::EnrollmentMode::ContextOnly),
+            context_only: mode == Some(EnrollmentMode::ContextOnly),
             items: view::assemble_note_items(&note_id, items, &details)
                 .into_iter()
                 .map(note_item_dto)
@@ -917,49 +923,60 @@ pub struct MeetingTrackingInput {
 /// Sets whether a meeting is tracked in full or for direct asks only, and
 /// re-evaluates the entries it already produced.
 ///
-/// **Reads the index before the ledger**, the one departure from the module
-/// doc's fixed order, and it is argued rather than accidental: the note's
-/// project, date and lines are *inputs* to the ledger write, so there is no
-/// order that puts the ledger first. The two acquisitions stay strictly
-/// sequential and never nested, which is the property the rule exists to
-/// protect.
+/// **The judgement is written to the note's frontmatter**, not to the ledger
+/// database: it is a fact about the meeting, so it belongs with the meeting,
+/// where it survives a re-route, a vault rebuild, and a sync to another
+/// machine. The ledger keeps only the consequence.
 ///
-/// The follow-up sync is what makes re-tracking whole. The ledger call revives
-/// what the override untracked; the sync's ordinary, idempotent create leg
-/// enrolls the items that were gated out and never got an entry at all. Both
-/// travel the same worker channel, so the sync cannot overtake the flip.
+/// Order, and why: the ledger's availability is checked first, so a refusal
+/// costs nothing; the vault write comes next, and a failure there leaves
+/// everything unchanged; the retro-application follows and is *awaited*, so the
+/// eager re-index that follows it cannot overtake it on the worker's queue.
+/// That re-index is what makes re-tracking whole — it forwards the note's fresh
+/// facts, whose `note_override` now reads the new value, and the ordinary
+/// idempotent create leg enrols the items the old mode gated out. The two
+/// acquisitions (index, then ledger) stay strictly sequential and never nested,
+/// which is the property the module doc's ordering rule exists to protect.
+///
+/// If the retro-application fails after the note was written, the note's
+/// frontmatter is still the truth and gates every future sync; only the
+/// re-evaluation of entries that already exist is missing, and flipping again
+/// re-runs it.
 #[tauri::command]
 pub async fn set_meeting_tracking(
     app: AppHandle,
     input: MeetingTrackingInput,
 ) -> Result<MeetingTrackingDto, String> {
-    let (client, index) = handles(&app);
-    let handle = app.state::<LedgerState>().handle();
-    let facts = tauri::async_runtime::spawn_blocking({
-        let note_id = input.note_id.clone();
-        move || index.and_then(|index| index.note_facts(&note_id))
-    })
-    .await
-    .map_err(|err| {
+    let kb = knowledge_base_dir(&app)?;
+    let (client, _) = handles(&app);
+    // Refused before the vault is touched: a switch that flips with nothing
+    // behind it is worse than one that refuses to flip.
+    if !client.is_available() {
+        return Err(reported(
+            "set_meeting_tracking",
+            "the ledger worker is unavailable",
+            LEDGER_REFUSED,
+        ));
+    }
+
+    let note_id = NoteId::parse(&input.note_id).map_err(|err| {
         reported(
             "set_meeting_tracking",
             err,
-            "Couldn't change this meeting's tracking. Reopen the note and try again.",
+            "That note id isn't valid, so its tracking can't be changed.",
         )
     })?;
-    let Some(facts) = facts else {
-        return Err(
-            "Kodabi doesn't have this meeting indexed yet, so its tracking can't be \
-                    changed. Try again in a moment."
-                .to_string(),
-        );
-    };
-
-    let project = facts.project.clone();
-    let note_id = input.note_id.clone();
     let context_only = input.context_only;
-    let outcome = tauri::async_runtime::spawn_blocking(move || {
-        client.set_note_tracking(note_id, project, context_only)
+
+    let listed = tauri::async_runtime::spawn_blocking({
+        let kb = kb.clone();
+        move || {
+            vault::set_note_tracking(
+                &kb,
+                &note_id,
+                context_only.then_some(EnrollmentMode::ContextOnly),
+            )
+        }
     })
     .await
     .map_err(|err| {
@@ -969,9 +986,46 @@ pub async fn set_meeting_tracking(
             "Couldn't change this meeting's tracking. Reopen the note and try again.",
         )
     })?
-    .map_err(|err| ledger_error("set_meeting_tracking", err, LEDGER_REFUSED))?;
+    .map_err(|err| {
+        note_error(
+            "set_meeting_tracking",
+            err,
+            "Couldn't change this meeting's tracking. The note is unchanged; try again.",
+        )
+    })?
+    .ok_or_else(|| {
+        "This meeting is no longer in the vault, so its tracking can't be changed.".to_string()
+    })?;
 
-    handle.sync(facts);
+    let project = listed.note.routing.project().to_string();
+    let outcome = tauri::async_runtime::spawn_blocking({
+        let note_id = input.note_id.clone();
+        let project = project.clone();
+        move || client.retro_apply_note_tracking(note_id, project, context_only)
+    })
+    .await
+    .map_err(|err| {
+        reported(
+            "set_meeting_tracking",
+            err,
+            "This meeting's tracking was saved, but its existing commitments weren't \
+             re-checked. Flip it again to re-check them.",
+        )
+    })?
+    .map_err(|err| {
+        ledger_error(
+            "set_meeting_tracking",
+            err,
+            "This meeting's tracking was saved, but its existing commitments weren't \
+             re-checked. Flip it again to re-check them.",
+        )
+    })?;
+
+    // Re-index the rewritten note. The index worker forwards its fresh facts to
+    // the ledger, and *that* is the follow-up sync: the facts now carry the new
+    // `note_override`, so the create leg enrols what the old mode gated out.
+    // Best-effort, like every other write path here: the watcher converges it.
+    reindex_and_broadcast(&app, &listed, &kb);
     broadcast_ledger_changed(&app);
     Ok(MeetingTrackingDto {
         context_only: outcome.context_only,

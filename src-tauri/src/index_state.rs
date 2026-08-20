@@ -108,6 +108,12 @@ fn forward_to_ledger(ledger: &LedgerHandle, note: &IndexedNote) {
         project: ledger_state::project_slug(note.project.as_deref()),
         date_utc,
         items: facts.action_items.clone(),
+        // The row being written *is* the note's frontmatter, so the gate reads
+        // the same value the file carries.
+        note_override: note
+            .tracking
+            .as_deref()
+            .and_then(|raw| kodabi_core::ledger::EnrollmentMode::parse_frontmatter(raw).ok()),
     });
 }
 
@@ -143,10 +149,19 @@ fn note_facts_from(idx: &NoteIndex, id: &str) -> Option<NoteFacts> {
         return None;
     }
     let items = idx.get_action_items(id).ok()?;
+    // The gate's input, read from the column the note's frontmatter fills. A
+    // value the index somehow holds but the enum does not know is treated as no
+    // override rather than failing the sync: the note file is the truth, and
+    // the next reconcile rewrites the row from it.
+    let note_override = row
+        .tracking
+        .as_deref()
+        .and_then(|raw| kodabi_core::ledger::EnrollmentMode::parse_frontmatter(raw).ok());
     Some(NoteFacts {
         note_id: row.id,
         project: ledger_state::project_slug(row.project.as_deref()),
         date_utc: row.date_utc,
+        note_override,
         items: items
             .into_iter()
             .map(|item| kodabi_core::meeting::ActionItemFact {

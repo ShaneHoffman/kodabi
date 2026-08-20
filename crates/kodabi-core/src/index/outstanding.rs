@@ -585,6 +585,9 @@ mod tests {
             tags: vec![],
             source: "transcript".to_string(),
             confidence: Some(0.9),
+            category: None,
+            category_confidence: None,
+            tracking: None,
             body: format!("body of {id}"),
             meeting: Some(MeetingFacts {
                 duration_seconds: Some(600),

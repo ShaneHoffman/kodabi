@@ -21,6 +21,7 @@ import {
   type RetentionKind,
   type Theme,
 } from "../../useSettings";
+import { CATEGORY_OPTIONS } from "../../useNotes";
 import { useNavigation } from "../../useNavigation";
 import { useShortcutStatus } from "../../useShortcutStatus";
 import { applyContrast, readContrast } from "../../contrast";
@@ -917,6 +918,24 @@ export function SettingsView() {
                 onCommit={() => void applyLedger("conversation_autoclose")}
               />
               <span className="font-data text-[12.5px] text-ink-faint">%</span>
+            </Row>
+          </Card>
+
+          {/* No control, on purpose. The per-genre setting behind this card is
+              stored already (`Settings.categories`), but what it will DO is the
+              next change's decision, so a control here could only be labelled
+              with a guess. A switch that flips and settles nothing is worse
+              than a sentence saying what is coming. What the card earns now is
+              the taxonomy itself: this is the one place the seven kinds the
+              note view and the Inbox have started speaking are written down. */}
+          <Card title="Meeting kinds">
+            <Row
+              label="Kinds Kodabi files meetings under"
+              hint="Kodabi picks one when it writes the note. Correct it from the note or from the Inbox, and it learns the correction for that project. Per-kind behavior arrives in a later update."
+            >
+              <span className="min-w-0 text-right font-data text-[11px] text-ink-faint">
+                {CATEGORY_OPTIONS.map((option) => option.label).join(" · ")}
+              </span>
             </Row>
           </Card>
 

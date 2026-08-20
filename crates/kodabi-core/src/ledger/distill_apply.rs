@@ -37,6 +37,9 @@ pub struct DistillFollowUp<'a> {
     /// indexes refer to.
     pub items: &'a [ActionItemFact],
     pub updates: &'a [LedgerUpdateDraft],
+    /// The note's tracking override, read straight off the `Note` this distill
+    /// just wrote. See [`crate::ledger::sync::NoteSync::note_override`].
+    pub note_override: Option<crate::ledger::EnrollmentMode>,
 }
 
 /// A commitment the conversation closed on its own.
@@ -110,6 +113,7 @@ pub fn apply_distill_follow_up(
         note_date_utc: follow_up.note_date_utc,
         items: follow_up.items,
         link_hints: &hints,
+        note_override: follow_up.note_override,
         now,
     })?;
 
@@ -389,6 +393,7 @@ mod tests {
                 note_date_utc: EARLIER,
                 items: &items,
                 link_hints: &[],
+                note_override: None,
                 now: EARLIER,
             })
             .unwrap();
@@ -408,6 +413,7 @@ mod tests {
                 note_date_utc: DAY,
                 items,
                 updates,
+                note_override: None,
             },
             AUTOCLOSE,
             NOW,
@@ -467,6 +473,7 @@ mod tests {
                 note_date_utc: "2026-01-01T00:00:00Z",
                 items: &[],
                 updates: &[update(&entry_id, LedgerUpdateKind::Refresh, None, 0.9)],
+                note_override: None,
             },
             AUTOCLOSE,
             NOW,
@@ -684,6 +691,7 @@ mod tests {
                 note_date_utc: DAY,
                 items: &items,
                 link_hints: &[],
+                note_override: None,
                 now: NOW,
             })
             .unwrap();
@@ -726,6 +734,7 @@ mod tests {
                 note_date_utc: EARLIER,
                 items: &[fact("a_other", "You", "book the venue")],
                 link_hints: &[],
+                note_override: None,
                 now: EARLIER,
             })
             .unwrap()

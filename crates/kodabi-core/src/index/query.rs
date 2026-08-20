@@ -20,8 +20,10 @@ use crate::meeting::MeetingFacts;
 /// `SearchHit` carries no body, so hydrating a page through these columns would
 /// read every hit's full text only to drop it. That surface has its own
 /// narrower list.
-const NOTE_COLUMNS: &str =
-    "id, path, title, type, project, date_raw, date_utc, source, confidence, body";
+const NOTE_COLUMNS: &str = concat!(
+    "id, path, title, type, project, date_raw, date_utc, source, confidence, ",
+    "category, category_confidence, tracking, body"
+);
 
 impl NoteIndex {
     /// Inserts `note`, or updates the existing row with the same `id` in place.
@@ -52,18 +54,22 @@ impl NoteIndex {
 
         tx.execute(
             "INSERT INTO notes
-                 (id, path, title, type, project, date_raw, date_utc, source, confidence, body)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                 (id, path, title, type, project, date_raw, date_utc, source, confidence,
+                  category, category_confidence, tracking, body)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
              ON CONFLICT(id) DO UPDATE SET
-                 path       = excluded.path,
-                 title      = excluded.title,
-                 type       = excluded.type,
-                 project    = excluded.project,
-                 date_raw   = excluded.date_raw,
-                 date_utc   = excluded.date_utc,
-                 source     = excluded.source,
-                 confidence = excluded.confidence,
-                 body       = excluded.body",
+                 path                = excluded.path,
+                 title               = excluded.title,
+                 type                = excluded.type,
+                 project             = excluded.project,
+                 date_raw            = excluded.date_raw,
+                 date_utc            = excluded.date_utc,
+                 source              = excluded.source,
+                 confidence          = excluded.confidence,
+                 category            = excluded.category,
+                 category_confidence = excluded.category_confidence,
+                 tracking            = excluded.tracking,
+                 body                = excluded.body",
             params![
                 note.id,
                 note.path,
@@ -74,6 +80,9 @@ impl NoteIndex {
                 date_utc,
                 note.source,
                 note.confidence,
+                note.category,
+                note.category_confidence,
+                note.tracking,
                 note.body,
             ],
         )?;
@@ -499,6 +508,9 @@ fn map_row(row: &Row<'_>) -> rusqlite::Result<NoteRow> {
         tags: Vec::new(),
         source: row.get("source")?,
         confidence: row.get("confidence")?,
+        category: row.get("category")?,
+        category_confidence: row.get("category_confidence")?,
+        tracking: row.get("tracking")?,
         body: row.get("body")?,
     })
 }
@@ -548,6 +560,9 @@ mod tests {
             tags: vec![],
             source: "transcript".to_string(),
             confidence: Some(0.9),
+            category: None,
+            category_confidence: None,
+            tracking: None,
             body: format!("body of {id}"),
             meeting: None,
         }

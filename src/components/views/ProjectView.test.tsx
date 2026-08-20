@@ -279,6 +279,9 @@ describe("ProjectView index rows", () => {
       tags: [],
       source: "manual",
       confidence: 0.9,
+      category: null,
+      category_confidence: null,
+      tracking: null,
       snippet: "",
       // A project listing never carries a guess: the note already has a home.
       guess: null,
