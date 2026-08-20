@@ -1,16 +1,19 @@
-//! Retro-application of a changed tracking override, and manual promotion.
+//! Retro-application of a changed enrollment mode, and manual promotion.
 //!
 //! [`sync`](super::sync) enforces the enrollment gate on the way *in*, deciding
 //! what earns an entry. This module owns the two things it cannot: changing a
 //! meeting's mind after the fact, and letting a person overrule the mode for one
 //! line.
 //!
-//! **The override itself is not stored in this crate's database.** It is a
-//! frontmatter key on the note ([`crate::vault::set_note_tracking`]), so it
-//! travels with the file; what lives here is the *consequence* — the entries a
-//! previous mode already minted, which no re-sync revisits on its own. The
-//! shell writes the note first and calls
-//! [`Ledger::retro_apply_note_tracking`] after.
+//! **Neither half of the mode is stored in this crate's database.** The
+//! per-meeting override is a frontmatter key on the note
+//! ([`crate::vault::set_note_tracking`]), so it travels with the file; the
+//! meeting category's default is a user setting, reached through
+//! [`category_default_for`](super::category_default_for). What lives here is the
+//! *consequence* — the entries a previous mode already minted, which no re-sync
+//! revisits on its own. The shell writes the note first and calls
+//! [`Ledger::retro_apply_note_tracking`] after, naming which source changed its
+//! mind ([`RetroSource`]).
 //!
 //! ## What retro-application may and may not touch
 //!
@@ -20,12 +23,18 @@
 //! * still in a live state (never a closure, a waiver, or a supersede — those
 //!   are real judgements about the commitment),
 //! * `touched = 0` (nobody has acted on it),
-//! * `enrolled_via = 'default'` in the untracking direction (a manual promote
-//!   said "track this one anyway", which outranks the meeting's mode), and
-//! * `untracked_via = 'override'` in the retracking direction (a person's own
-//!   untrack survives the meeting being re-tracked).
+//! * enrolled by a *machine* judgement in the untracking direction
+//!   (`enrolled_via IN ('default', 'category')`; a manual promote said "track
+//!   this one anyway", which outranks the meeting's mode), and
+//! * untracked by a *machine* judgement in the retracking direction
+//!   (`untracked_via IN ('override', 'category')`; a person's own untrack
+//!   survives the meeting being re-tracked).
 //!
-//! The asymmetry is deliberate: each direction only undoes what an override did.
+//! The asymmetry is deliberate: each direction only undoes what a default did.
+//! Both machine sources appear in both lists rather than each undoing only its
+//! own kind, and that breadth is load-bearing: entries minted while a meeting
+//! was a standup say `default`, so a recategorization into an observer genre
+//! would sweep nothing if the untrack direction insisted on `category`.
 //!
 //! The untracking direction adds one more: **this meeting has to be the entry's
 //! only live source.** A commitment restated across meetings holds an active ref
@@ -52,6 +61,30 @@ use super::{
 use crate::meeting::ActionItemFact;
 use crate::note::NoteId;
 
+/// Which half of the enrollment chain changed its mind, for
+/// [`Ledger::retro_apply_note_tracking`] to attribute the untracks it performs.
+///
+/// Deliberately two-variant: [`UntrackedVia::Manual`] is a person's own untrack
+/// and can never be the reason a re-evaluation runs, so it is unrepresentable
+/// here rather than merely unused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RetroSource {
+    /// The meeting's own `tracking:` override was set or cleared.
+    Override,
+    /// The meeting was recategorized, and its new genre's default decides.
+    Category,
+}
+
+impl RetroSource {
+    /// The provenance an untrack from this source is stamped with.
+    fn untracked_via(self) -> UntrackedVia {
+        match self {
+            RetroSource::Override => UntrackedVia::Override,
+            RetroSource::Category => UntrackedVia::Category,
+        }
+    }
+}
+
 /// What flipping one meeting's tracking did to the entries it had already
 /// produced.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -65,15 +98,22 @@ pub struct NoteTrackingOutcome {
 }
 
 impl Ledger {
-    /// Re-evaluates the entries a meeting already produced, after its tracking
-    /// override changed in the note's frontmatter.
+    /// Re-evaluates the entries a meeting already produced, after its effective
+    /// enrollment mode changed — either because its `tracking:` override was
+    /// flipped or because it was recategorized into a genre with a different
+    /// default.
     ///
     /// **The judgement itself is not stored here.** It lives in the note's
-    /// `tracking:` key ([`crate::vault::set_note_tracking`]), so it survives a
-    /// re-route, a vault rebuild and a sync to another machine; this store owns
-    /// only the consequence — the entries that judgement already minted, which
-    /// no re-sync would revisit on its own because sync's gate decides what
-    /// *earns* an entry, never what happens to one that exists.
+    /// `tracking:` and `category:` keys, so it survives a re-route, a vault
+    /// rebuild and a sync to another machine; this store owns only the
+    /// consequence — the entries that judgement already minted, which no re-sync
+    /// would revisit on its own because sync's gate decides what *earns* an
+    /// entry, never what happens to one that exists.
+    ///
+    /// `context_only` is the **effective** mode after the change, not the raw
+    /// override, so a recategorization of a meeting that pins its own override
+    /// correctly re-applies the mode it already had. `source` names which half
+    /// of the chain changed, and only affects how an untrack is attributed.
     ///
     /// Call it after the frontmatter write has succeeded. Idempotent in both
     /// directions: re-applying the mode a note already had finds nothing left
@@ -83,6 +123,7 @@ impl Ledger {
         note_id: &str,
         project: &str,
         context_only: bool,
+        source: RetroSource,
         now: &str,
     ) -> Result<NoteTrackingOutcome> {
         let mut outcome = NoteTrackingOutcome {
@@ -92,7 +133,7 @@ impl Ledger {
 
         if context_only {
             for entry_id in self.overridable_entries(note_id)? {
-                self.untrack(&entry_id, UntrackedVia::Override, now)?;
+                self.untrack(&entry_id, source.untracked_via(), now)?;
                 outcome.untracked.push(entry_id);
             }
         } else {
@@ -139,10 +180,16 @@ impl Ledger {
         Ok(removed > 0)
     }
 
-    /// Entries in this note that a context-only flip may untrack.
+    /// Entries in this note that a context-only mode may untrack.
     ///
     /// [`Direction::Mine`] is excluded because that is what context-only
     /// *means*: a direct ask is a commitment regardless of why you attended.
+    ///
+    /// **Both machine provenances are in scope, not only the one that changed.**
+    /// An entry minted while the meeting was a standup says `default`; one
+    /// minted while it was an all-hands with a `tracked` setting says `default`
+    /// too. Recategorizing into an observer genre has to reach all of them, and
+    /// what it must *not* reach is `manual` — a person's promote.
     ///
     /// **This meeting must be the entry's only live source.** A cross-note
     /// re-mention leaves an active ref in every meeting that restated the
@@ -156,7 +203,7 @@ impl Ledger {
             "SELECT entry_id FROM ledger_entries
              WHERE state IN ('open', 'needs_review', 'snoozed')
                AND touched = 0
-               AND enrolled_via = 'default'
+               AND enrolled_via IN ('default', 'category')
                AND direction <> 'mine'
                AND EXISTS (SELECT 1 FROM ledger_item_refs
                            WHERE ledger_item_refs.entry_id = ledger_entries.entry_id
@@ -170,12 +217,16 @@ impl Ledger {
         Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
-    /// Entries in this note that an override untracked and may now be revived.
+    /// Entries in this note that a default untracked and may now be revived.
+    ///
+    /// Machine untracks only, from either source: a person's own untrack
+    /// (`manual`) is a judgement about the commitment and outlives any change of
+    /// mode.
     fn override_untracked_entries(&self, note_id: &str) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
             "SELECT entry_id FROM ledger_entries
              WHERE state = 'untracked'
-               AND untracked_via = 'override'
+               AND untracked_via IN ('override', 'category')
                AND touched = 0
                AND EXISTS (SELECT 1 FROM ledger_item_refs
                            WHERE ledger_item_refs.entry_id = ledger_entries.entry_id
@@ -338,6 +389,9 @@ impl Ledger {
                 &note_id,
                 &project,
                 mode == EnrollmentMode::ContextOnly,
+                // A drained row *is* a per-meeting override, whatever the note's
+                // category would have said on its own.
+                RetroSource::Override,
                 now,
             ) {
                 eprintln!("ledger: couldn't re-check note {note_id}'s commitments: {err}");
@@ -389,6 +443,7 @@ mod tests {
                 items: &items,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap();
@@ -404,7 +459,7 @@ mod tests {
         let (mut ledger, _) = seeded();
 
         let outcome = ledger
-            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, RetroSource::Override, LATER)
             .unwrap();
 
         assert!(outcome.context_only);
@@ -425,14 +480,126 @@ mod tests {
     }
 
     #[test]
-    fn flipping_back_revives_exactly_what_the_override_untracked() {
+    fn recategorizing_untracks_what_the_old_genre_had_enrolled() {
+        // The whole point of the category sweep: these entries were minted
+        // while the meeting was, say, a standup, so they say `default`. If the
+        // sweep only matched `category` it would find nothing here.
+        let (mut ledger, _) = seeded();
+        assert_eq!(
+            entry_for(&ledger, "a_111111").enrolled_via,
+            EnrolledVia::Default
+        );
+
+        let outcome = ledger
+            .retro_apply_note_tracking(NOTE, PROJECT, true, RetroSource::Category, LATER)
+            .unwrap();
+
+        assert_eq!(outcome.untracked.len(), 2);
+        assert_eq!(entry_for(&ledger, "a_222222").state, EntryState::Open);
+        // Attributed to the genre, so the row can answer why it left.
+        assert_eq!(
+            entry_for(&ledger, "a_111111").untracked_via,
+            Some(UntrackedVia::Category)
+        );
+    }
+
+    #[test]
+    fn recategorizing_back_revives_what_the_genre_untracked() {
         let (mut ledger, _) = seeded();
         ledger
-            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, RetroSource::Category, LATER)
             .unwrap();
 
         let outcome = ledger
-            .retro_apply_note_tracking(NOTE, PROJECT, false, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, false, RetroSource::Category, LATER)
+            .unwrap();
+
+        assert_eq!(outcome.retracked.len(), 2);
+        for item_id in ["a_111111", "a_222222", "a_333333"] {
+            let entry = entry_for(&ledger, item_id);
+            assert_eq!(entry.state, EntryState::Open, "{item_id} should be live");
+            assert_eq!(entry.untracked_via, None);
+        }
+    }
+
+    #[test]
+    fn each_machine_source_undoes_the_others_work() {
+        // Deliberately symmetric: both sources are the machine's, so flipping a
+        // meeting's own switch back revives what a recategorization untracked
+        // and vice versa. Only a person's `manual` is out of reach either way.
+        let (mut ledger, _) = seeded();
+        ledger
+            .retro_apply_note_tracking(NOTE, PROJECT, true, RetroSource::Category, LATER)
+            .unwrap();
+
+        let outcome = ledger
+            .retro_apply_note_tracking(NOTE, PROJECT, false, RetroSource::Override, LATER)
+            .unwrap();
+
+        assert_eq!(outcome.retracked.len(), 2);
+        assert_eq!(entry_for(&ledger, "a_111111").state, EntryState::Open);
+    }
+
+    #[test]
+    fn a_recategorization_never_overrides_an_entry_a_person_touched() {
+        let (mut ledger, _) = seeded();
+        // A person snoozed Priya's line: a judgement about the commitment,
+        // which a genre's default has no standing to revisit.
+        let priya = entry_for(&ledger, "a_111111").entry_id;
+        ledger.snooze(&priya, "2026-09-01", LATER).unwrap();
+        ledger.mark_touched(&priya).unwrap();
+
+        let outcome = ledger
+            .retro_apply_note_tracking(NOTE, PROJECT, true, RetroSource::Category, LATER)
+            .unwrap();
+
+        assert_eq!(outcome.untracked.len(), 1, "only the untouched stray moves");
+        assert_eq!(entry_for(&ledger, "a_111111").state, EntryState::Snoozed);
+        assert_eq!(entry_for(&ledger, "a_333333").state, EntryState::Untracked);
+    }
+
+    #[test]
+    fn a_manually_promoted_entry_survives_a_recategorization() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let item = fact("a_111111", "Priya", "send the revised deck");
+        // Gated out by the genre, then promoted by hand anyway.
+        ledger
+            .sync_note_items(&NoteSync {
+                note_id: NOTE,
+                project: PROJECT,
+                note_date_utc: DAY_ONE,
+                items: std::slice::from_ref(&item),
+                link_hints: &[],
+                note_override: None,
+                category_default: Some(EnrollmentMode::ContextOnly),
+                now: NOW,
+            })
+            .unwrap();
+        let entry = ledger
+            .track_item(NOTE, &item, PROJECT, DAY_ONE, LATER)
+            .unwrap();
+        assert_eq!(entry.enrolled_via, EnrolledVia::Manual);
+
+        let outcome = ledger
+            .retro_apply_note_tracking(NOTE, PROJECT, true, RetroSource::Category, LATER)
+            .unwrap();
+
+        assert!(
+            outcome.untracked.is_empty(),
+            "a promote outranks the genre that gated it"
+        );
+        assert_eq!(entry_for(&ledger, "a_111111").state, EntryState::Open);
+    }
+
+    #[test]
+    fn flipping_back_revives_exactly_what_the_override_untracked() {
+        let (mut ledger, _) = seeded();
+        ledger
+            .retro_apply_note_tracking(NOTE, PROJECT, true, RetroSource::Override, LATER)
+            .unwrap();
+
+        let outcome = ledger
+            .retro_apply_note_tracking(NOTE, PROJECT, false, RetroSource::Override, LATER)
             .unwrap();
 
         assert!(!outcome.context_only);
@@ -459,12 +626,13 @@ mod tests {
                 items: &restated,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap();
 
         let outcome = ledger
-            .retro_apply_note_tracking("n_d4e5f6", PROJECT, true, LATER)
+            .retro_apply_note_tracking("n_d4e5f6", PROJECT, true, RetroSource::Override, LATER)
             .unwrap();
 
         assert!(
@@ -483,7 +651,7 @@ mod tests {
         ledger.mark_touched(&touched).unwrap();
 
         let outcome = ledger
-            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, RetroSource::Override, LATER)
             .unwrap();
 
         assert_eq!(
@@ -506,7 +674,7 @@ mod tests {
         ledger.waive(&waived, NOW).unwrap();
 
         let outcome = ledger
-            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, RetroSource::Override, LATER)
             .unwrap();
 
         assert!(outcome.untracked.is_empty());
@@ -521,10 +689,10 @@ mod tests {
         ledger.untrack(&mine, UntrackedVia::Manual, NOW).unwrap();
 
         ledger
-            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, RetroSource::Override, LATER)
             .unwrap();
         let outcome = ledger
-            .retro_apply_note_tracking(NOTE, PROJECT, false, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, false, RetroSource::Override, LATER)
             .unwrap();
 
         assert!(
@@ -548,7 +716,7 @@ mod tests {
         assert_eq!(promoted.state, EntryState::Open);
 
         let outcome = ledger
-            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, RetroSource::Override, LATER)
             .unwrap();
 
         assert!(!outcome.untracked.contains(&theirs));
@@ -559,10 +727,10 @@ mod tests {
     fn setting_the_same_mode_twice_changes_nothing() {
         let (mut ledger, _) = seeded();
         let first = ledger
-            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, RetroSource::Override, LATER)
             .unwrap();
         let second = ledger
-            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, RetroSource::Override, LATER)
             .unwrap();
 
         assert_eq!(first.untracked.len(), 2);
@@ -578,7 +746,7 @@ mod tests {
             fact("a_222222", "You", "book the venue"),
         ];
         ledger
-            .retro_apply_note_tracking(NOTE, PROJECT, true, NOW)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, RetroSource::Override, NOW)
             .unwrap();
         // The note's frontmatter is the gate's input, so each re-sync carries
         // whatever the note says at that moment — exactly what the shell does.
@@ -591,6 +759,7 @@ mod tests {
                     items: &items,
                     link_hints: &[],
                     note_override,
+                    category_default: None,
                     now: NOW,
                 })
                 .unwrap()
@@ -602,7 +771,7 @@ mod tests {
         // The other half of retro-application: this module revives what it
         // untracked, and the shell's follow-up sync creates what never existed.
         ledger
-            .retro_apply_note_tracking(NOTE, PROJECT, false, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, false, RetroSource::Override, LATER)
             .unwrap();
         let after = sync(&mut ledger, None);
 
@@ -622,7 +791,7 @@ mod tests {
     fn tracking_an_item_with_no_entry_mints_one_marked_manual() {
         let mut ledger = Ledger::open_in_memory().unwrap();
         ledger
-            .retro_apply_note_tracking(NOTE, PROJECT, true, NOW)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, RetroSource::Override, NOW)
             .unwrap();
         let item = fact("a_111111", "Priya", "send the revised deck");
         ledger
@@ -633,6 +802,7 @@ mod tests {
                 items: std::slice::from_ref(&item),
                 link_hints: &[],
                 note_override: Some(EnrollmentMode::ContextOnly),
+                category_default: None,
                 now: NOW,
             })
             .unwrap();
@@ -691,7 +861,7 @@ mod tests {
         ledger.clear_all_dirty();
 
         ledger
-            .retro_apply_note_tracking(NOTE, PROJECT, true, LATER)
+            .retro_apply_note_tracking(NOTE, PROJECT, true, RetroSource::Override, LATER)
             .unwrap();
 
         assert_eq!(ledger.dirty_projects(), vec![PROJECT.to_string()]);

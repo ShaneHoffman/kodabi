@@ -48,6 +48,7 @@ function commitment(
       title: "Kickoff",
       project: "Briarwood Golf",
       path: "Briarwood Golf/kickoff.md",
+      category: null,
     },
     evidence: [],
     ...overrides,
@@ -780,5 +781,52 @@ describe("CommitmentsView", () => {
     const mine = await screen.findByTestId("commitments-mine");
     expect(within(mine).getByText(/^overdue · due/)).toHaveClass("text-ink-dim");
     expect(within(mine).getByText(/stale · heard/)).not.toHaveClass("text-ink-dim");
+  });
+
+  it("says quietly what kind of room a commitment came out of", async () => {
+    const user = userEvent.setup();
+    serve({
+      entries: [
+        commitment({
+          entry_id: "le_kind",
+          description: "book the venue",
+          item: item(),
+          source: {
+            note_id: "n_a1b2c3",
+            title: "Kickoff",
+            project: "Briarwood Golf",
+            path: "Briarwood Golf/kickoff.md",
+            category: "all-hands",
+          },
+        }),
+      ],
+    });
+
+    await openCommitments(user);
+
+    // In the faint run beside the project, never promoted: the row's one
+    // promoted slot belongs to overdue or stale, and a meeting kind is context
+    // rather than a claim on attention.
+    const mine = await screen.findByTestId("commitments-mine");
+    const meta = within(mine).getByText(/All hands/);
+    expect(meta).toHaveTextContent("All hands");
+    expect(meta).not.toHaveClass("text-ink-dim");
+  });
+
+  it("omits the kind for a commitment whose note carries none", async () => {
+    const user = userEvent.setup();
+    serve({
+      entries: [
+        commitment({ entry_id: "le_plain", description: "book the venue", item: item() }),
+      ],
+    });
+
+    await openCommitments(user);
+
+    // A null category degrades exactly as a null source does: the segment is
+    // absent, never an empty middot.
+    const mine = await screen.findByTestId("commitments-mine");
+    expect(within(mine).queryByText(/ · · /)).toBeNull();
+    expect(within(mine).getByText(/Briarwood Golf/)).toBeInTheDocument();
   });
 });

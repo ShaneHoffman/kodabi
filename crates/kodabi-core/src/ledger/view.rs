@@ -34,6 +34,9 @@ pub struct NoteContext {
     /// Vault-relative path, informational (a move changes it; the id is the
     /// handle).
     pub path: String,
+    /// The meeting's genre, as the index stores it: `None` for a note that
+    /// carries no category, which includes every chat.
+    pub category: Option<crate::note::MeetingCategory>,
     /// The note's action items, in body order.
     pub items: Vec<ActionItemRow>,
 }
@@ -58,6 +61,9 @@ pub struct CommitmentSource {
     pub title: String,
     pub project: Option<String>,
     pub path: String,
+    /// The source meeting's genre, so a row can say quietly what kind of room
+    /// its commitment came out of. `None` where the note carries no category.
+    pub category: Option<crate::note::MeetingCategory>,
 }
 
 /// How long an untouched commitment stays [`AgingTier::Fresh`], then
@@ -336,6 +342,7 @@ fn assemble_one(
         title: note.title.clone(),
         project: note.project.clone(),
         path: note.path.clone(),
+        category: note.category,
     });
 
     Commitment {
@@ -441,6 +448,7 @@ mod tests {
             title: "Kickoff".to_string(),
             project: Some("Briarwood Golf".to_string()),
             path: format!("Briarwood Golf/{note_id}.md"),
+            category: Some(crate::note::MeetingCategory::Client),
             items,
         }
     }
@@ -457,6 +465,7 @@ mod tests {
                 items: &items,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap();
@@ -468,7 +477,13 @@ mod tests {
         let mut ledger = Ledger::open_in_memory().unwrap();
         // A context-only meeting: only the direct ask is enrolled.
         ledger
-            .retro_apply_note_tracking("n_a1b2c3", "Briarwood Golf", true, NOW)
+            .retro_apply_note_tracking(
+                "n_a1b2c3",
+                "Briarwood Golf",
+                true,
+                crate::ledger::RetroSource::Override,
+                NOW,
+            )
             .unwrap();
         let items = vec![
             fact("a_111111", "Priya", "send the revised deck"),
@@ -482,6 +497,7 @@ mod tests {
                 items: &items,
                 link_hints: &[],
                 note_override: Some(EnrollmentMode::ContextOnly),
+                category_default: None,
                 now: NOW,
             })
             .unwrap();
@@ -562,6 +578,7 @@ mod tests {
                 items: &items,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap();
@@ -575,6 +592,7 @@ mod tests {
                 items: &edited,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap();
@@ -639,6 +657,7 @@ mod tests {
                 items: &[],
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap();

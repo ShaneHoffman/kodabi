@@ -20,14 +20,18 @@ use super::Result;
 /// opened database lands on it. Not read at runtime: [`apply`] derives the
 /// version it writes from the list's length, so the two can never disagree.
 #[cfg(test)]
-pub(crate) const CURRENT_VERSION: i64 = 2;
+pub(crate) const CURRENT_VERSION: i64 = 3;
 
 /// The ordered migrations, as lazy builders. Each is applied in its own
 /// transaction, so a failure leaves the database at the last fully-applied
 /// version. Builders are only invoked for versions that actually run, so a
 /// no-op open never formats any migration SQL.
 fn migrations() -> Vec<fn() -> String> {
-    vec![migration_0001_initial_schema, migration_0002_enrollment]
+    vec![
+        migration_0001_initial_schema,
+        migration_0002_enrollment,
+        migration_0003_category_provenance,
+    ]
 }
 
 /// Applies every migration newer than the database's current `user_version`.
@@ -261,6 +265,71 @@ CREATE TABLE ledger_note_overrides (
     set_at  TEXT NOT NULL
 );
 CREATE INDEX idx_ledger_note_overrides_project ON ledger_note_overrides (project);
+"#
+    .to_string()
+}
+
+/// v3: admits `category` as a reason an entry was enrolled or untracked.
+///
+/// A meeting's *category* now carries an enrollment default
+/// ([`crate::ledger::builtin_category_default`]), so the two provenance columns
+/// gain a fourth and third value respectively: an entry can be in the working
+/// set because its genre gates and it was addressed to you, and it can have left
+/// the working set because the meeting was recategorized into such a genre.
+/// Both are machine judgements, which is what keeps them revivable where a
+/// person's `manual` is not.
+///
+/// **Another table rebuild, for the same narrow reason as v2:** both columns'
+/// `CHECK`s are inline column constraints, and SQLite offers no way to alter
+/// one. Unlike v2 this copy carries *every* column across verbatim, the three
+/// v2 additions included — there is no new column to default, only a wider set
+/// of values each may hold, so no existing row's meaning changes at all.
+/// [`apply`] holds foreign keys off around the drop; see its doc.
+fn migration_0003_category_provenance() -> String {
+    r#"
+CREATE TABLE ledger_entries_new (
+    entry_id            TEXT PRIMARY KEY,
+    state               TEXT NOT NULL CHECK (state IN
+                          ('open', 'needs_review', 'closed', 'superseded', 'waived',
+                           'snoozed', 'untracked')),
+    direction           TEXT NOT NULL CHECK (direction IN ('mine', 'theirs', 'unassigned')),
+    owner               TEXT NOT NULL,
+    description         TEXT NOT NULL,
+    owner_norm          TEXT NOT NULL,
+    description_norm    TEXT NOT NULL,
+    project             TEXT NOT NULL,
+    created_at          TEXT NOT NULL,
+    updated_at          TEXT NOT NULL,
+    last_mention        TEXT NOT NULL,
+    last_evidence_check TEXT,
+    snoozed_until       TEXT CHECK (snoozed_until IS NULL OR state = 'snoozed'),
+    closed_via          TEXT CHECK (closed_via IN ('manual', 'conversation', 'github')),
+    review_reason       TEXT CHECK (review_reason IS NULL OR state = 'needs_review'),
+    enrolled_via        TEXT NOT NULL DEFAULT 'default'
+                          CHECK (enrolled_via IN ('default', 'override', 'manual', 'category')),
+    untracked_via       TEXT CHECK (untracked_via IN ('manual', 'override', 'category')),
+    touched             INTEGER NOT NULL DEFAULT 0 CHECK (touched IN (0, 1)),
+    CHECK ((state = 'closed') = (closed_via IS NOT NULL)),
+    CHECK ((state = 'untracked') = (untracked_via IS NOT NULL))
+);
+
+INSERT INTO ledger_entries_new
+    (entry_id, state, direction, owner, description, owner_norm, description_norm,
+     project, created_at, updated_at, last_mention, last_evidence_check,
+     snoozed_until, closed_via, review_reason, enrolled_via, untracked_via, touched)
+SELECT
+     entry_id, state, direction, owner, description, owner_norm, description_norm,
+     project, created_at, updated_at, last_mention, last_evidence_check,
+     snoozed_until, closed_via, review_reason, enrolled_via, untracked_via, touched
+FROM ledger_entries;
+
+DROP TABLE ledger_entries;
+ALTER TABLE ledger_entries_new RENAME TO ledger_entries;
+
+CREATE INDEX idx_ledger_entries_state ON ledger_entries (state);
+CREATE INDEX idx_ledger_entries_project ON ledger_entries (project);
+CREATE INDEX idx_ledger_entries_match ON ledger_entries (owner_norm, description_norm);
+CREATE INDEX idx_ledger_entries_mention ON ledger_entries (last_mention);
 "#
     .to_string()
 }
@@ -549,6 +618,138 @@ mod tests {
             )
             .unwrap();
         assert_eq!(refs, 0, "the recreated table must keep its cascades");
+    }
+
+    /// Opens a connection migrated only as far as v2 — the state a database in
+    /// the field is in before this build touches it.
+    fn migrated_to_v2() -> Connection {
+        let mut conn = migrated_to_v1();
+        conn.execute_batch("PRAGMA foreign_keys = OFF;").unwrap();
+        let tx = conn.transaction().unwrap();
+        tx.execute_batch(&super::migration_0002_enrollment())
+            .unwrap();
+        tx.execute_batch("PRAGMA user_version = 2;").unwrap();
+        tx.commit().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+        conn
+    }
+
+    #[test]
+    fn v3_upgrade_carries_every_row_forward_including_the_v2_columns() {
+        let mut conn = migrated_to_v2();
+        seed_full_row_set(&conn);
+        // The columns v2 added, carrying non-default values this time: v2's own
+        // copy could let them default because they were new, and v3's must not.
+        conn.execute(
+            "UPDATE ledger_entries SET enrolled_via = 'manual', touched = 1
+             WHERE entry_id = 'le_aaaaaaaaaaaa'",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO ledger_entries
+                 (entry_id, state, direction, owner, description, owner_norm,
+                  description_norm, project, created_at, updated_at, last_mention,
+                  untracked_via, enrolled_via)
+             VALUES ('le_cccccccccccc', 'untracked', 'theirs', 'Priya', 'x', 'priya', 'x', 'Ops',
+                     '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z',
+                     'override', 'default')",
+            [],
+        )
+        .unwrap();
+
+        super::apply(&mut conn).unwrap();
+
+        for (table, expected) in [
+            ("ledger_entries", 3),
+            ("ledger_item_refs", 1),
+            ("ledger_evidence", 1),
+            ("ledger_entry_links", 1),
+        ] {
+            let count: i64 = conn
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, expected, "{table} must survive the v3 rebuild");
+        }
+        assert_eq!(super::foreign_key_violations(&conn).unwrap(), 0);
+
+        // Verbatim, not re-defaulted: this is the failure v2's shape invites.
+        let (via, touched): (String, i64) = conn
+            .query_row(
+                "SELECT enrolled_via, touched FROM ledger_entries
+                 WHERE entry_id = 'le_aaaaaaaaaaaa'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(via, "manual");
+        assert_eq!(touched, 1);
+        let untracked_via: Option<String> = conn
+            .query_row(
+                "SELECT untracked_via FROM ledger_entries WHERE entry_id = 'le_cccccccccccc'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(untracked_via.as_deref(), Some("override"));
+
+        for index in [
+            "idx_ledger_item_refs_live",
+            "idx_ledger_entries_state",
+            "idx_ledger_entries_project",
+            "idx_ledger_entries_match",
+            "idx_ledger_entries_mention",
+        ] {
+            assert!(index_exists(&conn, index), "{index} should exist");
+        }
+        assert!(table_exists(&conn, "ledger_note_overrides"));
+    }
+
+    #[test]
+    fn v3_admits_category_as_a_provenance_and_still_closes_the_set() {
+        let conn = migrated();
+
+        conn.execute(
+            "INSERT INTO ledger_entries
+                 (entry_id, state, direction, owner, description, owner_norm,
+                  description_norm, project, created_at, updated_at, last_mention,
+                  enrolled_via)
+             VALUES ('le_111111111111', 'open', 'mine', 'You', 'x', 'you', 'x', 'Ops',
+                     '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z',
+                     'category')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO ledger_entries
+                 (entry_id, state, direction, owner, description, owner_norm,
+                  description_norm, project, created_at, updated_at, last_mention,
+                  untracked_via)
+             VALUES ('le_222222222222', 'untracked', 'theirs', 'Priya', 'x', 'priya', 'x', 'Ops',
+                     '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z',
+                     'category')",
+            [],
+        )
+        .unwrap();
+
+        // Still closed sets, one value wider.
+        for (column, value) in [("enrolled_via", "'genre'"), ("untracked_via", "'genre'")] {
+            let err = conn.execute(
+                &format!(
+                    "INSERT INTO ledger_entries
+                         (entry_id, state, direction, owner, description, owner_norm,
+                          description_norm, project, created_at, updated_at, last_mention,
+                          {column})
+                     VALUES ('le_333333333333', 'untracked', 'theirs', 'Priya', 'x', 'priya', 'x',
+                             'Ops', '2026-08-01T00:00:00Z', '2026-08-01T00:00:00Z',
+                             '2026-08-01T00:00:00Z', {value})"
+                ),
+                [],
+            );
+            assert!(err.is_err(), "{column} must stay a closed set");
+        }
     }
 
     #[test]

@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 
+import type { NoteCategory } from "./useNotes";
 import { useVaultQuery } from "./useVaultQuery";
 
 /*
@@ -25,8 +26,10 @@ export type CommitmentState =
   | "untracked";
 
 /** How an entry left the working set. Mirrors `ledger::UntrackedVia`: `manual`
- * is a person's own untrack, `override` one a meeting's tracking mode applied. */
-export type UntrackedVia = "manual" | "override";
+ * is a person's own untrack, `override` one a meeting's own tracking mode
+ * applied, and `category` one its meeting kind applied when it was
+ * recategorized. */
+export type UntrackedVia = "manual" | "override" | "category";
 
 /** Which way a commitment points. Mirrors `ledger::Direction`, and it is this
  * view's organizing principle rather than a filter. */
@@ -52,6 +55,9 @@ export type CommitmentSource = {
   title: string;
   project: string | null;
   path: string;
+  /** The source meeting's kind, in the kebab-case spelling `NoteCategory`
+   * uses; `null` where the note carries none. */
+  category: NoteCategory | null;
 };
 
 /** Mirrors `ledger_cmds::CommitmentEvidenceDto`: one claim about a commitment. */

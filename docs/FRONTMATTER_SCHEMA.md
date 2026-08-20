@@ -133,17 +133,22 @@ Canonical key order the writer emits: **`id, type, category, tracking, title, pr
 
   Written by the distill pass and correctable in one click from the note view or the Inbox; each
   correction is recorded as an example in the project's `_category.yml`, which feeds the classifier
-  the next time a note routes there. The taxonomy is the level future behavior attaches at (the
-  commitment ledger's per-category enrollment default is the first consumer), but **nothing reads it
-  for behavior yet**.
+  the next time a note routes there. Each kind also carries a **commitment-enrollment default**,
+  editable in Settings, which fills the middle slot of the `tracking` chain below
+  (`ledger::effective_mode`); `all-hands` and `observer` default to tracking direct asks only. So
+  correcting a meeting's kind also re-evaluates what it contributes to the ledger, in both
+  directions, sparing anything a person has already acted on.
 
 - **`tracking`** — the per-meeting **commitment-tracking override**: `tracked` (every extracted item
   is enrolled in the ledger) or `context-only` (only items the local user owns are). Omit the key to
   **inherit** — the meeting category's default, then the global default of `tracked`.
 
-  Absence is deliberately indistinguishable from having opted back out, which is why the UI's switch
-  *removes* the key rather than writing `tracked`. The explicit `tracked` value exists for the case
-  categories introduce: "track this one, whatever my category defaults to."
+  Absence means *inherit*, which since categories carry defaults is no longer the same as `tracked`.
+  The UI's switch therefore **writes a value in both directions** rather than clearing the key:
+  clearing it on an all-hands would hand the meeting straight back to the genre that was already
+  gating it, so the switch would move and nothing would change. The explicit `tracked` value is what
+  says "track this one, whatever my kind defaults to." There is deliberately no affordance for
+  returning a meeting to inheriting; hand-deleting the key still does it.
 
   Called *per-meeting* because that is what the surface offers and what the word means to a reader,
   but unlike `category` it is **not restricted to `type: meeting`**: a chat carries action items and

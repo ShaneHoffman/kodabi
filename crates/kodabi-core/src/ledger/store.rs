@@ -1058,6 +1058,7 @@ mod tests {
                 items: &items,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap();
@@ -1383,6 +1384,7 @@ mod tests {
                 items: &items,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap()
@@ -1423,6 +1425,7 @@ mod tests {
                 items: &items,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap()
@@ -1447,6 +1450,7 @@ mod tests {
                 items: &items,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap()
@@ -1495,6 +1499,7 @@ mod tests {
                 items: &older,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap();
@@ -1506,6 +1511,7 @@ mod tests {
                 items: &newer,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap();
@@ -1589,6 +1595,7 @@ mod tests {
                 items: &items,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap();
@@ -1616,6 +1623,7 @@ mod tests {
                 items: &items,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap();
@@ -1641,6 +1649,7 @@ mod tests {
                 items: &items,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap()

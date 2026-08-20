@@ -11,7 +11,8 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use kodabi_core::settings::{
-    self, AppearanceSettings, LedgerSettings, OverlaySettings, RetentionPolicy, Settings,
+    self, AppearanceSettings, CategorySettings, LedgerSettings, OverlaySettings, RetentionPolicy,
+    Settings,
 };
 use tauri::{AppHandle, Emitter, State};
 
@@ -169,6 +170,33 @@ pub fn set_ledger_tuning(
     Ok(settings)
 }
 
+/// Sets the per-genre enrollment defaults: which kinds of meeting feed the
+/// commitment ledger in full, and which contribute only what was asked of you
+/// directly.
+///
+/// **Prospective, deliberately.** Unlike recategorizing one meeting, changing a
+/// genre's default does not re-evaluate the entries existing meetings already
+/// produced: it decides what happens the next time each note syncs. A setting
+/// that silently rearranged the working set of every all-hands in the vault, at
+/// whatever later moment each note happened to be re-read, would be a much
+/// larger action than the control looks like. Recategorizing a meeting, or
+/// flipping its own tracking switch, is the per-meeting re-evaluation.
+///
+/// Hence no `ledger:changed` either: nothing in the ledger has changed yet.
+#[tauri::command]
+pub fn set_category_prefs(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+    categories: CategorySettings,
+) -> Result<Settings, String> {
+    let settings = state.update(
+        "Couldn't save the meeting-kind settings. The previous values still apply; try again.",
+        |s| s.categories = categories,
+    )?;
+    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
+    Ok(settings)
+}
+
 /// Records that the user acknowledged the recording-consent nudge and stores
 /// the retention policy they chose in the same write. After this, the capture
 /// gate lets recording proceed.
@@ -211,6 +239,37 @@ mod tests {
         let path = dir.join("settings.toml");
         let initial = settings::load_or_create(&path).unwrap();
         (SettingsState::new(path.clone(), initial), path)
+    }
+
+    #[test]
+    fn a_meeting_kind_preference_persists_and_leaves_the_others_alone() {
+        let (state, path) = temp_settings_state("categories");
+        assert!(state
+            .snapshot()
+            .categories
+            .all_hands
+            .enrollment_default
+            .is_none());
+
+        let mut next = state.snapshot().categories;
+        next.client = kodabi_core::settings::CategoryPrefs {
+            enrollment_default: Some(kodabi_core::ledger::EnrollmentMode::ContextOnly),
+        };
+        let updated = state.update("unused", |s| s.categories = next).unwrap();
+
+        assert_eq!(
+            updated.categories.client.enrollment_default,
+            Some(kodabi_core::ledger::EnrollmentMode::ContextOnly)
+        );
+        // Untouched kinds keep inheriting rather than being pinned to whatever
+        // they resolved to when the write happened.
+        assert!(updated.categories.all_hands.enrollment_default.is_none());
+
+        let reread = settings::load_or_create(&path).unwrap();
+        assert_eq!(
+            reread.categories.client.enrollment_default,
+            Some(kodabi_core::ledger::EnrollmentMode::ContextOnly)
+        );
     }
 
     #[test]

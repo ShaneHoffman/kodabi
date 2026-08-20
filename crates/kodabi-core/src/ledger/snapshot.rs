@@ -676,6 +676,7 @@ mod tests {
                 items: &items,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap();
@@ -687,7 +688,13 @@ mod tests {
     fn the_enrollment_state_round_trips_through_a_fresh_ledger() {
         let (dir, mut ledger, entry_id) = vault_with_entry();
         ledger
-            .retro_apply_note_tracking("n_a1b2c3", "Briarwood Golf", true, NOW)
+            .retro_apply_note_tracking(
+                "n_a1b2c3",
+                "Briarwood Golf",
+                true,
+                crate::ledger::RetroSource::Override,
+                NOW,
+            )
             .unwrap();
         // The override untracked the entry (Priya's, not mine); touch it too, so
         // all three new columns carry a non-default value.
@@ -712,6 +719,37 @@ mod tests {
         let raw = fs::read_to_string(dir.path().join("Briarwood Golf").join(LEDGER_SNAPSHOT_FILE))
             .unwrap();
         assert!(!raw.contains("note_overrides"), "{raw}");
+    }
+
+    #[test]
+    fn category_provenance_round_trips_through_a_fresh_ledger() {
+        // The snapshot needs no shape change to carry the new values, only the
+        // wider enums — this is the test that proves it, in both columns.
+        let (dir, mut ledger, entry_id) = vault_with_entry();
+        ledger
+            .retro_apply_note_tracking(
+                "n_a1b2c3",
+                "Briarwood Golf",
+                true,
+                crate::ledger::RetroSource::Category,
+                NOW,
+            )
+            .unwrap();
+        ledger
+            .write_project_snapshot(dir.path(), "Briarwood Golf")
+            .unwrap();
+        let raw = fs::read_to_string(dir.path().join("Briarwood Golf").join(LEDGER_SNAPSHOT_FILE))
+            .unwrap();
+        assert!(raw.contains("untracked_via: category"), "{raw}");
+
+        let mut restored = Ledger::open_in_memory().unwrap();
+        restored
+            .restore_from_snapshots_if_empty(dir.path())
+            .unwrap();
+
+        let entry = restored.get_entry(&entry_id).unwrap().unwrap().entry;
+        assert_eq!(entry.state, EntryState::Untracked);
+        assert_eq!(entry.untracked_via, Some(UntrackedVia::Category));
     }
 
     #[test]
@@ -859,6 +897,7 @@ mod tests {
                 items: &items,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap();
@@ -891,6 +930,7 @@ mod tests {
                 items: &items,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap();
@@ -985,6 +1025,7 @@ mod tests {
                 items: &items,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap()
@@ -1037,6 +1078,7 @@ mod tests {
                     items: &items,
                     link_hints: &[],
                     note_override: None,
+                    category_default: None,
                     now: NOW,
                 })
                 .unwrap();

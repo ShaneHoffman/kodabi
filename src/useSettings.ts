@@ -62,9 +62,10 @@ export type LedgerSettings = {
   conversation_autoclose: number;
 };
 
-/** Mirrors `CategoryPrefs` in `crates/kodabi-core/src/settings.rs`. Stored, and
- * deliberately not yet read: `enrollment_default` is the `category_default`
- * slot in the ledger's `effective_mode`, which the next change wires up. */
+/** Mirrors `CategoryPrefs` in `crates/kodabi-core/src/settings.rs`.
+ * `enrollment_default` fills the `category_default` slot in the ledger's
+ * `effective_mode`; `null` means the genre inherits the built-in default below
+ * rather than meaning "tracked". */
 export type CategoryPrefs = {
   enrollment_default: "tracked" | "context_only" | null;
 };
@@ -79,6 +80,23 @@ export type CategorySettings = {
   review: CategoryPrefs;
   all_hands: CategoryPrefs;
   observer: CategoryPrefs;
+};
+
+/** What each genre enrolls when the user has not chosen. Mirrors
+ * `kodabi_core::ledger::builtin_category_default`, which is the authority: two
+ * genres are attended rather than transacted, so they contribute only what was
+ * asked of you directly. Kept here so Settings can name the inherited value. */
+export const BUILTIN_CATEGORY_DEFAULTS: Record<
+  keyof CategorySettings,
+  "tracked" | "context_only"
+> = {
+  standup: "tracked",
+  one_on_one: "tracked",
+  client: "tracked",
+  working_session: "tracked",
+  review: "tracked",
+  all_hands: "context_only",
+  observer: "context_only",
 };
 
 export type Settings = {
@@ -166,6 +184,14 @@ export function setAppearance(appearance: AppearanceSettings): Promise<Settings>
  * Commitments view re-reads its tiers rather than keeping the old ones. */
 export function setLedgerTuning(ledger: LedgerSettings): Promise<Settings> {
   return invoke<Settings>("set_ledger_tuning", { ledger });
+}
+
+/** Sets the per-genre enrollment defaults. Prospective by design: the backend
+ * emits only `settings:changed`, because nothing in the ledger has moved yet.
+ * Existing meetings are re-evaluated when one is recategorized or its own
+ * tracking switch is flipped. */
+export function setCategoryPrefs(categories: CategorySettings): Promise<Settings> {
+  return invoke<Settings>("set_category_prefs", { categories });
 }
 
 export function acknowledgeConsent(retention: RetentionPolicy): Promise<Settings> {

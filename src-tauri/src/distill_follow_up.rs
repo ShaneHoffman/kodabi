@@ -109,6 +109,13 @@ pub(crate) fn apply_after_distill(app: &AppHandle, kb: &Path, distilled: &Distil
             updates: distilled.ledger_updates.clone(),
             // Straight off the note this distill just wrote.
             note_override: listed.note.tracking,
+            // And the category the same distill classified it as, resolved
+            // against the user's settings: a fresh all-hands is gated on its
+            // very first sync, not only once someone recategorizes it.
+            category_default: kodabi_core::ledger::category_default_for(
+                listed.note.category,
+                &app.state::<SettingsState>().snapshot().categories,
+            ),
         },
         threshold,
     ) {

@@ -10,6 +10,7 @@
 use std::path::Path;
 
 use kodabi_core::index::IndexedNote;
+use kodabi_core::ledger::{EnrollmentMode, RetroSource};
 use kodabi_core::meeting;
 use kodabi_core::note::{
     self, MeetingCategory, Note, NoteEdit, NoteId, NoteType, Routing, Source, Tag,
@@ -18,8 +19,10 @@ use kodabi_core::sessions;
 use kodabi_core::vault::{self, FileNoteOptions, ListedNote, ProjectInfo, RoutedNote};
 use tauri::{AppHandle, Emitter, Manager};
 
-use crate::events::VAULT_CHANGED_EVENT;
+use crate::events::{LEDGER_CHANGED_EVENT, VAULT_CHANGED_EVENT};
 use crate::index_state::IndexState;
+use crate::ledger_state::LedgerState;
+use crate::settings_cmds::SettingsState;
 use crate::transcribe::knowledge_base_dir;
 use crate::user_errors::{note_error, reported};
 
@@ -551,6 +554,26 @@ pub struct SetCategoryInput {
 ///
 /// The note does not move: a category says what a meeting *was*, not where it
 /// belongs.
+///
+/// **A genre carries an enrollment default, so recategorizing re-evaluates the
+/// commitments this meeting already produced** — in both directions, and this is
+/// the only place that happens for a category change. The two halves are split
+/// across two mechanisms, deliberately:
+///
+/// * *Un-enrolling the strays* needs the awaited
+///   [`LedgerClient::retro_apply_note_tracking`] below, because those entries
+///   already exist and sync's gate only decides what *earns* an entry.
+/// * *Enrolling the missing* is free: the re-index at the end forwards the
+///   note's fresh facts, whose category default now reads the new genre, and the
+///   idempotent create leg mints what the old mode gated out.
+///
+/// Hence the ordering — retro first and awaited, so the re-index cannot overtake
+/// it on the worker's queue. Entries a person has touched are never revisited by
+/// either half; that rule lives in `ledger::enrollment`.
+///
+/// Unlike `set_meeting_tracking`, an unavailable ledger does **not** refuse the
+/// call: this command's primary effect is a fact about the note, which stands on
+/// its own. The re-evaluation is best-effort and says so when it fails.
 #[tauri::command]
 pub async fn set_note_category(
     app: AppHandle,
@@ -582,13 +605,56 @@ pub async fn set_note_category(
                 .to_string()
         })?;
 
+    // Re-evaluate what this meeting already put in the ledger, under the mode
+    // its new genre resolves to. The *effective* mode, not the category's own:
+    // a meeting that pins its own `tracking:` keeps it, and re-applying the mode
+    // it already had is an idempotent no-op that also converges any older drift.
+    let category_default = kodabi_core::ledger::category_default_for(
+        Some(category),
+        &app.state::<SettingsState>().snapshot().categories,
+    );
+    let effective = kodabi_core::ledger::effective_mode(listed.note.tracking, category_default);
+    let source = if listed.note.tracking.is_some() {
+        RetroSource::Override
+    } else {
+        RetroSource::Category
+    };
+    let client = app.state::<LedgerState>().client();
+    if client.is_available() {
+        let note_id = input.id.clone();
+        let project = listed.note.routing.project().to_string();
+        let context_only = effective == EnrollmentMode::ContextOnly;
+        tauri::async_runtime::spawn_blocking(move || {
+            client.retro_apply_note_tracking(note_id, project, context_only, source)
+        })
+        .await
+        .map_err(|err| reported("set_note_category", err, RECATEGORIZE_NOT_RECHECKED))?
+        .map_err(|err| {
+            crate::ledger_cmds::ledger_error("set_note_category", err, RECATEGORIZE_NOT_RECHECKED)
+        })?;
+    } else {
+        eprintln!(
+            "set_note_category: ledger unavailable, leaving {}'s existing commitments as they are",
+            input.id
+        );
+    }
+
     // The note stays where it is, so this is a plain rewrite: the upsert is
-    // keyed by the stable `id` and updates the same row.
+    // keyed by the stable `id` and updates the same row. Its forward to the
+    // ledger is the enrol-the-missing half of the re-evaluation.
     index_moved_note(&app.state::<IndexState>(), &listed, &kb);
     broadcast_vault_changed(&app);
+    // The ledger moved too, so a Commitments view open beside the note refetches.
+    let _ = app.emit(LEDGER_CHANGED_EVENT, ());
 
     Ok(note_summary(&listed, &kb))
 }
+
+/// What a recategorization says when the note was saved but its commitments
+/// could not be re-checked. Named because both failure legs share it.
+const RECATEGORIZE_NOT_RECHECKED: &str =
+    "This meeting's kind was saved, but its commitments weren't re-checked. Set the kind \
+     again to re-check them.";
 
 /// Projects a [`RoutedNote`] to the wire outcome: the routed note as a
 /// `NoteSummary`, and the previous location with its KB-relative forward-slash

@@ -65,7 +65,10 @@ Pulled by daily use, not pushed by roadmap. Each earns its place only after the 
   time (a later conversation, meeting or chat alike, refreshes, supersedes or closes a commitment an
   earlier one recorded), and the enrollment gate that separates extraction from tracking (a
   per-meeting "context only" mode that enrols only what you were asked for directly, untrack as a
-  verb distinct from waive, and enrollment provenance on every entry);
+  verb distinct from waive, and enrollment provenance on every entry), now driven by meeting
+  category: each genre carries an enrollment default (all-hands and observer track direct asks only),
+  recategorizing a meeting re-evaluates its still-open entries both ways without ever overruling a
+  person, and a row's source line names the kind of room it came from;
   GitHub evidence remains
 - Azure DevOps board integration
 - Weekly digests per project

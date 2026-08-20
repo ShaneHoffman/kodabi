@@ -37,7 +37,7 @@ mod sync;
 pub mod view;
 
 pub use distill_apply::{apply_distill_follow_up, AppliedUpdates, AutoClose, DistillFollowUp};
-pub use enrollment::{DrainOutcome, NoteTrackingOutcome};
+pub use enrollment::{DrainOutcome, NoteTrackingOutcome, RetroSource};
 pub use snapshot::{ProjectSnapshot, RestoreReport, LEDGER_SNAPSHOT_FILE, LEDGER_SNAPSHOT_VERSION};
 pub use store::{EntryDetail, EntryFilter, EntryLink, Evidence, ItemRef, LedgerEntry};
 pub use sync::{LinkHint, NoteSync, SyncOutcome};
@@ -489,16 +489,16 @@ impl EnrollmentMode {
 
 /// Resolves the enrollment mode that applies to one meeting.
 ///
-/// **This function is the seam.** The precedence is per-meeting override, then
-/// the meeting category's default, then the global default of
-/// [`EnrollmentMode::Tracked`].
+/// **This function is the seam,** and it is one chain rather than two: the
+/// per-meeting override, then the meeting category's default, then the global
+/// default of [`EnrollmentMode::Tracked`].
 ///
 /// The per-meeting override arrives from the note's frontmatter `tracking:` key
-/// (via [`sync::NoteSync::note_override`]). Every caller still passes `None`
-/// for `category_default`: notes now carry a
-/// [`category`](crate::note::MeetingCategory), but nothing maps a category to a
-/// default mode yet — that is the one wire left to run, and it lands here and
-/// nowhere else.
+/// (via [`sync::NoteSync::note_override`]); the category default arrives from
+/// the settings the shell resolved with [`category_default_for`], because this
+/// store can read neither the vault nor the settings file. Both are inputs for
+/// the same reason, and both are un-omittable fields on a struct with no
+/// `Default` so a producer cannot silently drop half the chain.
 pub fn effective_mode(
     note_override: Option<EnrollmentMode>,
     category_default: Option<EnrollmentMode>,
@@ -506,6 +506,54 @@ pub fn effective_mode(
     note_override
         .or(category_default)
         .unwrap_or(EnrollmentMode::Tracked)
+}
+
+/// The enrollment default a meeting category carries when the user has not set
+/// one — the product's opinion about what each genre is *for*.
+///
+/// Two genres are attended rather than transacted: an `observer` sitting-in and
+/// an `all-hands` broadcast produce plenty of other people's commitments and
+/// almost none of yours, which is exactly the noise
+/// [`EnrollmentMode::ContextOnly`] exists to keep out. Everything else is a room
+/// you are working in, so it tracks in full.
+///
+/// The match is exhaustive on purpose: a new genre does not compile until
+/// someone decides which side of that line it falls on.
+pub fn builtin_category_default(category: crate::note::MeetingCategory) -> EnrollmentMode {
+    use crate::note::MeetingCategory as Category;
+    match category {
+        Category::AllHands | Category::Observer => EnrollmentMode::ContextOnly,
+        Category::Standup
+        | Category::OneOnOne
+        | Category::Client
+        | Category::WorkingSession
+        | Category::Review => EnrollmentMode::Tracked,
+    }
+}
+
+/// The category slot of [`effective_mode`], resolved for one note.
+///
+/// `None` means the note has no category to inherit from (a chat, or a meeting
+/// the classifier left unlabelled), so the chain falls straight through to the
+/// global default.
+///
+/// **A stored `None` on the category's prefs means "inherit the builtin", not
+/// "track".** That is what makes [`builtin_category_default`] reach installs
+/// whose settings file predates this wiring: every field file already carries
+/// `[categories.*]` tables whose `enrollment_default` is absent, and serde fills
+/// those with `None` rather than with any hand-written default. A user who wants
+/// an all-hands tracked in full stores `Some(Tracked)`, which overrules the
+/// builtin exactly as it reads.
+pub fn category_default_for(
+    category: Option<crate::note::MeetingCategory>,
+    categories: &crate::settings::CategorySettings,
+) -> Option<EnrollmentMode> {
+    category.map(|category| {
+        categories
+            .for_category(category)
+            .enrollment_default
+            .unwrap_or_else(|| builtin_category_default(category))
+    })
 }
 
 /// Why an entry is in the ledger — the answer to "why are you in my working
@@ -521,6 +569,14 @@ pub enum EnrolledVia {
     Override,
     /// Promoted by hand from the note, against whatever the mode said.
     Manual,
+    /// Enrolled under a meeting whose *category* gates — so, a
+    /// [`Direction::Mine`] item in an all-hands or an observer meeting that
+    /// carries no override of its own.
+    ///
+    /// Distinct from [`EnrolledVia::Override`] because the judgement is a
+    /// standing one about a genre rather than a decision about this meeting, and
+    /// recategorizing may revisit it where flipping the override may not.
+    Category,
 }
 
 impl EnrolledVia {
@@ -530,6 +586,7 @@ impl EnrolledVia {
             EnrolledVia::Default => "default",
             EnrolledVia::Override => "override",
             EnrolledVia::Manual => "manual",
+            EnrolledVia::Category => "category",
         }
     }
 
@@ -539,6 +596,7 @@ impl EnrolledVia {
             "default" => Ok(EnrolledVia::Default),
             "override" => Ok(EnrolledVia::Override),
             "manual" => Ok(EnrolledVia::Manual),
+            "category" => Ok(EnrolledVia::Category),
             other => Err(invalid_field(
                 "enrolled_via",
                 format!("unknown enrollment provenance {other:?}"),
@@ -551,7 +609,8 @@ impl EnrolledVia {
 ///
 /// The distinction is load-bearing for retro-application: flipping a meeting
 /// back to tracked revives what the override untracked and leaves a person's
-/// own untrack alone.
+/// own untrack alone. Both machine reasons are revivable and a person's is not,
+/// which is the whole of the rule.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UntrackedVia {
@@ -559,6 +618,9 @@ pub enum UntrackedVia {
     Manual,
     /// A meeting's tracking override untracked it.
     Override,
+    /// A meeting's category default untracked it, when the meeting was
+    /// recategorized into a genre that tracks direct asks only.
+    Category,
 }
 
 impl UntrackedVia {
@@ -567,6 +629,7 @@ impl UntrackedVia {
         match self {
             UntrackedVia::Manual => "manual",
             UntrackedVia::Override => "override",
+            UntrackedVia::Category => "category",
         }
     }
 
@@ -575,6 +638,7 @@ impl UntrackedVia {
         match raw {
             "manual" => Ok(UntrackedVia::Manual),
             "override" => Ok(UntrackedVia::Override),
+            "category" => Ok(UntrackedVia::Category),
             other => Err(invalid_field(
                 "untracked_via",
                 format!("unknown untrack provenance {other:?}"),
@@ -702,7 +766,119 @@ impl Ledger {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::note::MeetingCategory;
+    use crate::settings::{CategoryPrefs, CategorySettings};
     use tempfile::tempdir;
+
+    #[test]
+    fn two_genres_are_attended_rather_than_transacted() {
+        for category in [MeetingCategory::AllHands, MeetingCategory::Observer] {
+            assert_eq!(
+                builtin_category_default(category),
+                EnrollmentMode::ContextOnly,
+                "{} is a room you sit in",
+                category.as_str()
+            );
+        }
+        for category in [
+            MeetingCategory::Standup,
+            MeetingCategory::OneOnOne,
+            MeetingCategory::Client,
+            MeetingCategory::WorkingSession,
+            MeetingCategory::Review,
+        ] {
+            assert_eq!(
+                builtin_category_default(category),
+                EnrollmentMode::Tracked,
+                "{} is a room you work in",
+                category.as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn an_unset_preference_inherits_the_builtin_rather_than_tracking() {
+        // The load-bearing case: every settings file in the field predates this
+        // wiring and stores `None` for all seven genres. If `None` read as
+        // "track", the built-in defaults would reach nobody but new installs.
+        let settings = CategorySettings::default();
+        assert_eq!(
+            category_default_for(Some(MeetingCategory::AllHands), &settings),
+            Some(EnrollmentMode::ContextOnly)
+        );
+        assert_eq!(
+            category_default_for(Some(MeetingCategory::Standup), &settings),
+            Some(EnrollmentMode::Tracked)
+        );
+    }
+
+    #[test]
+    fn a_stored_preference_overrules_the_builtin_in_both_directions() {
+        let settings = CategorySettings {
+            all_hands: CategoryPrefs {
+                enrollment_default: Some(EnrollmentMode::Tracked),
+            },
+            standup: CategoryPrefs {
+                enrollment_default: Some(EnrollmentMode::ContextOnly),
+            },
+            ..Default::default()
+        };
+
+        assert_eq!(
+            category_default_for(Some(MeetingCategory::AllHands), &settings),
+            Some(EnrollmentMode::Tracked)
+        );
+        assert_eq!(
+            category_default_for(Some(MeetingCategory::Standup), &settings),
+            Some(EnrollmentMode::ContextOnly)
+        );
+    }
+
+    #[test]
+    fn a_note_with_no_category_falls_through_the_chain_untouched() {
+        // Every chat, and any meeting the classifier left unlabelled.
+        assert_eq!(
+            category_default_for(None, &CategorySettings::default()),
+            None
+        );
+        assert_eq!(effective_mode(None, None), EnrollmentMode::Tracked);
+    }
+
+    #[test]
+    fn the_chain_prefers_the_meetings_own_judgement() {
+        assert_eq!(
+            effective_mode(
+                Some(EnrollmentMode::Tracked),
+                Some(EnrollmentMode::ContextOnly)
+            ),
+            EnrollmentMode::Tracked
+        );
+        assert_eq!(
+            effective_mode(
+                Some(EnrollmentMode::ContextOnly),
+                Some(EnrollmentMode::Tracked)
+            ),
+            EnrollmentMode::ContextOnly
+        );
+        assert_eq!(
+            effective_mode(None, Some(EnrollmentMode::ContextOnly)),
+            EnrollmentMode::ContextOnly
+        );
+    }
+
+    #[test]
+    fn category_provenance_round_trips_through_its_stored_spelling() {
+        assert_eq!(EnrolledVia::Category.as_str(), "category");
+        assert_eq!(
+            EnrolledVia::parse("category").unwrap(),
+            EnrolledVia::Category
+        );
+        assert_eq!(UntrackedVia::Category.as_str(), "category");
+        assert_eq!(
+            UntrackedVia::parse("category").unwrap(),
+            UntrackedVia::Category
+        );
+    }
 
     #[test]
     fn open_in_memory_is_ready_to_use() {

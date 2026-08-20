@@ -40,6 +40,9 @@ pub struct DistillFollowUp<'a> {
     /// The note's tracking override, read straight off the `Note` this distill
     /// just wrote. See [`crate::ledger::sync::NoteSync::note_override`].
     pub note_override: Option<crate::ledger::EnrollmentMode>,
+    /// The default this note's meeting category carries, resolved by the shell.
+    /// See [`crate::ledger::sync::NoteSync::category_default`].
+    pub category_default: Option<crate::ledger::EnrollmentMode>,
 }
 
 /// A commitment the conversation closed on its own.
@@ -114,6 +117,7 @@ pub fn apply_distill_follow_up(
         items: follow_up.items,
         link_hints: &hints,
         note_override: follow_up.note_override,
+        category_default: follow_up.category_default,
         now,
     })?;
 
@@ -394,6 +398,7 @@ mod tests {
                 items: &items,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: EARLIER,
             })
             .unwrap();
@@ -414,6 +419,7 @@ mod tests {
                 items,
                 updates,
                 note_override: None,
+                category_default: None,
             },
             AUTOCLOSE,
             NOW,
@@ -474,6 +480,7 @@ mod tests {
                 items: &[],
                 updates: &[update(&entry_id, LedgerUpdateKind::Refresh, None, 0.9)],
                 note_override: None,
+                category_default: None,
             },
             AUTOCLOSE,
             NOW,
@@ -692,6 +699,7 @@ mod tests {
                 items: &items,
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: NOW,
             })
             .unwrap();
@@ -735,6 +743,7 @@ mod tests {
                 items: &[fact("a_other", "You", "book the venue")],
                 link_hints: &[],
                 note_override: None,
+                category_default: None,
                 now: EARLIER,
             })
             .unwrap()

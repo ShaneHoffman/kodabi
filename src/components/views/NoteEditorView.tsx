@@ -15,6 +15,12 @@ import {
   type NoteType,
 } from "../../useNotes";
 import { folderHue, useProjects, type FolderHue } from "../../useProjects";
+import {
+  BUILTIN_CATEGORY_DEFAULTS,
+  useSettings,
+  type CategorySettings,
+  type Settings,
+} from "../../useSettings";
 import { isSessionSource, useSessionArtifacts, type SessionArtifacts } from "../../useSessions";
 import { applyMarkup, selectionAnchor } from "../../textareaCaret";
 import { backendCopy } from "../../errorCopy";
@@ -262,6 +268,39 @@ type ReadProps = {
   onEdit: () => void;
 };
 
+/** The settings key holding a meeting kind's preferences, from its frontmatter
+ * spelling. Mirrors the same map in `SettingsView`; the two spellings are the
+ * schema's, not a choice made here. */
+const CATEGORY_SETTING_KEYS: Record<NoteCategory, keyof CategorySettings> = {
+  standup: "standup",
+  "one-on-one": "one_on_one",
+  client: "client",
+  "working-session": "working_session",
+  review: "review",
+  "all-hands": "all_hands",
+  observer: "observer",
+};
+
+/** Whether this meeting tracks direct asks only, resolving the same chain the
+ * backend does (`ledger::effective_mode`): the note's own `tracking:` first,
+ * then its kind's default, then the global default of tracking everything.
+ *
+ * Finished here rather than read off the note alone because an absent
+ * `tracking:` does not mean "tracked" — it means "whatever my kind says", and a
+ * switch that showed off while the ledger was gating would be lying. Settings
+ * that have not loaded yet resolve to the built-in defaults, which is what the
+ * backend would answer anyway for a user who never touched the control. */
+function effectiveContextOnly(
+  note: { tracking: "tracked" | "context-only" | null; category: NoteCategory | null },
+  settings: Settings | null,
+): boolean {
+  if (note.tracking !== null) return note.tracking === "context-only";
+  if (note.category === null) return false;
+  const key = CATEGORY_SETTING_KEYS[note.category];
+  const stored = settings?.categories[key].enrollment_default ?? null;
+  return (stored ?? BUILTIN_CATEGORY_DEFAULTS[key]) === "context_only";
+}
+
 /** A note distilled from a captured session, and the only caller that reads
  * the artifacts behind its `source:` field. */
 function SessionReadNote(props: ReadProps) {
@@ -291,6 +330,7 @@ function ReadNoteLayout({
   session: { artifacts: SessionArtifacts | null; error: string | null } | null;
 }) {
   const { navigate } = useNavigation();
+  const { settings } = useSettings();
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [transcriptOpen, setTranscriptOpen] = useState(false);
 
@@ -346,10 +386,12 @@ function ReadNoteLayout({
                 is most of them. */}
             {/* The mode comes off the note the view already read from disk,
                 not from the panel's own index-backed payload: the file is the
-                source of truth and reaches here first (see the panel's doc). */}
+                source of truth and reaches here first (see the panel's doc).
+                An absent `tracking:` means "whatever my kind says", so the
+                chain is finished here rather than read as tracked. */}
             <NoteCommitmentsPanel
               noteId={note.id}
-              contextOnly={note.tracking === "context-only"}
+              contextOnly={effectiveContextOnly(note, settings)}
             />
             {session !== null && (
               <SessionPanel
