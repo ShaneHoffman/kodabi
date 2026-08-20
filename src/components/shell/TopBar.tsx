@@ -1,5 +1,4 @@
 import { useState, type ReactNode } from "react";
-import { CAPTURE_TOGGLE_SHORTCUT } from "../../captureControl";
 import { captureLabel, markMode } from "../../captureLabel";
 import { isCaptureActive, useCaptureState } from "../../useCaptureState";
 import { PALETTE_SHORTCUT_LABEL } from "../../useCommandPalette";
@@ -7,7 +6,6 @@ import { useDebouncedValue } from "../../useDebouncedValue";
 import { useElapsed } from "../../useElapsed";
 import { useModelStatus, isTranscriptionReady } from "../../useModelStatus";
 import { useNavigation } from "../../useNavigation";
-import { useShortcutStatus } from "../../useShortcutStatus";
 import { useWindowMaximized } from "../../useWindowMaximized";
 import { closeWindow, minimizeWindow, toggleMaximizeWindow } from "../../windowControls";
 import { ListenPill } from "./ListenPill";
@@ -146,43 +144,6 @@ export function TopBar({ onOpenPalette }: Props) {
   const { state: models } = useModelStatus();
   const modelsDetail = isTranscriptionReady(models) ? null : "Transcription not ready yet";
 
-  // The one place in the main window that teaches the capture chord, and the
-  // reason it is here rather than on a first-run banner: it sits on the very
-  // indicator the chord operates, so the lesson and the thing it is about are
-  // the same object. Permanent on every idle pill by design, the way an editor
-  // keeps its shortcut in the placeholder rather than retiring it once.
-  //
-  // Withheld the moment capture is engaged at all, which is a stricter test
-  // than the pill's own: the pill hides its detail while *recording*, and
-  // `starting` and `reconnecting` are neither recording nor idle — they keep
-  // the detail slot open, and a press during either one STOPS the capture (the
-  // tray reads "Stop capture" for every phase but idle, `capture_control.rs`).
-  // Teaching "starts a capture" there is exactly backwards, which is the whole
-  // reason this is a null rather than a constant.
-  //
-  // Both clocks are read — the live state and the debounced one the headline
-  // beside it speaks from — so the hint can neither outlive a capture's last
-  // engaged moment nor appear next to a headline still saying one is running.
-  //
-  // Withheld a second way: the chord only binds if the OS granted it at
-  // startup, and teaching a key that does nothing is worse than teaching
-  // nothing. When it was refused the slot keeps its job and names the path that
-  // does work, which is the same fallback Settings points at. An unknown status
-  // (the read has not landed, or failed) keeps the chord — see
-  // `useShortcutStatus` on why silence is not evidence.
-  //
-  // The tray *menu*, not the tray icon: the icon is built with
-  // `show_menu_on_left_click(false)` and its left click shows the main window
-  // (`capture_control.rs`), so "the tray icon starts a capture" would swap one
-  // dead instruction for another. Only the menu's Start capture item does it.
-  const shortcutBound = useShortcutStatus()?.captureToggle ?? true;
-  const shortcutHint =
-    engaged || isCaptureActive(settledCapture.phase)
-      ? null
-      : shortcutBound
-        ? `${CAPTURE_TOGGLE_SHORTCUT} starts a capture`
-        : "The tray menu starts a capture";
-
   const maximized = useWindowMaximized();
 
   return (
@@ -227,15 +188,7 @@ export function TopBar({ onOpenPalette }: Props) {
         // and it only reaches an idle pill anyway — the detail slot is hidden
         // while live, which is exactly right here. Nothing is wrong during the
         // recording; it is the transcription afterwards that is waiting.
-        //
-        // The chord hint is the last rung, so the chain reads failure, then
-        // models, then teaching: something wrong always outranks something to
-        // learn. That ordering is also what keeps first run right — while the
-        // models download, the more urgent fact holds the slot, and the hint
-        // takes over the moment transcription is ready. It is `null` on any
-        // engaged pill, so the chain falls through to nothing there rather
-        // than to a hint that would be false (see `shortcutHint`).
-        detail={label.detail ?? modelsDetail ?? shortcutHint}
+        detail={label.detail ?? modelsDetail}
         elapsedSeconds={elapsedSeconds}
       />
 
