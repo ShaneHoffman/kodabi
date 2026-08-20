@@ -74,6 +74,7 @@ const DEFAULTS: Settings = {
     all_hands: { enrollment_default: null },
     observer: { enrollment_default: null },
   },
+  identity: { display_name: "", aliases: [] },
 };
 
 function settingsWith(overlay: OverlaySettings): Settings {
@@ -891,6 +892,73 @@ describe("SettingsView About card", () => {
     ).toBeInTheDocument();
     expect(within(about()).queryByText(/no route to host/)).toBeNull();
     logged.mockRestore();
+  });
+
+  it("saves the name the user goes by", async () => {
+    const user = userEvent.setup();
+    const stored: Settings = {
+      ...DEFAULTS,
+      identity: { display_name: "Avery", aliases: [] },
+    };
+    onCommand("set_identity", () => stored);
+    await renderSeeded();
+
+    const name = screen.getByRole("textbox", { name: "Your name" });
+    await user.type(name, "Avery{Enter}");
+
+    expect(invoke).toHaveBeenCalledWith("set_identity", {
+      identity: { display_name: "Avery", aliases: [] },
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("Saved.");
+  });
+
+  it("sends the other names as the list the backend stores", async () => {
+    const user = userEvent.setup();
+    const stored: Settings = {
+      ...DEFAULTS,
+      identity: { display_name: "", aliases: ["Avery Kim", "A. Kim"] },
+    };
+    onCommand("set_identity", () => stored);
+    await renderSeeded();
+
+    // One line of text going in, a real list on the wire.
+    const aliases = screen.getByRole("textbox", { name: "Other names" });
+    await user.type(aliases, "Avery Kim,  A. Kim ,{Enter}");
+
+    expect(invoke).toHaveBeenCalledWith("set_identity", {
+      identity: { display_name: "", aliases: ["Avery Kim", "A. Kim"] },
+    });
+  });
+
+  it("re-seeds the names from what actually persisted", async () => {
+    const user = userEvent.setup();
+    // The backend drops the duplicate spelling; the field must show what is
+    // stored rather than what was typed.
+    const stored: Settings = {
+      ...DEFAULTS,
+      identity: { display_name: "Avery", aliases: ["Avery Kim"] },
+    };
+    onCommand("set_identity", () => stored);
+    await renderSeeded();
+
+    const aliases = screen.getByRole("textbox", { name: "Other names" });
+    await user.type(aliases, "Avery Kim, avery{Enter}");
+
+    expect(await screen.findByRole("status")).toHaveTextContent("Saved.");
+    expect(aliases).toHaveValue("Avery Kim");
+  });
+
+  it("does not write when a name is committed unchanged", async () => {
+    const user = userEvent.setup();
+    onCommand("set_identity", () => DEFAULTS);
+    await renderSeeded();
+
+    const name = screen.getByRole("textbox", { name: "Your name" });
+    await user.click(name);
+    await user.tab();
+
+    expect(invoke).not.toHaveBeenCalledWith("set_identity", expect.anything());
+    expect(screen.queryByRole("status")).toBeNull();
   });
 
   it("saves the aging thresholds and the auto-close confidence", async () => {

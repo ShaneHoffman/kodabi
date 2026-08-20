@@ -24,6 +24,7 @@ import {
   setCommitmentDone,
   snoozeCommitment,
   untrackCommitment,
+  claimCommitmentMine,
   useCommitments,
   waiveCommitment,
   type Commitment,
@@ -214,6 +215,36 @@ export function CommitmentsView({ slug }: Props) {
     );
 
   /**
+   * The correction behind every misfiled row: this one is mine.
+   *
+   * Moves it to Mine and teaches the name it was filed under, so the next
+   * meeting gets it right unprompted. The move is what the user asked for and
+   * always lands; the name is the part that can quietly fail, and a failure
+   * there is worth saying, because the same misfiling will happen again.
+   */
+  const claimMine = (commitment: Commitment) =>
+    void run(
+      commitment,
+      "claim",
+      "Couldn't move this to Mine. The ledger is unchanged; try again.",
+      async () => {
+        const result = await claimCommitmentMine(commitment.entry_id);
+        // Only a real failure earns a line. A name the backend declined to
+        // learn (a reserved token, or one it already knew) is the design
+        // working, and apologising for it would send the reader to Settings to
+        // add something that must never be added.
+        if (result.alias === "failed") {
+          setRowErrors((errors) => ({
+            ...errors,
+            [commitment.entry_id]: `Moved to Mine, but "${commitmentOwner(
+              commitment,
+            )}" wasn't saved as one of your names, so future mentions may still file under Waiting on them. Add it in Settings.`,
+          }));
+        }
+      },
+    );
+
+  /**
    * The undo, behind every settled row and every snooze.
    *
    * A closed row whose line is still in its note unticks the box as well: the
@@ -264,6 +295,7 @@ export function CommitmentsView({ slug }: Props) {
     onSnoozePick: setSnoozeTarget,
     onWaive: waive,
     onUntrack: untrack,
+    onClaimMine: claimMine,
     onConfirm: (target: Commitment, evidenceId: string) =>
       void run(
         target,
@@ -448,6 +480,7 @@ type RowProps = {
   onSnoozePick: (commitment: Commitment) => void;
   onWaive: (commitment: Commitment) => void;
   onUntrack: (commitment: Commitment) => void;
+  onClaimMine: (commitment: Commitment) => void;
   onConfirm: (commitment: Commitment, evidenceId: string) => void;
   onDismiss: (commitment: Commitment, evidenceId: string) => void;
 };
@@ -472,6 +505,7 @@ function CommitmentRow({
   onSnoozePick,
   onWaive,
   onUntrack,
+  onClaimMine,
   onConfirm,
   onDismiss,
 }: RowProps) {
@@ -673,6 +707,19 @@ function CommitmentRow({
               <Menu.Item onClick={() => onSnoozePick(commitment)}>
                 Snooze until a date…
               </Menu.Item>
+              {commitment.direction !== "mine" && (
+                <>
+                  <Menu.Separator />
+                  {/* A verdict about who this row belongs to, which is what
+                      this slot holds. It also teaches the name, so the next
+                      meeting files it right without being asked: every
+                      correction is training data, the same loop routing
+                      corrections run. */}
+                  <Menu.Item onClick={() => onClaimMine(commitment)}>
+                    This is mine
+                  </Menu.Item>
+                </>
+              )}
               <Menu.Separator />
               {/* No confirmation on either: each writes one ledger row, touches
                   no note, and Reopen on the shelf below takes it straight back.

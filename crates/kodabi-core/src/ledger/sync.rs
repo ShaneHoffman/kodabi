@@ -130,6 +130,16 @@ pub struct NoteSync<'a> {
     /// field on the same no-`Default` struct, so the compiler holds the second
     /// half of the chain to the same standard as the first.
     pub category_default: Option<EnrollmentMode>,
+    /// Who the local user is, for resolving an owner string to
+    /// [`Direction::Mine`] ([`crate::ledger::OwnerIdentity`]).
+    ///
+    /// A plain field on the same no-`Default` struct as the two above, for the
+    /// third instance of the same reason: the names live in settings this store
+    /// cannot read, and getting them wrong is not cosmetic. Under
+    /// [`EnrollmentMode::ContextOnly`] the direction *is* the gate, so an
+    /// omitted identity would silently drop the user's own commitments rather
+    /// than merely mis-file them.
+    pub identity: &'a crate::ledger::OwnerIdentity,
     /// RFC 3339 UTC, for `created_at` / `updated_at` / ref timestamps.
     pub now: &'a str,
 }
@@ -205,9 +215,11 @@ impl Ledger {
             note_date_utc: now,
             items: &[],
             link_hints: &[],
-            // No items means nothing can be enrolled, so the gate is moot.
+            // No items means nothing can be enrolled, so neither the gate nor
+            // the identity that feeds it is ever consulted.
             note_override: None,
             category_default: None,
+            identity: &crate::ledger::OwnerIdentity::default(),
             now,
         })
     }
@@ -342,7 +354,7 @@ fn reconcile(
                 item.description,
                 normalize(&item.owner),
                 normalize(&item.description),
-                Direction::from_owner(&item.owner).as_str(),
+                Direction::resolve(&item.owner, sync.identity).as_str(),
                 sync.now,
             ],
         )?;
@@ -390,7 +402,7 @@ fn reconcile(
                 // The gate. An item the mode excludes gets no entry and no ref,
                 // so nothing downstream — aging, evidence, the Commitments
                 // view — ever sees it.
-                let direction = Direction::from_owner(&item.owner);
+                let direction = Direction::resolve(&item.owner, sync.identity);
                 if !mode.enrolls(direction) {
                     outcome.not_enrolled += 1;
                     continue;
@@ -684,6 +696,7 @@ mod tests {
                 note_override: None,
                 category_default: None,
                 items,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap()
@@ -723,6 +736,7 @@ mod tests {
                 note_override,
                 category_default,
                 items,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap()
@@ -929,6 +943,7 @@ mod tests {
                 }],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -1471,6 +1486,7 @@ mod tests {
                 note_override: None,
                 category_default: None,
                 items,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap()

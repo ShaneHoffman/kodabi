@@ -83,6 +83,20 @@ export type CategorySettings = {
   observer: CategoryPrefs;
 };
 
+/** Mirrors `IdentitySettings` in `crates/kodabi-core/src/settings.rs`: who the
+ * local user is, for deciding which extracted commitments are theirs.
+ *
+ * Both halves are matched the same way (normalized, not fuzzy), so the display
+ * name is just the spelling the user gave first. The backend normalizes and
+ * de-duplicates on write, which is why a save re-seeds from what came back
+ * rather than from what was typed. */
+export type IdentitySettings = {
+  display_name: string;
+  /** Other spellings meetings use for the same person. Grown by the
+   * Commitments view's claim affordance as much as by hand. */
+  aliases: string[];
+};
+
 /** Which meeting kind a per-kind preference belongs to: the settings struct's
  * snake_case key, from the kebab-case spelling the frontmatter and the wire
  * use. Both spellings are the schema's, and this is the one place they meet on
@@ -122,6 +136,7 @@ export type Settings = {
   mic_check: MicCheckResult | null;
   ledger: LedgerSettings;
   categories: CategorySettings;
+  identity: IdentitySettings;
 };
 
 /** The theme choices, in the order they are offered. */
@@ -201,6 +216,18 @@ export function setLedgerTuning(ledger: LedgerSettings): Promise<Settings> {
   return invoke<Settings>("set_ledger_tuning", { ledger });
 }
 
+/** Saves who the user is, and re-checks the commitments already recorded
+ * against the new set of names.
+ *
+ * Emits `ledger:changed` as well as `settings:changed`: unlike the per-genre
+ * defaults, learning a name is retrospective, so entries the app had filed
+ * under Waiting on them may move to Mine. The re-check runs in the background
+ * and announces itself, so the returned settings are the whole of what this
+ * call is waiting on. */
+export function setIdentity(identity: IdentitySettings): Promise<Settings> {
+  return invoke<Settings>("set_identity", { identity });
+}
+
 /** Sets the per-genre enrollment defaults. Prospective by design: the backend
  * emits only `settings:changed`, because nothing in the ledger has moved yet.
  * Existing meetings are re-evaluated when one is recategorized or its own
@@ -209,8 +236,14 @@ export function setCategoryPrefs(categories: CategorySettings): Promise<Settings
   return invoke<Settings>("set_category_prefs", { categories });
 }
 
-export function acknowledgeConsent(retention: RetentionPolicy): Promise<Settings> {
-  return invoke<Settings>("acknowledge_consent", { retention });
+/** Acknowledges the consent nudge, storing the chosen retention policy and, if
+ * the user gave one, the name their own commitments file under. A blank name
+ * leaves the setting untouched. */
+export function acknowledgeConsent(
+  retention: RetentionPolicy,
+  displayName?: string,
+): Promise<Settings> {
+  return invoke<Settings>("acknowledge_consent", { retention, displayName });
 }
 
 /** Runs the mic test: plays a short tone through the default output device

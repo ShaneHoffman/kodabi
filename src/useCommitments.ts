@@ -181,6 +181,32 @@ export function untrackCommitment(entryId: string): Promise<CommitmentEntry> {
   });
 }
 
+/** Mirrors `AliasOutcome` in `src-tauri/src/ledger_cmds.rs`: what became of the
+ * name a claimed row was filed under.
+ *
+ * `not_needed` is the design working (a reserved token like Them, or a spelling
+ * already known); `failed` is the only one worth a word to the user, because
+ * the same misfiling will happen again. */
+export type AliasOutcome = "saved" | "not_needed" | "failed";
+
+/** Mirrors `ClaimMineDto` in `src-tauri/src/ledger_cmds.rs`: the re-filed
+ * entry, plus what became of the name it was filed under. */
+export type ClaimMineResult = {
+  entry: CommitmentEntry;
+  alias: AliasOutcome;
+};
+
+/** One-click human correction: this commitment is mine.
+ *
+ * Moves the entry to Mine and teaches the owner spelling as one of the user's
+ * names, so the next meeting files it right unprompted. The correction loop the
+ * routing examples established: every correction is training data. */
+export function claimCommitmentMine(entryId: string): Promise<ClaimMineResult> {
+  return invoke<ClaimMineResult>("claim_commitment_mine", {
+    input: { entry_id: entryId },
+  });
+}
+
 /** Returns a commitment to open: waking a snooze, taking back a waiver, or
  * undoing a closure an evidence pass made on its own. */
 export function reopenCommitment(entryId: string): Promise<CommitmentEntry> {

@@ -250,6 +250,7 @@ pub fn assemble_note_items(
     note_id: &str,
     items: Vec<ActionItemRow>,
     details: &[EntryDetail],
+    identity: &crate::ledger::OwnerIdentity,
 ) -> Vec<NoteItemEnrollment> {
     let mut by_item: HashMap<&str, &EntryDetail> = HashMap::new();
     for detail in details {
@@ -264,7 +265,7 @@ pub fn assemble_note_items(
         .into_iter()
         .map(|item| {
             let matched = by_item.get(item.id.as_str());
-            let direction = Direction::from_owner(&item.owner);
+            let direction = Direction::resolve(&item.owner, identity);
             match matched {
                 Some(detail) => NoteItemEnrollment {
                     item,
@@ -466,6 +467,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -498,6 +500,7 @@ mod tests {
                 link_hints: &[],
                 note_override: Some(EnrollmentMode::ContextOnly),
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -517,6 +520,7 @@ mod tests {
                 row("a_222222", "You", "book the venue", None, false),
             ],
             &details,
+            &crate::ledger::OwnerIdentity::default(),
         );
 
         // Body order is the reader's order.
@@ -548,6 +552,7 @@ mod tests {
                 false,
             )],
             &details,
+            &crate::ledger::OwnerIdentity::default(),
         );
         assert_eq!(elsewhere[0].tracking, ItemTracking::NotEnrolled);
 
@@ -561,6 +566,7 @@ mod tests {
                 false,
             )],
             &details,
+            &crate::ledger::OwnerIdentity::default(),
         );
         assert_eq!(here[0].tracking, ItemTracking::Tracked);
         assert_eq!(here[0].untracked_via, None);
@@ -579,6 +585,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -593,6 +600,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -605,6 +613,7 @@ mod tests {
                 row("a_111111", "Priya", "send the revised deck", None, false),
             ],
             &details,
+            &crate::ledger::OwnerIdentity::default(),
         );
 
         assert_eq!(assembled[0].tracking, ItemTracking::Tracked);
@@ -658,6 +667,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();

@@ -196,6 +196,10 @@ pub fn distill_chat(
             // no model title the note falls back to its id, which beats a file
             // named after a disambiguator.
             title_seed_fallback: None,
+            // No identity block: a chat's two participants are fixed and
+            // labelled ("You" and "Claude"), so there is no name for the model
+            // to mistake the user for.
+            identity: None,
         },
         route,
         open_entries,

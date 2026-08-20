@@ -100,6 +100,7 @@ pub(crate) fn apply_after_distill(app: &AppHandle, kb: &Path, distilled: &Distil
     };
 
     let threshold = autoclose_threshold(app);
+    let settings = app.state::<SettingsState>().snapshot();
     let applied = match client.distill_follow_up(
         OwnedFollowUp {
             note_id: distilled.id.as_str().to_string(),
@@ -114,8 +115,11 @@ pub(crate) fn apply_after_distill(app: &AppHandle, kb: &Path, distilled: &Distil
             // very first sync, not only once someone recategorizes it.
             category_default: kodabi_core::ledger::category_default_for(
                 listed.note.category,
-                &app.state::<SettingsState>().snapshot().categories,
+                &settings.categories,
             ),
+            // From the same snapshot as the category default, so the gate and
+            // the direction that feeds it read one settings state.
+            identity: settings.identity.owner_identity(),
         },
         threshold,
     ) {

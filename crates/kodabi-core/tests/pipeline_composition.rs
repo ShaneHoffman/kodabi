@@ -404,6 +404,7 @@ fn a_meeting_transcript_distills_routes_writes_indexes_and_searches_back() {
         &MockRunner(briarwood_output()),
         root,
         &session,
+        None,
         &recording_route(root, &decided),
         &no_open_entries,
     )
@@ -849,6 +850,7 @@ fn an_unroutable_transcript_lands_in_inbox_with_its_score_and_is_still_searchabl
         &MockRunner(ambiguous_output()),
         root,
         &session,
+        None,
         &recording_route(root, &decided),
         &no_open_entries,
     )
@@ -924,6 +926,7 @@ fn notes_written_by_the_pipeline_order_chronologically_in_the_index() {
         &MockRunner(briarwood_output()),
         root,
         &earlier,
+        None,
         &recording_route(root, &decided),
         &no_open_entries,
     )
@@ -932,6 +935,7 @@ fn notes_written_by_the_pipeline_order_chronologically_in_the_index() {
         &MockRunner(renamed),
         root,
         &later,
+        None,
         &recording_route(root, &decided),
         &no_open_entries,
     )
@@ -979,6 +983,7 @@ fn a_chat_note_and_a_meeting_note_order_against_each_other() {
         &MockRunner(briarwood_output()),
         root,
         &session,
+        None,
         &recording_route(root, &decided),
         &no_open_entries,
     )
@@ -1039,6 +1044,7 @@ fn a_later_meeting_closes_a_commitment_the_earlier_one_recorded() {
         &MockRunner(briarwood_output()),
         root,
         &first_session,
+        None,
         &recording_route(root, &decided),
         &no_open_entries,
     )
@@ -1059,6 +1065,7 @@ fn a_later_meeting_closes_a_commitment_the_earlier_one_recorded() {
             link_hints: &[],
             note_override: None,
             category_default: None,
+            identity: &kodabi_core::ledger::OwnerIdentity::default(),
             now: "2026-08-12T12:00:00Z",
         })
         .unwrap();
@@ -1107,6 +1114,7 @@ fn a_later_meeting_closes_a_commitment_the_earlier_one_recorded() {
         &MockRunner(follow_up_output),
         root,
         &second_session,
+        None,
         &recording_route(root, &decided),
         &|_| open.clone(),
     )
@@ -1135,6 +1143,7 @@ fn a_later_meeting_closes_a_commitment_the_earlier_one_recorded() {
                 second_listed.note.category,
                 &kodabi_core::settings::CategorySettings::default(),
             ),
+            identity: &kodabi_core::ledger::OwnerIdentity::default(),
         },
         kodabi_core::ledger::DEFAULT_CONVERSATION_AUTOCLOSE,
         "2026-08-19T12:00:00Z",
@@ -1210,6 +1219,7 @@ fn recategorizing_a_meeting_re_evaluates_what_it_already_put_in_the_ledger() {
         &MockRunner(briarwood_output()),
         root,
         &session,
+        None,
         &recording_route(root, &decided),
         &no_open_entries,
     )
@@ -1235,6 +1245,7 @@ fn recategorizing_a_meeting_re_evaluates_what_it_already_put_in_the_ledger() {
                 link_hints: &[],
                 note_override: note.tracking,
                 category_default: ledger::category_default_for(note.category, &categories),
+                identity: &kodabi_core::ledger::OwnerIdentity::default(),
                 now: "2026-08-12T12:00:00Z",
             })
             .unwrap()

@@ -93,6 +93,7 @@ fn distills_a_stored_transcript_into_a_schema_valid_meeting_note() {
         &runner,
         vault.path(),
         &session_path,
+        None,
         &|_, _| inbox_routing(),
         &no_open_entries,
     )

@@ -29,7 +29,7 @@ it.
 | Vault root — `sessions/`, `chats/`, project note folders, `_glossary.yml`, `_routing_examples.yml`, `_category.yml`, `_ledger.yml` | `app_data_dir()` | `transcribe::knowledge_base_dir` (`KODABI_KB_ROOT`) | `<base>` |
 | Note index — `index.db` (+ `-wal`, `-shm`) | `app_data_dir()/index.db` | `index_state::index_db_path` (`KODABI_INDEX_DB`) | `<base>/.index/index.db` |
 | Commitment ledger — `ledger.db` (+ `-wal`, `-shm`) | `app_config_dir()/ledger.db` | `sandbox::config_dir` → `ledger_state` | `<base>/ledger.db` |
-| Settings — `settings.toml` (consent, retention, overlay, appearance, mic check, commitment and meeting-kind tuning) | `app_config_dir()` | `sandbox::config_dir` → `lib.rs` setup | `<base>` |
+| Settings — `settings.toml` (consent, retention, overlay, appearance, mic check, commitment and meeting-kind tuning, your name) | `app_config_dir()` | `sandbox::config_dir` → `lib.rs` setup | `<base>` |
 | Device identity — `device.toml` | `app_config_dir()` | `sandbox::config_dir` → `kodabi_core::device` | `<base>` |
 | Claude Code wiring — `_claude/kodabi.mcp.json`, `_claude/terminal-settings.json` | `app_config_dir()` | `sandbox::config_dir` → `terminal_cmds` | `<base>/_claude` |
 | WebView2 profile (localStorage, webview state) | `%LOCALAPPDATA%\com.kodabi.app\EBWebView` — the one location *outside* the app-data folder | `WEBVIEW2_USER_DATA_FOLDER` | `<base>/.webview2` |

@@ -43,6 +43,11 @@ export function ConsentNudge({ onClose }: Props) {
   const [days, setDays] = useState(String(DEFAULT_KEEP_DAYS));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // The one place the app asks who you are. This gate is the only surface
+  // every install passes before its first capture, which makes it the last
+  // moment the answer is still ahead of the first meeting rather than behind
+  // it. Optional: blank simply means not yet, and Settings holds the field.
+  const [displayName, setDisplayName] = useState("");
 
   const primaryRef = useRef<HTMLButtonElement>(null);
 
@@ -55,7 +60,10 @@ export function ConsentNudge({ onClose }: Props) {
     // means consent was NOT granted (the nudge will correctly reappear on the
     // next toggle), while a failed start leaves consent granted.
     try {
-      await acknowledgeConsent(buildRetentionPolicy(kind, Number(days)));
+      await acknowledgeConsent(
+        buildRetentionPolicy(kind, Number(days)),
+        displayName.trim(),
+      );
     } catch (err) {
       setError(
         backendCopy(err, "Couldn't save your choice, so recording stays off. Try again."),
@@ -137,6 +145,18 @@ export function ConsentNudge({ onClose }: Props) {
           onChange={(event) => setDays(event.target.value)}
         />
       )}
+
+      {/* Last of the fields, and deliberately after the retention choice: the
+          consent and what happens to the recording are what the dialog is for,
+          and this is a convenience that rides along. Nothing gates on it. */}
+      <Field
+        label="Your name"
+        hint="Optional. Lets Kodabi tell which commitments in a meeting are yours."
+        placeholder="Not set"
+        value={displayName}
+        readOnly={submitting}
+        onChange={(event) => setDisplayName(event.target.value)}
+      />
 
       {error && <StatusMessage variant="error" compact>{error}</StatusMessage>}
 

@@ -97,6 +97,13 @@ pub struct NoteTrackingOutcome {
     pub retracked: Vec<String>,
 }
 
+/// What one owner re-resolution pass moved.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct OwnerResolutionOutcome {
+    /// Entries the new identity re-filed as the user's own.
+    pub claimed: Vec<String>,
+}
+
 impl Ledger {
     /// Re-evaluates the entries a meeting already produced, after its effective
     /// enrollment mode changed — either because its `tracking:` override was
@@ -256,6 +263,7 @@ impl Ledger {
         item: &ActionItemFact,
         project: &str,
         note_date_utc: &str,
+        identity: &crate::ledger::OwnerIdentity,
         now: &str,
     ) -> Result<LedgerEntry> {
         if let Some(existing) = self.entry_for_item(note_id, item.id.as_str())? {
@@ -271,7 +279,7 @@ impl Ledger {
             return self.reread(&entry.entry_id);
         }
 
-        let direction = Direction::from_owner(&item.owner);
+        let direction = Direction::resolve(&item.owner, identity);
         let entry_id = {
             let tx = self.connection_mut().transaction()?;
             let entry_id = insert_open_entry(
@@ -297,6 +305,71 @@ impl Ledger {
         };
         self.mark_dirty(project);
         self.reread(&entry_id)
+    }
+
+    /// Re-evaluates which open commitments are the user's own, after the
+    /// configured identity changed.
+    ///
+    /// The mirror of [`Ledger::retro_apply_note_tracking`], and bound by the
+    /// same rule: learning a name is setting a **default**, and a default never
+    /// overrules a person. So this walks only entries that are in a live state
+    /// and `touched = 0`. There is no `enrolled_via` filter here, and none is
+    /// needed — every human act on an entry, including a manual promote, marks
+    /// it touched, so that one column already excludes everything a person
+    /// decided.
+    ///
+    /// **It only ever moves entries *toward* [`Direction::Mine`].** Removing an
+    /// alias re-files nothing, and that asymmetry is the same one the enrolment
+    /// gate's observer rule rests on: a stray in Waiting-on-them is one click to
+    /// fix, while silently dropping a commitment out of Mine is the failure the
+    /// user would never see coming. `unassigned` is excluded for a different
+    /// reason — by construction only the grammar's own `Unassigned` token
+    /// resolves there, so no alias can match it.
+    ///
+    /// **What it cannot reach:** items a context-only meeting gated out have no
+    /// row at all ([`sync`](super::sync)'s create leg), so no sweep can find
+    /// them; they enrol when their note is next re-synced. Re-forwarding the
+    /// whole vault on every alias edit would be a far larger action than the
+    /// control looks like, so it is deliberately not done, and the per-line
+    /// promote remains the immediate path for one that matters.
+    pub fn retro_resolve_owners(
+        &mut self,
+        identity: &super::OwnerIdentity,
+        now: &str,
+    ) -> Result<OwnerResolutionOutcome> {
+        let mut outcome = OwnerResolutionOutcome::default();
+        if identity.is_empty() {
+            return Ok(outcome);
+        }
+
+        for entry_id in self.unresolved_entries(identity)? {
+            self.claim_mine(&entry_id, now)?;
+            outcome.claimed.push(entry_id);
+        }
+        Ok(outcome)
+    }
+
+    /// Live, untouched, them-side entries whose owner is one of the user's
+    /// names.
+    ///
+    /// Matched on `owner_norm`, the column [`sync`](super::sync) wrote with the
+    /// same normalization [`super::OwnerIdentity`] applies to the alias set, so
+    /// a name stored months ago and a name typed just now fold identically.
+    fn unresolved_entries(&self, identity: &super::OwnerIdentity) -> Result<Vec<String>> {
+        let aliases = identity.normalized_aliases();
+        let placeholders = std::iter::repeat_n("?", aliases.len())
+            .collect::<Vec<_>>()
+            .join(", ");
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT entry_id FROM ledger_entries
+             WHERE state IN ('open', 'needs_review', 'snoozed')
+               AND touched = 0
+               AND direction = 'theirs'
+               AND owner_norm IN ({placeholders})
+             ORDER BY entry_id"
+        ))?;
+        let rows = stmt.query_map(rusqlite::params_from_iter(aliases), |row| row.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
     }
 
     /// Re-reads an entry that must exist, for a mutator returning its new shape.
@@ -444,6 +517,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -452,6 +526,183 @@ mod tests {
 
     fn entry_for(ledger: &Ledger, item_id: &str) -> LedgerEntry {
         ledger.entry_for_item(NOTE, item_id).unwrap().unwrap()
+    }
+
+    /// The same note, synced by a user who has told the app their name.
+    fn seeded_as(identity: &crate::ledger::OwnerIdentity) -> (Ledger, Vec<ActionItemFact>) {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![
+            fact("a_111111", "Priya", "send the revised deck"),
+            fact("a_444444", "Avery", "circulate the minutes"),
+        ];
+        ledger
+            .sync_note_items(&NoteSync {
+                note_id: NOTE,
+                project: PROJECT,
+                note_date_utc: DAY_ONE,
+                items: &items,
+                link_hints: &[],
+                note_override: None,
+                category_default: None,
+                identity,
+                now: NOW,
+            })
+            .unwrap();
+        (ledger, items)
+    }
+
+    #[test]
+    fn a_configured_name_enrols_as_the_users_own_commitment() {
+        let identity = crate::ledger::OwnerIdentity::new("Avery", &[]);
+        let (ledger, _) = seeded_as(&identity);
+
+        assert_eq!(entry_for(&ledger, "a_444444").direction, Direction::Mine);
+        assert_eq!(entry_for(&ledger, "a_111111").direction, Direction::Theirs);
+    }
+
+    #[test]
+    fn a_context_only_meeting_still_enrols_the_users_own_commitment_by_name() {
+        // The headline failure this feature exists for: under ContextOnly the
+        // direction *is* the gate, so an owner spelled as a name rather than
+        // "You" used to produce no row at all.
+        let identity = crate::ledger::OwnerIdentity::new("Avery", &[]);
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![
+            fact("a_444444", "Avery", "circulate the minutes"),
+            fact("a_111111", "Priya", "send the revised deck"),
+        ];
+        let outcome = ledger
+            .sync_note_items(&NoteSync {
+                note_id: NOTE,
+                project: PROJECT,
+                note_date_utc: DAY_ONE,
+                items: &items,
+                link_hints: &[],
+                note_override: Some(EnrollmentMode::ContextOnly),
+                category_default: None,
+                identity: &identity,
+                now: NOW,
+            })
+            .unwrap();
+
+        assert_eq!(outcome.created.len(), 1);
+        assert_eq!(outcome.not_enrolled, 1, "the other side is still gated out");
+        assert_eq!(entry_for(&ledger, "a_444444").direction, Direction::Mine);
+        assert!(ledger.entry_for_item(NOTE, "a_111111").unwrap().is_none());
+    }
+
+    #[test]
+    fn learning_a_name_re_files_the_commitments_already_recorded_under_it() {
+        let (mut ledger, _) = seeded_as(&crate::ledger::OwnerIdentity::default());
+        // Synced before the user said who they were, so their own line landed
+        // on the them side.
+        assert_eq!(entry_for(&ledger, "a_444444").direction, Direction::Theirs);
+
+        let identity = crate::ledger::OwnerIdentity::new("avery", &[]);
+        let outcome = ledger.retro_resolve_owners(&identity, LATER).unwrap();
+
+        assert_eq!(outcome.claimed.len(), 1);
+        assert_eq!(entry_for(&ledger, "a_444444").direction, Direction::Mine);
+        assert_eq!(
+            entry_for(&ledger, "a_111111").direction,
+            Direction::Theirs,
+            "someone else's commitment is untouched"
+        );
+
+        // Idempotent: a second pass has nothing left to move.
+        let again = ledger.retro_resolve_owners(&identity, LATER).unwrap();
+        assert!(again.claimed.is_empty());
+    }
+
+    #[test]
+    fn re_resolution_never_overrides_an_entry_a_person_has_acted_on() {
+        let (mut ledger, _) = seeded_as(&crate::ledger::OwnerIdentity::default());
+        let entry_id = entry_for(&ledger, "a_444444").entry_id;
+        // What the shell's mutation path does after every successful op.
+        ledger.snooze(&entry_id, "2026-09-01", NOW).unwrap();
+        ledger.mark_touched(&entry_id).unwrap();
+
+        let identity = crate::ledger::OwnerIdentity::new("Avery", &[]);
+        let outcome = ledger.retro_resolve_owners(&identity, LATER).unwrap();
+
+        assert!(outcome.claimed.is_empty());
+        assert_eq!(entry_for(&ledger, "a_444444").direction, Direction::Theirs);
+    }
+
+    #[test]
+    fn re_resolution_leaves_settled_commitments_alone() {
+        let (mut ledger, _) = seeded_as(&crate::ledger::OwnerIdentity::default());
+        let entry_id = entry_for(&ledger, "a_444444").entry_id;
+        // Settled by a machine, so `touched` is not what excludes it here: the
+        // live-state filter is.
+        ledger
+            .close(&entry_id, ClosedVia::Conversation, LATER)
+            .unwrap();
+
+        let identity = crate::ledger::OwnerIdentity::new("Avery", &[]);
+        let outcome = ledger.retro_resolve_owners(&identity, LATER).unwrap();
+
+        assert!(outcome.claimed.is_empty());
+        assert_eq!(entry_for(&ledger, "a_444444").state, EntryState::Closed);
+        assert_eq!(entry_for(&ledger, "a_444444").direction, Direction::Theirs);
+    }
+
+    #[test]
+    fn re_resolution_never_demotes_a_commitment_out_of_mine() {
+        // Clearing a name must not silently drop the user's own commitments:
+        // the sweep only ever moves entries toward Mine.
+        let (mut ledger, _) = seeded_as(&crate::ledger::OwnerIdentity::new("Avery", &[]));
+        assert_eq!(entry_for(&ledger, "a_444444").direction, Direction::Mine);
+
+        let outcome = ledger
+            .retro_resolve_owners(&crate::ledger::OwnerIdentity::new("Blake", &[]), LATER)
+            .unwrap();
+
+        assert!(outcome.claimed.is_empty());
+        assert_eq!(entry_for(&ledger, "a_444444").direction, Direction::Mine);
+    }
+
+    #[test]
+    fn an_unattributed_line_is_never_swept_into_mine() {
+        let (mut ledger, _) = seeded();
+        // Even an identity that names the sentinel cannot reach it: the row is
+        // `unassigned`, and the sweep only reads `theirs`.
+        let identity = crate::ledger::OwnerIdentity::new(crate::distill::UNASSIGNED_OWNER, &[]);
+        let outcome = ledger.retro_resolve_owners(&identity, LATER).unwrap();
+
+        assert!(outcome.claimed.is_empty());
+        assert_eq!(
+            entry_for(&ledger, "a_333333").direction,
+            Direction::Unassigned
+        );
+    }
+
+    #[test]
+    fn claiming_an_entry_moves_only_its_direction() {
+        let (mut ledger, _) = seeded_as(&crate::ledger::OwnerIdentity::default());
+        let before = entry_for(&ledger, "a_111111");
+        ledger.snooze(&before.entry_id, "2026-09-01", NOW).unwrap();
+
+        let claimed = ledger.claim_mine(&before.entry_id, LATER).unwrap();
+
+        assert_eq!(claimed.direction, Direction::Mine);
+        assert_eq!(claimed.state, EntryState::Snoozed, "still snoozed");
+        assert_eq!(
+            claimed.owner, "Priya",
+            "the note's line is what it is; the ledger's copy still matches it"
+        );
+
+        // Idempotent, and a second claim does not restamp `updated_at`.
+        let again = ledger
+            .claim_mine(&before.entry_id, "2026-08-19T09:00:00Z")
+            .unwrap();
+        assert_eq!(again.updated_at, claimed.updated_at);
+    }
+
+    #[test]
+    fn claiming_an_entry_that_does_not_exist_is_an_error() {
+        let (mut ledger, _) = seeded();
+        assert!(ledger.claim_mine("le_missing0001", LATER).is_err());
     }
 
     #[test]
@@ -572,11 +823,19 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: Some(EnrollmentMode::ContextOnly),
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
         let entry = ledger
-            .track_item(NOTE, &item, PROJECT, DAY_ONE, LATER)
+            .track_item(
+                NOTE,
+                &item,
+                PROJECT,
+                DAY_ONE,
+                &crate::ledger::OwnerIdentity::default(),
+                LATER,
+            )
             .unwrap();
         assert_eq!(entry.enrolled_via, EnrolledVia::Manual);
 
@@ -627,6 +886,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -710,7 +970,14 @@ mod tests {
         let theirs = entry_for(&ledger, "a_111111").entry_id;
         ledger.untrack(&theirs, UntrackedVia::Manual, NOW).unwrap();
         let promoted = ledger
-            .track_item(NOTE, &items[0], PROJECT, DAY_ONE, LATER)
+            .track_item(
+                NOTE,
+                &items[0],
+                PROJECT,
+                DAY_ONE,
+                &crate::ledger::OwnerIdentity::default(),
+                LATER,
+            )
             .unwrap();
         assert_eq!(promoted.enrolled_via, EnrolledVia::Manual);
         assert_eq!(promoted.state, EntryState::Open);
@@ -760,6 +1027,7 @@ mod tests {
                     link_hints: &[],
                     note_override,
                     category_default: None,
+                    identity: &crate::ledger::OwnerIdentity::default(),
                     now: NOW,
                 })
                 .unwrap()
@@ -803,13 +1071,21 @@ mod tests {
                 link_hints: &[],
                 note_override: Some(EnrollmentMode::ContextOnly),
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
         assert!(ledger.entry_for_item(NOTE, "a_111111").unwrap().is_none());
 
         let entry = ledger
-            .track_item(NOTE, &item, PROJECT, DAY_ONE, LATER)
+            .track_item(
+                NOTE,
+                &item,
+                PROJECT,
+                DAY_ONE,
+                &crate::ledger::OwnerIdentity::default(),
+                LATER,
+            )
             .unwrap();
 
         assert_eq!(entry.state, EntryState::Open);
@@ -828,7 +1104,14 @@ mod tests {
         let before = entry_for(&ledger, "a_111111");
 
         let after = ledger
-            .track_item(NOTE, &items[0], PROJECT, DAY_ONE, LATER)
+            .track_item(
+                NOTE,
+                &items[0],
+                PROJECT,
+                DAY_ONE,
+                &crate::ledger::OwnerIdentity::default(),
+                LATER,
+            )
             .unwrap();
 
         assert_eq!(after, before, "a live entry is returned untouched");
@@ -845,7 +1128,14 @@ mod tests {
         ledger.close(&closed, ClosedVia::Manual, NOW).unwrap();
 
         let after = ledger
-            .track_item(NOTE, &items[0], PROJECT, DAY_ONE, LATER)
+            .track_item(
+                NOTE,
+                &items[0],
+                PROJECT,
+                DAY_ONE,
+                &crate::ledger::OwnerIdentity::default(),
+                LATER,
+            )
             .unwrap();
 
         assert_eq!(

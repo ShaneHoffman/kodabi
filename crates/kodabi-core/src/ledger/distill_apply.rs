@@ -43,6 +43,8 @@ pub struct DistillFollowUp<'a> {
     /// The default this note's meeting category carries, resolved by the shell.
     /// See [`crate::ledger::sync::NoteSync::category_default`].
     pub category_default: Option<crate::ledger::EnrollmentMode>,
+    /// Who the local user is. See [`crate::ledger::sync::NoteSync::identity`].
+    pub identity: &'a crate::ledger::OwnerIdentity,
 }
 
 /// A commitment the conversation closed on its own.
@@ -118,6 +120,7 @@ pub fn apply_distill_follow_up(
         link_hints: &hints,
         note_override: follow_up.note_override,
         category_default: follow_up.category_default,
+        identity: follow_up.identity,
         now,
     })?;
 
@@ -399,6 +402,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: EARLIER,
             })
             .unwrap();
@@ -420,6 +424,7 @@ mod tests {
                 updates,
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
             },
             AUTOCLOSE,
             NOW,
@@ -481,6 +486,7 @@ mod tests {
                 updates: &[update(&entry_id, LedgerUpdateKind::Refresh, None, 0.9)],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
             },
             AUTOCLOSE,
             NOW,
@@ -700,6 +706,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -744,6 +751,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: EARLIER,
             })
             .unwrap()
