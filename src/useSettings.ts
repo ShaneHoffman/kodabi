@@ -3,6 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { backendCopy } from "./errorCopy";
 import { SETTINGS_CHANGED_EVENT } from "./events";
+import type { NoteCategory } from "./useNotes";
 
 /*
  * The settings wire shapes, mirroring the Rust DTOs in
@@ -80,6 +81,20 @@ export type CategorySettings = {
   review: CategoryPrefs;
   all_hands: CategoryPrefs;
   observer: CategoryPrefs;
+};
+
+/** Which meeting kind a per-kind preference belongs to: the settings struct's
+ * snake_case key, from the kebab-case spelling the frontmatter and the wire
+ * use. Both spellings are the schema's, and this is the one place they meet on
+ * this side, so a view never writes the mapping out again. */
+export const CATEGORY_SETTING_KEYS: Record<NoteCategory, keyof CategorySettings> = {
+  standup: "standup",
+  "one-on-one": "one_on_one",
+  client: "client",
+  "working-session": "working_session",
+  review: "review",
+  "all-hands": "all_hands",
+  observer: "observer",
 };
 
 /** What each genre enrolls when the user has not chosen. Mirrors

@@ -17,8 +17,8 @@ import {
 import { folderHue, useProjects, type FolderHue } from "../../useProjects";
 import {
   BUILTIN_CATEGORY_DEFAULTS,
+  CATEGORY_SETTING_KEYS,
   useSettings,
-  type CategorySettings,
   type Settings,
 } from "../../useSettings";
 import { isSessionSource, useSessionArtifacts, type SessionArtifacts } from "../../useSessions";
@@ -266,19 +266,6 @@ type ReadProps = {
   project: string;
   origin?: View;
   onEdit: () => void;
-};
-
-/** The settings key holding a meeting kind's preferences, from its frontmatter
- * spelling. Mirrors the same map in `SettingsView`; the two spellings are the
- * schema's, not a choice made here. */
-const CATEGORY_SETTING_KEYS: Record<NoteCategory, keyof CategorySettings> = {
-  standup: "standup",
-  "one-on-one": "one_on_one",
-  client: "client",
-  "working-session": "working_session",
-  review: "review",
-  "all-hands": "all_hands",
-  observer: "observer",
 };
 
 /** Whether this meeting tracks direct asks only, resolving the same chain the

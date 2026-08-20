@@ -4,6 +4,7 @@ import { CAPTURE_TOGGLE_SHORTCUT } from "../../captureControl";
 import { backendCopy } from "../../errorCopy";
 import {
   BUILTIN_CATEGORY_DEFAULTS,
+  CATEGORY_SETTING_KEYS,
   buildRetentionPolicy,
   clampConfidence,
   clampDays,
@@ -24,7 +25,7 @@ import {
   type RetentionKind,
   type Theme,
 } from "../../useSettings";
-import { CATEGORY_OPTIONS, type NoteCategory } from "../../useNotes";
+import { CATEGORY_OPTIONS } from "../../useNotes";
 import { useNavigation } from "../../useNavigation";
 import { useShortcutStatus } from "../../useShortcutStatus";
 import { applyContrast, readContrast } from "../../contrast";
@@ -161,20 +162,6 @@ type LedgerField = keyof LedgerSettings;
 
 /** Which meeting kind a per-kind write is for. */
 type CategoryKey = keyof CategorySettings;
-
-/** The frontmatter spelling of a kind to the settings key that holds its
- * preferences: kebab-case on the wire, snake_case in the settings struct
- * (`crates/kodabi-core/src/settings.rs`). The one place the two spellings meet
- * on this side. */
-const CATEGORY_SETTING_KEYS: Record<NoteCategory, CategoryKey> = {
-  standup: "standup",
-  "one-on-one": "one_on_one",
-  client: "client",
-  "working-session": "working_session",
-  review: "review",
-  "all-hands": "all_hands",
-  observer: "observer",
-};
 
 /** The three choices a kind offers, with the inherit option naming what it
  * inherits so the row reads as settled rather than blank. */
@@ -615,7 +602,13 @@ export function SettingsView() {
   // is the row's own status line, and an error two rows below the control that
   // raised it reads as belonging to the wrong setting.
   const [ledgerFoot, setLedgerFoot] = useState<LedgerField>("aging_after_days");
-  const [categoryError, setCategoryError] = useState<string | null>(null);
+  // The failing kind travels with its message, for the reason `ledgerFoot`
+  // exists: this card is seven rows tall, so an error parked at its head reads
+  // as a claim about the card rather than about the write that raised it.
+  const [categoryError, setCategoryError] = useState<{
+    key: CategoryKey;
+    message: string;
+  } | null>(null);
   // Which kind is mid-write, so only that row's Select reads as busy.
   const [savingCategory, setSavingCategory] = useState<CategoryKey | null>(null);
   if (!seededLedger && settings) {
@@ -717,12 +710,13 @@ export function SettingsView() {
       });
       setSettings(updated);
     } catch (err) {
-      setCategoryError(
-        backendCopy(
+      setCategoryError({
+        key,
+        message: backendCopy(
           err,
           "Couldn't save the meeting-kind settings. The previous values still apply; try again.",
         ),
-      );
+      });
     } finally {
       setSavingCategory(null);
     }
@@ -999,18 +993,23 @@ export function SettingsView() {
             <Row
               label="What each kind adds to your commitments"
               hint="Kodabi picks the kind when it writes the note; correct it from the note or the Inbox. Only direct asks keeps other people's items out, and something asked of you directly is tracked either way. A meeting's own tracking switch always wins over its kind."
-              foot={
-                categoryError && (
-                  <StatusMessage variant="error" compact>
-                    {categoryError}
-                  </StatusMessage>
-                )
-              }
             />
             {CATEGORY_OPTIONS.map((option) => {
               const key = CATEGORY_SETTING_KEYS[option.value];
               return (
-                <Row key={option.value} label={option.label}>
+                <Row
+                  key={option.value}
+                  label={option.label}
+                  // The row's own status line, so the message sits under the
+                  // Select that raised it rather than six rows above it.
+                  foot={
+                    categoryError?.key === key && (
+                      <StatusMessage variant="error" compact>
+                        {categoryError.message}
+                      </StatusMessage>
+                    )
+                  }
+                >
                   <Select
                     hideLabel
                     label={`${option.label} commitments`}

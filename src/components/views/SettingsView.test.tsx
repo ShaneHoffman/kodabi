@@ -1049,13 +1049,18 @@ describe("SettingsView meeting kinds card", () => {
     await renderSeeded();
 
     const kinds = card("Meeting kinds");
-    await user.click(within(kinds).getByRole("combobox", { name: "Observer commitments" }));
+    const observer = within(kinds).getByRole("combobox", { name: "Observer commitments" });
+    await user.click(observer);
     await user.click(await screen.findByRole("option", { name: "Track everything" }));
 
+    const message = await within(kinds).findByText(
+      "Couldn't save the meeting-kind settings. The previous values still apply; try again.",
+    );
+    expect(message).toBeInTheDocument();
+    // Under the row that raised it, not at the head of a seven-row card: a
+    // message six rows above its control reads as belonging to the card.
     expect(
-      await within(kinds).findByText(
-        "Couldn't save the meeting-kind settings. The previous values still apply; try again.",
-      ),
-    ).toBeInTheDocument();
+      observer.compareDocumentPosition(message) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });
