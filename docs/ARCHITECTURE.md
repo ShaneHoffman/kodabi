@@ -302,7 +302,10 @@ right unprompted. Three spellings are refused rather than learned
 before any alias is consulted, and `Them` is the sharper case, because it is what the distill
 guidance writes for an unnamed other, so adopting it would quietly claim every future them-side
 commitment. A refusal is not a failure and the view does not report it as one. Claiming goes through the ordinary mutation path, which marks the entry `touched`,
-which is exactly right: a person has now judged that row.
+which is exactly right: a person has now judged that row. That flag is also what protects the claim
+from the reconcile tiers: an entry's `direction` is normally re-derived from the owner string every
+time a reworded line relinks, and a claimed one is the case that string cannot express, so the
+rewrite skips a `touched` entry already sitting in Mine.
 
 Learning a name is retrospective, unlike a genre default. Saving one sweeps the entries already
 recorded (`ledger::Ledger::retro_resolve_owners`), bound by the same rule as every other retro pass —

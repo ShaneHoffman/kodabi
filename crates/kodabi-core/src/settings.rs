@@ -273,23 +273,34 @@ impl IdentitySettings {
         self.display_name.trim().is_empty() && self.aliases.is_empty()
     }
 
-    /// Trims every spelling, drops the blanks, and de-duplicates on the
-    /// normalized form, keeping the first spelling of each.
+    /// Trims every spelling, drops the blanks and the reserved tokens, and
+    /// de-duplicates on the normalized form, keeping the first spelling of
+    /// each.
     ///
     /// Applied at the write boundary so what is stored is what will be
     /// matched: a trailing space or a second `"avery"` in a different case
     /// would survive a round-trip and read as two different names in the UI.
+    ///
+    /// The reserved-token filter is [`crate::ledger::learnable_alias`], the
+    /// same gate the claim affordance learns through, applied here because a
+    /// free-text field is the other door into this set. It matters most for
+    /// `"Them"`: the distill guidance writes it for a commitment an *unnamed*
+    /// other took on, so storing it as one of the user's names would claim
+    /// every future them-side line the room never put a name to.
     pub fn normalized(&self) -> IdentitySettings {
         let mut seen = std::collections::BTreeSet::new();
-        let display_name = self.display_name.trim().to_string();
+        let display_name = crate::ledger::learnable_alias(&self.display_name)
+            .unwrap_or_default()
+            .to_string();
         if !display_name.is_empty() {
             seen.insert(crate::ledger::normalize_owner(&display_name));
         }
         let aliases = self
             .aliases
             .iter()
-            .map(|alias| alias.trim().to_string())
-            .filter(|alias| !alias.is_empty() && seen.insert(crate::ledger::normalize_owner(alias)))
+            .filter_map(|alias| crate::ledger::learnable_alias(alias))
+            .map(str::to_string)
+            .filter(|alias| seen.insert(crate::ledger::normalize_owner(alias)))
             .collect();
         IdentitySettings {
             display_name,
@@ -767,6 +778,30 @@ mod tests {
             vec!["Avery Kim".to_string()],
             "a blank, the display name again, and a re-cased duplicate all drop"
         );
+    }
+
+    #[test]
+    fn normalizing_an_identity_refuses_the_grammars_own_tokens() {
+        // The free-text Settings field is the other door into this set, so it
+        // gets the same gate the claim affordance learns through. "Them" is the
+        // one that would do real damage: it is what the distill guidance writes
+        // for an unnamed other, so keeping it would claim every future
+        // them-side line.
+        let identity = IdentitySettings {
+            display_name: "Them".to_string(),
+            aliases: vec![
+                "You".to_string(),
+                "them".to_string(),
+                crate::distill::UNASSIGNED_OWNER.to_string(),
+                "Avery Kim".to_string(),
+            ],
+        };
+
+        let normalized = identity.normalized();
+
+        assert_eq!(normalized.display_name, "");
+        assert_eq!(normalized.aliases, vec!["Avery Kim".to_string()]);
+        assert!(!normalized.owner_identity().is_me("Them"));
     }
 
     #[test]

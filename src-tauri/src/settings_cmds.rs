@@ -271,7 +271,15 @@ pub(crate) fn resolve_owners_in_background(
 /// install passes before its first capture, which is the last moment the answer
 /// is still ahead of the first meeting rather than behind it. A blank leaves
 /// the setting untouched rather than writing an empty name over one the user
-/// already gave.
+/// already gave, and a reserved token reads as a blank
+/// (`ledger::learnable_alias`, the same gate `set_identity` writes through).
+///
+/// **A name given here sweeps, exactly as `set_identity` does.** "Ahead of the
+/// first meeting" is true of the recordings, not of the ledger: settings are
+/// machine-local while the vault is not, so a first run against an existing
+/// vault has a full ledger by the time this gate is answered — the startup
+/// reconcile built it, and every commitment in it is filed under Waiting on
+/// them because nobody had said who the user was yet.
 #[tauri::command]
 pub fn acknowledge_consent(
     app: AppHandle,
@@ -279,18 +287,26 @@ pub fn acknowledge_consent(
     retention: RetentionPolicy,
     display_name: Option<String>,
 ) -> Result<Settings, String> {
-    let display_name = display_name.unwrap_or_default().trim().to_string();
+    let display_name = display_name
+        .as_deref()
+        .and_then(kodabi_core::ledger::learnable_alias)
+        .unwrap_or_default()
+        .to_string();
+    let named = !display_name.is_empty();
     let settings = state.update(
         "Couldn't save your choice, so recording stays off. Try again.",
         |s| {
             s.consent_acknowledged = true;
             s.retention = retention;
-            if !display_name.is_empty() {
+            if named {
                 s.identity.display_name = display_name.clone();
             }
         },
     )?;
     let _ = app.emit(SETTINGS_CHANGED_EVENT, settings.clone());
+    if named {
+        resolve_owners_in_background(&app, settings.identity.owner_identity());
+    }
     // The chosen policy may prune immediately (e.g. KeepDays over pre-existing
     // sessions), same as an explicit policy change.
     crate::retention::spawn_prune(&app);

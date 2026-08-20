@@ -343,10 +343,22 @@ fn reconcile(
         let item = fresh[*new_idx];
         retire_ref(tx, &facts.entry_id, sync.note_id, old_item_id, sync.now)?;
         link_ref(tx, &facts.entry_id, sync.note_id, &item.id, sync.now)?;
+        // The direction is re-derived from the new owner string, with one
+        // exception: an entry a person has claimed as their own stays theirs.
+        // `owner` is the note's word and `direction` is normally a function of
+        // it, but `Ledger::claim_mine` breaks that tie deliberately - the
+        // claimed spelling may be one no alias can ever resolve ("Them", an
+        // unattributed line), so re-deriving here would silently hand the
+        // commitment back on the next reword. Same asymmetry the sweep rests
+        // on: only ever *toward* Mine, and never over a person's judgement.
         tx.execute(
             "UPDATE ledger_entries
              SET owner = ?2, description = ?3, owner_norm = ?4, description_norm = ?5,
-                 direction = ?6, updated_at = ?7
+                 direction = CASE
+                     WHEN touched = 1 AND direction = 'mine' THEN direction
+                     ELSE ?6
+                 END,
+                 updated_at = ?7
              WHERE entry_id = ?1",
             params![
                 facts.entry_id,
@@ -1205,6 +1217,61 @@ mod tests {
         let outcome = sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &after);
 
         assert_eq!(outcome.relinked, vec![entry_id.clone()]);
+        let detail = ledger.get_entry(&entry_id).unwrap().unwrap();
+        assert_eq!(detail.entry.owner, "Priya");
+        assert_eq!(detail.entry.direction, Direction::Theirs);
+    }
+
+    #[test]
+    fn a_relink_never_takes_back_a_commitment_the_user_claimed() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        // "Them" is the distill guidance's word for an unnamed other, and one
+        // the app refuses to learn as a name, so the claim is the only record
+        // that this row is the user's.
+        let before = vec![fact("a_111111", "Them", "get you the numbers")];
+        sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &before);
+        let entry_id = ledger.list_entries(&EntryFilter::default()).unwrap()[0]
+            .entry_id
+            .clone();
+        ledger.claim_mine(&entry_id, NOW).unwrap();
+        ledger.mark_touched(&entry_id).unwrap();
+
+        // The line is reworded in the note, which re-mints its id and relinks.
+        let after = vec![fact("a_999999", "Them", "get you the Q3 numbers")];
+        let outcome = sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &after);
+
+        assert_eq!(outcome.relinked, vec![entry_id.clone()]);
+        let detail = ledger.get_entry(&entry_id).unwrap().unwrap();
+        assert_eq!(detail.entry.description, "get you the Q3 numbers");
+        assert_eq!(
+            detail.entry.direction,
+            Direction::Mine,
+            "a reword must not silently hand the commitment back"
+        );
+    }
+
+    #[test]
+    fn a_relink_still_re_derives_the_direction_of_an_untouched_entry() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        // Nobody has judged this one, so the note stays the authority.
+        let before = vec![fact("a_111111", "You", "book the venue")];
+        sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &before);
+        let entry_id = ledger.list_entries(&EntryFilter::default()).unwrap()[0]
+            .entry_id
+            .clone();
+        assert_eq!(
+            ledger
+                .get_entry(&entry_id)
+                .unwrap()
+                .unwrap()
+                .entry
+                .direction,
+            Direction::Mine
+        );
+
+        let after = vec![fact("a_999999", "Priya", "book the venue")];
+        sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &after);
+
         let detail = ledger.get_entry(&entry_id).unwrap().unwrap();
         assert_eq!(detail.entry.owner, "Priya");
         assert_eq!(detail.entry.direction, Direction::Theirs);
