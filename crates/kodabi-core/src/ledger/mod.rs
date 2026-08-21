@@ -42,8 +42,9 @@ pub use snapshot::{ProjectSnapshot, RestoreReport, LEDGER_SNAPSHOT_FILE, LEDGER_
 pub use store::{EntryDetail, EntryFilter, EntryLink, Evidence, ItemRef, LedgerEntry};
 pub use sync::{LinkHint, NoteSync, SyncOutcome};
 pub use view::{
-    AgingConfig, AgingTier, Commitment, CommitmentItem, CommitmentSource, ItemTracking,
-    NoteContext, NoteItemEnrollment, DEFAULT_AGING_AFTER_DAYS, DEFAULT_STALE_AFTER_DAYS,
+    mention_window_cutoff, AgingConfig, AgingTier, Commitment, CommitmentItem, CommitmentSource,
+    ItemTracking, NoteContext, NoteItemEnrollment, DEFAULT_AGING_AFTER_DAYS,
+    DEFAULT_STALE_AFTER_DAYS,
 };
 
 use std::collections::BTreeSet;

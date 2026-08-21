@@ -33,7 +33,7 @@ struct GetNoteParams {
 
 /// Fetches a note by id. A missing id is a business error (`isError`), since the
 /// caller asserted the note exists. `action_items` carries the extracted items of
-/// any note that has them (a meeting or a chat). For a meeting note, `meeting`
+/// any note that has them, which is every type. For a meeting note, `meeting`
 /// additionally carries the index-backed `MeetingMeta` (duration, speaker count,
 /// decisions, action-item count); it is `null` for every other type.
 pub fn call(server: &Server, arguments: Value) -> Result<Value, RpcError> {

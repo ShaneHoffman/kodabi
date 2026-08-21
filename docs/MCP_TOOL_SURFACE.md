@@ -210,7 +210,7 @@ metadata as well. Use after `search_notes` to read a hit in full.
   "properties": {
     "id": { "$ref": "#/$defs/NoteId", "description": "Stable id of the note to read." },
     "include_body": { "type": "boolean", "default": true, "description": "Include the full distilled markdown body. Set false for metadata + decisions + action items only." },
-    "include_action_items": { "type": "boolean", "default": true, "description": "Include extracted action items (meeting and chat notes carry them)." }
+    "include_action_items": { "type": "boolean", "default": true, "description": "Include extracted action items (every note type can carry them)." }
   }
 }
 ```
@@ -293,10 +293,10 @@ Read-only fetch of stored data; closed world. Not-found id and "not a meeting" a
 ### 4. `list_outstanding_items`
 
 List action items that are not yet done (open or overdue), each linked back to its source note (a
-meeting or a chat).
+meeting, a chat, or a hand-written note).
 
 - **title:** `List outstanding items`
-- **description:** `List action items that are not done (open/overdue), extracted from meetings and chats and linked to their source note. Filter by project subtree, owner, status, due-before date, or source note.`
+- **description:** `List action items that are not done (open/overdue), extracted from meetings, chats and hand-written notes, and linked to their source note. Filter by project subtree, owner, status, due-before date, or source note.`
 
 **inputSchema**
 ```json
@@ -715,7 +715,7 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
         "owner": { "type": "string", "description": "Who owns it (e.g. \"you\" or a person's name)." },
         "due_date": { "oneOf": [ { "$ref": "#/$defs/IsoDate" }, { "type": "null" } ], "description": "Due date, or null if none." },
         "status": { "$ref": "#/$defs/ActionItemStatus" },
-        "source": { "$ref": "#/$defs/NoteRef", "description": "The note this item was extracted from (a meeting or a chat)." },
+        "source": { "$ref": "#/$defs/NoteRef", "description": "The note this item was extracted from." },
         "extracted_date": { "oneOf": [ { "$ref": "#/$defs/IsoDate" }, { "type": "null" } ], "description": "Date the item was extracted (usually the source note's date)." }
       },
       "description": "An extracted action / outstanding item linked to its source note."
@@ -853,7 +853,7 @@ meeting history* — traces through this surface as:
 
 1. `list_projects()` → resolve the free-text name "Briarwood Golf" to its slug (e.g. `"Briarwood Golf"`
    or a nested slug if it's a sub-project).
-2. `list_outstanding_items(project: "Briarwood Golf")` or `get_project_context(project: "Briarwood Golf", include_outstanding: true)` → the not-done action items for that project, each carrying a `source` (`NoteRef`) back to the note it was made in (a meeting or a chat).
+2. `list_outstanding_items(project: "Briarwood Golf")` or `get_project_context(project: "Briarwood Golf", include_outstanding: true)` → the not-done action items for that project, each carrying a `source` (`NoteRef`) back to the note it was made in.
 3. `get_note(id: <source.id>)` → full body of the source note, if the answer needs to quote or
    explain an item in more detail than the `ActionItem.description` provides.
 

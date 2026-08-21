@@ -259,6 +259,35 @@ are gated identically; neither field is defaultable, so a producer that forgets 
 Because sync is idempotent, returning a meeting to tracked enrols what was skipped simply by
 re-syncing it.
 
+**Commitments do not only arrive from meetings.** Every note type derives action items
+(`meeting::derives_facts`), by one of two grammars chosen from the type. A machine-rendered body (a
+meeting, a chat) is read with the distill grammar: sections, and `Owner to do X by DATE.` split into
+its fields. A hand-written body (`type: note` — quick capture, or anything edited by hand) is read
+with the plain-checkbox grammar: any `- [ ]` line anywhere in the body, whole, owned by the user.
+The split exists because the two bodies make different promises — quick capture writes the user's
+text verbatim and has no headers at all, and applying the distill grammar's `" to "` split to free
+text turns `- [ ] Send the deck to Priya.` into an item owned by "Send the deck". The plain grammar
+infers nothing: no owner, no due date, just the line. Its owner is the fixed token `You`, which
+`Direction::resolve` maps to *mine* ahead of any alias, so it survives the user renaming themselves
+— it is hashed into the item's id, and an id that moved would orphan its entry.
+
+Both grammars feed the same enrollment gate, so a plain note honours `tracking:` in its frontmatter
+exactly as a meeting does. One rule is enforced at the create leg for all of them: **an item already
+ticked the first time the ledger sees it mints nothing.** A checkbox flip on an item already tracked
+still changes nothing (it lands on the present tier), and a later note restating a commitment as
+done is still a mention of a live one — what is declined is only finished business the ledger never
+knew about, which is most of what a historical note holds.
+
+**The first run over an existing vault is seeded deliberately.** Every other route into the ledger
+fires when a note *changes*, so a vault full of open commitments and an empty `ledger.db` would stay
+that way: the startup reconcile skips unchanged notes, and the meeting-facts backfill finds nothing
+missing. When the ledger is still empty after the snapshot restore, the index worker therefore seeds
+it from what the index already holds — open items only, and only from notes dated inside the
+enrolment window (`ledger::mention_window_cutoff`, the stale threshold). The window is the whole
+design: without it day one is a wall of months-old items that arrive already stale and sort above
+everything current. `last_mention` comes from each note's own date, so the aging tiers place a
+backfilled commitment where its note sits in time rather than treating it as minted today.
+
 The gate applies to entry *creation* only. A re-mention still links and still bumps `last_mention`,
 so a live commitment restated in a context-only meeting does not age out for having been discussed
 in the wrong room, and an edit still relinks its existing entry. Changing a meeting's effective mode

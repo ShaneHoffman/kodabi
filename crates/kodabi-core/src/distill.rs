@@ -71,6 +71,23 @@ use crate::transcription::Channel;
 /// claim commitments the user never took.
 pub const UNASSIGNED_OWNER: &str = "Unassigned";
 
+/// The owner token a hand-written note's checkbox lines are attributed to.
+///
+/// A plain note is the user's own scratchpad: a `- [ ]` line in it is something
+/// *they* mean to do, so unlike a meeting's unattributed line it is theirs
+/// rather than [`UNASSIGNED_OWNER`]. The distill grammar's `" to "` split is
+/// deliberately not applied there (see [`crate::meeting`]), so this is the only
+/// owner a plain note's item ever carries.
+///
+/// **It is hashed into the item id** (`crate::meeting::action_item_id`), so it
+/// must be a fixed token and must never track the identity setting — a user
+/// renaming themselves would otherwise re-mint every hand-written item's id and
+/// orphan its ledger entry. `"You"` is safe to fix because
+/// [`Direction::resolve`](crate::ledger::Direction::resolve) maps it to
+/// `Mine` outright, ahead of any alias lookup: it is the grammar's own spelling
+/// for the local user and no identity can redefine it.
+pub const SELF_OWNER: &str = "You";
+
 /// Longest title kept from the model (characters); anything longer is cut.
 /// The title only seeds the note's filename slug (itself capped at 40) and
 /// the `DistilledNote` echo, so this is a sanity bound, not a schema rule.
@@ -1135,6 +1152,28 @@ fn render_action_item(item: &ActionItemDraft) -> String {
     }
 }
 
+/// The two action-item checkbox markers, exactly as the grammar accepts them
+/// (lowercase `x` only).
+pub(crate) const UNCHECKED_MARKER: &str = "- [ ] ";
+pub(crate) const CHECKED_MARKER: &str = "- [x] ";
+
+/// Peels a leading checkbox marker off a line, returning the remaining text and
+/// whether the box was ticked. `None` when the line is not a checkbox line at
+/// all.
+///
+/// The shared first step of both grammars [`crate::meeting::parse_body`] runs:
+/// the distill grammar goes on to split the remainder into owner / description /
+/// due date ([`parse_action_line`]), while the plain-checkbox grammar keeps it
+/// whole. Because it strips only these two exact markers, a
+/// [`crate::vault::ANNOTATION_PREFIX`] line (`- Closed …`) is rejected here, in
+/// both grammars, by construction.
+pub(crate) fn parse_checkbox_line(line: &str) -> Option<(&str, bool)> {
+    if let Some(rest) = line.strip_prefix(UNCHECKED_MARKER) {
+        return Some((rest, false));
+    }
+    line.strip_prefix(CHECKED_MARKER).map(|rest| (rest, true))
+}
+
 /// Parses one rendered action-item line back into `(owner, description,
 /// due_date)` — the inverse of [`render_action_item`] and the exact parse the
 /// meeting-facts extractor ([`crate::meeting`]) runs against a note body.
@@ -1146,9 +1185,7 @@ fn render_action_item(item: &ActionItemDraft) -> String {
 /// terminal `.` is peeled off as the due date only when it is a valid calendar
 /// date, so a description ending in a date-like phrase is not misread.
 pub(crate) fn parse_action_line(line: &str) -> Option<(String, String, Option<String>)> {
-    let rest = line
-        .strip_prefix("- [ ] ")
-        .or_else(|| line.strip_prefix("- [x] "))?;
+    let (rest, _done) = parse_checkbox_line(line)?;
     let rest = rest.strip_suffix('.')?;
     let (owner, rest) = rest.split_once(" to ")?;
     // An optional " by YYYY-MM-DD" tail: 4 marker chars + 10 date chars.

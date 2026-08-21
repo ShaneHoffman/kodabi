@@ -54,7 +54,7 @@ fn broadcast_vault_changed(app: &AppHandle) {
 ///
 /// `ledger_cmds` has its own `reindex_and_broadcast`, which pairs this with the
 /// broadcast because every write it makes wants both.
-fn index_moved_note(index: &IndexState, listed: &ListedNote, kb: &Path) {
+pub(crate) fn index_moved_note(index: &IndexState, listed: &ListedNote, kb: &Path) {
     let rel = listed.path.strip_prefix(kb).unwrap_or(&listed.path);
     let mut indexed = IndexedNote::from_note(
         &listed.note,
@@ -531,6 +531,14 @@ pub async fn file_note_to_project(
 
     // Keep the index in step with the move: a re-route changes the note's
     // project and path, and the upsert updates the same row.
+    //
+    // The ledger follows from the same write. The re-index forwards the note's
+    // facts, every item lands on the ledger's "present" tier (an `a_` id does
+    // not hash the project), and `follow_project` moves the entries and dirties
+    // both projects' snapshots. **`ledger:changed` is not emitted here**: the
+    // sync is queued on the ledger worker, so an emit at this point would
+    // announce a move the reader cannot see yet. The worker announces it once
+    // the write lands (`ledger_state::handle_job`).
     index_moved_note(&app.state::<IndexState>(), &routed.note, &kb);
     broadcast_vault_changed(&app);
 
@@ -860,6 +868,11 @@ pub async fn delete_note(app: AppHandle, id: String) -> Result<DeletedNoteDto, S
             eprintln!("failed to clean up the session for note {id}: {err}");
             false
         });
+    // The index delete carries the ledger's half with it: the job retires every
+    // ref this note held and sends whatever is left with nowhere to point to
+    // review. Nothing is deleted from the ledger — a commitment outlives the
+    // note that recorded it. As with a re-file, the worker (not this command)
+    // emits `ledger:changed`, after the retirement has actually landed.
     app.state::<IndexState>()
         .delete_note_best_effort(note_id.as_str());
     broadcast_vault_changed(&app);

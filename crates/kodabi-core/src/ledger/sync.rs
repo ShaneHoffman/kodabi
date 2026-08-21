@@ -157,6 +157,15 @@ pub struct SyncOutcome {
     pub rementioned: Vec<String>,
     /// Entries whose last live ref disappeared.
     pub sent_to_review: Vec<String>,
+    /// Entries this pass moved to another project, because the note that
+    /// mentions them was filed somewhere new (see `follow_project`).
+    ///
+    /// A move writes nothing about the *items* — every one of them lands in the
+    /// present tier and `unchanged` counts them — so without this the commonest
+    /// re-file looks like a no-op to every caller that asks whether the pass did
+    /// anything, and both projects' snapshots would be marked dirty by a pass
+    /// reporting itself silent.
+    pub moved: Vec<String>,
     /// Items whose id was already linked, and stayed linked.
     pub unchanged: usize,
     /// Items the meeting's enrollment mode kept out of the ledger.
@@ -164,19 +173,29 @@ pub struct SyncOutcome {
     /// Reported for the log, not stored: an un-enrolled item has no row
     /// anywhere, which is the point of the gate.
     pub not_enrolled: usize,
+    /// Items already ticked when first seen, which mint no entry.
+    ///
+    /// Reported for the log, not stored, for the same reason as
+    /// `not_enrolled`: nothing is written.
+    pub skipped_done: usize,
 }
 
 impl SyncOutcome {
     /// Whether the pass wrote anything.
     ///
-    /// `not_enrolled` is deliberately excluded: gating an item writes nothing,
-    /// so a pass that gates every item must stay silent or the snapshot
-    /// debounce would rearm on every reconcile of a context-only meeting.
+    /// `not_enrolled` and `skipped_done` are deliberately excluded: both mean an
+    /// item was declined and *no row was written*, so a pass that declines every
+    /// item must stay silent or the snapshot debounce would rearm on every
+    /// reconcile of a context-only meeting (or of an all-ticked note).
+    ///
+    /// `moved` is deliberately included: a project move is a real `UPDATE` and
+    /// dirties two snapshots.
     pub fn is_noop(&self) -> bool {
         self.created.is_empty()
             && self.relinked.is_empty()
             && self.rementioned.is_empty()
             && self.sent_to_review.is_empty()
+            && self.moved.is_empty()
     }
 }
 
@@ -268,7 +287,9 @@ fn reconcile(
             // Present on both sides. A checkbox flip lands here and correctly
             // changes nothing; only the project may have moved.
             outcome.unchanged += 1;
-            follow_project(tx, entry_id, sync, dirty)?;
+            if follow_project(tx, entry_id, sync, dirty)? {
+                outcome.moved.push(entry_id.clone());
+            }
         } else {
             vanished.push((item_id.clone(), entry_id.clone()));
         }
@@ -371,7 +392,9 @@ fn reconcile(
             ],
         )?;
         dirty.insert(facts.project.clone());
-        follow_project(tx, &facts.entry_id, sync, dirty)?;
+        if follow_project(tx, &facts.entry_id, sync, dirty)? {
+            outcome.moved.push(facts.entry_id.clone());
+        }
         outcome.relinked.push(facts.entry_id.clone());
     }
 
@@ -407,10 +430,27 @@ fn reconcile(
         match matched {
             Some(entry_id) => {
                 link_ref(tx, &entry_id, sync.note_id, &item.id, sync.now)?;
-                bump_mention(tx, &entry_id, sync, dirty)?;
+                if bump_mention(tx, &entry_id, sync, dirty)? {
+                    outcome.moved.push(entry_id.clone());
+                }
                 outcome.rementioned.push(entry_id);
             }
             None => {
+                // Already ticked the first time we ever saw it: there is no
+                // commitment left to track, so minting an *open* entry for it
+                // would be simply wrong. This only reaches items no tier
+                // matched — a checkbox flip on an item the ledger already knows
+                // lands in the present tier above and correctly changes
+                // nothing, and a done restatement of a live commitment is still
+                // evidence the commitment exists, so the re-mention leg keeps
+                // it. What is declined here is only the never-seen-before tick:
+                // a historical note's finished business, which the first-run
+                // backfill and the hand-written-note grammar both surface in
+                // quantity.
+                if item.done {
+                    outcome.skipped_done += 1;
+                    continue;
+                }
                 // The gate. An item the mode excludes gets no entry and no ref,
                 // so nothing downstream — aging, evidence, the Commitments
                 // view — ever sees it.
@@ -620,18 +660,21 @@ fn has_active_ref(tx: &Connection, entry_id: &str) -> Result<bool> {
 /// where its snapshot is written. This one rule is also what makes re-filing a
 /// note and renaming a project converge without either needing its own API, and
 /// it is a no-op when the project has not changed, which keeps re-syncs silent.
+/// Returns whether the entry actually moved, so the caller can report it in
+/// [`SyncOutcome::moved`] — a re-file leaves every item unchanged, and the move
+/// is then the only thing the pass did.
 fn follow_project(
     tx: &Connection,
     entry_id: &str,
     sync: &NoteSync<'_>,
     dirty: &mut BTreeSet<String>,
-) -> Result<()> {
+) -> Result<bool> {
     if sync.project.is_empty() {
-        return Ok(());
+        return Ok(false);
     }
     let facts = entry_facts(tx, entry_id)?;
     if facts.project == sync.project || facts.last_mention.as_str() > sync.note_date_utc {
-        return Ok(());
+        return Ok(false);
     }
     tx.execute(
         "UPDATE ledger_entries SET project = ?2, updated_at = ?3 WHERE entry_id = ?1",
@@ -640,20 +683,22 @@ fn follow_project(
     // Both the old and the new project's snapshots are now behind.
     dirty.insert(facts.project);
     dirty.insert(sync.project.to_string());
-    Ok(())
+    Ok(true)
 }
 
 /// Records that a commitment was mentioned again by this note: the mention date
 /// advances, the project follows, and an entry that was in review only because
 /// its line vanished comes back to life.
+/// Returns whether the project moved, forwarded from `follow_project` so the
+/// re-mention leg reports it the same way the other legs do.
 fn bump_mention(
     tx: &Connection,
     entry_id: &str,
     sync: &NoteSync<'_>,
     dirty: &mut BTreeSet<String>,
-) -> Result<()> {
+) -> Result<bool> {
     let facts = entry_facts(tx, entry_id)?;
-    follow_project(tx, entry_id, sync, dirty)?;
+    let moved = follow_project(tx, entry_id, sync, dirty)?;
     if sync.note_date_utc > facts.last_mention.as_str() {
         tx.execute(
             "UPDATE ledger_entries SET last_mention = ?2, updated_at = ?3 WHERE entry_id = ?1",
@@ -669,7 +714,7 @@ fn bump_mention(
         )?;
     }
     dirty.insert(facts.project);
-    Ok(())
+    Ok(moved)
 }
 
 #[cfg(test)]
@@ -1506,7 +1551,7 @@ mod tests {
         );
 
         // The note is re-filed; the same items arrive under a real project.
-        sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &items);
+        let outcome = sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &items);
         assert_eq!(
             ledger.get_entry(&entry_id).unwrap().unwrap().entry.project,
             "Briarwood Golf"
@@ -1516,6 +1561,102 @@ mod tests {
         assert!(ledger
             .dirty_projects()
             .contains(&"Briarwood Golf".to_string()));
+
+        // Every item landed in the present tier, so the move is the *only*
+        // thing this pass did — and it has to say so, or a re-file reads as a
+        // no-op to everything downstream of the outcome.
+        assert_eq!(outcome.moved, vec![entry_id.clone()]);
+        assert_eq!(outcome.unchanged, 1);
+        assert!(!outcome.is_noop(), "a project move is a write");
+
+        // Re-syncing the same note where it now lives moves nothing.
+        let settled = sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &items);
+        assert!(settled.moved.is_empty());
+        assert!(settled.is_noop());
+    }
+
+    #[test]
+    fn an_older_note_reports_no_move_when_the_project_holds() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let newer = vec![fact("a_222222", "Priya", "send the deck")];
+        sync_note(&mut ledger, "n_d4e5f6", "Briarwood Golf", DAY_TWO, &newer);
+
+        // The same commitment re-mentioned by an older note: it re-links across
+        // notes, but the last-mention guard holds the project, so nothing moved.
+        let older = vec![fact("a_111111", "Priya", "send the deck")];
+        let outcome = sync_note(&mut ledger, "n_a1b2c3", "Ops", DAY_ONE, &older);
+
+        assert_eq!(outcome.rementioned.len(), 1, "matched the live entry");
+        assert!(outcome.moved.is_empty(), "the guard held the project");
+    }
+
+    #[test]
+    fn a_never_seen_done_item_mints_no_entry() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let mut ticked = fact("a_111111", "Priya", "send the deck");
+        ticked.done = true;
+
+        let outcome = sync_note(&mut ledger, "n_a1b2c3", "Ops", DAY_ONE, &[ticked]);
+
+        assert!(outcome.created.is_empty(), "no open entry for done work");
+        assert_eq!(outcome.skipped_done, 1);
+        assert!(
+            outcome.is_noop(),
+            "declining writes nothing, so the snapshot debounce must not rearm"
+        );
+        assert!(ledger
+            .list_entries(&EntryFilter::default())
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn ticking_an_item_the_ledger_already_knows_still_changes_nothing() {
+        // The skip is only for items no tier matched. An entry that already
+        // exists keeps living through a checkbox flip — closing it is a
+        // person's judgement, not the parser's.
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let open = vec![fact("a_111111", "Priya", "send the deck")];
+        sync_note(&mut ledger, "n_a1b2c3", "Ops", DAY_ONE, &open);
+        let entry_id = ledger.list_entries(&EntryFilter::default()).unwrap()[0]
+            .entry_id
+            .clone();
+
+        let mut ticked = fact("a_111111", "Priya", "send the deck");
+        ticked.done = true;
+        let outcome = sync_note(&mut ledger, "n_a1b2c3", "Ops", DAY_ONE, &[ticked]);
+
+        assert_eq!(outcome.unchanged, 1);
+        assert_eq!(
+            outcome.skipped_done, 0,
+            "the present tier ran, not the skip"
+        );
+        assert_eq!(
+            ledger.get_entry(&entry_id).unwrap().unwrap().entry.state,
+            EntryState::Open
+        );
+    }
+
+    #[test]
+    fn a_done_restatement_still_re_mentions_a_live_commitment() {
+        // A later note that records the same commitment as finished is evidence
+        // the commitment exists; the re-mention leg keeps it rather than the
+        // skip declining it.
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        sync_note(
+            &mut ledger,
+            "n_a1b2c3",
+            "Ops",
+            DAY_ONE,
+            &[fact("a_111111", "Priya", "send the deck")],
+        );
+
+        let mut restated = fact("a_222222", "Priya", "send the deck");
+        restated.done = true;
+        let outcome = sync_note(&mut ledger, "n_d4e5f6", "Ops", DAY_TWO, &[restated]);
+
+        assert_eq!(outcome.rementioned.len(), 1);
+        assert_eq!(outcome.skipped_done, 0);
     }
 
     #[test]

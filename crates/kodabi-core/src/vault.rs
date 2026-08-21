@@ -356,9 +356,12 @@ pub fn set_action_item_done(
     let Some((_, listed)) = find_note_anywhere(vault_root, id)? else {
         return Ok(SetDoneOutcome::NoteMissing);
     };
-    let Some(line_index) =
-        meeting::action_item_line(listed.note.id.as_str(), &listed.note.body, action_item_id)
-    else {
+    let Some(line_index) = meeting::action_item_line(
+        listed.note.id.as_str(),
+        listed.note.note_type,
+        &listed.note.body,
+        action_item_id,
+    ) else {
         return Ok(SetDoneOutcome::ItemMissing);
     };
 
@@ -474,9 +477,12 @@ pub fn annotate_action_item(
     let Some((_, listed)) = find_note_anywhere(vault_root, id)? else {
         return Ok(AnnotateOutcome::NoteMissing);
     };
-    let Some(line_index) =
-        meeting::action_item_line(listed.note.id.as_str(), &listed.note.body, action_item_id)
-    else {
+    let Some(line_index) = meeting::action_item_line(
+        listed.note.id.as_str(),
+        listed.note.note_type,
+        &listed.note.body,
+        action_item_id,
+    ) else {
         return Ok(AnnotateOutcome::ItemMissing);
     };
 
@@ -3463,6 +3469,90 @@ mod tests {
             .contains("- [x] Priya to send the revised deck by 2026-08-20."));
         // The sibling line is untouched.
         assert!(listed.note.body.contains("- [ ] You to book the venue."));
+    }
+
+    /// A hand-written note, as quick capture writes one: no sections, no
+    /// grammar, just checkbox lines.
+    fn plain_note_with_items(
+        vault: &Path,
+        project: &str,
+        id: &str,
+    ) -> Vec<meeting::ActionItemFact> {
+        let note = Note::new(
+            NoteId::parse(id).unwrap(),
+            NoteType::Note,
+            Routing::Manual {
+                project: project.to_string(),
+            },
+            "2026-08-01",
+            vec![Tag::parse("fixture").unwrap()],
+            Source::parse("manual").unwrap(),
+            "Called the bank.\n\n- [ ] chase the wire to Priya\n- [ ] book the flights\n",
+        )
+        .unwrap();
+        note::write_note(vault, &note, Some("capture")).unwrap();
+        meeting::meeting_facts_for(&note, vault)
+            .unwrap()
+            .action_items
+    }
+
+    #[test]
+    fn set_action_item_done_flips_a_plain_notes_checkbox() {
+        // The reverse walk has to run the *plain* grammar for a plain note, or
+        // it resolves the wrong line (here: no line at all, since neither line
+        // sits under an `## Action items` header).
+        let vault = tempdir().unwrap();
+        let before = plain_note_with_items(vault.path(), "Ops", "n_note01");
+        let id = NoteId::parse("n_note01").unwrap();
+        assert_eq!(before.len(), 2);
+        assert_eq!(before[0].description, "chase the wire to Priya");
+
+        let outcome = set_action_item_done(vault.path(), &id, &before[0].id, true).unwrap();
+        let SetDoneOutcome::Updated(listed) = outcome else {
+            panic!("expected an update, got {outcome:?}");
+        };
+        assert!(listed.note.body.contains("- [x] chase the wire to Priya"));
+        assert!(
+            listed.note.body.contains("- [ ] book the flights"),
+            "the sibling line is untouched"
+        );
+
+        // And the id survives the tick, so the ledger keeps tracking it.
+        let after = meeting::meeting_facts_for(&listed.note, vault.path())
+            .unwrap()
+            .action_items;
+        assert_eq!(after[0].id, before[0].id);
+        assert!(after[0].done);
+    }
+
+    #[test]
+    fn annotate_action_item_writes_under_a_plain_notes_line() {
+        let vault = tempdir().unwrap();
+        let before = plain_note_with_items(vault.path(), "Ops", "n_note01");
+        let id = NoteId::parse("n_note01").unwrap();
+
+        let outcome =
+            annotate_action_item(vault.path(), &id, &before[1].id, "2026-08-17", "booked.")
+                .unwrap();
+        let AnnotateOutcome::Annotated(listed) = outcome else {
+            panic!("expected an annotation, got {outcome:?}");
+        };
+
+        let lines: Vec<&str> = listed.note.body.lines().collect();
+        let target = lines
+            .iter()
+            .position(|line| line.contains("book the flights"))
+            .expect("the item line");
+        assert_eq!(lines[target + 1], "  - Closed 2026-08-17: booked.");
+
+        // The annotation is inert: the ids are unchanged and no phantom item
+        // appeared.
+        let after = meeting::meeting_facts_for(&listed.note, vault.path())
+            .unwrap()
+            .action_items;
+        assert_eq!(after.len(), 2);
+        assert_eq!(after[0].id, before[0].id);
+        assert_eq!(after[1].id, before[1].id);
     }
 
     #[test]

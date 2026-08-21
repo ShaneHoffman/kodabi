@@ -14,10 +14,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use kodabi_core::capture::{quick_capture, route_preview};
 use kodabi_core::note::{self, Note, Routing};
+use kodabi_core::vault::ListedNote;
 use tauri::{AppHandle, Emitter, Manager, Runtime, Window};
 use tauri_plugin_global_shortcut::Shortcut;
 
 use crate::events::VAULT_CHANGED_EVENT;
+use crate::index_state::IndexState;
 use crate::routing_env::{report_signal_failures, routing_config_from_env};
 use crate::transcribe::knowledge_base_dir;
 
@@ -186,6 +188,19 @@ fn submit_impl(app: &AppHandle, text: &str) -> Result<QuickCaptureOutcome, Strin
     // log it so the user can fix the file. The capture itself succeeded.
     report_signal_failures("quick-capture", &captured.glossary_failures);
     report_signal_failures("quick-capture", &captured.example_failures);
+
+    // Index it now rather than leaving it to the watcher. A quick capture's
+    // checkbox lines are commitments (`meeting::derives_facts` covers plain
+    // notes), and the watcher's debounce would hold them out of the ledger for
+    // half a second after the window closes. Best-effort, like every other
+    // index write: the `.md` on disk is the truth, and the watcher still
+    // converges anything this misses.
+    let listed = ListedNote {
+        title: kodabi_core::vault::effective_title(&captured.note, &captured.path),
+        path: captured.path.clone(),
+        note: captured.note.clone(),
+    };
+    crate::note_cmds::index_moved_note(&app.state::<IndexState>(), &listed, &kb);
 
     // Broadcast to every window so the main window's lists refresh even while it
     // is hidden to the tray.

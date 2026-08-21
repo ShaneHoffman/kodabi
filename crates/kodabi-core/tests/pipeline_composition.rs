@@ -1328,3 +1328,124 @@ fn recategorizing_a_meeting_re_evaluates_what_it_already_put_in_the_ledger() {
         .unwrap();
     assert_eq!(live.len(), 2);
 }
+
+/// A hand-written capture is the one commitment source with no distill in front
+/// of it, so nothing else in the suite runs the plain-checkbox grammar's real
+/// output into the real ledger. Every ledger unit test feeds synthetic
+/// `ActionItemFact`s with hand-written ids; every facts unit test stops at the
+/// parse. This is the seam between them: quick capture writes a file, the real
+/// hasher mints the ids, the ledger enrols from those.
+#[test]
+fn a_quick_captures_checkbox_becomes_a_commitment_the_user_owns() {
+    let vault = two_project_vault();
+    let root = vault.path();
+
+    let captured = kodabi_core::capture::quick_capture(
+        root,
+        "Called the bank about the wire.\n\
+         - [ ] chase the wire to Priya\n\
+         - [x] file the receipt\n",
+        "2026-08-12",
+        &RoutingConfig::default(),
+    )
+    .unwrap();
+    assert_eq!(captured.note.note_type, NoteType::Note);
+
+    // The facts the index would cache, derived exactly as the write path does.
+    let facts = meeting::meeting_facts_for(&captured.note, root)
+        .expect("a hand-written note carries facts");
+    assert_eq!(facts.action_items.len(), 2, "both lines, section or not");
+    assert!(
+        facts.decisions.is_empty(),
+        "a plain note renders no decisions"
+    );
+    // Whole line, no owner split: the misparse the distill grammar would make
+    // here is the reason the two grammars are separate.
+    assert_eq!(facts.action_items[0].description, "chase the wire to Priya");
+    assert_eq!(facts.action_items[0].owner, "You");
+    assert!(!facts.action_items[0].done);
+    assert!(facts.action_items[1].done);
+
+    let date_utc = normalize_date_to_utc(&captured.note.date).unwrap();
+    let mut ledger = Ledger::open_in_memory().unwrap();
+    let outcome = ledger
+        .sync_note_items(&NoteSync {
+            note_id: captured.note.id.as_str(),
+            project: INBOX,
+            note_date_utc: &date_utc,
+            items: &facts.action_items,
+            link_hints: &[],
+            note_override: captured.note.tracking,
+            category_default: None,
+            identity: &kodabi_core::ledger::OwnerIdentity::default(),
+            now: "2026-08-12T12:00:00Z",
+        })
+        .unwrap();
+
+    // The open line enrols; the one already ticked mints nothing, because a
+    // commitment the ledger has never seen and that is already done is not a
+    // commitment.
+    assert_eq!(outcome.created.len(), 1);
+    assert_eq!(outcome.skipped_done, 1);
+
+    let entries = ledger.list_entries(&EntryFilter::default()).unwrap();
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].description, "chase the wire to Priya");
+    // `You` resolves to the user ahead of any alias, so a capture lands under
+    // "mine" with no identity configured at all.
+    assert_eq!(entries[0].direction, ledger::Direction::Mine);
+    // An unfiled capture is scoped to the Inbox, which is a real project folder
+    // with its own snapshot, not a null.
+    assert_eq!(entries[0].project, INBOX);
+    assert_eq!(
+        entries[0].last_mention, date_utc,
+        "aged from the note's day"
+    );
+
+    // --- Ticking it off in the note keeps the entry, and its id -------------
+    let entry_id = entries[0].entry_id.clone();
+    let item_id = facts.action_items[0].id.clone();
+    let ticked = vault::set_action_item_done(root, &captured.note.id, &item_id, true).unwrap();
+    let vault::SetDoneOutcome::Updated(listed) = ticked else {
+        panic!("expected the checkbox to flip, got {ticked:?}");
+    };
+
+    // The reverse walk found the right line under the plain grammar, and the
+    // re-derived id is unchanged — which is the whole reason the ledger can
+    // keep tracking a line across a tick.
+    let after = meeting::meeting_facts_for(&listed.note, root).unwrap();
+    assert_eq!(after.action_items[0].id, item_id);
+    assert!(after.action_items[0].done);
+
+    let resynced = ledger
+        .sync_note_items(&NoteSync {
+            note_id: captured.note.id.as_str(),
+            project: INBOX,
+            note_date_utc: &date_utc,
+            items: &after.action_items,
+            link_hints: &[],
+            note_override: listed.note.tracking,
+            category_default: None,
+            identity: &kodabi_core::ledger::OwnerIdentity::default(),
+            now: "2026-08-12T13:00:00Z",
+        })
+        .unwrap();
+    assert_eq!(resynced.unchanged, 1, "the tick lands in the present tier");
+    assert_eq!(
+        resynced.created.len(),
+        0,
+        "the ticked item is matched, not re-minted"
+    );
+    // The *other* line — done since it was written, never enrolled — is
+    // declined again, as it will be on every future sync of this note.
+    assert_eq!(resynced.skipped_done, 1);
+    assert!(
+        resynced.is_noop(),
+        "nothing was written, so the snapshot debounce must not rearm"
+    );
+    assert_eq!(
+        ledger.get_entry(&entry_id).unwrap().unwrap().entry.state,
+        EntryState::Open,
+        "closing is a person's judgement, not the parser's"
+    );
+}
