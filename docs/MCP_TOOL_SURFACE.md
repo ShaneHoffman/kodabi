@@ -50,7 +50,7 @@ Claude Code MCP reference (`code.claude.com/docs/en/mcp`) and the MCP tool speci
 
   Those two names are **shared with the desktop app, not owned by the MCP server**: the app reads the
   same `KODABI_KB_ROOT` (`transcribe::knowledge_base_dir`) and `KODABI_INDEX_DB`
-  (`index_state::open_index`) as overrides for its own vault and index, falling back to the app-data
+  (`index_state::index_db_path`) as overrides for its own vault and index, falling back to the app-data
   dir when they are unset. One name means one location on both sides of the boundary. They must be set
   together — the index reconciles against the KB root, so moving one without the other converges the
   index against a foreign vault. The end-to-end harness relies on this (`docs/UI_E2E_HARNESS.md`).

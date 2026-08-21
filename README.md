@@ -295,8 +295,8 @@ against real notes.
 
 `pnpm dev:sandbox` is the same app with one environment variable set. It seeds a
 gitignored, worktree-local `.sandbox/` with the fixture catalogue on first run,
-and keeps the vault, note index, settings, device identity, downloaded models and
-WebView2 profile there. Release builds and the unset case are byte-for-byte unaffected.
+and keeps the vault, note index, commitment ledger, settings, device identity,
+downloaded models and WebView2 profile there. Release builds and the unset case are byte-for-byte unaffected.
 
 ```sh
 pnpm dev:sandbox                              # seed on first run, then launch
