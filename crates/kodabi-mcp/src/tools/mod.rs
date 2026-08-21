@@ -1,4 +1,4 @@
-//! The `tools/call` router and the eight tool handlers (six read, two write).
+//! The `tools/call` router and the ten tool handlers (seven read, three write).
 //!
 //! Each handler deserializes its arguments into a kodabi-core param type, calls
 //! one core function, and wraps the result in the success/business-error
@@ -12,9 +12,11 @@ mod file_note_to_project;
 mod get_meeting_transcript;
 mod get_note;
 mod get_project_context;
+mod list_commitments;
 mod list_outstanding_items;
 mod list_projects;
 mod search_notes;
+mod update_action_item;
 
 use std::path::Path;
 
@@ -22,6 +24,8 @@ use chrono::NaiveDate;
 use serde_json::Value;
 
 use kodabi_core::index::{ActionItemRow, ActionItemStatus, IndexError, NoteRow, NoteType};
+use kodabi_core::ledger::commitments::CommitmentsError;
+use kodabi_core::ledger::LedgerError;
 use kodabi_core::note::{MeetingCategory, NoteError};
 use kodabi_core::project_context::ProjectContextError;
 use kodabi_core::sessions::SessionsError;
@@ -48,10 +52,12 @@ pub fn call(server: &Server, params: Option<&Value>) -> Result<Value, RpcError> 
         "get_note" => get_note::call(server, arguments),
         "get_meeting_transcript" => get_meeting_transcript::call(server, arguments),
         "list_outstanding_items" => list_outstanding_items::call(server, arguments),
+        "list_commitments" => list_commitments::call(server, arguments),
         "list_projects" => list_projects::call(server, arguments),
         "get_project_context" => get_project_context::call(server, arguments),
         "file_note_to_project" => file_note_to_project::call(server, arguments),
         "add_glossary_term" => add_glossary_term::call(server, arguments),
+        "update_action_item" => update_action_item::call(server, arguments),
         other => Err(RpcError::invalid_params(format!("unknown tool: {other}"))),
     }
 }
@@ -81,6 +87,24 @@ fn map_sessions_error(error: SessionsError) -> RpcError {
         SessionsError::Cursor(_) => RpcError::invalid_params(error.to_string()),
         other => RpcError::internal(other.to_string()),
     }
+}
+
+/// Routes a [`CommitmentsError`]: a tampered pagination token is a caller fault
+/// a validating client should have avoided; a ledger fault is internal.
+fn map_commitments_error(error: CommitmentsError) -> RpcError {
+    match error {
+        CommitmentsError::Cursor { .. } => RpcError::invalid_params(error.to_string()),
+        CommitmentsError::Ledger(_) => RpcError::internal(error.to_string()),
+    }
+}
+
+/// Routes a [`LedgerError`] from a write.
+///
+/// Every variant here is internal: the one failure a caller could act on —
+/// a forbidden lifecycle transition — is converted to a business error at the
+/// call site, where the entry's own states can be named in the message.
+fn map_ledger_error(error: LedgerError) -> RpcError {
+    RpcError::internal(error.to_string())
 }
 
 /// Routes a [`ProjectContextError`]: a slug naming no project is a business

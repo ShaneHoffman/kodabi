@@ -2,14 +2,45 @@
 //! the reason they could not be built.
 
 use kodabi_core::index::NoteIndex;
+use kodabi_core::ledger::Ledger;
 
 use crate::config::ServerConfig;
 use crate::protocol::RpcError;
 
 /// The read backend: the resolved config plus the open note index.
+///
+/// The ledger is deliberately *not* held open here, unlike the index. It is
+/// opened per call by [`Backend::open_ledger`], for two reasons: its mutators
+/// take `&mut self` while a handler only ever sees `&Server`, and the desktop
+/// app owns a long-lived writer on the same file — so holding a second handle
+/// open for the life of a chat session would keep a WAL reader pinned for no
+/// gain. An open costs one file handle and a `user_version` read.
 pub struct Backend {
     pub config: ServerConfig,
     pub index: NoteIndex,
+}
+
+impl Backend {
+    /// Opens the commitment ledger for one call.
+    ///
+    /// Refuses rather than inventing a path when `KODABI_LEDGER_DB` is unset:
+    /// this process cannot know where the app keeps its config dir, and a
+    /// guessed path would create a second, empty ledger that disagrees with the
+    /// real one — the failure mode a person would never think to look for.
+    pub fn open_ledger(&self) -> Result<Ledger, RpcError> {
+        let path = self.config.ledger_db.as_ref().ok_or_else(|| {
+            RpcError::internal(
+                "KODABI_LEDGER_DB is unset; the MCP server needs it to reach the commitment ledger"
+                    .to_string(),
+            )
+        })?;
+        Ledger::open(path).map_err(|error| {
+            RpcError::internal(format!(
+                "failed to open ledger at {}: {error}",
+                path.display()
+            ))
+        })
+    }
 }
 
 /// The MCP server. Holds the backend, or the startup error that prevented it —

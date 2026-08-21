@@ -11,12 +11,13 @@
 //!
 //! So `KODABI_SANDBOX` names a base directory that every one of those paths is
 //! derived from, and this module is the derivation. It is deliberately *one*
-//! switch rather than the pair of lower-level seams (`KODABI_KB_ROOT` and
-//! `KODABI_INDEX_DB`) it drives: those two are only safe when set together —
-//! moving the vault while the index stays behind makes the startup reconcile
-//! converge the real index against a foreign vault and delete every row for the
-//! notes it can no longer see — and a switch that cannot be half-set cannot be
-//! half-set wrongly.
+//! switch rather than the three lower-level seams (`KODABI_KB_ROOT`,
+//! `KODABI_INDEX_DB` and `KODABI_LEDGER_DB`) it drives: those are only safe
+//! when set together — moving the vault while the index stays behind makes the
+//! startup reconcile converge the real index against a foreign vault and delete
+//! every row for the notes it can no longer see, and a ledger left behind while
+//! the vault moves judges commitments that no longer exist — and a switch that
+//! cannot be half-set cannot be half-set wrongly.
 //!
 //! **Refusal, not fallthrough.** Every failure here is a startup error rather
 //! than a quiet fallback to the real directories. A sandbox that silently
@@ -30,6 +31,9 @@
 //! - `.index/index.db` is the note index — dot-prefixed so vault enumeration
 //!   skips it (a plain `index/` folder would show up as a project) and so it
 //!   survives a re-seed of the fixture vault,
+//! - `ledger.db` is the commitment ledger, flat in the base because that is
+//!   where a real install keeps it: it lives in the *config* dir, and the base
+//!   is the config dir. Vault enumeration reads only `.md`, so it needs no dot,
 //! - `.models/` holds the models downloaded on first run, dot-prefixed for the
 //!   same reason,
 //! - `.webview2/` is the WebView2 user-data profile, kept out of the vault for
@@ -103,6 +107,10 @@ pub struct SandboxEnv {
     pub explicit_kb_root: Option<OsString>,
     /// `KODABI_INDEX_DB`, if the caller also set it. Refused likewise.
     pub explicit_index_db: Option<OsString>,
+    /// `KODABI_LEDGER_DB`, if the caller also set it. Refused likewise: the
+    /// ledger judges the vault's commitments, so pointing it elsewhere while
+    /// the sandbox moves the vault is the same half-set hazard as the other two.
+    pub explicit_ledger_db: Option<OsString>,
 }
 
 /// Every state location a sandboxed launch may use.
@@ -112,6 +120,8 @@ pub struct SandboxPaths {
     pub base: PathBuf,
     /// `<base>/.index/index.db`.
     pub index_db: PathBuf,
+    /// `<base>/ledger.db`, beside the settings files a real install keeps it with.
+    pub ledger_db: PathBuf,
     /// `<base>/.webview2`.
     pub webview2: PathBuf,
 }
@@ -126,8 +136,8 @@ pub enum SandboxError {
     /// drives. Honouring both is impossible and picking one silently is exactly
     /// the half-set hazard the switch exists to remove.
     #[error(
-        "{variable} is set alongside {sandbox}, which derives the vault and index itself. \
-         Unset {variable}, or drop {sandbox} to use it directly."
+        "{variable} is set alongside {sandbox}, which derives the vault, index and ledger \
+         itself. Unset {variable}, or drop {sandbox} to use it directly."
     )]
     ExplicitOverride {
         variable: &'static str,
@@ -172,6 +182,12 @@ pub fn resolve(env: &SandboxEnv, real: &RealAppDirs) -> Result<SandboxPaths, San
             sandbox: SANDBOX_ENV,
         });
     }
+    if env.explicit_ledger_db.is_some() {
+        return Err(SandboxError::ExplicitOverride {
+            variable: "KODABI_LEDGER_DB",
+            sandbox: SANDBOX_ENV,
+        });
+    }
 
     let base = if is_enable_keyword(&env.switch) {
         default_base(&real.data)
@@ -196,6 +212,7 @@ pub fn resolve(env: &SandboxEnv, real: &RealAppDirs) -> Result<SandboxPaths, San
 
     Ok(SandboxPaths {
         index_db: base.join(INDEX_SUBDIR).join(INDEX_FILE),
+        ledger_db: base.join(crate::ledger::LEDGER_DB_FILE),
         webview2: base.join(WEBVIEW2_SUBDIR),
         base,
     })
@@ -273,6 +290,7 @@ mod tests {
             switch: OsString::from(switch),
             explicit_kb_root: None,
             explicit_index_db: None,
+            explicit_ledger_db: None,
         }
     }
 
@@ -312,6 +330,9 @@ mod tests {
         let paths = resolve(&env(r"D:\sandbox"), &real()).expect("should resolve");
         // Byte-identical to `indexDbFor()` in e2e/lib/vault.mjs.
         assert_eq!(paths.index_db, PathBuf::from(r"D:\sandbox\.index\index.db"));
+        // Flat in the base, because the base is the config dir and that is
+        // where a real install keeps the ledger.
+        assert_eq!(paths.ledger_db, PathBuf::from(r"D:\sandbox\ledger.db"));
         assert_eq!(paths.webview2, PathBuf::from(r"D:\sandbox\.webview2"));
     }
 
@@ -360,6 +381,24 @@ mod tests {
             ),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn an_explicit_ledger_db_is_refused_and_named() {
+        let mut with_ledger = env("1");
+        with_ledger.explicit_ledger_db = Some(OsString::from(r"C:\somewhere\ledger.db"));
+        let err = resolve(&with_ledger, &real()).expect_err("should refuse");
+        assert!(
+            matches!(
+                err,
+                SandboxError::ExplicitOverride {
+                    variable: "KODABI_LEDGER_DB",
+                    ..
+                }
+            ),
+            "{err:?}"
+        );
+        assert!(err.to_string().contains("KODABI_LEDGER_DB"));
     }
 
     #[test]

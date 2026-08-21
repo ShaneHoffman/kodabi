@@ -394,7 +394,7 @@ const LEDGER_READ_REFUSED: &str =
 /// Read per call rather than cached: the Settings view can change these while
 /// the Commitments view is mounted, and the ledger event that follows sends it
 /// straight back here.
-fn aging_config(app: &AppHandle) -> AgingConfig {
+pub(crate) fn aging_config(app: &AppHandle) -> AgingConfig {
     let ledger = app.state::<SettingsState>().snapshot().ledger;
     AgingConfig {
         aging_after_days: ledger.aging_after_days.get(),

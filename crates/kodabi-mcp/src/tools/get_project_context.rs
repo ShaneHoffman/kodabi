@@ -24,9 +24,20 @@ pub fn call(server: &Server, arguments: Value) -> Result<Value, RpcError> {
     // the briefing carry the same statuses `list_outstanding_items` would give.
     let today = Local::now().date_naive();
 
+    // Best-effort: an unconfigured or unopenable ledger leaves the briefing's
+    // `commitments` block null rather than failing the whole call. The rest of
+    // the briefing is still true and useful, and the null says plainly that
+    // this server cannot speak to what is tracked.
+    let ledger = backend
+        .config
+        .ledger_db
+        .as_deref()
+        .and_then(|path| kodabi_core::ledger::Ledger::open(path).ok());
+
     match project_context::get_project_context(
         &backend.index,
         &backend.config.kb_root,
+        ledger.as_ref(),
         &params,
         today,
     ) {

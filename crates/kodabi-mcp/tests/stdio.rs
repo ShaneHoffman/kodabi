@@ -646,3 +646,232 @@ fn vault_grown_index_serves_what_the_markdown_on_disk_says() {
         json!({ "meeting": 1, "note": 0, "chat": 1 })
     );
 }
+
+// ---------------------------------------------------------------------------
+// The commitment ledger, over a real process boundary
+// ---------------------------------------------------------------------------
+
+/// Like [`run_server`], but also wires `KODABI_LEDGER_DB` — the seam the
+/// commitment tools need and the other eight do not.
+fn run_server_with_ledger(
+    index_db: &Path,
+    kb_root: &Path,
+    ledger_db: &Path,
+    requests: &str,
+) -> Vec<Value> {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_kodabi-mcp"))
+        .env("KODABI_INDEX_DB", index_db)
+        .env("KODABI_KB_ROOT", kb_root)
+        .env("KODABI_LEDGER_DB", ledger_db)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+
+    {
+        let mut stdin = child.stdin.take().unwrap();
+        stdin.write_all(requests.as_bytes()).unwrap();
+    }
+
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "server exited unsuccessfully: {:?}; stderr: {}",
+        output.status,
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            serde_json::from_str(line)
+                .unwrap_or_else(|error| panic!("non-JSON on stdout: {line:?} ({error})"))
+        })
+        .collect()
+}
+
+/// A vault + index + ledger describing the same two commitments, grown the way
+/// the app grows them: a real note on disk, indexed from it, and the ledger
+/// synced from the ids that note's body derives.
+///
+/// Returns the ledger path and the two action-item ids (tracked, untracked).
+fn seed_ledger_fixture(vault: &Path, index: &mut NoteIndex, ledger_db: &Path) -> (String, String) {
+    use kodabi_core::ledger::{Ledger, NoteSync, OwnerIdentity, UntrackedVia};
+
+    let body = concat!(
+        "# Summary\n\n",
+        "We met.\n\n",
+        "## Action items\n\n",
+        "- [ ] Priya to draft the plan.\n",
+        "- [ ] Jane to chase the invoice.\n",
+    );
+    let note = Note::new(
+        NoteId::parse("n_meet09").unwrap(),
+        note::NoteType::Meeting,
+        Routing::Manual {
+            project: "Growth".to_string(),
+        },
+        "2026-07-10",
+        vec![],
+        Source::parse("manual").unwrap(),
+        body,
+    )
+    .unwrap();
+    write_and_index(index, vault, &note, Some("commitments"));
+
+    let facts = meeting::meeting_facts_for(&note, vault).expect("a meeting carries facts");
+    assert_eq!(facts.action_items.len(), 2);
+    let tracked = facts.action_items[0].id.clone();
+    let untracked_item = facts.action_items[1].id.clone();
+
+    let mut ledger = Ledger::open(ledger_db).unwrap();
+    let created = ledger
+        .sync_note_items(&NoteSync {
+            note_id: "n_meet09",
+            project: "Growth",
+            note_date_utc: "2026-07-10T00:00:00Z",
+            items: &facts.action_items,
+            link_hints: &[],
+            note_override: None,
+            category_default: None,
+            identity: &OwnerIdentity::default(),
+            now: "2026-07-13T00:00:00Z",
+        })
+        .unwrap()
+        .created;
+    assert_eq!(created.len(), 2);
+
+    // The second is taken out of the working set by hand, so the fixture holds
+    // one commitment the ledger tracks and one it deliberately does not.
+    let second = ledger
+        .entry_for_item("n_meet09", &untracked_item)
+        .unwrap()
+        .expect("the second item minted an entry");
+    ledger
+        .untrack(
+            &second.entry_id,
+            UntrackedVia::Manual,
+            "2026-07-15T00:00:00Z",
+        )
+        .unwrap();
+
+    (tracked, untracked_item)
+}
+
+/// The whole point of the ticket, over a real process boundary: chat's answer
+/// about what is outstanding matches what the app is tracking, and a mark-done
+/// from chat lands in both stores.
+#[test]
+fn stdio_server_serves_commitments_and_marks_one_done() {
+    let dir = tempfile::tempdir().unwrap();
+    let index_path = dir.path().join("index.db");
+    let ledger_path = dir.path().join("ledger.db");
+    let vault = dir.path().join("vault");
+    std::fs::create_dir(&vault).unwrap();
+    std::fs::create_dir(vault.join("Growth")).unwrap();
+
+    let (tracked, untracked_item) = {
+        let mut index = NoteIndex::open(&index_path).unwrap();
+        seed_ledger_fixture(&vault, &mut index, &ledger_path)
+    };
+
+    let requests = format!(
+        "{}\n{}\n{}\n",
+        json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+               "params":{"name":"list_commitments","arguments":{}}}),
+        json!({"jsonrpc":"2.0","id":2,"method":"tools/call",
+               "params":{"name":"update_action_item",
+                         "arguments":{"note_id":"n_meet09","item_id":tracked,"done":true}}}),
+        json!({"jsonrpc":"2.0","id":3,"method":"tools/call",
+               "params":{"name":"list_commitments","arguments":{}}}),
+    );
+    let responses = run_server_with_ledger(&index_path, &vault, &ledger_path, &requests);
+
+    // The tracked commitment is served; the untracked one is not.
+    let before = structured(&responses, 1);
+    let rows = before["commitments"].as_array().unwrap();
+    assert_eq!(rows.len(), 1, "only the tracked commitment: {before}");
+    assert_eq!(rows[0]["item"]["item_id"], tracked);
+    assert_eq!(rows[0]["state"], "open");
+    assert_eq!(before["summary"]["total"], 1);
+
+    // The write reports both halves.
+    let written = structured(&responses, 2);
+    assert_eq!(written["note_outcome"], "updated");
+    assert_eq!(written["entry"]["state"], "closed");
+    assert_eq!(written["entry"]["closed_via"], "manual");
+
+    // And the next read agrees, so chat cannot contradict itself either.
+    let after = structured(&responses, 3);
+    assert!(after["commitments"].as_array().unwrap().is_empty());
+
+    // The durable stores really moved: the checkbox on disk, and the entry in a
+    // ledger this test opens for itself after the child exited.
+    let markdown = std::fs::read_to_string(vault.join("Growth").join("commitments.md")).unwrap();
+    assert!(
+        markdown.contains("- [x] Priya to draft the plan."),
+        "{markdown}"
+    );
+    assert!(
+        markdown.contains("- [ ] Jane to chase the invoice."),
+        "the untargeted line is byte-preserved: {markdown}"
+    );
+
+    let ledger = kodabi_core::ledger::Ledger::open(&ledger_path).unwrap();
+    let entry = ledger
+        .entry_for_item("n_meet09", &tracked)
+        .unwrap()
+        .expect("the entry survived");
+    assert_eq!(entry.state, kodabi_core::ledger::EntryState::Closed);
+    assert!(entry.touched, "a person made this call, not a machine");
+
+    // The vault snapshot was refreshed by the process that dirtied it, so a
+    // rebuild-from-empty would not lose the judgement.
+    assert!(
+        vault.join("Growth").join("_ledger.yml").is_file(),
+        "the sidecar flushed its own snapshot"
+    );
+    let _ = untracked_item;
+}
+
+/// The ledger now has two writers: the app's worker and this sidecar. Without a
+/// `busy_timeout` the loser of a race fails instantly with SQLITE_BUSY.
+#[test]
+fn a_write_waits_out_another_processs_transaction() {
+    let dir = tempfile::tempdir().unwrap();
+    let index_path = dir.path().join("index.db");
+    let ledger_path = dir.path().join("ledger.db");
+    let vault = dir.path().join("vault");
+    std::fs::create_dir(&vault).unwrap();
+    std::fs::create_dir(vault.join("Growth")).unwrap();
+
+    let tracked = {
+        let mut index = NoteIndex::open(&index_path).unwrap();
+        seed_ledger_fixture(&vault, &mut index, &ledger_path).0
+    };
+
+    // Stand in for the app's worker mid-write: an exclusive transaction held
+    // for a beat after the child is already trying to write.
+    let holder = rusqlite::Connection::open(&ledger_path).unwrap();
+    holder.execute_batch("BEGIN IMMEDIATE").unwrap();
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        holder.execute_batch("COMMIT").unwrap();
+    });
+
+    let requests = format!(
+        "{}\n",
+        json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+               "params":{"name":"update_action_item",
+                         "arguments":{"note_id":"n_meet09","item_id":tracked,"done":true}}}),
+    );
+    let responses = run_server_with_ledger(&index_path, &vault, &ledger_path, &requests);
+    release.join().unwrap();
+
+    // It waited rather than failing: the write landed.
+    let written = structured(&responses, 1);
+    assert_eq!(written["entry"]["state"], "closed");
+}

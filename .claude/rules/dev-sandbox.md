@@ -15,13 +15,14 @@ workflow and stays untouched.**
   catalogue on first run, and leaves real data alone. This binds every
   agent-driven surface: the [`preview`](../skills/preview/SKILL.md) skill, a
   Kangentic task session, a screenshot run, anything that opens the window.
-- **One switch, never the pair.** `KODABI_SANDBOX` derives the vault root, the
-  index, the config dir and the WebView2 profile from a single base. Setting
-  `KODABI_KB_ROOT` or `KODABI_INDEX_DB` alongside it is **refused at startup** —
-  those two are only safe when moved together, and half-setting them makes the
-  startup reconcile delete rows from the real index. For a base other than the
-  default, set `KODABI_SANDBOX=<absolute path>` (or `1` for the app-data `-dev`
-  sibling) and nothing else.
+- **One switch, never the pieces.** `KODABI_SANDBOX` derives the vault root, the
+  index, the commitment ledger, the config dir and the WebView2 profile from a
+  single base. Setting `KODABI_KB_ROOT`, `KODABI_INDEX_DB` or `KODABI_LEDGER_DB`
+  alongside it is **refused at startup** — those are only safe when moved
+  together, and half-setting them makes the startup reconcile delete rows from
+  the real index, or leaves the ledger judging commitments from another vault.
+  For a base other than the default, set `KODABI_SANDBOX=<absolute path>` (or `1`
+  for the app-data `-dev` sibling) and nothing else.
 - **Refusal, not fallthrough.** A sandboxed launch that would resolve to the
   real vault or the real app dirs exits with a message naming what to change. If
   a launch refuses, fix the environment — never work around it by dropping the

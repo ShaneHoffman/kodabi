@@ -28,6 +28,7 @@
 //! items through [`ledger_item_refs`](migrations), whose rows retire rather than
 //! disappear. [`sync`] is where a re-minted id is re-attached to its entry.
 
+pub mod commitments;
 pub mod distill_apply;
 mod enrollment;
 mod migrations;
@@ -53,6 +54,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use rusqlite::Connection;
+
+use crate::BUSY_TIMEOUT_MS;
 
 /// Filename of the ledger database, resolved against the app config dir (the
 /// shell's `sandbox::config_dir`, so `KODABI_SANDBOX` relocates it with the rest
@@ -843,8 +846,19 @@ impl Ledger {
     /// `foreign_keys` is load-bearing here rather than incidental: an entry's
     /// refs, evidence, and links cascade from it, so a delete that left them
     /// behind would resurrect as orphan rows in the next snapshot.
+    ///
+    /// `busy_timeout` is load-bearing too, and newer: the ledger used to have
+    /// exactly one writer (the app's worker thread owns it outright), but the
+    /// MCP server writes a person's mark-done judgement from its own process.
+    /// rusqlite defaults the timeout to zero, so the loser of a race would get
+    /// `SQLITE_BUSY` on the first contended write instead of waiting out a
+    /// transaction that lasts microseconds. Set before [`migrations::apply`],
+    /// so a migration racing another opener waits rather than failing.
     fn init(mut conn: Connection) -> Result<Self> {
-        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+        conn.execute_batch(&format!(
+            "PRAGMA journal_mode = WAL; PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}; \
+             PRAGMA foreign_keys = ON;"
+        ))?;
         migrations::apply(&mut conn)?;
         Ok(Self {
             conn,
@@ -1023,6 +1037,53 @@ mod tests {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(version, migrations::CURRENT_VERSION);
+    }
+
+    #[test]
+    fn a_busy_timeout_is_configured_so_two_writers_wait_rather_than_fail() {
+        let dir = tempdir().unwrap();
+        let ledger = Ledger::open(&dir.path().join(LEDGER_DB_FILE)).unwrap();
+        let timeout: i64 = ledger
+            .conn
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .unwrap();
+        assert_eq!(timeout, i64::from(BUSY_TIMEOUT_MS));
+    }
+
+    #[test]
+    fn a_second_handle_on_one_file_sees_the_first_handles_committed_write() {
+        // The shape the MCP server introduces: its own connection writes the
+        // judgement, and the app's long-lived worker connection must see it on
+        // its next read rather than serving a cached view.
+        let dir = tempdir().unwrap();
+        let path = dir.path().join(LEDGER_DB_FILE);
+        let mut writer = Ledger::open(&path).unwrap();
+        let reader = Ledger::open(&path).unwrap();
+
+        let outcome = writer
+            .sync_note_items(&crate::ledger::NoteSync {
+                note_id: "n_a1b2c3",
+                project: "Briarwood",
+                note_date_utc: "2026-08-21T10:00:00Z",
+                items: &[crate::meeting::ActionItemFact {
+                    id: "a_one".to_string(),
+                    description: "ship the thing".to_string(),
+                    owner: "Jane".to_string(),
+                    due_date: None,
+                    done: false,
+                    extracted_date: None,
+                }],
+                link_hints: &[],
+                note_override: None,
+                category_default: None,
+                identity: &OwnerIdentity::default(),
+                now: "2026-08-21T10:00:00Z",
+            })
+            .unwrap();
+        let entry_id = outcome.created.first().expect("an entry was created");
+
+        let seen = reader.get_entry(entry_id).unwrap();
+        assert!(seen.is_some(), "the second handle should see the commit");
     }
 
     #[test]

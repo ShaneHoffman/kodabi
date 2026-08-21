@@ -72,12 +72,12 @@ deterministic without a second suppression switch to keep in sync.
 
 One always-on environment switch points a run at a throwaway everything:
 `KODABI_SANDBOX`, set to a fresh `mkdtemp` base. Rust derives the vault root,
-the index, the config dir and the WebView2 profile from it
-(`kodabi_core::sandbox`), so the harness names one directory rather than
-assembling paths itself. It drives the lower-level `KODABI_KB_ROOT` and
-`KODABI_INDEX_DB` seams — the exact names `kodabi-mcp` already reads and the
-generated `.mcp.json` already writes — which must move together; see
-**Caveats**. The same switch backs `pnpm dev:sandbox` and the `/preview` skill,
+the index, the commitment ledger, the config dir and the WebView2 profile from
+it (`kodabi_core::sandbox`), so the harness names one directory rather than
+assembling paths itself. It drives the lower-level `KODABI_KB_ROOT`,
+`KODABI_INDEX_DB` and `KODABI_LEDGER_DB` seams — the exact names `kodabi-mcp`
+already reads and the generated `.mcp.json` already writes — which must move
+together; see **Caveats**. The same switch backs `pnpm dev:sandbox` and the `/preview` skill,
 so there is one isolation mechanism rather than a harness-only one. Details in
 [`e2e/README.md`](../e2e/README.md) and
 [`DEV_SANDBOX.md`](DEV_SANDBOX.md).

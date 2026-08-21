@@ -28,7 +28,7 @@ it.
 |---|---|---|---|
 | Vault root — `sessions/`, `chats/`, project note folders, `_glossary.yml`, `_routing_examples.yml`, `_category.yml`, `_ledger.yml` | `app_data_dir()` | `transcribe::knowledge_base_dir` (`KODABI_KB_ROOT`) | `<base>` |
 | Note index — `index.db` (+ `-wal`, `-shm`) | `app_data_dir()/index.db` | `index_state::index_db_path` (`KODABI_INDEX_DB`) | `<base>/.index/index.db` |
-| Commitment ledger — `ledger.db` (+ `-wal`, `-shm`) | `app_config_dir()/ledger.db` | `sandbox::config_dir` → `ledger_state` | `<base>/ledger.db` |
+| Commitment ledger — `ledger.db` (+ `-wal`, `-shm`) | `app_config_dir()/ledger.db` | `ledger_state::ledger_db_path` (`KODABI_LEDGER_DB`) | `<base>/ledger.db` |
 | Settings — `settings.toml` (consent, retention, overlay, appearance, mic check, commitment and meeting-kind tuning, your name) | `app_config_dir()` | `sandbox::config_dir` → `lib.rs` setup | `<base>` |
 | Device identity — `device.toml` | `app_config_dir()` | `sandbox::config_dir` → `kodabi_core::device` | `<base>` |
 | Claude Code wiring — `_claude/kodabi.mcp.json`, `_claude/terminal-settings.json` | `app_config_dir()` | `sandbox::config_dir` → `terminal_cmds` | `<base>/_claude` |
@@ -37,7 +37,7 @@ it.
 | Session artifacts — `<stem>.jsonl`, `.wav`, `.dismissed` | `<vault>/sessions/` | follows the vault root | inside `<base>` |
 | In-flight capture spill — `sessions/inflight/<session>/` | `<vault>/sessions/inflight/` | `kodabi_core::inflight` | inside `<base>` |
 | Chat transcripts — `chats/<stem>.jsonl` | `<vault>/chats/` | `kodabi_core::chat` (`CHATS_DIR`) | inside `<base>` |
-| MCP sidecar (`kodabi-mcp`) reads | its own `KODABI_KB_ROOT` + `KODABI_INDEX_DB` | inherited from the generated `.mcp.json` | follows the sandbox |
+| MCP sidecar (`kodabi-mcp`) reads, and writes the ledger | its own `KODABI_KB_ROOT` + `KODABI_INDEX_DB` + `KODABI_LEDGER_DB` | inherited from the generated `.mcp.json` | follows the sandbox |
 
 Retention keeps no bookkeeping file: membership is derived from disk on every
 sweep, so there is no separate state to isolate.
@@ -91,12 +91,14 @@ before the models directory and is not part of what the sandbox relocates.
 `e2e/lib/vault.mjs` computes — a seeded directory and a sandboxed launch agree
 on where the index lives, and the two constants cross-reference each other.
 
-**One switch, not two variables.** `KODABI_KB_ROOT` and `KODABI_INDEX_DB` are
-still the low-level seams, and they are only safe when moved together:
-`IndexState::initialize` hands the KB root to a startup reconcile job, so
-relocating the vault while the index stays behind converges the real index
-against a foreign vault and deletes every row for the notes it can no longer
-see. The sandbox derives both from one base so that pairing cannot be half-set.
+**One switch, not three variables.** `KODABI_KB_ROOT`, `KODABI_INDEX_DB` and
+`KODABI_LEDGER_DB` are still the low-level seams, and they are only safe when
+moved together: `IndexState::initialize` hands the KB root to a startup reconcile
+job, so relocating the vault while the index stays behind converges the real
+index against a foreign vault and deletes every row for the notes it can no
+longer see, and a ledger left behind while the vault moves judges commitments
+that no longer exist. The sandbox derives all three from one base so that
+grouping cannot be half-set.
 
 ## Refusals
 
@@ -107,7 +109,7 @@ over.
 
 | Condition | Message |
 |---|---|
-| `KODABI_KB_ROOT` or `KODABI_INDEX_DB` set alongside the switch | `<var> is set alongside KODABI_SANDBOX, which derives the vault and index itself. Unset <var>, or drop KODABI_SANDBOX to use it directly.` |
+| `KODABI_KB_ROOT`, `KODABI_INDEX_DB`, or `KODABI_LEDGER_DB` set alongside the switch | `<var> is set alongside KODABI_SANDBOX, which derives the vault, index and ledger itself. Unset <var>, or drop KODABI_SANDBOX to use it directly.` |
 | A relative base | ``KODABI_SANDBOX must be `1`, `true`, or an absolute path; got the relative path …`` |
 | A base that equals, contains, sits inside, or walks (`..`) into a real app dir | `sandbox base … overlaps the real app directory …. Refusing to touch real data in sandbox mode; choose a base outside it.` |
 
@@ -119,8 +121,9 @@ same refusal rather than being walked: `…\com.kodabi.app-dev\..\com.kodabi.app
 compares unequal component-wise but resolves to the real app dir.
 
 Once activation succeeds, resolving to real data is structurally impossible
-rather than merely checked — `sandbox::activate` overwrites `KODABI_KB_ROOT` and
-`KODABI_INDEX_DB` in the process environment before the Tauri builder exists, so
+rather than merely checked — `sandbox::activate` overwrites `KODABI_KB_ROOT`,
+`KODABI_INDEX_DB` and `KODABI_LEDGER_DB` in the process environment before the
+Tauri builder exists, so
 every existing resolver, the asset-protocol scope widening, the generated
 `.mcp.json` and every spawned child follow the sandbox with no sandbox-specific
 branch of their own.

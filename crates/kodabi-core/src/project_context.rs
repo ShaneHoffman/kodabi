@@ -42,6 +42,7 @@ use crate::index::{
     ActionItemStatus, NoteIndex, NoteRow, NoteTypeCounts, OutstandingItem, OutstandingParams,
     ProjectScope,
 };
+use crate::ledger::commitments::{self, CommitmentsParams, CommitmentsSummary};
 use crate::note::{self, INBOX};
 use crate::vault::{self, ProjectSummary};
 
@@ -188,6 +189,18 @@ pub struct ProjectContext {
     pub recent_notes: Vec<NoteSummary>,
     pub outstanding: Vec<OutstandingItem>,
     pub counts: ProjectCounts,
+    /// What the commitment ledger is tracking for this project, as counts.
+    ///
+    /// `outstanding` above is raw extraction — every unchecked line, including
+    /// the ones the ledger never enrolled or has since settled. This is the
+    /// other answer, so a briefing cannot imply the two agree. Counts only: the
+    /// rows live behind `list_commitments`, the same division `counts` already
+    /// draws against a capped `outstanding` section.
+    ///
+    /// `None` when no ledger is configured (the MCP server without
+    /// `KODABI_LEDGER_DB`), which reads on the wire as a briefing that cannot
+    /// speak to tracking rather than one claiming nothing is tracked.
+    pub commitments: Option<CommitmentsSummary>,
 }
 
 /// Why a briefing could not be assembled.
@@ -204,6 +217,8 @@ pub enum ProjectContextError {
     Index(#[from] crate::index::IndexError),
     #[error(transparent)]
     Glossary(#[from] GlossaryError),
+    #[error(transparent)]
+    Commitments(#[from] crate::ledger::commitments::CommitmentsError),
     #[error("failed to read {path}: {source}")]
     Io {
         path: PathBuf,
@@ -221,6 +236,7 @@ pub enum ProjectContextError {
 pub fn get_project_context(
     index: &NoteIndex,
     vault_root: &Path,
+    ledger: Option<&crate::ledger::Ledger>,
     params: &ProjectContextParams,
     today: NaiveDate,
 ) -> Result<ProjectContext, ProjectContextError> {
@@ -303,12 +319,28 @@ pub fn get_project_context(
         )
     };
 
+    // The ledger's own totals for the same scope, under its live-state default.
+    let commitments = ledger
+        .map(|ledger| {
+            commitments::commitments_summary(
+                ledger,
+                &CommitmentsParams {
+                    project: Some(canonical.clone()),
+                    include_descendants: params.include_descendants,
+                    ..CommitmentsParams::default()
+                },
+                today,
+            )
+        })
+        .transpose()?;
+
     Ok(ProjectContext {
         project,
         description,
         glossary,
         recent_notes,
         outstanding,
+        commitments,
         counts: ProjectCounts {
             notes: notes_by_type.total(),
             meetings: notes_by_type.meeting,
@@ -462,7 +494,7 @@ mod tests {
         index: &NoteIndex,
         params: &ProjectContextParams,
     ) -> ProjectContext {
-        get_project_context(index, vault.path(), params, today()).unwrap()
+        get_project_context(index, vault.path(), None, params, today()).unwrap()
     }
 
     #[test]
@@ -518,12 +550,61 @@ mod tests {
         assert_eq!(ctx.counts.notes, 3);
     }
 
+    /// The briefing carries two different answers about the same project, and
+    /// says so: `outstanding` is raw extraction, `commitments` is what the
+    /// ledger is actually tracking.
+    #[test]
+    fn the_ledger_summary_is_absent_without_a_ledger_and_counted_with_one() {
+        let (vault, index) = seeded();
+
+        let without = context(&vault, &index, &ProjectContextParams::new("Growth"));
+        assert!(
+            without.commitments.is_none(),
+            "no ledger configured is `null`, not a claim that nothing is tracked"
+        );
+
+        let mut ledger = crate::ledger::Ledger::open_in_memory().unwrap();
+        ledger
+            .sync_note_items(&crate::ledger::NoteSync {
+                note_id: "n_meet01",
+                project: "Growth",
+                note_date_utc: "2026-07-10T00:00:00Z",
+                items: &[crate::meeting::ActionItemFact {
+                    id: "a_one001".to_string(),
+                    description: "send the deck".to_string(),
+                    owner: "Priya".to_string(),
+                    due_date: None,
+                    done: false,
+                    extracted_date: None,
+                }],
+                link_hints: &[],
+                note_override: None,
+                category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
+                now: "2026-07-10T00:00:00Z",
+            })
+            .unwrap();
+
+        let with = get_project_context(
+            &index,
+            vault.path(),
+            Some(&ledger),
+            &ProjectContextParams::new("Growth"),
+            today(),
+        )
+        .unwrap();
+        let summary = with.commitments.expect("a ledger was supplied");
+        assert_eq!(summary.total, 1);
+        assert_eq!(summary.theirs, 1);
+    }
+
     #[test]
     fn a_missing_project_is_not_found() {
         let (vault, index) = seeded();
         let result = get_project_context(
             &index,
             vault.path(),
+            None,
             &ProjectContextParams::new("Nope"),
             today(),
         );
@@ -540,6 +621,7 @@ mod tests {
         let result = get_project_context(
             &index,
             vault.path(),
+            None,
             &ProjectContextParams::new(INBOX),
             today(),
         );
@@ -552,6 +634,7 @@ mod tests {
             let result = get_project_context(
                 &index,
                 vault.path(),
+                None,
                 &ProjectContextParams::new(spelling),
                 today(),
             );
@@ -568,6 +651,7 @@ mod tests {
         let result = get_project_context(
             &index,
             vault.path(),
+            None,
             &ProjectContextParams::new("Growth/../etc"),
             today(),
         );

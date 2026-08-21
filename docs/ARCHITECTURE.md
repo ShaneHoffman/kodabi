@@ -99,16 +99,25 @@ structurally:
 The durable architectural bet: **the Rust backend is a dumb, testable data layer, and the AI layer
 upgrades itself every time Claude Code ships.**
 
-`kodabi-mcp` exposes the knowledge base as an MCP server over stdio — eight v1 tools, six read and
-two write:
+`kodabi-mcp` exposes the knowledge base as an MCP server over stdio — ten tools, seven read and
+three write:
 
 - **Read:** `search_notes`, `get_note`, `get_meeting_transcript`, `list_outstanding_items`,
-  `list_projects`, `get_project_context`
-- **Write:** `file_note_to_project`, `add_glossary_term`
+  `list_commitments`, `list_projects`, `get_project_context`
+- **Write:** `file_note_to_project`, `add_glossary_term`, `update_action_item`
 
 Their schemas are specified in [`MCP_TOOL_SURFACE.md`](MCP_TOOL_SURFACE.md) and mirrored verbatim as
 committed JSON under `crates/kodabi-mcp/schemas/`. The read tools are pre-approved for the CLI; the
 write tools always prompt.
+
+The last two of each are the commitment ledger's surface, and the reason they are separate tools
+rather than fields on the existing ones: `list_outstanding_items` answers *what did they commit to*
+from raw extraction, while `list_commitments` answers *what am I tracking* from the ledger, through
+the same core join the Commitments view renders — so chat and the app cannot disagree about what is
+outstanding. `update_action_item` writes both halves of a mark-done: the checkbox in the note (the
+source of truth for done) and the closure in the ledger. Those three tools need `KODABI_LEDGER_DB`,
+the one optional path in the sidecar's wiring; the ledger lives in the config dir, so neither of the
+other two env vars locates it.
 
 Claude Code is invoked as the **headless CLI**, never the Agent SDK (which is TypeScript/Python only
 and would force a Node sidecar into a pure-Rust backend). There are exactly three spawn sites:

@@ -331,6 +331,10 @@ fn input_str<'v>(input: &'v Value, key: &str) -> Option<&'v str> {
     input.get(key).and_then(Value::as_str)
 }
 
+fn input_bool(input: &Value, key: &str) -> Option<bool> {
+    input.get(key).and_then(Value::as_bool)
+}
+
 /// One quiet log line describing a tool call, phrased for when it is written:
 /// the call streams out of the model *before* it runs. The pre-approved read
 /// tools run unconditionally, so their copy states the outcome; a write tool
@@ -359,6 +363,13 @@ pub fn tool_use_summary(tool_name: &str, input: &Value) -> String {
                 format!("Asked to add glossary term \"{term}\" to {project}")
             }
             _ => "Asked to add a glossary term".to_string(),
+        },
+        "list_commitments" => "Listed tracked commitments".to_string(),
+        // Phrased by the direction the request moves the checkbox, since
+        // "update" reads as neither of the two things it actually does.
+        "update_action_item" => match input_bool(input, "done") {
+            Some(false) => "Asked to reopen an action item".to_string(),
+            _ => "Asked to mark an action item done".to_string(),
         },
         other => format!("Called {other}"),
     }
@@ -390,6 +401,10 @@ pub fn permission_question(tool_name: &str, display_name: Option<&str>, input: &
         "add_glossary_term" => match (input_str(input, "term"), input_str(input, "project")) {
             (Some(term), Some(project)) => format!("Add glossary term \"{term}\" to {project}?"),
             _ => "Add a glossary term?".to_string(),
+        },
+        "update_action_item" => match input_bool(input, "done") {
+            Some(false) => "Reopen this action item?".to_string(),
+            _ => "Mark this action item done?".to_string(),
         },
         other => format!("Allow {}?", display_name.unwrap_or(other)),
     }
@@ -823,11 +838,31 @@ mod tests {
             ),
             "Asked to add glossary term \"AEC\" to Briarwood Golf"
         );
-        // Unknown tool (e.g. a later list_outstanding_items): truthful fallback
-        // whether it turns out to be a pre-approved read or a prompted write.
         assert_eq!(
-            tool_use_summary("mcp__kodabi__list_outstanding_items", &json!({})),
-            "Called list_outstanding_items"
+            tool_use_summary("mcp__kodabi__list_commitments", &json!({})),
+            "Listed tracked commitments"
+        );
+        // Both directions of the one write that has two, and the bare form when
+        // the model streamed the name before the argument.
+        assert_eq!(
+            tool_use_summary(
+                "mcp__kodabi__update_action_item",
+                &json!({"note_id": "n_a1b2c3", "item_id": "a_one", "done": true})
+            ),
+            "Asked to mark an action item done"
+        );
+        assert_eq!(
+            tool_use_summary(
+                "mcp__kodabi__update_action_item",
+                &json!({"note_id": "n_a1b2c3", "item_id": "a_one", "done": false})
+            ),
+            "Asked to reopen an action item"
+        );
+        // Unknown tool: truthful fallback whether it turns out to be a
+        // pre-approved read or a prompted write.
+        assert_eq!(
+            tool_use_summary("mcp__kodabi__some_later_tool", &json!({})),
+            "Called some_later_tool"
         );
     }
 
@@ -885,6 +920,22 @@ mod tests {
                 &json!({"term": "AEC", "project": "Briarwood Golf"})
             ),
             "Add glossary term \"AEC\" to Briarwood Golf?"
+        );
+        assert_eq!(
+            permission_question(
+                "mcp__kodabi__update_action_item",
+                Some("Update Action Item"),
+                &json!({"note_id": "n_a1b2c3", "item_id": "a_one", "done": true})
+            ),
+            "Mark this action item done?"
+        );
+        assert_eq!(
+            permission_question(
+                "mcp__kodabi__update_action_item",
+                Some("Update Action Item"),
+                &json!({"note_id": "n_a1b2c3", "item_id": "a_one", "done": false})
+            ),
+            "Reopen this action item?"
         );
         assert_eq!(
             permission_question("mcp__kodabi__delete_note", Some("Delete Note"), &json!({})),

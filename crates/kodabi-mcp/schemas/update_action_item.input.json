@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "note_id",
+    "item_id",
+    "done"
+  ],
+  "properties": {
+    "note_id": {
+      "$ref": "#/$defs/NoteId",
+      "description": "The note holding the action item's source line."
+    },
+    "item_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The action item's id, as list_outstanding_items, get_note, or list_commitments report it."
+    },
+    "done": {
+      "type": "boolean",
+      "description": "True to tick the checkbox and close the tracked commitment; false to untick it and reopen."
+    }
+  },
+  "$defs": {
+    "NoteId": {
+      "type": "string",
+      "pattern": "^n_[0-9a-z]{6,}$",
+      "description": "Stable note identifier, e.g. \"n_a1b2c3\". Generated at creation, never rewritten on move/re-route. This is the write handle."
+    }
+  }
+}

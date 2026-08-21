@@ -562,25 +562,47 @@ pub fn flush(app: &AppHandle) {
     }
 }
 
-/// Opens `ledger.db` in the app config dir, beside `settings.toml`.
+/// Where `ledger.db` lives: the app config dir, beside `settings.toml`.
 ///
 /// Resolved through [`crate::sandbox::config_dir`] rather than Tauri's
 /// `app_config_dir` directly, which is the whole reason `KODABI_SANDBOX`
 /// relocates it for free: an agent-driven launch must never write commitments
 /// into the user's real data.
+///
+/// `KODABI_LEDGER_DB` overrides it, mirroring [`crate::index_state::index_db_path`]
+/// and for the same reason: `terminal_cmds::write_mcp_config` hands this path to
+/// the `kodabi-mcp` sidecar, which has no `AppHandle` and so cannot resolve a
+/// config dir for itself. One resolver on both sides is what keeps the sidecar's
+/// commitments and the app's from being two different databases. Under
+/// `KODABI_SANDBOX` the variable is set by activation, and setting it *by hand*
+/// alongside the switch is refused outright (`kodabi_core::sandbox::resolve`).
+pub(crate) fn ledger_db_path(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Some(value) =
+        std::env::var_os(crate::sandbox::LEDGER_DB_ENV).filter(|value| !value.is_empty())
+    {
+        return Ok(PathBuf::from(value));
+    }
+    Ok(crate::sandbox::config_dir(app)?.join(LEDGER_DB_FILE))
+}
+
+/// Opens (creating if absent) the ledger database at [`ledger_db_path`].
 fn open_ledger(app: &AppHandle) -> Option<Ledger> {
-    let dir = match crate::sandbox::config_dir(app) {
-        Ok(dir) => dir,
+    let path = match ledger_db_path(app) {
+        Ok(path) => path,
         Err(err) => {
-            eprintln!("failed to resolve the config directory for the ledger: {err}");
+            eprintln!("failed to resolve the commitment ledger path: {err}");
             return None;
         }
     };
-    if let Err(err) = std::fs::create_dir_all(&dir) {
-        eprintln!("failed to create the config directory for the ledger: {err}");
-        return None;
+    // First launch has no config dir yet — and an overridden path may name a
+    // directory that does not exist either.
+    if let Some(parent) = path.parent() {
+        if let Err(err) = std::fs::create_dir_all(parent) {
+            eprintln!("failed to create the config directory for the ledger: {err}");
+            return None;
+        }
     }
-    match Ledger::open(&dir.join(LEDGER_DB_FILE)) {
+    match Ledger::open(&path) {
         Ok(ledger) => Some(ledger),
         Err(err) => {
             eprintln!("failed to open the commitment ledger: {err}");

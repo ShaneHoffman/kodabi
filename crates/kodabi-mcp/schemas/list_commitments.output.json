@@ -1,0 +1,474 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "commitments",
+    "summary",
+    "page"
+  ],
+  "properties": {
+    "commitments": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Commitment"
+      },
+      "description": "The page's commitments, most recently mentioned first."
+    },
+    "summary": {
+      "$ref": "#/$defs/CommitmentsSummary"
+    },
+    "page": {
+      "$ref": "#/$defs/PageInfo"
+    }
+  },
+  "$defs": {
+    "ActionItemStatus": {
+      "type": "string",
+      "enum": [
+        "open",
+        "overdue",
+        "done"
+      ],
+      "description": "Action-item status. 'overdue' is derived server-side from 'open' + a past due date."
+    },
+    "AgingTier": {
+      "type": "string",
+      "enum": [
+        "fresh",
+        "aging",
+        "stale"
+      ],
+      "description": "How long a commitment has gone untouched, derived at read time from the later of its last mention and last evidence check against the user's configured thresholds (14 and 30 days by default). Nothing is stored, so a tier reflects today, not when the row was written."
+    },
+    "Commitment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry_id",
+        "state",
+        "direction",
+        "owner",
+        "description",
+        "project",
+        "created_at",
+        "updated_at",
+        "last_mention",
+        "last_evidence_check",
+        "tier",
+        "snoozed_until",
+        "snooze_lapsed",
+        "closed_via",
+        "review_reason",
+        "untracked_via",
+        "item",
+        "source",
+        "evidence"
+      ],
+      "properties": {
+        "entry_id": {
+          "$ref": "#/$defs/EntryId"
+        },
+        "state": {
+          "$ref": "#/$defs/EntryState"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "owner": {
+          "type": "string",
+          "description": "The ledger's cached copy of who owes the commitment. Prefer item.owner when item is present; this is what survives the source line being edited away."
+        },
+        "description": {
+          "type": "string",
+          "description": "The ledger's cached copy of the commitment text. Prefer item.description when item is present."
+        },
+        "project": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ProjectSlug"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The project the commitment is filed under, or null when it is unfiled."
+        },
+        "created_at": {
+          "$ref": "#/$defs/IsoDateTime"
+        },
+        "updated_at": {
+          "$ref": "#/$defs/IsoDateTime"
+        },
+        "last_mention": {
+          "$ref": "#/$defs/IsoDateTime"
+        },
+        "last_evidence_check": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/IsoDateTime"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "When an evidence provider last looked, or null if never."
+        },
+        "tier": {
+          "$ref": "#/$defs/AgingTier"
+        },
+        "snoozed_until": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/IsoDate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The day a snooze runs out; null unless state is 'snoozed'."
+        },
+        "snooze_lapsed": {
+          "type": "boolean",
+          "description": "True when a snoozed commitment's day has arrived. Nothing writes when a snooze lapses, so this is derived at read time and a lapsed entry is live work again."
+        },
+        "closed_via": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "manual",
+            "conversation",
+            "github",
+            null
+          ],
+          "description": "What established a closure; null unless state is 'closed'."
+        },
+        "review_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the entry needs a person's eye; null unless state is 'needs_review'."
+        },
+        "untracked_via": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "manual",
+            "override",
+            "category",
+            null
+          ],
+          "description": "Why the commitment left the working set; null unless state is 'untracked'."
+        },
+        "item": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/CommitmentItem"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/CommitmentSource"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/CommitmentEvidence"
+          },
+          "description": "Unresolved claims that this may already be settled. Empty for most commitments."
+        }
+      },
+      "description": "One entry in the commitment ledger, joined to its live source line. The ledger's answer to \"what am I tracking\", as opposed to list_outstanding_items' \"what did they commit to\"."
+    },
+    "CommitmentEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "source",
+        "reference",
+        "confidence",
+        "observed_at"
+      ],
+      "properties": {
+        "evidence_id": {
+          "type": "string",
+          "description": "Stable evidence identifier, e.g. \"ev_3k9p2q\"."
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "manual",
+            "conversation",
+            "github"
+          ],
+          "description": "Where the claim came from."
+        },
+        "reference": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "What the claim points at (a note id, a quoted line, a URL), or null."
+        },
+        "confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "How strongly the source believes the commitment is settled."
+        },
+        "observed_at": {
+          "$ref": "#/$defs/IsoDateTime"
+        }
+      },
+      "description": "One unresolved claim that a commitment may already be settled, awaiting a person's confirmation."
+    },
+    "CommitmentItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "note_id",
+        "item_id",
+        "description",
+        "owner",
+        "due_date",
+        "done",
+        "status"
+      ],
+      "properties": {
+        "note_id": {
+          "$ref": "#/$defs/NoteId"
+        },
+        "item_id": {
+          "type": "string",
+          "description": "The action-item id of the live source line, as list_outstanding_items and get_note report it. This plus note_id is what update_action_item takes."
+        },
+        "description": {
+          "type": "string",
+          "description": "The line's current text."
+        },
+        "owner": {
+          "type": "string",
+          "description": "The line's current owner."
+        },
+        "due_date": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/IsoDate"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Due date, or null when the line carries none."
+        },
+        "done": {
+          "type": "boolean",
+          "description": "The checkbox, which is the source of truth for done/not-done."
+        },
+        "status": {
+          "$ref": "#/$defs/ActionItemStatus"
+        }
+      },
+      "description": "The live source line behind a commitment. Null on a Commitment when the entry has no active reference (its line was edited away) or the index has no row for the note; the entry's own cached owner/description is the fallback."
+    },
+    "CommitmentSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "note_id",
+        "title",
+        "project",
+        "path"
+      ],
+      "properties": {
+        "note_id": {
+          "$ref": "#/$defs/NoteId"
+        },
+        "title": {
+          "type": "string",
+          "description": "The source note's effective title."
+        },
+        "project": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ProjectSlug"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The source note's project, or null when it is unfiled."
+        },
+        "path": {
+          "type": "string",
+          "description": "Current note path relative to the KB root. Informational; changes on move."
+        },
+        "category": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/MeetingCategory"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The source meeting's genre, or null for a note that carries none (which includes every chat)."
+        }
+      },
+      "description": "Where a commitment's source line lives, for a click-through."
+    },
+    "CommitmentsSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "mine",
+        "theirs",
+        "unassigned",
+        "needs_review",
+        "snooze_lapsed"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Commitments matching the filter across all pages."
+        },
+        "mine": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of those, ones the user owes."
+        },
+        "theirs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of those, ones the user is waiting on."
+        },
+        "unassigned": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of those, ones nobody was attributed."
+        },
+        "needs_review": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of those, ones that lost their source line."
+        },
+        "snooze_lapsed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Of those, snoozes whose day has arrived."
+        }
+      },
+      "description": "Cross-page totals for the same filter, so a caller that pages can still report the shape of the whole set."
+    },
+    "Direction": {
+      "type": "string",
+      "enum": [
+        "mine",
+        "theirs",
+        "unassigned"
+      ],
+      "description": "Which way a commitment points: something the user owes ('mine'), something they are waiting on ('theirs'), or something nobody was attributed ('unassigned')."
+    },
+    "EntryId": {
+      "type": "string",
+      "pattern": "^le_[0-9a-z]{6,}$",
+      "description": "Stable commitment-ledger entry identifier, e.g. \"le_7fq2k9\". Minted when the ledger first enrolls a commitment and never rewritten, unlike the action-item id, which is a content hash and is re-minted whenever the source line is edited."
+    },
+    "EntryState": {
+      "type": "string",
+      "enum": [
+        "open",
+        "needs_review",
+        "closed",
+        "superseded",
+        "waived",
+        "snoozed",
+        "untracked"
+      ],
+      "description": "Where a tracked commitment stands. Deliberately not a done/not-done axis: the note's checkbox owns that, and these are the states a checkbox cannot spell. 'open' is live; 'needs_review' lost its source line; 'closed' was resolved; 'superseded' was replaced by a later commitment; 'waived' is deliberately not happening; 'snoozed' is hidden until a date; 'untracked' was removed from the working set while its source line stays."
+    },
+    "IsoDate": {
+      "type": "string",
+      "format": "date",
+      "description": "Calendar date, ISO 8601 / RFC 3339 full-date, e.g. \"2026-07-11\"."
+    },
+    "IsoDateTime": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp, RFC 3339 date-time with offset (\"Z\" or numeric), e.g. \"2026-07-11T14:03:00Z\" or \"2026-07-09T14:00:00-07:00\"."
+    },
+    "MeetingCategory": {
+      "type": "string",
+      "enum": [
+        "standup",
+        "one-on-one",
+        "client",
+        "working-session",
+        "review",
+        "all-hands",
+        "observer"
+      ],
+      "description": "The meeting's genre: the second facet beside `type`, classified at distill time and correctable by hand."
+    },
+    "NoteId": {
+      "type": "string",
+      "pattern": "^n_[0-9a-z]{6,}$",
+      "description": "Stable note identifier, e.g. \"n_a1b2c3\". Generated at creation, never rewritten on move/re-route. This is the write handle."
+    },
+    "PageInfo": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "has_more",
+        "next_cursor"
+      ],
+      "properties": {
+        "has_more": {
+          "type": "boolean",
+          "description": "True if more results exist beyond this page."
+        },
+        "next_cursor": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Opaque token to pass as the next request's cursor; null when has_more is false."
+        },
+        "total_estimate": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0,
+          "description": "Total matches when the underlying candidate pool was exhausted (an exact count), or null when it was not — a truncated pool knows only its own size, which would understate the total. Never a value the caller can treat as a floor for how much is left; use has_more for that."
+        }
+      },
+      "description": "Cursor-based pagination envelope. Cursors are opaque and mutation-safe (they encode sort key + id, not an offset)."
+    },
+    "ProjectSlug": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "pattern": "^[^/\\\\]+(?:/[^/\\\\]+)*$",
+      "description": "Hierarchical project path/slug relative to the KB root, e.g. \"Growth/Q3\". Segments are folder names; no leading/trailing or empty segments. Each segment must also be a legal Windows folder name (no reserved device names such as CON/PRN/NUL, no trailing dot or space, none of the characters Windows forbids in a path segment), and may not start with \".\" or \"_\" — those prefixes mark infra folders (\".obsidian\", \"_assets\") that routing discovery skips, so such a project would be writable yet invisible to routing. The Phase 2 writer rejects violations. \"Inbox\" (any casing) is a reserved folder name — a real project may not use it — and \"sessions\", \"raw\", and \"chats\" (any casing) are reserved as first segments: <KB root>/sessions/ holds raw session artifacts and <KB root>/chats/ holds raw chat transcripts, never notes (\"raw\" stays reserved alongside them; a nested segment like \"Data/raw\" is fine). This is the canonical project handle accepted by tools. Because no real project can be named \"Inbox\", read tools that filter by project reuse it as a sentinel meaning \"unfiled\" — see search_notes's project field."
+    }
+  }
+}

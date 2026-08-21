@@ -32,7 +32,10 @@ Claude Code MCP reference (`code.claude.com/docs/en/mcp`) and the MCP tool speci
         "args": [],
         "env": {
           "KODABI_INDEX_DB": "<app-data>/index.db",
-          "KODABI_KB_ROOT": "<knowledge-base-root>"
+          "KODABI_KB_ROOT": "<knowledge-base-root>",
+          "KODABI_LEDGER_DB": "<app-config>/ledger.db",
+          "KODABI_AGING_AFTER_DAYS": "14",
+          "KODABI_STALE_AFTER_DAYS": "30"
         }
       }
     }
@@ -40,22 +43,39 @@ Claude Code MCP reference (`code.claude.com/docs/en/mcp`) and the MCP tool speci
   ```
 
   An entry with no `type`/`url` field is read by Claude Code as a stdio server. The server resolves
-  the knowledge-base root and the index from its own config — the two env vars above, injected by the
+  every location from its own config — the env vars above, injected by the
   Tauri shell from app config (not from the working directory), read by `crates/kodabi-mcp/src/config.rs`.
   The server may implement the MCP `roots/list` request if it wants to bound its own filesystem access
   to Claude Code's granted directories.
 
   Those two names are **shared with the desktop app, not owned by the MCP server**: the app reads the
   same `KODABI_KB_ROOT` (`transcribe::knowledge_base_dir`) and `KODABI_INDEX_DB`
-  (`index_state::open_index`) as overrides for its own vault and index, falling back to the app-data
+  (`index_state::index_db_path`) as overrides for its own vault and index, falling back to the app-data
   dir when they are unset. One name means one location on both sides of the boundary. They must be set
   together — the index reconciles against the KB root, so moving one without the other converges the
   index against a foreign vault. The end-to-end harness relies on this (`docs/UI_E2E_HARNESS.md`).
+
+  **`KODABI_LEDGER_DB` is the third such name, and it is optional.** The commitment ledger lives in
+  the app's *config* dir rather than beside the index, so neither of the other two locates it; the
+  app's own resolver is `ledger_state::ledger_db_path`. It backs `list_commitments`,
+  `update_action_item`, and the `commitments` counts of `get_project_context`. Optional so a
+  `.mcp.json` written before those tools existed keeps working: unset, they return an internal error
+  naming the variable and every other tool is unaffected. It is never *defaulted* — the server
+  cannot know where the app keeps its config dir, and a guessed path would silently create a second,
+  empty ledger that disagrees with the real one. Under `KODABI_SANDBOX` all three are derived
+  together, and setting any of them by hand alongside the switch is refused outright
+  (`docs/DEV_SANDBOX.md`).
+
+  **`KODABI_AGING_AFTER_DAYS` / `KODABI_STALE_AFTER_DAYS`** carry the user's aging thresholds, which
+  live in `settings.toml` — a file the server has no path to and no business parsing. Passing them
+  keeps a commitment's tier reading the same in chat as in the Commitments view. Unlike the paths, an
+  absent or unparseable value falls back to the documented defaults (14 and 30) rather than failing:
+  a tier is a shading on an answer, where a wrong path would be a wrong answer.
 - **Permissions.** The *implemented* read tools are pre-approved as a group (the single source is
   `READ_TOOL_PERMISSIONS` in `crates/kodabi-core/src/terminal.rs` — a read tool added to the server
-  must be added there too, or it will prompt), and the write tools (e.g.
-  `"mcp__kodabi__file_note_to_project"`, `"mcp__kodabi__add_glossary_term"`) are deliberately left
-  off the allow-list, so approval stays meaningful per-tool. The server performs no confirmation of
+  must be added there too, or it will prompt), and the write tools
+  (`"mcp__kodabi__file_note_to_project"`, `"mcp__kodabi__add_glossary_term"`,
+  `"mcp__kodabi__update_action_item"`) are deliberately left off the allow-list, so approval stays meaningful per-tool. The server performs no confirmation of
   its own; approval is entirely Claude Code's permission model — and how the prompt reaches the user
   depends on the consumer (below).
 - **Two in-app consumers share this wiring**, both spawned against the same generated `.mcp.json`
@@ -121,17 +141,19 @@ Claude Code MCP reference (`code.claude.com/docs/en/mcp`) and the MCP tool speci
 | `get_note` | Get note | read | Full distilled note body + metadata by id |
 | `get_meeting_transcript` | Get meeting transcript | read | Per-channel transcript segments for a meeting |
 | `list_outstanding_items` | List outstanding items | read | Not-done action items, linked to source note |
+| `list_commitments` | List commitments | read | Tracked commitments from the ledger (the working set) |
 | `list_projects` | List projects | read | Enumerate projects (hierarchy, counts) |
 | `get_project_context` | Get project context | read | Aggregate briefing for one project |
 | `file_note_to_project` | File note to project | **write** | Route/re-route a note (the correction loop) |
 | `add_glossary_term` | Add glossary term | **write** | Upsert a project glossary term |
+| `update_action_item` | Update action item | **write** | Tick/untick an item and move its commitment |
 
 `get_note` is not in the ticket's §3.2 candidate list; it closes a gap the seven candidates leave
 open (see [What this hands downstream](#what-this-hands-downstream) and the milestone walkthrough
 below) — `search_notes` returns only snippets, and Phase 3 chat needs to quote full note content.
 
 All `annotations` objects use the four MCP tool-annotation hints: `readOnlyHint`, `destructiveHint`,
-`idempotentHint`, `openWorldHint`. The six reads set `readOnlyHint: true`; both writes set
+`idempotentHint`, `openWorldHint`. The seven reads set `readOnlyHint: true`; all three writes set
 `readOnlyHint: false` and `destructiveHint: false` (mutating, but reversible with no data loss).
 
 ---
@@ -295,8 +317,15 @@ Read-only fetch of stored data; closed world. Not-found id and "not a meeting" a
 List action items that are not yet done (open or overdue), each linked back to its source note (a
 meeting, a chat, or a hand-written note).
 
+**This is raw extraction, and it is not the same question as "what am I tracking".** Every unchecked
+line in the vault is here, including ones the commitment ledger never enrolled and ones the user has
+since closed, waived, superseded or untracked. Where the question is about what is outstanding,
+owed, or being waited on, [`list_commitments`](#5-list_commitments) is the tool that agrees with the
+app's Commitments view. This one stays deliberately unfiltered: it is the honest answer to "what did
+they commit to", and it is also the only one of the two that works with no ledger configured.
+
 - **title:** `List outstanding items`
-- **description:** `List action items that are not done (open/overdue), extracted from meetings, chats and hand-written notes, and linked to their source note. Filter by project subtree, owner, status, due-before date, or source note.`
+- **description:** `List action items that are not done (open/overdue), extracted from meetings, chats and hand-written notes, and linked to their source note. Filter by project subtree, owner, status, due-before date, or source note. This is raw extraction: it includes items the commitment ledger has since closed, waived, superseded, or never tracked. For the curated working set ("what am I tracking", "what am I waiting on"), use list_commitments instead.`
 
 **inputSchema**
 ```json
@@ -349,7 +378,71 @@ Read-only aggregation over the local index; closed world.
 
 ---
 
-### 5. `list_projects`
+### 5. `list_commitments`
+
+List the commitments the user is actually **tracking**, from the commitment ledger, each joined to
+its live source line.
+
+The companion to [`list_outstanding_items`](#4-list_outstanding_items), and deliberately a separate
+tool rather than fields bolted onto it. The two answer different questions about the same words: a
+note says *what was said*, `list_outstanding_items` says *what did they commit to* (raw extraction,
+every unchecked line in the vault), and this says *what am I tracking* (the working set, after the
+enrollment gate and after every closure, waiver, snooze or removal the user has made). They are also
+different entities: an extracted item is keyed by a content hash that is re-minted whenever its line
+is edited, while a ledger entry keeps one `le_` id for the life of the commitment.
+
+Assembled through the same core join the desktop Commitments view renders, so chat and the app
+cannot disagree about what is outstanding — which is the whole reason this tool exists.
+
+- **title:** `List commitments`
+- **description:** `List tracked commitments from the commitment ledger: what the user is actually tracking, after enrollment and after any closures, waivers, snoozes, or removals they have made. Each carries its lifecycle state, direction (owed by the user vs waited on), aging tier, and its live source line. Defaults to the live working set; pass state explicitly to see settled ones. Prefer this over list_outstanding_items whenever the question is about what is outstanding, owed, or being waited on, so the answer matches the app's Commitments view.`
+
+**inputSchema**
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "project": { "$ref": "#/$defs/ProjectSlug", "description": "Restrict to commitments filed under this project. \"Inbox\" (any casing) matches unfiled ones." },
+    "include_descendants": { "type": "boolean", "default": true, "description": "When a project filter is set, also include commitments from nested sub-projects." },
+    "direction": { "$ref": "#/$defs/Direction", "description": "Restrict to commitments the user owes, is waiting on, or that nobody was attributed." },
+    "state": { "type": "array", "items": { "$ref": "#/$defs/EntryState" }, "uniqueItems": true, "default": ["open", "needs_review", "snoozed"], "description": "Entry states to include. Defaults to the live working set. Pass the settled states explicitly to see what was closed, waived, superseded or untracked." },
+    "source_note_id": { "$ref": "#/$defs/NoteId", "description": "Restrict to commitments whose live source line is in this note." },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 100, "default": 50, "description": "Max commitments per page." },
+    "cursor": { "type": "string", "description": "Opaque pagination token from a prior response's page.next_cursor." }
+  }
+}
+```
+
+**outputSchema**
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["commitments", "summary", "page"],
+  "properties": {
+    "commitments": { "type": "array", "items": { "$ref": "#/$defs/Commitment" }, "description": "The page's commitments, most recently mentioned first." },
+    "summary": { "$ref": "#/$defs/CommitmentsSummary" },
+    "page": { "$ref": "#/$defs/PageInfo" }
+  }
+}
+```
+
+**annotations**
+```json
+{ "readOnlyHint": true, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false }
+```
+Read-only aggregation over the local ledger and index; closed world.
+
+Needs `KODABI_LEDGER_DB` (see [Server & wiring](#server--wiring)). Unset, this tool returns an
+internal error naming the variable rather than guessing a path — a guessed one would create an
+empty second ledger that silently disagrees with the real one.
+
+---
+
+### 6. `list_projects`
 
 Enumerate routing-target projects, including hierarchy, counts, and last activity.
 
@@ -395,13 +488,20 @@ Read-only enumeration; closed world.
 
 ---
 
-### 6. `get_project_context`
+### 7. `get_project_context`
 
 Return an aggregate briefing for one project — description, glossary, recent notes, outstanding
 items, and counts — in a single call.
 
 - **title:** `Get project context`
 - **description:** `Aggregate context for one project in a single call: description, glossary, recent notes, outstanding items, and counts. Toggle and limit each section. Ideal for grounding a chat about a project.`
+
+The briefing carries **two** answers about the same project and keeps them apart: `outstanding` (and
+its `counts`) is raw extraction, while `commitments` is what the ledger is tracking. Counts only, no
+rows — the same division `counts` already draws against a capped `outstanding` section, and the rows
+live behind [`list_commitments`](#5-list_commitments). It gets no `include_*` toggle for the same
+reason `counts` has none: it is counts-sized, and a briefing that silently omitted it would read as
+"nothing tracked".
 
 **inputSchema**
 ```json
@@ -436,6 +536,7 @@ items, and counts — in a single call.
     "glossary": { "type": "array", "items": { "$ref": "#/$defs/GlossaryTerm" }, "description": "Glossary terms (present when include_glossary; truncated to glossary_limit)." },
     "recent_notes": { "type": "array", "items": { "$ref": "#/$defs/NoteSummary" }, "description": "Most recent notes, newest first (present when include_recent_notes)." },
     "outstanding": { "type": "array", "items": { "$ref": "#/$defs/ActionItem" }, "description": "Not-done action items (present when include_outstanding)." },
+    "commitments": { "oneOf": [{ "$ref": "#/$defs/CommitmentsSummary" }, { "type": "null" }], "description": "What the commitment ledger is tracking for this project, as cross-page totals. Distinct from `outstanding` above, which is raw extraction and still lists items the ledger has closed, waived, superseded, or never enrolled. The rows behind these counts come from list_commitments. Null when the server has no ledger configured, which means it cannot speak to tracking (not that nothing is tracked)." },
     "counts": {
       "type": "object",
       "additionalProperties": false,
@@ -470,7 +571,7 @@ Read-only aggregation; closed world.
 
 ---
 
-### 7. `file_note_to_project` — *write*
+### 8. `file_note_to_project` — *write*
 
 Route or re-route a note to a project — the human correction loop — moving the file and updating
 its frontmatter while preserving its stable id.
@@ -530,7 +631,7 @@ Approval is handled entirely by Claude Code's permission prompt (see
 
 ---
 
-### 8. `add_glossary_term` — *write*
+### 9. `add_glossary_term` — *write*
 
 Add or update a glossary term for a project, used for transcription biasing and cleanup.
 
@@ -574,6 +675,102 @@ Add or update a glossary term for a project, used for transcription biasing and 
 ```
 Mutating but non-destructive; upsert keyed on the normalized term means identical inputs converge
 to one state; local-only.
+
+---
+
+### 10. `update_action_item` — *write*
+
+Mark an action item done, or reopen it.
+
+Writes **both** halves of what that means: the checkbox in the source note, and the matching
+judgement in the commitment ledger. They are genuinely different facts — the note's `- [x]` is the
+source of truth for done/not-done (the ledger has no `done` column at all), while the ledger records
+what a checkbox cannot spell: that this was closed, and by whom. Writing only the box would leave
+the Commitments view still listing the item as open, which is the chat/view disagreement this tool
+exists to prevent.
+
+**Note first, then the ledger**, matching the desktop `set_commitment_done` command: a partial
+failure that leaves the box ticked and the entry open is legible and self-correcting (the next sync
+sees the tick), while the reverse would show a commitment closed against a line that still reads
+open. The note write is also what makes an open app converge: the file watcher sees the `.md`,
+reconciles, and emits `vault:changed`, at which point every window refetches and sees this process's
+committed close. The server has no `AppHandle` and could not emit an event itself.
+
+Two cases write the box and leave the ledger alone, both ordinary answers rather than faults: an
+item the enrollment gate never enrolled (`entry: null`), and one the user untracked by hand
+(reported with its untracked state). In both, the ledger has nothing to say and the checkbox is the
+whole truth.
+
+- **title:** `Update action item`
+- **description:** `Mark an action item done, or reopen it. Ticks the checkbox in its source note and records the matching judgement in the commitment ledger, so chat and the app's Commitments view agree. Identify the item by note_id + item_id from list_outstanding_items, get_note, or list_commitments. Reversible: call again with done=false.`
+
+**inputSchema**
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["note_id", "item_id", "done"],
+  "properties": {
+    "note_id": { "$ref": "#/$defs/NoteId", "description": "The note holding the action item's source line." },
+    "item_id": { "type": "string", "minLength": 1, "description": "The action item's id, as list_outstanding_items, get_note, or list_commitments report it." },
+    "done": { "type": "boolean", "description": "True to tick the checkbox and close the tracked commitment; false to untick it and reopen." }
+  }
+}
+```
+
+**outputSchema**
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "done", "note_outcome", "note_updated", "entry"],
+  "properties": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "item_id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/NoteId" },
+        "item_id": { "type": "string", "description": "The action item that was targeted." }
+      },
+      "description": "What the call acted on, echoed back."
+    },
+    "done": { "type": "boolean", "description": "The state that was requested." },
+    "note_outcome": { "type": "string", "enum": ["updated", "already_set", "note_missing", "item_missing"], "description": "What happened to the note file. 'already_set' means the checkbox already read that way, which is a success. 'note_missing' and 'item_missing' mean the source line has moved on since the ledger linked it; the commitment was still updated, which is why they are not errors here." },
+    "note_updated": { "type": "boolean", "description": "Whether the note file was actually rewritten." },
+    "entry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["entry_id", "state", "closed_via", "updated_at"],
+          "properties": {
+            "entry_id": { "$ref": "#/$defs/EntryId" },
+            "state": { "$ref": "#/$defs/EntryState" },
+            "closed_via": { "type": ["string", "null"], "enum": ["manual", "conversation", "github", null], "description": "What established the closure. A chat-made close records 'manual', the same as one made in the app: both are a person's own judgement." },
+            "updated_at": { "$ref": "#/$defs/IsoDateTime" }
+          }
+        },
+        { "type": "null" }
+      ],
+      "description": "The commitment as it now stands, or null when the item is not tracked by the ledger. Null is an ordinary outcome: the checkbox is the source of truth for done/not-done, and plenty of extracted lines were never enrolled."
+    }
+  }
+}
+```
+
+**annotations**
+```json
+{ "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false }
+```
+Mutating but non-destructive: a state transition the caller can ask for the other way round, and
+ticking an already-ticked box is a no-op success. Local-only.
+
+Needs `KODABI_LEDGER_DB` (see [Server & wiring](#server--wiring)). Unset, this tool refuses
+**before touching the vault**, so a configuration fault can never leave a ticked box with nothing
+recorded against it.
 
 ---
 
@@ -746,6 +943,108 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
         "last_activity": { "oneOf": [ { "$ref": "#/$defs/IsoDateTime" }, { "type": "null" } ], "description": "UTC timestamp of the most recent note activity, or null if empty." }
       },
       "description": "A routing-target project (maps to a folder), with hierarchy and counts."
+    },
+    "EntryId": {
+      "type": "string",
+      "pattern": "^le_[0-9a-z]{6,}$",
+      "description": "Stable commitment-ledger entry identifier, e.g. \"le_7fq2k9\". Minted when the ledger first enrolls a commitment and never rewritten, unlike the action-item id, which is a content hash and is re-minted whenever the source line is edited."
+    },
+    "EntryState": {
+      "type": "string",
+      "enum": ["open", "needs_review", "closed", "superseded", "waived", "snoozed", "untracked"],
+      "description": "Where a tracked commitment stands. Deliberately not a done/not-done axis: the note's checkbox owns that, and these are the states a checkbox cannot spell. 'open' is live; 'needs_review' lost its source line; 'closed' was resolved; 'superseded' was replaced by a later commitment; 'waived' is deliberately not happening; 'snoozed' is hidden until a date; 'untracked' was removed from the working set while its source line stays."
+    },
+    "Direction": {
+      "type": "string",
+      "enum": ["mine", "theirs", "unassigned"],
+      "description": "Which way a commitment points: something the user owes ('mine'), something they are waiting on ('theirs'), or something nobody was attributed ('unassigned')."
+    },
+    "AgingTier": {
+      "type": "string",
+      "enum": ["fresh", "aging", "stale"],
+      "description": "How long a commitment has gone untouched, derived at read time from the later of its last mention and last evidence check against the user's configured thresholds (14 and 30 days by default). Nothing is stored, so a tier reflects today, not when the row was written."
+    },
+    "CommitmentItem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["note_id", "item_id", "description", "owner", "due_date", "done", "status"],
+      "properties": {
+        "note_id": { "$ref": "#/$defs/NoteId" },
+        "item_id": { "type": "string", "description": "The action-item id of the live source line, as list_outstanding_items and get_note report it. This plus note_id is what update_action_item takes." },
+        "description": { "type": "string", "description": "The line's current text." },
+        "owner": { "type": "string", "description": "The line's current owner." },
+        "due_date": { "oneOf": [{ "$ref": "#/$defs/IsoDate" }, { "type": "null" }], "description": "Due date, or null when the line carries none." },
+        "done": { "type": "boolean", "description": "The checkbox, which is the source of truth for done/not-done." },
+        "status": { "$ref": "#/$defs/ActionItemStatus" }
+      },
+      "description": "The live source line behind a commitment. Null on a Commitment when the entry has no active reference (its line was edited away) or the index has no row for the note; the entry's own cached owner/description is the fallback."
+    },
+    "CommitmentSource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["note_id", "title", "project", "path"],
+      "properties": {
+        "note_id": { "$ref": "#/$defs/NoteId" },
+        "title": { "type": "string", "description": "The source note's effective title." },
+        "project": { "oneOf": [{ "$ref": "#/$defs/ProjectSlug" }, { "type": "null" }], "description": "The source note's project, or null when it is unfiled." },
+        "path": { "type": "string", "description": "Current note path relative to the KB root. Informational; changes on move." },
+        "category": { "oneOf": [{ "$ref": "#/$defs/MeetingCategory" }, { "type": "null" }], "description": "The source meeting's genre, or null for a note that carries none (which includes every chat)." }
+      },
+      "description": "Where a commitment's source line lives, for a click-through."
+    },
+    "CommitmentEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence_id", "source", "reference", "confidence", "observed_at"],
+      "properties": {
+        "evidence_id": { "type": "string", "description": "Stable evidence identifier, e.g. \"ev_3k9p2q\"." },
+        "source": { "type": "string", "enum": ["manual", "conversation", "github"], "description": "Where the claim came from." },
+        "reference": { "type": ["string", "null"], "description": "What the claim points at (a note id, a quoted line, a URL), or null." },
+        "confidence": { "type": "number", "minimum": 0, "maximum": 1, "description": "How strongly the source believes the commitment is settled." },
+        "observed_at": { "$ref": "#/$defs/IsoDateTime" }
+      },
+      "description": "One unresolved claim that a commitment may already be settled, awaiting a person's confirmation."
+    },
+    "Commitment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry_id", "state", "direction", "owner", "description", "project", "created_at", "updated_at", "last_mention", "last_evidence_check", "tier", "snoozed_until", "snooze_lapsed", "closed_via", "review_reason", "untracked_via", "item", "source", "evidence"],
+      "properties": {
+        "entry_id": { "$ref": "#/$defs/EntryId" },
+        "state": { "$ref": "#/$defs/EntryState" },
+        "direction": { "$ref": "#/$defs/Direction" },
+        "owner": { "type": "string", "description": "The ledger's cached copy of who owes the commitment. Prefer item.owner when item is present; this is what survives the source line being edited away." },
+        "description": { "type": "string", "description": "The ledger's cached copy of the commitment text. Prefer item.description when item is present." },
+        "project": { "oneOf": [{ "$ref": "#/$defs/ProjectSlug" }, { "type": "null" }], "description": "The project the commitment is filed under, or null when it is unfiled." },
+        "created_at": { "$ref": "#/$defs/IsoDateTime" },
+        "updated_at": { "$ref": "#/$defs/IsoDateTime" },
+        "last_mention": { "$ref": "#/$defs/IsoDateTime" },
+        "last_evidence_check": { "oneOf": [{ "$ref": "#/$defs/IsoDateTime" }, { "type": "null" }], "description": "When an evidence provider last looked, or null if never." },
+        "tier": { "$ref": "#/$defs/AgingTier" },
+        "snoozed_until": { "oneOf": [{ "$ref": "#/$defs/IsoDate" }, { "type": "null" }], "description": "The day a snooze runs out; null unless state is 'snoozed'." },
+        "snooze_lapsed": { "type": "boolean", "description": "True when a snoozed commitment's day has arrived. Nothing writes when a snooze lapses, so this is derived at read time and a lapsed entry is live work again." },
+        "closed_via": { "type": ["string", "null"], "enum": ["manual", "conversation", "github", null], "description": "What established a closure; null unless state is 'closed'." },
+        "review_reason": { "type": ["string", "null"], "description": "Why the entry needs a person's eye; null unless state is 'needs_review'." },
+        "untracked_via": { "type": ["string", "null"], "enum": ["manual", "override", "category", null], "description": "Why the commitment left the working set; null unless state is 'untracked'." },
+        "item": { "oneOf": [{ "$ref": "#/$defs/CommitmentItem" }, { "type": "null" }] },
+        "source": { "oneOf": [{ "$ref": "#/$defs/CommitmentSource" }, { "type": "null" }] },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/CommitmentEvidence" }, "description": "Unresolved claims that this may already be settled. Empty for most commitments." }
+      },
+      "description": "One entry in the commitment ledger, joined to its live source line. The ledger's answer to \"what am I tracking\", as opposed to list_outstanding_items' \"what did they commit to\"."
+    },
+    "CommitmentsSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "mine", "theirs", "unassigned", "needs_review", "snooze_lapsed"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0, "description": "Commitments matching the filter across all pages." },
+        "mine": { "type": "integer", "minimum": 0, "description": "Of those, ones the user owes." },
+        "theirs": { "type": "integer", "minimum": 0, "description": "Of those, ones the user is waiting on." },
+        "unassigned": { "type": "integer", "minimum": 0, "description": "Of those, ones nobody was attributed." },
+        "needs_review": { "type": "integer", "minimum": 0, "description": "Of those, ones that lost their source line." },
+        "snooze_lapsed": { "type": "integer", "minimum": 0, "description": "Of those, snoozes whose day has arrived." }
+      },
+      "description": "Cross-page totals for the same filter, so a caller that pages can still report the shape of the whole set."
     }
   }
 }
@@ -807,8 +1106,6 @@ the transitive subset of `$defs` each tool references, so each schema is self-co
 
 Out of scope for this spec, listed so Phase 3+ doesn't rediscover the gap from scratch:
 
-- **`update_action_item`** (mark an item done) — belongs with the later commitment-ledger work, not
-  the read/route/glossary surface defined here.
 - **`resolve_project`** (fuzzy project-name → slug) — `list_projects` covers name resolution
   acceptably for v1; a dedicated fuzzy resolver is a nice-to-have if free-text matching proves
   unreliable in practice.

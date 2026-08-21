@@ -337,27 +337,7 @@ impl IndexReadHandle {
             return HashMap::new();
         }
         let idx = lock(&self.index);
-        let mut contexts = HashMap::with_capacity(note_ids.len());
-        for id in note_ids {
-            let Ok(Some(row)) = idx.get_note(id) else {
-                continue;
-            };
-            let Ok(items) = idx.get_action_items(id) else {
-                continue;
-            };
-            contexts.insert(
-                id.clone(),
-                NoteContext {
-                    note_id: row.id,
-                    title: row.title,
-                    project: row.project,
-                    path: row.path,
-                    category: row.category,
-                    items,
-                },
-            );
-        }
-        contexts
+        kodabi_core::ledger::commitments::note_contexts(&idx, note_ids)
     }
 
     /// One note's ledger-shaped facts, or `None` when the index cannot supply

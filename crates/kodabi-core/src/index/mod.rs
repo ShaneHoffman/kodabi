@@ -42,6 +42,8 @@ use std::sync::Once;
 
 use rusqlite::Connection;
 
+use crate::BUSY_TIMEOUT_MS;
+
 /// Embedding dimension for the `sqlite-vec` table.
 ///
 /// Settled on **bge-small-en-v1.5** (FOUNDING_DOC's "Embedding model" open
@@ -147,9 +149,14 @@ impl NoteIndex {
     /// suits a desktop reader/writer pair (the watcher writes, MCP reads); it is
     /// harmless on an in-memory database. `foreign_keys` must be enabled per
     /// connection for the `note_tags` cascade, and is set before the first
-    /// transaction so it takes effect.
+    /// transaction so it takes effect. `busy_timeout` covers that same pair:
+    /// a WAL reader still blocks briefly during a checkpoint or recovery, and
+    /// rusqlite's default of zero turns that into an instant `SQLITE_BUSY`.
     fn init(mut conn: Connection) -> Result<Self> {
-        conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;")?;
+        conn.execute_batch(&format!(
+            "PRAGMA journal_mode = WAL; PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}; \
+             PRAGMA foreign_keys = ON;"
+        ))?;
         migrations::apply(&mut conn)?;
         Ok(Self { conn })
     }
@@ -176,6 +183,17 @@ mod tests {
             .query_row("SELECT count(*) FROM notes", [], |row| row.get(0))
             .unwrap();
         assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn a_busy_timeout_is_configured_so_a_reader_waits_out_a_checkpoint() {
+        let dir = tempdir().unwrap();
+        let index = NoteIndex::open(&dir.path().join("index.db")).unwrap();
+        let timeout: i64 = index
+            .conn
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .unwrap();
+        assert_eq!(timeout, i64::from(BUSY_TIMEOUT_MS));
     }
 
     #[test]

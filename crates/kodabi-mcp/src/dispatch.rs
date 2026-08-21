@@ -15,7 +15,7 @@ pub const PROTOCOL_VERSION: &str = "2025-06-18";
 /// The server instructions surfaced at `initialize`. Must stay under 2 KB —
 /// Claude Code truncates this (and every tool description) at that size, which
 /// would silently drop the "when to use this" guidance a client relies on.
-const INSTRUCTIONS: &str = "Kodabi tools over your local knowledge base of distilled, routed Markdown notes. Read: search_notes for hybrid full-text and semantic retrieval (ranked snippets), get_note to read a hit in full by its stable id, get_meeting_transcript for a meeting's per-channel transcript segments, list_outstanding_items for not-done action items linked to their source note, list_projects to resolve a project name to its slug before filtering, and get_project_context for a one-call briefing on a project (description, glossary, recent notes, outstanding items, counts). Write (the human correction loop): file_note_to_project re-files a note to a project while preserving its stable id, and add_glossary_term adds or updates a project glossary term (upsert by normalized term). Ids and slugs are the handles: a note id looks like n_a1b2c3, a project slug is a folder path like Growth/Q3, and the reserved slug Inbox means unfiled. Lists paginate with limit plus an opaque cursor; an empty result is a valid answer, while a lookup by an id that does not exist is an error.";
+const INSTRUCTIONS: &str = "Kodabi tools over your local knowledge base of distilled, routed Markdown notes. Read: search_notes for hybrid full-text and semantic retrieval (ranked snippets), get_note to read a hit in full by its stable id, get_meeting_transcript for a meeting's per-channel transcript segments, list_commitments for what the user is tracking (the commitment ledger, after their own closures and waivers), list_outstanding_items for the raw extracted action items behind it, list_projects to resolve a project name to its slug before filtering, and get_project_context for a one-call briefing on a project. For any question about what is outstanding, owed, or being waited on, prefer list_commitments: list_outstanding_items still reports items the user has settled. Write: file_note_to_project re-files a note while preserving its stable id, add_glossary_term upserts a project glossary term, and update_action_item ticks or unticks an item, closing or reopening the tracked commitment with it. Ids and slugs are the handles: a note id looks like n_a1b2c3, a project slug is a folder path like Growth/Q3, and the reserved slug Inbox means unfiled. Lists paginate with limit plus an opaque cursor; an empty result is a valid answer, while a lookup by an id that does not exist is an error.";
 
 const _: () = assert!(INSTRUCTIONS.len() < 2048);
 
@@ -78,6 +78,21 @@ mod tests {
     /// `list_projects`). The returned `TempDir` must be kept alive for the vault
     /// to exist.
     fn seeded_server() -> (Server, tempfile::TempDir) {
+        let (index, vault) = seeded_parts();
+        let config = ServerConfig {
+            index_db: PathBuf::from("in-memory"),
+            kb_root: vault.path().to_path_buf(),
+            // The commitment tools each seed their own ledger; the shared
+            // server deliberately has none, so every other tool stays covered
+            // in the configuration most installs were upgraded from.
+            ledger_db: None,
+            aging: kodabi_core::ledger::AgingConfig::default(),
+        };
+        (Server::with_backend(config, index), vault)
+    }
+
+    /// The seeded index and its vault, before either is wrapped in a server.
+    fn seeded_parts() -> (NoteIndex, tempfile::TempDir) {
         let vault = tempfile::tempdir().unwrap();
         fs::create_dir(vault.path().join("Growth")).unwrap();
         fs::create_dir(vault.path().join("Ops")).unwrap();
@@ -245,11 +260,158 @@ mod tests {
             })
             .unwrap();
 
+        (index, vault)
+    }
+
+    /// A server whose vault, index and ledger all describe the *same* two
+    /// commitments, as a running app would leave them.
+    ///
+    /// Real note files on disk, with their action-item ids derived from the
+    /// body rather than invented: the write tool re-derives ids from the
+    /// Markdown, so a fixture with made-up ids would test nothing. The ledger is
+    /// a real file too, since the server opens it by path on every call.
+    ///
+    /// One of the two commitments is deliberately untracked, so every test can
+    /// check that a settled judgement stays out of the default answer.
+    fn seeded_server_with_ledger() -> (Server, tempfile::TempDir) {
+        seeded_ledger_server(true)
+    }
+
+    /// The same fixture with the `KODABI_LEDGER_DB` wiring present or absent, so
+    /// the unconfigured case is tested against a vault that really holds the
+    /// notes rather than an empty one.
+    fn seeded_ledger_server(configured: bool) -> (Server, tempfile::TempDir) {
+        use kodabi_core::ledger::{Ledger, UntrackedVia};
+
+        let vault = tempfile::tempdir().unwrap();
+        fs::create_dir(vault.path().join("Growth")).unwrap();
+        fs::create_dir(vault.path().join("Ops")).unwrap();
+
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        let ledger_db = vault.path().join("ledger.db");
+        let mut ledger = Ledger::open(&ledger_db).unwrap();
+
+        let tracked = seed_tracked_note(
+            vault.path(),
+            &mut index,
+            &mut ledger,
+            "n_meet01",
+            "Growth",
+            "Priya to draft the plan.",
+        );
+        assert!(!tracked.is_empty(), "the Growth note minted an entry");
+
+        let loose = seed_tracked_note(
+            vault.path(),
+            &mut index,
+            &mut ledger,
+            "n_chat01",
+            "Ops",
+            "Jane to ask MERIDIAN for a bridge line item.",
+        );
+        // Taken out of the working set by hand: still extracted, no longer tracked.
+        ledger
+            .untrack(&loose[0], UntrackedVia::Manual, "2026-07-15T00:00:00Z")
+            .unwrap();
+        drop(ledger);
+
         let config = ServerConfig {
             index_db: PathBuf::from("in-memory"),
             kb_root: vault.path().to_path_buf(),
+            ledger_db: configured.then_some(ledger_db),
+            aging: kodabi_core::ledger::AgingConfig::default(),
         };
         (Server::with_backend(config, index), vault)
+    }
+
+    /// Writes one note carrying a single action item, indexes it, and syncs the
+    /// ledger from the ids the body actually derives. Returns the entry ids the
+    /// sync created.
+    fn seed_tracked_note(
+        vault: &std::path::Path,
+        index: &mut NoteIndex,
+        ledger: &mut kodabi_core::ledger::Ledger,
+        note_id: &str,
+        project: &str,
+        item_line: &str,
+    ) -> Vec<String> {
+        use kodabi_core::ledger::{NoteSync, OwnerIdentity};
+        use kodabi_core::meeting::derive_meeting_facts;
+        use kodabi_core::note::{write_note, Note, NoteId, NoteType, Routing, Source};
+
+        let body = format!("# Summary\n\nWe met.\n\n## Action items\n\n- [ ] {item_line}\n");
+        let source = Source::parse("transcript").unwrap();
+        let note = Note::new(
+            NoteId::parse(note_id).unwrap(),
+            NoteType::Meeting,
+            Routing::Manual {
+                project: project.to_string(),
+            },
+            "2026-07-10",
+            vec![],
+            source.clone(),
+            &body,
+        )
+        .unwrap();
+        write_note(vault, &note, Some("Seeded note")).unwrap();
+
+        // A meeting body, so the distill grammar splits the owner off the line
+        // the way a real distilled note carries it.
+        let facts = derive_meeting_facts(
+            note_id,
+            NoteType::Meeting,
+            "2026-07-10",
+            &source,
+            &body,
+            vault,
+        );
+        index
+            .upsert_note(&IndexedNote {
+                id: note_id.to_string(),
+                path: format!("{project}/seeded-note.md"),
+                title: "Seeded note".to_string(),
+                note_type: NoteType::Meeting.into(),
+                project: Some(project.to_string()),
+                date: "2026-07-10".to_string(),
+                tags: vec![],
+                source: "transcript".to_string(),
+                confidence: None,
+                category: None,
+                category_confidence: None,
+                tracking: None,
+                body: body.clone(),
+                meeting: Some(facts.clone()),
+            })
+            .unwrap();
+
+        ledger
+            .sync_note_items(&NoteSync {
+                note_id,
+                project,
+                note_date_utc: "2026-07-10T00:00:00Z",
+                items: &facts.action_items,
+                link_hints: &[],
+                note_override: None,
+                category_default: None,
+                identity: &OwnerIdentity::default(),
+                now: "2026-07-13T00:00:00Z",
+            })
+            .unwrap()
+            .created
+    }
+
+    /// The single action-item id a seeded note derives.
+    fn seeded_item_id(server: &Server, note_id: &str) -> String {
+        let response = call_tool(server, "get_note", json!({ "id": note_id }));
+        response["result"]["structuredContent"]["action_items"][0]["id"]
+            .as_str()
+            .expect("the seeded note carries one action item")
+            .to_string()
+    }
+
+    /// The note file's body as it now stands on disk.
+    fn read_note_body(vault: &std::path::Path, project: &str) -> String {
+        fs::read_to_string(vault.join(project).join("seeded-note.md")).unwrap()
     }
 
     /// Writes a five-segment session transcript into `<vault>/sessions/` and
@@ -1173,5 +1335,309 @@ mod tests {
         );
         assert_eq!(response["result"]["isError"], Value::Bool(true));
         assert!(response.get("error").is_none());
+    }
+    // ----- list_commitments -------------------------------------------------
+
+    #[test]
+    fn list_commitments_serves_the_tracked_working_set() {
+        let (server, _vault) = seeded_server_with_ledger();
+        let response = call_tool(&server, "list_commitments", json!({}));
+        let structured = &response["result"]["structuredContent"];
+
+        let rows = structured["commitments"].as_array().unwrap();
+        assert_eq!(
+            rows.len(),
+            1,
+            "the untracked entry is not in the working set"
+        );
+        let row = &rows[0];
+        assert_eq!(row["state"], "open");
+        assert_eq!(row["description"], "draft the plan");
+        assert_eq!(row["project"], "Growth");
+        // The live source line is joined in from the index, under the id the
+        // note body derives.
+        assert_eq!(row["item"]["item_id"], seeded_item_id(&server, "n_meet01"));
+        assert_eq!(row["item"]["done"], false);
+        assert_eq!(row["source"]["note_id"], "n_meet01");
+        assert_eq!(structured["summary"]["total"], 1);
+        assert_eq!(structured["page"]["has_more"], false);
+    }
+
+    /// The reason this tool exists: raw extraction and the ledger disagree, and
+    /// each tool answers for its own store.
+    #[test]
+    fn an_untracked_item_is_outstanding_but_not_a_commitment() {
+        let (server, _vault) = seeded_server_with_ledger();
+
+        let outstanding = call_tool(
+            &server,
+            "list_outstanding_items",
+            json!({ "project": "Ops" }),
+        );
+        let items = outstanding["result"]["structuredContent"]["items"]
+            .as_array()
+            .unwrap();
+        assert_eq!(items.len(), 1, "extraction still reports the line");
+        assert_eq!(items[0]["id"], seeded_item_id(&server, "n_chat01"));
+
+        let commitments = call_tool(&server, "list_commitments", json!({ "project": "Ops" }));
+        let rows = commitments["result"]["structuredContent"]["commitments"]
+            .as_array()
+            .unwrap();
+        assert!(rows.is_empty(), "the ledger does not track it");
+
+        // Asking for it by state finds it, so nothing is hidden — only defaulted away.
+        let settled = call_tool(
+            &server,
+            "list_commitments",
+            json!({ "project": "Ops", "state": ["untracked"] }),
+        );
+        let rows = settled["result"]["structuredContent"]["commitments"]
+            .as_array()
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0]["untracked_via"], "manual");
+    }
+
+    #[test]
+    fn an_unknown_project_is_an_empty_commitments_page_not_an_error() {
+        let (server, _vault) = seeded_server_with_ledger();
+        let response = call_tool(&server, "list_commitments", json!({ "project": "Nope" }));
+        let structured = &response["result"]["structuredContent"];
+        assert!(structured["commitments"].as_array().unwrap().is_empty());
+        assert_eq!(structured["page"]["has_more"], false);
+        assert_eq!(response["result"]["isError"], false);
+    }
+
+    #[test]
+    fn a_bad_commitments_cursor_is_invalid_params() {
+        let (server, _vault) = seeded_server_with_ledger();
+        let response = call_tool(&server, "list_commitments", json!({ "cursor": "nope" }));
+        assert_eq!(response["error"]["code"], -32602);
+    }
+
+    #[test]
+    fn an_unknown_commitments_argument_is_rejected() {
+        let (server, _vault) = seeded_server_with_ledger();
+        let response = call_tool(&server, "list_commitments", json!({ "projects": "Growth" }));
+        assert_eq!(response["error"]["code"], -32602);
+    }
+
+    /// A `.mcp.json` written before these tools existed names no ledger. The
+    /// error says which variable to set rather than inventing a path.
+    #[test]
+    fn commitments_without_a_configured_ledger_name_the_variable() {
+        let (server, _vault) = seeded_server();
+        let response = call_tool(&server, "list_commitments", json!({}));
+        assert_eq!(response["error"]["code"], -32603);
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("KODABI_LEDGER_DB"));
+    }
+
+    #[test]
+    fn a_project_briefing_carries_the_ledgers_counts_when_one_is_configured() {
+        let (with_ledger, _vault) = seeded_server_with_ledger();
+        let response = call_tool(
+            &with_ledger,
+            "get_project_context",
+            json!({ "project": "Growth" }),
+        );
+        let structured = &response["result"]["structuredContent"];
+        assert_eq!(structured["commitments"]["total"], 1);
+        // Raw extraction is still reported separately, and still counts.
+        assert!(structured["counts"]["outstanding_open"].as_u64().unwrap() >= 1);
+
+        // Without a ledger the block is null: the briefing cannot speak to
+        // tracking, which is not the same as nothing being tracked.
+        let (without, _vault) = seeded_server();
+        let response = call_tool(
+            &without,
+            "get_project_context",
+            json!({ "project": "Growth" }),
+        );
+        assert!(response["result"]["structuredContent"]["commitments"].is_null());
+    }
+
+    // ----- update_action_item -----------------------------------------------
+
+    /// The write both halves: the checkbox in the note, and the judgement in the
+    /// ledger. Either alone is the disagreement this tool exists to prevent.
+    #[test]
+    fn marking_an_item_done_ticks_the_note_and_closes_the_commitment() {
+        let (server, vault) = seeded_server_with_ledger();
+        let item = seeded_item_id(&server, "n_meet01");
+
+        let response = call_tool(
+            &server,
+            "update_action_item",
+            json!({ "note_id": "n_meet01", "item_id": item, "done": true }),
+        );
+        let structured = &response["result"]["structuredContent"];
+        assert_eq!(response["result"]["isError"], false);
+        assert_eq!(structured["note_outcome"], "updated");
+        assert_eq!(structured["note_updated"], true);
+        assert_eq!(structured["entry"]["state"], "closed");
+        // A chat-made close is a person's own judgement, like one made in the app.
+        assert_eq!(structured["entry"]["closed_via"], "manual");
+
+        // The note on disk really carries the tick.
+        let body = read_note_body(vault.path(), "Growth");
+        assert!(body.contains("- [x]"), "the checkbox was written: {body}");
+
+        // And the commitment has left the working set.
+        let listed = call_tool(&server, "list_commitments", json!({}));
+        assert!(listed["result"]["structuredContent"]["commitments"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn reopening_unticks_the_note_and_reopens_the_commitment() {
+        let (server, vault) = seeded_server_with_ledger();
+        let item = seeded_item_id(&server, "n_meet01");
+
+        let done = json!({ "note_id": "n_meet01", "item_id": item, "done": true });
+        call_tool(&server, "update_action_item", done);
+
+        let response = call_tool(
+            &server,
+            "update_action_item",
+            json!({ "note_id": "n_meet01", "item_id": item, "done": false }),
+        );
+        let structured = &response["result"]["structuredContent"];
+        assert_eq!(structured["entry"]["state"], "open");
+        assert!(structured["entry"]["closed_via"].is_null());
+        let body = read_note_body(vault.path(), "Growth");
+        assert!(body.contains("- [ ]"), "the checkbox was cleared: {body}");
+    }
+
+    /// Asking twice is a success, not an error: the person got what they wanted.
+    #[test]
+    fn marking_an_already_done_item_done_again_succeeds() {
+        let (server, _vault) = seeded_server_with_ledger();
+        let item = seeded_item_id(&server, "n_meet01");
+        let args = json!({ "note_id": "n_meet01", "item_id": item, "done": true });
+
+        call_tool(&server, "update_action_item", args.clone());
+        let response = call_tool(&server, "update_action_item", args);
+        let structured = &response["result"]["structuredContent"];
+        assert_eq!(response["result"]["isError"], false);
+        assert_eq!(structured["note_outcome"], "already_set");
+        assert_eq!(structured["note_updated"], false);
+        assert_eq!(structured["entry"]["state"], "closed");
+    }
+
+    /// The checkbox is the source of truth for done/not-done, so an item the
+    /// person took out of the working set still ticks — and the ledger is left
+    /// exactly as they set it rather than being argued with.
+    #[test]
+    fn an_untracked_item_ticks_without_moving_the_ledger() {
+        let (server, vault) = seeded_server_with_ledger();
+        let item = seeded_item_id(&server, "n_chat01");
+
+        let response = call_tool(
+            &server,
+            "update_action_item",
+            json!({ "note_id": "n_chat01", "item_id": item, "done": true }),
+        );
+        let structured = &response["result"]["structuredContent"];
+        assert_eq!(response["result"]["isError"], false);
+        assert_eq!(structured["note_outcome"], "updated");
+        assert!(read_note_body(vault.path(), "Ops").contains("- [x]"));
+        assert_eq!(
+            structured["entry"]["state"], "untracked",
+            "reported as-is, with no judgement invented for it"
+        );
+    }
+
+    #[test]
+    fn updating_an_unknown_note_is_a_business_error() {
+        let (server, _vault) = seeded_server_with_ledger();
+        let response = call_tool(
+            &server,
+            "update_action_item",
+            json!({ "note_id": "n_zzzzzz", "item_id": "a_whatever", "done": true }),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("note not found"));
+    }
+
+    #[test]
+    fn a_malformed_note_id_is_invalid_params() {
+        let (server, _vault) = seeded_server_with_ledger();
+        let response = call_tool(
+            &server,
+            "update_action_item",
+            json!({ "note_id": "not-an-id", "item_id": "a_whatever", "done": true }),
+        );
+        assert_eq!(response["error"]["code"], -32602);
+    }
+
+    /// A forbidden transition is something the model can act on (reopen first),
+    /// so it comes back as a business answer naming both states.
+    #[test]
+    fn closing_a_waived_commitment_is_refused_in_the_callers_terms() {
+        let (server, vault) = seeded_server_with_ledger();
+        let item = seeded_item_id(&server, "n_meet01");
+
+        {
+            use kodabi_core::ledger::{EntryFilter, Ledger};
+            let mut ledger = Ledger::open(&vault.path().join("ledger.db")).unwrap();
+            let open = ledger
+                .list_entries(&EntryFilter {
+                    states: Some(vec![kodabi_core::ledger::EntryState::Open]),
+                    project: None,
+                    include_descendants: false,
+                    direction: None,
+                    note_id: None,
+                    stale_before: None,
+                    unchecked_since: None,
+                })
+                .unwrap();
+            ledger
+                .waive(&open[0].entry_id, "2026-07-16T00:00:00Z")
+                .unwrap();
+        }
+
+        let response = call_tool(
+            &server,
+            "update_action_item",
+            json!({ "note_id": "n_meet01", "item_id": item, "done": true }),
+        );
+        assert_eq!(response["result"]["isError"], true);
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("waived"), "names where it is: {text}");
+        assert!(text.contains("closed"), "names where it would go: {text}");
+    }
+
+    /// A configuration fault must never leave a ticked box with nothing recorded
+    /// against it, so the refusal happens before the vault is touched.
+    #[test]
+    fn updating_without_a_configured_ledger_leaves_the_note_untouched() {
+        let (server, vault) = seeded_ledger_server(false);
+        let item = seeded_item_id(&server, "n_meet01");
+        let before = read_note_body(vault.path(), "Growth");
+
+        let response = call_tool(
+            &server,
+            "update_action_item",
+            json!({ "note_id": "n_meet01", "item_id": item, "done": true }),
+        );
+        assert_eq!(response["error"]["code"], -32603);
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("KODABI_LEDGER_DB"));
+        assert_eq!(
+            before,
+            read_note_body(vault.path(), "Growth"),
+            "nothing was written"
+        );
     }
 }

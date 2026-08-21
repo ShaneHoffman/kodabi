@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source",
+    "done",
+    "note_outcome",
+    "note_updated",
+    "entry"
+  ],
+  "properties": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "item_id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/NoteId"
+        },
+        "item_id": {
+          "type": "string",
+          "description": "The action item that was targeted."
+        }
+      },
+      "description": "What the call acted on, echoed back."
+    },
+    "done": {
+      "type": "boolean",
+      "description": "The state that was requested."
+    },
+    "note_outcome": {
+      "type": "string",
+      "enum": [
+        "updated",
+        "already_set",
+        "note_missing",
+        "item_missing"
+      ],
+      "description": "What happened to the note file. 'already_set' means the checkbox already read that way, which is a success. 'note_missing' and 'item_missing' mean the source line has moved on since the ledger linked it; the commitment was still updated, which is why they are not errors here."
+    },
+    "note_updated": {
+      "type": "boolean",
+      "description": "Whether the note file was actually rewritten."
+    },
+    "entry": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "entry_id",
+            "state",
+            "closed_via",
+            "updated_at"
+          ],
+          "properties": {
+            "entry_id": {
+              "$ref": "#/$defs/EntryId"
+            },
+            "state": {
+              "$ref": "#/$defs/EntryState"
+            },
+            "closed_via": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "enum": [
+                "manual",
+                "conversation",
+                "github",
+                null
+              ],
+              "description": "What established the closure. A chat-made close records 'manual', the same as one made in the app: both are a person's own judgement."
+            },
+            "updated_at": {
+              "$ref": "#/$defs/IsoDateTime"
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The commitment as it now stands, or null when the item is not tracked by the ledger. Null is an ordinary outcome: the checkbox is the source of truth for done/not-done, and plenty of extracted lines were never enrolled."
+    }
+  },
+  "$defs": {
+    "EntryId": {
+      "type": "string",
+      "pattern": "^le_[0-9a-z]{6,}$",
+      "description": "Stable commitment-ledger entry identifier, e.g. \"le_7fq2k9\". Minted when the ledger first enrolls a commitment and never rewritten, unlike the action-item id, which is a content hash and is re-minted whenever the source line is edited."
+    },
+    "EntryState": {
+      "type": "string",
+      "enum": [
+        "open",
+        "needs_review",
+        "closed",
+        "superseded",
+        "waived",
+        "snoozed",
+        "untracked"
+      ],
+      "description": "Where a tracked commitment stands. Deliberately not a done/not-done axis: the note's checkbox owns that, and these are the states a checkbox cannot spell. 'open' is live; 'needs_review' lost its source line; 'closed' was resolved; 'superseded' was replaced by a later commitment; 'waived' is deliberately not happening; 'snoozed' is hidden until a date; 'untracked' was removed from the working set while its source line stays."
+    },
+    "IsoDateTime": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp, RFC 3339 date-time with offset (\"Z\" or numeric), e.g. \"2026-07-11T14:03:00Z\" or \"2026-07-09T14:00:00-07:00\"."
+    },
+    "NoteId": {
+      "type": "string",
+      "pattern": "^n_[0-9a-z]{6,}$",
+      "description": "Stable note identifier, e.g. \"n_a1b2c3\". Generated at creation, never rewritten on move/re-route. This is the write handle."
+    }
+  }
+}
