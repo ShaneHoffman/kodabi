@@ -303,9 +303,14 @@ impl LedgerHandle {
     /// before any handle escapes `initialize`, so by the time this request is
     /// served the restore has already run and set the flag.
     ///
-    /// `false` on an unavailable ledger or a worker that does not answer in
-    /// time: a missed backfill costs one startup and re-offers itself on the
-    /// next, while a blocked index worker would stall the whole reconcile.
+    /// `false` on an unavailable ledger or a worker that does not answer
+    /// within `REPLY_TIMEOUT`, because a blocked index worker would stall the
+    /// whole reconcile. A timed-out answer is **not** free: the worker serves
+    /// the request regardless and clears the flag, and by the next launch the
+    /// ledger may no longer be empty, so the seed would never be re-offered.
+    /// The caller therefore asks this *before* queueing any batch of its own —
+    /// see `index_state::run_reconcile` — which is what keeps the wait a bare
+    /// round trip on an otherwise idle queue.
     pub fn take_startup_backfill(&self) -> bool {
         let Some(sender) = &self.0 else {
             return false;

@@ -602,6 +602,14 @@ fn run_reconcile(
                     report.upserted, report.unchanged, report.deleted
                 );
             }
+            // Claimed *before* either forward below queues a batch. The answer
+            // is settled by `RestoreIfEmpty`, the ledger worker's first job, so
+            // asking early cannot change it — but asking late puts a blocking
+            // round trip behind a whole-vault sync, and the reply timeout is
+            // finite. A timed-out reply still consumes the flag on the worker
+            // side, and the batch it waited on has by then made the ledger
+            // non-empty, so no later launch would ever re-offer the seed.
+            let owes_seed = ledger.take_startup_backfill();
             // Every note whose facts were re-derived, plus every note that left
             // the vault, reaches the ledger before the embed sweep — the
             // commitments matter more than the vectors, and the sweep is slow.
@@ -614,14 +622,15 @@ fn run_reconcile(
             for id in &report.deleted_ids {
                 ledger.note_gone(id);
             }
-            // Meeting notes skipped by the fast path (unchanged on disk) still
-            // need their facts derived after the v3 migration — backfill them.
+            // Notes skipped by the fast path (unchanged on disk) still need
+            // their facts derived after the v3 migration — backfill them.
             let backfilled = backfill_meeting_facts(index, root);
             forward_backfilled(index, ledger, &backfilled, &enrolment_settings(app));
             // A ledger that came up empty gets seeded from the index, which by
-            // now holds facts for every note in the vault. Asked after the two
-            // forwards above so those facts exist to be read.
-            if ledger.take_startup_backfill() {
+            // now holds facts for every note in the vault. Run after the two
+            // forwards above so those facts exist to be read, even though the
+            // question itself was asked before them.
+            if owes_seed {
                 seed_ledger_from_index(index, ledger, &enrolment_settings(app));
             }
             if let Some(embedder) = embedder {
@@ -706,12 +715,14 @@ fn run_rebuild(
     }
 }
 
-/// Derives meeting facts for any meeting or chat note the index has not
-/// backfilled yet (`meeting::derives_facts`). Independent of embeddings (needs no
-/// embedder): the v3 migration adds the meeting tables empty and a reconcile
-/// fast-path skips unchanged notes, so a field database's existing notes need one
-/// derive pass. Best-effort — a failure is logged and the next sweep retries.
-/// Fast (a meeting is one small JSONL read; a chat is body-parse only), so it
+/// Derives facts for any fact-carrying note the index has not backfilled yet
+/// (`meeting::derives_facts`, which is now every type). Independent of
+/// embeddings (needs no embedder): the v3 migration adds the meeting tables
+/// empty and a reconcile fast-path skips unchanged notes, so a field database's
+/// existing notes need one derive pass — and widening `derives_facts` to plain
+/// notes puts every hand-written note through that same pass once.
+/// Best-effort — a failure is logged and the next sweep retries. Fast (a meeting
+/// is one small JSONL read; a chat or a plain note is body-parse only), so it
 /// runs under the index lock like `reconcile` itself.
 /// Returns the ids it filled, so the caller can forward them to the ledger.
 fn backfill_meeting_facts(index: &Mutex<NoteIndex>, vault_root: &Path) -> Vec<String> {

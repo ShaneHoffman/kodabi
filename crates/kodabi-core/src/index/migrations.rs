@@ -143,28 +143,36 @@ CREATE TABLE note_chunks (
 /// `get_note` can serve `MeetingMeta` + `ActionItem` without re-parsing the body
 /// or re-reading the JSONL on every call.
 ///
-/// **These tables serve meeting *and* chat notes** (`meeting::derives_facts`);
-/// the `note_meetings` name is historical, predating the chat leg, and was kept
-/// because renaming it would cost a migration for no behavior change while the
-/// MCP wire object is still `meeting`/`MeetingMeta`. Nothing here is type-aware:
-/// `note_id` is a bare key and no column records the note type.
+/// **These tables serve every fact-carrying note type** (`meeting::derives_facts`,
+/// which now covers meetings, chats *and* plain notes); the `note_meetings` name
+/// is historical, predating both the chat leg and the hand-written one, and was
+/// kept because renaming it would cost a migration for no behavior change while
+/// the MCP wire object is still `meeting`/`MeetingMeta`. Nothing here is
+/// type-aware: `note_id` is a bare key and no column records the note type. The
+/// type decides only which *grammar* filled these rows, upstream in
+/// `meeting::parse_body`, and that choice leaves no trace in the schema.
 ///
-/// - `note_meetings` — one row per meeting or chat note: the two session-derived
+/// - `note_meetings` — one row per fact-carrying note: the two session-derived
 ///   scalars (`duration_seconds`, `speaker_count`), both nullable because a note
 ///   whose `source` is a keyword (e.g. `manual`) or whose transcript was pruned
-///   by retention has no transcript to measure. **Both are always `NULL` for a
-///   chat**, whose `source` is a chat transcript, not a session recording — that
-///   pre-existing nullability is why adding chats needed no migration at all.
-///   A note with zero decisions and zero action items still gets a row, and that
-///   row is deliberate: it is the sentinel that makes
-///   `note_ids_missing_meeting_facts` converge instead of re-deriving the same
-///   empty note on every backfill pass.
-/// - `note_decisions` — the ordered `## Decisions` bullets.
-/// - `note_action_items` — the ordered `## Action items` lines, parsed into the
-///   grammar's fields; `item_id` is a deterministic hash of the note id + the
-///   line's content, so it is stable across reindexes (see `crate::meeting`).
-///   `done` is the checkbox state; `overdue` is derived server-side and not
-///   stored.
+///   by retention has no transcript to measure. **Both are always `NULL` for
+///   anything but a meeting**, whose `source` alone points at a session
+///   recording — that pre-existing nullability is why adding first chats and
+///   then plain notes needed no migration at all. A note with zero decisions and
+///   zero action items still gets a row, and that row is deliberate: it is the
+///   sentinel that makes `note_ids_missing_meeting_facts` converge instead of
+///   re-deriving the same empty note on every backfill pass. A plain note is
+///   routinely that case, since the plain grammar renders no decisions.
+/// - `note_decisions` — the ordered `## Decisions` bullets. Written only by the
+///   distill grammar; a plain note contributes no rows here.
+/// - `note_action_items` — the ordered action-item lines. Under the distill
+///   grammar these are the `## Action items` lines parsed into the grammar's
+///   fields; under the plain-checkbox grammar they are `- [ ]` lines from
+///   anywhere in the body, stored whole with `owner` fixed to `You` and
+///   `due_date` NULL. Either way `item_id` is a deterministic hash of the note
+///   id + the line's content, so it is stable across reindexes (see
+///   `crate::meeting`). `done` is the checkbox state; `overdue` is derived
+///   server-side and not stored.
 ///
 /// All three are keyed by `note_id TEXT` (not the `notes.pk` foreign key), so
 /// they sit beside `notes_vec`/`note_chunks` as a body/session-derived cache and
@@ -172,8 +180,9 @@ CREATE TABLE note_chunks (
 /// rebuildable cache (FOUNDING_DOC §3.6), a field database gains three empty
 /// tables on upgrade and repopulates them via the meeting-facts backfill pass
 /// (`reconcile::reconcile_missing_meeting_facts`) — nothing is lost. That pass
-/// covers every chat note too, so a database indexed before chats carried facts
-/// converges on the next launch with no schema change.
+/// covers every type `derives_facts` admits, so a database indexed before chats
+/// (or before plain notes) carried facts converges on the next launch with no
+/// schema change.
 fn migration_0003_meeting_facts() -> String {
     r#"
 CREATE TABLE note_meetings (
