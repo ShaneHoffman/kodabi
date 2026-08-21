@@ -9,14 +9,22 @@
 //! can cache it (`crate::index`) and `get_note` can serve it without re-parsing
 //! the body or re-reading the JSONL per call.
 //!
-//! **Scope: meeting *and* chat notes** ([`derives_facts`]) — "chats are documents
-//! too" (FOUNDING_DOC §3.6), and a chat's commitments are as real as a meeting's.
-//! The `meeting` names here (this module, [`MeetingFacts`], the `note_meetings`
-//! table, `IndexedNote::meeting`) are historical: they predate the chat leg and
-//! were kept because the MCP wire object is still `meeting`/`MeetingMeta`, which
-//! stays meeting-only. The two session-derived scalars are the real divergence —
-//! they are always `None` for a chat, whose `source` is a chat transcript rather
-//! than a session recording.
+//! **Scope: every note type** ([`derives_facts`]) — "chats are documents too"
+//! (FOUNDING_DOC §3.6), and a commitment written by hand is as real as one a
+//! meeting produced. The `meeting` names here (this module, [`MeetingFacts`],
+//! the `note_meetings` table, `IndexedNote::meeting`) are historical: they
+//! predate both the chat leg and the hand-written one, and were kept because the
+//! MCP wire object is still `meeting`/`MeetingMeta`, which stays meeting-only.
+//!
+//! **Two grammars, chosen by type** ([`parse_body`]). A machine-rendered body
+//! (meeting, chat) round-trips through the distill grammar by construction —
+//! [`parse_action_line`] is documented as `render_body`'s exact inverse. A
+//! hand-written body (`note`) makes no such promise, so it gets the
+//! plain-checkbox grammar instead, which infers nothing from the line's text.
+//!
+//! The two session-derived scalars are the other divergence — they are `None`
+//! for anything but a meeting, whose `source` alone points at a session
+//! recording.
 //!
 //! Everything here is a pure function of the note's body + its session file, so a
 //! reindex reproduces it exactly — the index stays a rebuildable cache
@@ -26,7 +34,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::distill::{parse_action_line, UNASSIGNED_OWNER};
+use crate::distill::{parse_action_line, parse_checkbox_line, SELF_OWNER, UNASSIGNED_OWNER};
 use crate::note::{Note, NoteType, Source};
 use crate::raw_session::{self, TranscriptSegment};
 use crate::transcription::Channel;
@@ -79,19 +87,29 @@ pub struct ActionItemFact {
 /// of truth for the gate, mirrored in SQL by
 /// [`note_ids_missing_meeting_facts`](crate::index::NoteIndex::note_ids_missing_meeting_facts).
 ///
-/// The rule is *"is this body machine-rendered by [`crate::distill::render_body`]?"*
-/// [`parse_action_line`] is documented as that renderer's exact inverse, so a
-/// meeting body and a chat body round-trip through the grammar by construction.
+/// Every note type carries facts, but not by the same grammar — see
+/// [`parse_body`]. A machine-rendered body (meeting, chat) is read with the
+/// distill grammar; a hand-written one (`note`) is read with the plain-checkbox
+/// grammar.
 ///
-/// [`NoteType::Note`] is deliberately excluded: `quick_capture`
-/// ([`crate::capture`]) writes the user's text verbatim and never runs the distill
-/// pass, so nothing guarantees a `note` body follows the grammar. Since the parser
-/// takes everything before the *first* `" to "` as the owner, a hand-written
-/// `- [ ] Send the deck to Priya.` would index with owner `"Send the deck"` and
-/// description `"Priya"`. Hand-written commitments belong to the Phase 5
-/// commitment ledger, which can widen this deliberately.
+/// This returns `true` for every variant today, and is kept as a function rather
+/// than inlined because it is a *contract*, not a constant: it is the single
+/// source of truth a new note type must answer, and the SQL mirror above is
+/// pinned to it by a parity test.
+///
+/// [`NoteType::Note`] was excluded until the commitment ledger shipped, on the
+/// grounds that `quick_capture` ([`crate::capture`]) writes the user's text
+/// verbatim so nothing guarantees a `note` body follows the distill grammar —
+/// parsed by that grammar, a hand-written `- [ ] Send the deck to Priya.` would
+/// take everything before the first `" to "` as the owner and index with owner
+/// `"Send the deck"`. That argument is answered rather than overridden: a plain
+/// note is never read with the distill grammar at all, so the misparse it warned
+/// about cannot arise.
 pub fn derives_facts(note_type: NoteType) -> bool {
-    matches!(note_type, NoteType::Meeting | NoteType::Chat)
+    matches!(
+        note_type,
+        NoteType::Meeting | NoteType::Chat | NoteType::Note
+    )
 }
 
 /// Derives facts for a note, or `None` when its type carries none
@@ -135,7 +153,7 @@ pub fn derive_meeting_facts(
     body: &str,
     kb_root: &Path,
 ) -> MeetingFacts {
-    let (decisions, action_items) = parse_body(note_id, date, body);
+    let (decisions, action_items) = parse_body(note_id, note_type, date, body);
     let (duration_seconds, speaker_count) = if note_type == NoteType::Meeting {
         session_metrics(source, kb_root)
     } else {
@@ -156,11 +174,36 @@ enum Section {
     ActionItems,
 }
 
-/// Extracts the `## Decisions` bullets and `## Action items` lines from a note
-/// body. A `##` header switches the active section; any other `#`-header (e.g.
-/// `# Summary`) resets to `Other`, so only lines under the two named sections are
-/// collected. Unparseable action lines are skipped.
-fn parse_body(note_id: &str, date: &str, body: &str) -> (Vec<String>, Vec<ActionItemFact>) {
+/// Extracts a note's decisions and action items, by whichever of the two
+/// grammars its type is written in.
+///
+/// **Machine-rendered bodies** ([`NoteType::Meeting`], [`NoteType::Chat`]) use
+/// the distill grammar: a `##` header switches the active section; any other
+/// `#`-header (e.g. `# Summary`) resets to `Other`, so only lines under
+/// `## Decisions` and `## Action items` are collected, and each action line is
+/// split into owner / description / due date by [`parse_action_line`].
+/// Unparseable action lines are skipped.
+///
+/// **Hand-written bodies** ([`NoteType::Note`]) use the plain-checkbox grammar,
+/// and the two differences are both deliberate:
+///
+/// - *No sections.* Any `- [ ]` / `- [x]` line counts, wherever it sits. Quick
+///   capture writes the user's text with no headers at all, so requiring
+///   `## Action items` would exclude exactly the notes this grammar exists for.
+/// - *No owner split.* The whole line after the checkbox is the description and
+///   the owner is always [`SELF_OWNER`]. A plain note is the user's own
+///   scratchpad, and applying the distill grammar's `" to "` split to free text
+///   is the misparse [`derives_facts`] documents. Nothing else is inferred: no
+///   due date is parsed out of prose either.
+///
+/// A plain note has no decisions — `## Decisions` is a rendered-body construct,
+/// and inferring decisions from free text is not something a grammar can do.
+fn parse_body(
+    note_id: &str,
+    note_type: NoteType,
+    date: &str,
+    body: &str,
+) -> (Vec<String>, Vec<ActionItemFact>) {
     let extracted_date = date.get(..10).and_then(crate::distill::valid_iso_date);
 
     let mut decisions = Vec::new();
@@ -168,6 +211,33 @@ fn parse_body(note_id: &str, date: &str, body: &str) -> (Vec<String>, Vec<Action
     // Occurrences of each identical (owner, description, due) tuple seen so far,
     // so duplicate lines get distinct-but-stable ids.
     let mut occurrences: HashMap<(String, String, Option<String>), u32> = HashMap::new();
+
+    if note_type == NoteType::Note {
+        for raw_line in body.lines() {
+            let Some((rest, done)) = parse_checkbox_line(raw_line.trim()) else {
+                continue;
+            };
+            let description = rest.trim();
+            if description.is_empty() {
+                continue;
+            }
+            let description = description.to_string();
+            let key = (SELF_OWNER.to_string(), description.clone(), None);
+            let occurrence = occurrences.entry(key).or_insert(0);
+            let id = action_item_id(note_id, SELF_OWNER, &description, None, *occurrence);
+            *occurrence += 1;
+            action_items.push(ActionItemFact {
+                id,
+                description,
+                owner: SELF_OWNER.to_string(),
+                due_date: None,
+                done,
+                extracted_date: extracted_date.clone(),
+            });
+        }
+        return (decisions, action_items);
+    }
+
     let mut section = Section::Other;
 
     for raw_line in body.lines() {
@@ -230,16 +300,44 @@ fn parse_body(note_id: &str, date: &str, body: &str) -> (Vec<String>, Vec<Action
 /// The 0-based body line index of the action item with `item_id`, or `None` when
 /// no line in this body mints that id.
 ///
-/// Walks the body exactly as [`parse_body`] does — same section state machine,
-/// same occurrence counting — because the occurrence counter is what
-/// distinguishes two identical lines, so a walk that diverged from it would
-/// return the wrong line for the second of a duplicate pair.
+/// Walks the body exactly as [`parse_body`] does — **same grammar for the same
+/// `note_type`**, same section state machine, same occurrence counting — because
+/// the occurrence counter is what distinguishes two identical lines, so a walk
+/// that diverged from it would return the wrong line for the second of a
+/// duplicate pair. The two mode branches here mirror `parse_body`'s and must be
+/// kept in lockstep with them.
 ///
 /// `None` is an ordinary answer, not a failure: an item whose line has since
 /// been edited or deleted no longer exists in the body, and the caller
 /// (`vault::annotate_action_item`) treats annotating as best-effort.
-pub fn action_item_line(note_id: &str, body: &str, item_id: &str) -> Option<usize> {
+pub fn action_item_line(
+    note_id: &str,
+    note_type: NoteType,
+    body: &str,
+    item_id: &str,
+) -> Option<usize> {
     let mut occurrences: HashMap<(String, String, Option<String>), u32> = HashMap::new();
+
+    if note_type == NoteType::Note {
+        for (index, raw_line) in body.lines().enumerate() {
+            let Some((rest, _done)) = parse_checkbox_line(raw_line.trim()) else {
+                continue;
+            };
+            let description = rest.trim();
+            if description.is_empty() {
+                continue;
+            }
+            let key = (SELF_OWNER.to_string(), description.to_string(), None);
+            let occurrence = occurrences.entry(key).or_insert(0);
+            let id = action_item_id(note_id, SELF_OWNER, description, None, *occurrence);
+            *occurrence += 1;
+            if id == item_id {
+                return Some(index);
+            }
+        }
+        return None;
+    }
+
     let mut section = Section::Other;
 
     for (index, raw_line) in body.lines().enumerate() {
@@ -384,6 +482,18 @@ mod tests {
     use std::path::PathBuf;
     use tempfile::tempdir;
 
+    /// The distill-grammar parse. Every test that predates the plain-note
+    /// grammar exercises a machine-rendered body, so they name the type once
+    /// here rather than repeating it at each call.
+    fn parse_meeting(note_id: &str, date: &str, body: &str) -> (Vec<String>, Vec<ActionItemFact>) {
+        parse_body(note_id, NoteType::Meeting, date, body)
+    }
+
+    /// The distill-grammar reverse walk, paired with [`parse_meeting`].
+    fn meeting_item_line(note_id: &str, body: &str, item_id: &str) -> Option<usize> {
+        action_item_line(note_id, NoteType::Meeting, body, item_id)
+    }
+
     // --- action_item_line -------------------------------------------------
 
     const ANNOTATED_BODY: &str = "# Summary\n\nWe met.\n\n## Action items\n\n\
@@ -393,37 +503,37 @@ mod tests {
 
     #[test]
     fn action_item_line_finds_each_item_including_duplicates() {
-        let items = parse_body("n_aaaaaa", "2026-08-01", ANNOTATED_BODY).1;
+        let items = parse_meeting("n_aaaaaa", "2026-08-01", ANNOTATED_BODY).1;
         assert_eq!(items.len(), 3);
 
         // Body line indexes: 0 `# Summary`, 1 blank, 2 prose, 3 blank,
         // 4 `## Action items`, 5 blank, then the three items.
         assert_eq!(
-            action_item_line("n_aaaaaa", ANNOTATED_BODY, &items[0].id),
+            meeting_item_line("n_aaaaaa", ANNOTATED_BODY, &items[0].id),
             Some(6)
         );
         assert_eq!(
-            action_item_line("n_aaaaaa", ANNOTATED_BODY, &items[1].id),
+            meeting_item_line("n_aaaaaa", ANNOTATED_BODY, &items[1].id),
             Some(7)
         );
         // The duplicate resolves to the *second* occurrence's line, which only
         // the shared occurrence counting can get right.
         assert_eq!(
-            action_item_line("n_aaaaaa", ANNOTATED_BODY, &items[2].id),
+            meeting_item_line("n_aaaaaa", ANNOTATED_BODY, &items[2].id),
             Some(8)
         );
     }
 
     #[test]
     fn action_item_line_is_none_for_an_unknown_or_foreign_id() {
-        let items = parse_body("n_aaaaaa", "2026-08-01", ANNOTATED_BODY).1;
+        let items = parse_meeting("n_aaaaaa", "2026-08-01", ANNOTATED_BODY).1;
         assert_eq!(
-            action_item_line("n_aaaaaa", ANNOTATED_BODY, "a_notreal"),
+            meeting_item_line("n_aaaaaa", ANNOTATED_BODY, "a_notreal"),
             None
         );
         // Ids are scoped by note, so another note's id never matches here.
         assert_eq!(
-            action_item_line("n_bbbbbb", ANNOTATED_BODY, &items[0].id),
+            meeting_item_line("n_bbbbbb", ANNOTATED_BODY, &items[0].id),
             None
         );
     }
@@ -436,10 +546,137 @@ mod tests {
         let annotated = "## Action items\n\n- [ ] Priya to send the deck.\n  \
              - Closed 2026-08-17: PR merged (example.com/pull/42).\n";
 
-        let before = parse_body("n_aaaaaa", "2026-08-01", plain).1;
-        let after = parse_body("n_aaaaaa", "2026-08-01", annotated).1;
+        let before = parse_meeting("n_aaaaaa", "2026-08-01", plain).1;
+        let after = parse_meeting("n_aaaaaa", "2026-08-01", annotated).1;
         assert_eq!(before, after);
         assert_eq!(after.len(), 1, "the annotation minted no item");
+    }
+
+    // --- the plain-note grammar -------------------------------------------
+
+    #[test]
+    fn a_plain_note_takes_checkboxes_anywhere_as_the_users_own() {
+        // A quick capture: no frontmatter sections, no headers at all.
+        let body = "Called the bank, still waiting.\n\
+             - [ ] chase the wire\n\
+             \n\
+             Some other thought.\n\
+             - [x] book the flights\n";
+        let (decisions, items) = parse_body(NOTE_ID, NoteType::Note, "2026-07-09", body);
+
+        assert!(decisions.is_empty(), "a plain note renders no decisions");
+        assert_eq!(items.len(), 2, "both lines count, section or not");
+
+        assert_eq!(items[0].owner, SELF_OWNER);
+        assert_eq!(items[0].description, "chase the wire");
+        assert_eq!(items[0].due_date, None);
+        assert!(!items[0].done);
+        assert_eq!(items[0].extracted_date.as_deref(), Some("2026-07-09"));
+
+        assert_eq!(items[1].owner, SELF_OWNER);
+        assert_eq!(items[1].description, "book the flights");
+        assert!(items[1].done);
+    }
+
+    #[test]
+    fn a_plain_note_line_never_splits_on_to() {
+        // The exact misparse `derives_facts` documented as the reason plain
+        // notes were excluded: under the distill grammar this line indexes with
+        // owner "Send the deck" and description "Priya".
+        let body = "- [ ] Send the deck to Priya.";
+
+        let plain = parse_body(NOTE_ID, NoteType::Note, "2026-07-09", body).1;
+        assert_eq!(plain.len(), 1);
+        assert_eq!(plain[0].owner, SELF_OWNER);
+        assert_eq!(plain[0].description, "Send the deck to Priya.");
+        assert_eq!(plain[0].due_date, None);
+
+        // The same body read as a meeting still misparses, which is why the two
+        // grammars are separate rather than one widened one.
+        let as_meeting = parse_meeting(NOTE_ID, "2026-07-09", &format!("## Action items\n{body}"));
+        assert_eq!(as_meeting.1[0].owner, "Send the deck");
+    }
+
+    #[test]
+    fn a_plain_note_ignores_prose_and_bare_bullets() {
+        let body = "# A heading is just text here\n\
+             - a plain bullet\n\
+             - [] malformed\n\
+             -[ ] malformed\n\
+             - [X] uppercase is not the marker\n\
+             - [ ]\n\
+             - [ ]    \n";
+        let items = parse_body(NOTE_ID, NoteType::Note, "2026-07-09", body).1;
+        assert!(
+            items.is_empty(),
+            "only well-formed, non-empty checkbox lines count, got {items:?}"
+        );
+    }
+
+    #[test]
+    fn a_closure_annotation_is_inert_in_a_plain_note() {
+        // `vault::annotate_action_item` writes its line into whatever note the
+        // item lives in, so the plain grammar has to skip it too. It does by
+        // construction: `- Closed ` is neither checkbox marker.
+        let plain = "- [ ] chase the wire\n";
+        let annotated = "- [ ] chase the wire\n  - Closed 2026-08-17: paid.\n";
+
+        let before = parse_body(NOTE_ID, NoteType::Note, "2026-07-09", plain).1;
+        let after = parse_body(NOTE_ID, NoteType::Note, "2026-07-09", annotated).1;
+        assert_eq!(before, after, "ids and all");
+        assert_eq!(after.len(), 1, "the annotation minted no item");
+    }
+
+    #[test]
+    fn plain_note_duplicates_get_distinct_but_stable_ids() {
+        let body = "- [ ] chase the wire\n- [ ] chase the wire\n";
+        let first = parse_body(NOTE_ID, NoteType::Note, "2026-07-09", body).1;
+        let second = parse_body(NOTE_ID, NoteType::Note, "2026-07-09", body).1;
+
+        assert_eq!(first.len(), 2);
+        assert_ne!(first[0].id, first[1].id);
+        assert_eq!(first, second, "stable across a re-derivation");
+    }
+
+    #[test]
+    fn action_item_line_walks_the_plain_grammar() {
+        let body = "Notes.\n\
+             - [ ] chase the wire\n\
+             prose in between\n\
+             - [ ] chase the wire\n";
+        let items = parse_body(NOTE_ID, NoteType::Note, "2026-07-09", body).1;
+        assert_eq!(items.len(), 2);
+
+        assert_eq!(
+            action_item_line(NOTE_ID, NoteType::Note, body, &items[0].id),
+            Some(1)
+        );
+        // The duplicate resolves to its own line, which only the shared
+        // occurrence counting gets right.
+        assert_eq!(
+            action_item_line(NOTE_ID, NoteType::Note, body, &items[1].id),
+            Some(3)
+        );
+        assert_eq!(
+            action_item_line(NOTE_ID, NoteType::Note, body, "a_notreal"),
+            None
+        );
+    }
+
+    #[test]
+    fn the_two_grammars_do_not_read_each_others_bodies() {
+        // A meeting body's items are invisible to the plain grammar unless they
+        // happen to be checkbox lines (they are, but they parse whole), and a
+        // plain body's items are invisible to the meeting grammar (no section).
+        let meeting_body = "## Action items\n\n- [ ] Jane to send the memo.";
+        let plain_read = parse_body(NOTE_ID, NoteType::Note, "2026-07-09", meeting_body).1;
+        assert_eq!(plain_read.len(), 1);
+        assert_eq!(plain_read[0].owner, SELF_OWNER);
+        assert_eq!(plain_read[0].description, "Jane to send the memo.");
+
+        let plain_body = "- [ ] chase the wire";
+        let meeting_read = parse_meeting(NOTE_ID, "2026-07-09", plain_body).1;
+        assert!(meeting_read.is_empty(), "no section, no items");
     }
 
     fn segment(index: u64, channel: Channel, start_ms: u64, end_ms: u64) -> TranscriptSegment {
@@ -488,7 +725,7 @@ The team met.
 - [ ] Jane to send the memo by 2026-07-15.
 - [x] Priya to book the room.
 - [ ] Unassigned to circulate the notes.";
-        let (_, items) = parse_body(NOTE_ID, "2026-07-09", body);
+        let (_, items) = parse_meeting(NOTE_ID, "2026-07-09", body);
 
         assert_eq!(items.len(), 3);
         assert_eq!(items[0].owner, "Jane");
@@ -523,7 +760,7 @@ Body text.
 ## Open questions
 
 - What about docs?";
-        let (decisions, items) = parse_body(NOTE_ID, "2026-07-09", body);
+        let (decisions, items) = parse_meeting(NOTE_ID, "2026-07-09", body);
 
         assert_eq!(decisions, vec!["Ship on Friday", "Freeze the API"]);
         // The action item and the open question do not leak into decisions.
@@ -537,8 +774,8 @@ Body text.
 
 - [ ] Jane to send the memo.
 - [ ] Jane to send the memo.";
-        let (_, first) = parse_body(NOTE_ID, "2026-07-09", body);
-        let (_, second) = parse_body(NOTE_ID, "2026-07-09", body);
+        let (_, first) = parse_meeting(NOTE_ID, "2026-07-09", body);
+        let (_, second) = parse_meeting(NOTE_ID, "2026-07-09", body);
 
         assert_eq!(first.len(), 2);
         // Distinct within the note...
@@ -551,8 +788,8 @@ Body text.
     #[test]
     fn ids_are_well_formed_and_scoped_by_note() {
         let body = "## Action items\n\n- [ ] Jane to send the memo by 2026-07-15.";
-        let (_, a) = parse_body("n_aaaaaa", "2026-07-09", body);
-        let (_, b) = parse_body("n_bbbbbb", "2026-07-09", body);
+        let (_, a) = parse_meeting("n_aaaaaa", "2026-07-09", body);
+        let (_, b) = parse_meeting("n_bbbbbb", "2026-07-09", body);
 
         let id = &a[0].id;
         let suffix = id.strip_prefix("a_").expect("a_ prefix");
@@ -570,7 +807,7 @@ Body text.
     #[test]
     fn a_description_containing_to_and_by_is_not_misparsed() {
         let body = "## Action items\n\n- [ ] Priya to talk to finance by phone by 2026-08-01.";
-        let (_, items) = parse_body(NOTE_ID, "2026-07-09", body);
+        let (_, items) = parse_meeting(NOTE_ID, "2026-07-09", body);
 
         assert_eq!(items[0].owner, "Priya");
         assert_eq!(items[0].description, "talk to finance by phone");
@@ -693,21 +930,35 @@ Body text.
     }
 
     #[test]
-    fn facts_are_derived_for_the_types_whose_bodies_the_distill_pass_renders() {
-        assert!(derives_facts(NoteType::Meeting));
-        assert!(derives_facts(NoteType::Chat));
-        // Deliberate: a `note` body is written verbatim by quick capture and
-        // never passes through `distill::render_body`, so nothing guarantees it
-        // follows the grammar `parse_action_line` inverts.
-        assert!(!derives_facts(NoteType::Note));
+    fn facts_are_derived_for_every_note_type() {
+        // A `note` body joined the list when the commitment ledger widened to
+        // hand-written commitments. It is not read with the distill grammar —
+        // it gets the plain-checkbox one — so the misparse that kept it out is
+        // answered rather than accepted.
+        for note_type in [NoteType::Meeting, NoteType::Chat, NoteType::Note] {
+            assert!(derives_facts(note_type), "{note_type:?} must derive facts");
+        }
     }
 
     #[test]
-    fn facts_are_not_derived_for_a_plain_note() {
+    fn a_plain_notes_facts_come_from_the_plain_grammar() {
         let kb = PathBuf::from(".");
         let note = note_of("n_note01", NoteType::Note, "quick-capture");
 
-        assert_eq!(meeting_facts_for(&note, &kb), None);
+        let facts = meeting_facts_for(&note, &kb).expect("a plain note carries facts");
+        // The shared fixture body is meeting-shaped, which is the point: read
+        // with the plain grammar its headers are inert, its checkbox line is
+        // the user's own, and its `## Decisions` bullet is not a decision.
+        assert!(facts.decisions.is_empty());
+        assert_eq!(facts.action_items.len(), 1);
+        assert_eq!(facts.action_items[0].owner, SELF_OWNER);
+        assert_eq!(
+            facts.action_items[0].description, "Jane to do the thing.",
+            "no owner split, no terminal period peeled"
+        );
+        // Session scalars are meeting-only, as for a chat.
+        assert_eq!(facts.duration_seconds, None);
+        assert_eq!(facts.speaker_count, None);
     }
 
     #[test]

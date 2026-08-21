@@ -158,19 +158,20 @@ pub fn reconcile(
     Ok(report)
 }
 
-/// Derives and stores meeting facts for every fact-carrying note (meeting or
-/// chat, per `meeting::derives_facts`) the index has not backfilled yet,
-/// returning the ids it filled (the count is `.len()`, and the ids are what the
-/// ledger's ingest needs). The meeting-facts counterpart to the caller's
-/// embedding backfill (`note_ids_missing_embeddings` then `reconcile_missing`):
+/// Derives and stores meeting facts for every fact-carrying note — a meeting, a
+/// chat or a plain note, per `meeting::derives_facts` — the index has not
+/// backfilled yet, returning the ids it filled (the count is `.len()`, and the
+/// ids are what the ledger's ingest needs). The meeting-facts counterpart to the
+/// caller's embedding backfill (`note_ids_missing_embeddings` then `reconcile_missing`):
 /// the v3 migration adds the meeting tables empty, and `reconcile`'s fast path
 /// skips an unchanged note, so existing notes carry no facts until this runs.
 ///
 /// Works from the stored row (`body`, `source`, `date`, `type`) plus the session
 /// file — it never re-reads the `.md`. A row that vanished between the scan and
 /// now, or whose stored `source` no longer parses, is skipped. Like `reconcile`,
-/// this is rows-only and holds no embedder. A chat is body-parse only: its type
-/// suppresses the session read (see `meeting::derive_meeting_facts`).
+/// this is rows-only and holds no embedder. Only a meeting reads a session file
+/// at all: every other type is body-parse only, its type suppressing the session
+/// read and choosing the grammar (see `meeting::derive_meeting_facts`).
 pub fn reconcile_missing_meeting_facts(
     vault_root: &Path,
     index: &mut NoteIndex,

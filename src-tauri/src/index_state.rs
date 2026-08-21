@@ -35,6 +35,8 @@ use kodabi_core::ledger::OwnerIdentity;
 use kodabi_core::reconcile;
 use kodabi_core::settings::CategorySettings;
 use kodabi_core::watch::{self, VaultWatcher};
+
+use chrono::Utc;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::events::{INDEX_STATE_EVENT, VAULT_CHANGED_EVENT};
@@ -152,6 +154,59 @@ fn forward_reconciled(
     ledger.sync_batch(batch);
 }
 
+/// Forwards a *backfill* pass's notes, which is the same thing with one filter:
+/// a hand-written note older than the enrolment window does not enrol.
+///
+/// The window exists because the two backfill legs are the only ones that hand
+/// the ledger notes nobody just touched. A note the reconcile upserted changed
+/// on disk, so it is a fresh mention whatever its date, and
+/// [`forward_reconciled`] stays unwindowed for exactly that reason. A backfill
+/// leg, by contrast, sweeps whatever the vault happens to hold — and when
+/// `derives_facts` widened to plain notes, that became every checkbox the user
+/// ever wrote. Enrolling a to-do from eight months ago is honest and useless: it
+/// arrives already past the stale threshold, sorting above everything current.
+///
+/// Meetings and chats are deliberately *not* windowed: they have been forwarded
+/// unconditionally since the v3 migration shipped, and narrowing that now would
+/// silently drop commitments from field databases mid-backfill.
+fn forward_backfilled(
+    index: &Mutex<NoteIndex>,
+    ledger: &LedgerHandle,
+    ids: &[String],
+    settings: &EnrolmentSettings,
+) {
+    if ids.is_empty() {
+        return;
+    }
+    let cutoff = kodabi_core::ledger::mention_window_cutoff(Utc::now(), settings.stale_after_days);
+    let idx = lock(index);
+    let batch: Vec<NoteFacts> = ids
+        .iter()
+        .filter(|id| {
+            // A row we cannot read is left to `note_facts_from` to drop, so it
+            // is not excluded here.
+            match idx.get_note(id) {
+                Ok(Some(row)) => backfill_enrols(row.note_type, &row.date_utc, &cutoff),
+                _ => true,
+            }
+        })
+        .filter_map(|id| note_facts_from(&idx, id, settings))
+        .collect();
+    drop(idx);
+    ledger.sync_batch(batch);
+}
+
+/// The enrolment window's one rule, split out so it can be read and tested on
+/// its own: a hand-written note enrols only from inside the window; a meeting or
+/// a chat always does.
+fn backfill_enrols(
+    note_type: kodabi_core::index::NoteType,
+    date_utc: &str,
+    cutoff_utc: &str,
+) -> bool {
+    note_type != kodabi_core::index::NoteType::Note || date_utc >= cutoff_utc
+}
+
 /// The user settings a note has to be read against before it reaches the
 /// ledger: the enrollment chain's category slot, and the names that decide
 /// which of its owners mean the local user.
@@ -161,6 +216,9 @@ fn forward_reconciled(
 pub(crate) struct EnrolmentSettings {
     categories: CategorySettings,
     identity: OwnerIdentity,
+    /// The aging config's stale threshold, doubling as the enrolment window for
+    /// the backfill legs (`forward_backfilled`, `seed_ledger_from_index`).
+    stale_after_days: u32,
 }
 
 impl EnrolmentSettings {
@@ -184,6 +242,7 @@ pub(crate) fn enrolment_settings(app: &AppHandle) -> EnrolmentSettings {
     EnrolmentSettings {
         categories: settings.categories,
         identity: settings.identity.owner_identity(),
+        stale_after_days: settings.ledger.stale_after_days.get(),
     }
 }
 
@@ -543,6 +602,14 @@ fn run_reconcile(
                     report.upserted, report.unchanged, report.deleted
                 );
             }
+            // Claimed *before* either forward below queues a batch. The answer
+            // is settled by `RestoreIfEmpty`, the ledger worker's first job, so
+            // asking early cannot change it — but asking late puts a blocking
+            // round trip behind a whole-vault sync, and the reply timeout is
+            // finite. A timed-out reply still consumes the flag on the worker
+            // side, and the batch it waited on has by then made the ledger
+            // non-empty, so no later launch would ever re-offer the seed.
+            let owes_seed = ledger.take_startup_backfill();
             // Every note whose facts were re-derived, plus every note that left
             // the vault, reaches the ledger before the embed sweep — the
             // commitments matter more than the vectors, and the sweep is slow.
@@ -555,10 +622,17 @@ fn run_reconcile(
             for id in &report.deleted_ids {
                 ledger.note_gone(id);
             }
-            // Meeting notes skipped by the fast path (unchanged on disk) still
-            // need their facts derived after the v3 migration — backfill them.
+            // Notes skipped by the fast path (unchanged on disk) still need
+            // their facts derived after the v3 migration — backfill them.
             let backfilled = backfill_meeting_facts(index, root);
-            forward_reconciled(index, ledger, &backfilled, &enrolment_settings(app));
+            forward_backfilled(index, ledger, &backfilled, &enrolment_settings(app));
+            // A ledger that came up empty gets seeded from the index, which by
+            // now holds facts for every note in the vault. Run after the two
+            // forwards above so those facts exist to be read, even though the
+            // question itself was asked before them.
+            if owes_seed {
+                seed_ledger_from_index(index, ledger, &enrolment_settings(app));
+            }
             if let Some(embedder) = embedder {
                 reconcile_missing(index, embedder);
             }
@@ -610,7 +684,7 @@ fn run_rebuild(
                 ledger.note_gone(id);
             }
             let backfilled = backfill_meeting_facts(index, root);
-            forward_reconciled(index, ledger, &backfilled, &enrolment_settings(app));
+            forward_backfilled(index, ledger, &backfilled, &enrolment_settings(app));
             if let Some(embedder) = embedder {
                 reconcile_missing(index, embedder);
             }
@@ -641,12 +715,14 @@ fn run_rebuild(
     }
 }
 
-/// Derives meeting facts for any meeting or chat note the index has not
-/// backfilled yet (`meeting::derives_facts`). Independent of embeddings (needs no
-/// embedder): the v3 migration adds the meeting tables empty and a reconcile
-/// fast-path skips unchanged notes, so a field database's existing notes need one
-/// derive pass. Best-effort — a failure is logged and the next sweep retries.
-/// Fast (a meeting is one small JSONL read; a chat is body-parse only), so it
+/// Derives facts for any fact-carrying note the index has not backfilled yet
+/// (`meeting::derives_facts`, which is now every type). Independent of
+/// embeddings (needs no embedder): the v3 migration adds the meeting tables
+/// empty and a reconcile fast-path skips unchanged notes, so a field database's
+/// existing notes need one derive pass — and widening `derives_facts` to plain
+/// notes puts every hand-written note through that same pass once.
+/// Best-effort — a failure is logged and the next sweep retries. Fast (a meeting
+/// is one small JSONL read; a chat or a plain note is body-parse only), so it
 /// runs under the index lock like `reconcile` itself.
 /// Returns the ids it filled, so the caller can forward them to the ledger.
 fn backfill_meeting_facts(index: &Mutex<NoteIndex>, vault_root: &Path) -> Vec<String> {
@@ -663,6 +739,64 @@ fn backfill_meeting_facts(index: &Mutex<NoteIndex>, vault_root: &Path) -> Vec<St
             Vec::new()
         }
     }
+}
+
+/// Enrols the commitments an existing vault already holds, into a ledger that
+/// came up empty.
+///
+/// **Why anything is needed at all.** Every other route into the ledger is
+/// triggered by a note *changing*. On the first launch after the ledger shipped
+/// — or after `ledger.db` is lost, with the snapshots gone too — nothing has
+/// changed: the reconcile's fast path skips every unchanged note, so
+/// `upserted_ids` is empty, and the meeting-facts backfill finds every row
+/// already present. The vault is full of open commitments and the ledger stays
+/// empty forever, because "forever" is however long it takes each note to be
+/// edited again.
+///
+/// **Why it is windowed.** Only notes inside the enrolment window
+/// (`mention_window_cutoff`, the stale threshold) are enrolled. A vault holds
+/// months of notes, and their old open items are precisely the ones that would
+/// arrive already stale and sort above everything the user is actually working
+/// on — day one would be a wall of other people's forgotten business. The
+/// window is the difference between a ledger that is useful on day one and one
+/// that gets ignored on day one.
+///
+/// Open items only, by the query. `last_mention` comes from each note's own
+/// date through the ordinary facts path, so the aging tiers place a backfilled
+/// commitment exactly where its note sits in time rather than treating it as
+/// minted today.
+///
+/// Best-effort and idempotent: `sync_note_items` converges, so a redundant seed
+/// costs transactions and changes nothing.
+fn seed_ledger_from_index(
+    index: &Mutex<NoteIndex>,
+    ledger: &LedgerHandle,
+    settings: &EnrolmentSettings,
+) {
+    let cutoff = kodabi_core::ledger::mention_window_cutoff(Utc::now(), settings.stale_after_days);
+    let idx = lock(index);
+    let ids = match idx.note_ids_with_open_items_since(&cutoff) {
+        Ok(ids) => ids,
+        Err(err) => {
+            drop(idx);
+            eprintln!("ledger backfill: could not list recent open items: {err}");
+            return;
+        }
+    };
+    let batch: Vec<NoteFacts> = ids
+        .iter()
+        .filter_map(|id| note_facts_from(&idx, id, settings))
+        .collect();
+    drop(idx);
+
+    if batch.is_empty() {
+        return;
+    }
+    eprintln!(
+        "ledger backfill: enrolling commitments from {} note(s) since {cutoff}",
+        batch.len()
+    );
+    ledger.sync_batch(batch);
 }
 
 /// Upserts `note` and refreshes its embeddings, embedding *off* the index lock.
@@ -865,4 +999,42 @@ fn build_embedder(app: &AppHandle) -> Option<Arc<dyn Embedder>> {
 #[cfg(not(feature = "embed"))]
 fn build_embedder(_app: &AppHandle) -> Option<Arc<dyn Embedder>> {
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kodabi_core::index::NoteType;
+
+    const CUTOFF: &str = "2026-07-18T12:00:00Z";
+
+    #[test]
+    fn the_backfill_window_holds_back_only_old_hand_written_notes() {
+        // The case the window exists for: a to-do the user wrote months ago,
+        // which would arrive already past the stale threshold and sort above
+        // everything they are actually working on.
+        assert!(!backfill_enrols(
+            NoteType::Note,
+            "2026-01-05T00:00:00Z",
+            CUTOFF
+        ));
+        // A recent one is exactly what it should catch.
+        assert!(backfill_enrols(
+            NoteType::Note,
+            "2026-08-01T00:00:00Z",
+            CUTOFF
+        ));
+        // The boundary is inclusive.
+        assert!(backfill_enrols(NoteType::Note, CUTOFF, CUTOFF));
+
+        // Meetings and chats have been forwarded unconditionally since the
+        // meeting-facts backfill shipped; narrowing that now would silently
+        // drop commitments from a field database mid-backfill.
+        for note_type in [NoteType::Meeting, NoteType::Chat] {
+            assert!(
+                backfill_enrols(note_type, "2025-01-01T00:00:00Z", CUTOFF),
+                "{note_type:?} is never windowed"
+            );
+        }
+    }
 }

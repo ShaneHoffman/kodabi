@@ -151,9 +151,9 @@ Canonical key order the writer emits: **`id, type, category, tracking, title, pr
   returning a meeting to inheriting; hand-deleting the key still does it.
 
   Called *per-meeting* because that is what the surface offers and what the word means to a reader,
-  but unlike `category` it is **not restricted to `type: meeting`**: a chat carries action items and
-  feeds the ledger the same way (`meeting::derives_facts`), so the same override has to be able to
-  apply to one. Nothing writes it on a chat today.
+  but unlike `category` it is **not restricted to `type: meeting`**: every note type carries action
+  items and feeds the ledger the same way (`meeting::derives_facts`), so the same override has to be
+  able to apply to any of them. Nothing writes it on a chat or a plain note today.
 
   It lives here rather than in the ledger database because it is a judgement about the *note*, so it
   travels with the file: a re-route, a vault rebuild, or a sync to another machine all carry it for

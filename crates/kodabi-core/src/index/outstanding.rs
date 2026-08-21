@@ -8,9 +8,9 @@
 //! and the source `NoteRef`.
 //!
 //! The join carries **no `notes.type` predicate**, deliberately: a commitment is
-//! a commitment whether it was made in a meeting or in a chat, so chat-sourced
-//! items surface here beside meeting-sourced ones (FOUNDING_DOC §3.6, "chats are
-//! documents too"). Which types produce rows at all is decided once, upstream, by
+//! a commitment whether it was made in a meeting, in a chat, or written by hand,
+//! so all three surface here together (FOUNDING_DOC §3.6, "chats are documents
+//! too"). Which types produce rows at all is decided once, upstream, by
 //! [`crate::meeting::derives_facts`] — not a second time here.
 //!
 //! # Status is filtered in SQL and rendered in Rust

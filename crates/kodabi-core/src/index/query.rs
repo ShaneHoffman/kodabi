@@ -122,7 +122,7 @@ impl NoteIndex {
 
     /// Writes (or clears, with `None`) a note's meeting facts in its own
     /// transaction. The meeting-facts backfill's entry point: it derives facts
-    /// for an already-indexed meeting or chat note
+    /// for an already-indexed fact-carrying note
     /// (`note_ids_missing_meeting_facts`) without re-running a full
     /// [`upsert_note`](NoteIndex::upsert_note).
     pub fn set_meeting_facts(&mut self, note_id: &str, facts: Option<&MeetingFacts>) -> Result<()> {
@@ -421,12 +421,38 @@ impl NoteIndex {
     pub fn note_ids_missing_meeting_facts(&self) -> Result<Vec<String>> {
         let mut stmt = self.conn.prepare(
             "SELECT id FROM notes
-             WHERE type IN ('meeting', 'chat')
+             WHERE type IN ('meeting', 'chat', 'note')
                AND id NOT IN (SELECT note_id FROM note_meetings)
              ORDER BY id",
         )?;
         let ids = stmt
             .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        Ok(ids)
+    }
+
+    /// Note ids carrying at least one *open* action item, dated on or after
+    /// `cutoff_utc`, ordered by `id` — the commitment ledger's first-run
+    /// backfill work list.
+    ///
+    /// `cutoff_utc` is an RFC 3339 UTC instant (`Z`), compared lexically against
+    /// the stored `date_utc`, which is normalized for exactly that
+    /// (`normalize_date_to_utc`): a text sort is a time sort.
+    ///
+    /// Only open items count. A note whose every box is ticked carries no
+    /// commitment worth enrolling, and the ledger declines a never-seen-before
+    /// ticked item anyway — filtering here keeps whole notes out of the batch
+    /// rather than round-tripping them to be declined one item at a time.
+    pub fn note_ids_with_open_items_since(&self, cutoff_utc: &str) -> Result<Vec<String>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT DISTINCT notes.id FROM notes
+             JOIN note_action_items ON note_action_items.note_id = notes.id
+             WHERE note_action_items.done = 0
+               AND notes.date_utc >= ?1
+             ORDER BY notes.id",
+        )?;
+        let ids = stmt
+            .query_map([cutoff_utc], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<String>>>()?;
         Ok(ids)
     }
@@ -665,7 +691,7 @@ mod tests {
     }
 
     #[test]
-    fn note_ids_missing_meeting_facts_lists_unbackfilled_meetings_and_chats() {
+    fn note_ids_missing_meeting_facts_lists_every_unbackfilled_fact_carrying_note() {
         let mut index = NoteIndex::open_in_memory().unwrap();
         // A meeting note with no facts derived yet — the backfill's target.
         index
@@ -680,14 +706,87 @@ mod tests {
         let mut chat = note("n_chat01", Some("Growth"), "2026-07-10");
         chat.note_type = NoteType::Chat;
         index.upsert_note(&chat).unwrap();
-        // A plain note is never in the list.
+        // A plain note is a target too since the ledger widened to hand-written
+        // commitments: its checkbox lines are read with the plain grammar.
         let mut plain = note("n_note01", Some("Growth"), "2026-07-10");
         plain.note_type = NoteType::Note;
         index.upsert_note(&plain).unwrap();
 
         assert_eq!(
             index.note_ids_missing_meeting_facts().unwrap(),
-            vec!["n_bare01".to_string(), "n_chat01".to_string()]
+            vec![
+                "n_bare01".to_string(),
+                "n_chat01".to_string(),
+                "n_note01".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn note_ids_with_open_items_since_filters_by_date_and_done() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+
+        let open_item = |description: &str, done: bool| ActionItemFact {
+            id: format!("a_{description}"),
+            description: description.to_string(),
+            owner: "You".to_string(),
+            due_date: None,
+            done,
+            extracted_date: None,
+        };
+        let with_items = |id: &str, date: &str, items: Vec<ActionItemFact>| {
+            let mut input = note(id, Some("Growth"), date);
+            input.meeting = Some(MeetingFacts {
+                duration_seconds: None,
+                speaker_count: None,
+                decisions: Vec::new(),
+                action_items: items,
+            });
+            input
+        };
+
+        // In: recent, and something is still open.
+        index
+            .upsert_note(&with_items(
+                "n_recent1",
+                "2026-07-10",
+                vec![open_item("chase the wire", false)],
+            ))
+            .unwrap();
+        // Out: recent, but every box is ticked.
+        index
+            .upsert_note(&with_items(
+                "n_recent2",
+                "2026-07-10",
+                vec![open_item("already handled", true)],
+            ))
+            .unwrap();
+        // Out: still open, but older than the window.
+        index
+            .upsert_note(&with_items(
+                "n_old0001",
+                "2026-01-05",
+                vec![open_item("ancient business", false)],
+            ))
+            .unwrap();
+        // Out: recent, but carries no items at all.
+        index
+            .upsert_note(&note("n_recent3", Some("Growth"), "2026-07-10"))
+            .unwrap();
+        // In: mixed, and the one open item is enough.
+        index
+            .upsert_note(&with_items(
+                "n_mixed01",
+                "2026-07-10",
+                vec![open_item("done bit", true), open_item("open bit", false)],
+            ))
+            .unwrap();
+
+        assert_eq!(
+            index
+                .note_ids_with_open_items_since("2026-06-01T00:00:00Z")
+                .unwrap(),
+            vec!["n_mixed01".to_string(), "n_recent1".to_string()]
         );
     }
 

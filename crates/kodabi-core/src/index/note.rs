@@ -172,7 +172,7 @@ pub struct IndexedNote {
     /// Note body (frontmatter stripped) — the full-text search content.
     pub body: String,
     /// Structured facts (decisions, action items, and for a meeting the duration
-    /// and speaker count) for a meeting or chat note, or `None` for a type that
+    /// and speaker count) for a fact-carrying note, or `None` for a type that
     /// carries none (see [`crate::meeting::derives_facts`]) or when the caller has
     /// not derived them. Historical field name, matching the MCP wire object,
     /// which stays meeting-only.

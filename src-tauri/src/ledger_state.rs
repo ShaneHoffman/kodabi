@@ -43,8 +43,9 @@ use kodabi_core::ledger::{
 };
 use kodabi_core::meeting::ActionItemFact;
 use kodabi_core::note::INBOX;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager};
 
+use crate::events::LEDGER_CHANGED_EVENT;
 use crate::transcribe::knowledge_base_dir;
 
 /// Quiet period after the last change before snapshots are written.
@@ -167,6 +168,9 @@ enum LedgerJob {
     NoteGone(String),
     /// Rebuild from the vault's snapshots, but only into an empty database.
     RestoreIfEmpty,
+    /// Answer whether this session still owes a first-run backfill, and clear
+    /// the flag. See [`LedgerHandle::take_startup_backfill`].
+    TakeStartupBackfill { reply: Sender<bool> },
     /// Graduate any tracking override still parked in the legacy
     /// `ledger_note_overrides` table into its note's frontmatter.
     DrainLegacyOverrides,
@@ -261,7 +265,12 @@ pub struct LedgerState {
 /// A cloneable write handle, for the index worker to forward facts through.
 ///
 /// Every method is fire-and-forget and silently no-ops when the ledger is
-/// unavailable, so the index worker never has to branch on it.
+/// unavailable, so the index worker never has to branch on it — with the single
+/// exception of [`take_startup_backfill`](LedgerHandle::take_startup_backfill),
+/// which asks a question and therefore has to wait for the answer. It is safe
+/// for the index worker to block on: it is asked once per session, from that
+/// worker's own thread, and it answers `false` rather than hanging if the ledger
+/// never opened.
 #[derive(Clone)]
 pub struct LedgerHandle(Option<Sender<LedgerJob>>);
 
@@ -282,6 +291,38 @@ impl LedgerHandle {
     /// Tells the ledger a note is gone from the vault.
     pub fn note_gone(&self, note_id: &str) {
         self.send(LedgerJob::NoteGone(note_id.to_string()));
+    }
+
+    /// Whether this session still owes a first-run backfill — claimed, so it
+    /// answers `true` at most once.
+    ///
+    /// The handshake exists because neither worker can answer the question
+    /// alone: only the ledger worker knows whether the database came up empty,
+    /// and only the index worker can read the notes that would fill it. FIFO
+    /// order is what makes the answer trustworthy — `RestoreIfEmpty` is queued
+    /// before any handle escapes `initialize`, so by the time this request is
+    /// served the restore has already run and set the flag.
+    ///
+    /// `false` on an unavailable ledger or a worker that does not answer
+    /// within `REPLY_TIMEOUT`, because a blocked index worker would stall the
+    /// whole reconcile. A timed-out answer is **not** free: the worker serves
+    /// the request regardless and clears the flag, and by the next launch the
+    /// ledger may no longer be empty, so the seed would never be re-offered.
+    /// The caller therefore asks this *before* queueing any batch of its own —
+    /// see `index_state::run_reconcile` — which is what keeps the wait a bare
+    /// round trip on an otherwise idle queue.
+    pub fn take_startup_backfill(&self) -> bool {
+        let Some(sender) = &self.0 else {
+            return false;
+        };
+        let (reply, answers) = mpsc::channel();
+        if sender
+            .send(LedgerJob::TakeStartupBackfill { reply })
+            .is_err()
+        {
+            return false;
+        }
+        answers.recv_timeout(REPLY_TIMEOUT).unwrap_or(false)
     }
 
     fn send(&self, job: LedgerJob) {
@@ -439,8 +480,21 @@ impl LedgerState {
         let vault_root = knowledge_base_dir(app).ok();
 
         let (sender, jobs) = mpsc::channel::<LedgerJob>();
+        // The worker's voice. Machine ingest reaches this database with no
+        // command in flight, so without this a re-file, a delete, or a watcher
+        // reconcile would leave an open Commitments view showing yesterday.
+        let announcer = app.clone();
         std::thread::spawn(move || {
-            run_worker(jobs, ledger, vault_root, SNAPSHOT_QUIET, SNAPSHOT_MAX_DELAY)
+            run_worker(
+                jobs,
+                ledger,
+                vault_root,
+                SNAPSHOT_QUIET,
+                SNAPSHOT_MAX_DELAY,
+                move || {
+                    let _ = announcer.emit(LEDGER_CHANGED_EVENT, ());
+                },
+            )
         });
 
         // Queued before any handle escapes this function, so it is the worker's
@@ -547,16 +601,26 @@ fn now_utc() -> String {
 /// timers and reads no clock. Parameterized on both intervals so a test can
 /// drive it with short ones over an injected channel, the shape
 /// `watch::run_debounce` established.
+///
+/// `on_changed` announces machine ingest to the rest of the app — see
+/// [`handle_job`] for which jobs count and why the worker is the one that
+/// speaks. It is called with no lock held and after the write has committed.
 fn run_worker(
     jobs: Receiver<LedgerJob>,
     mut ledger: Ledger,
     vault_root: Option<PathBuf>,
     quiet: Duration,
     max_delay: Duration,
+    on_changed: impl Fn(),
 ) {
     // When the oldest un-flushed change arrived, and the most recent one.
     let mut oldest: Option<Instant> = None;
     let mut newest: Option<Instant> = None;
+    // Whether this session still owes a first-run backfill. Set once by
+    // `RestoreIfEmpty` (the first job queued), read once by the index worker
+    // through `take_startup_backfill`. A worker local rather than shared state
+    // because FIFO order over this channel is what makes the answer meaningful.
+    let mut backfill_pending = false;
 
     loop {
         let deadline = oldest.zip(newest).map(|(oldest, newest)| {
@@ -571,8 +635,16 @@ fn run_worker(
         match received {
             Ok(job) => {
                 let pending_before = ledger.dirty_projects().len();
-                let stop = handle_job(&mut ledger, vault_root.as_deref(), job);
+                let changed = handle_job(
+                    &mut ledger,
+                    vault_root.as_deref(),
+                    &mut backfill_pending,
+                    job,
+                );
                 let pending_after = ledger.dirty_projects().len();
+                if changed {
+                    on_changed();
+                }
 
                 // Only a *newly* dirtied project extends the quiet window. A
                 // further change to a project already queued needs no extension:
@@ -594,9 +666,6 @@ fn run_worker(
                     oldest = None;
                     newest = None;
                 }
-                if stop {
-                    return;
-                }
             }
             Err(RecvTimeoutError::Timeout) => {
                 flush_snapshots(&mut ledger, vault_root.as_deref());
@@ -612,26 +681,49 @@ fn run_worker(
     }
 }
 
-/// Runs one job. Returns whether the worker should stop.
-fn handle_job(ledger: &mut Ledger, vault_root: Option<&Path>, job: LedgerJob) -> bool {
+/// Runs one job. Returns whether it wrote something the rest of the app should
+/// hear about, i.e. whether to announce `ledger:changed`.
+///
+/// **The rule: a job with no reply channel is machine ingest, and the worker
+/// announces it; a job carrying a reply belongs to a command, which announces
+/// for itself once it has the answer.** Machine ingest has no other voice — the
+/// watcher's reconcile, a re-file's re-sync, a delete's retirement and the
+/// startup restore all reach this database without any command being in flight,
+/// and before this the Commitments view simply went stale until something else
+/// happened to refetch it.
+///
+/// Announcing from the worker also gets the ordering right for free: the event
+/// fires strictly *after* the write lands. The alternative — having the commands
+/// emit — would have to either emit early (announcing a change the reader cannot
+/// see yet) or block the command on the worker queue, which can be a whole-vault
+/// batch away.
+fn handle_job(
+    ledger: &mut Ledger,
+    vault_root: Option<&Path>,
+    backfill_pending: &mut bool,
+    job: LedgerJob,
+) -> bool {
     match job {
-        LedgerJob::Sync(facts) => sync_one(ledger, &facts),
+        LedgerJob::Sync(facts) => return sync_one(ledger, &facts),
         LedgerJob::SyncBatch(batch) => {
-            for facts in &batch {
-                sync_one(ledger, facts);
-            }
+            // Fold rather than short-circuit: every note in the batch must sync,
+            // and any one of them writing is enough to announce.
+            return batch
+                .iter()
+                .fold(false, |changed, facts| sync_one(ledger, facts) | changed);
         }
-        LedgerJob::NoteGone(note_id) => {
-            if let Err(err) = ledger.note_removed(&note_id, &now_utc()) {
+        LedgerJob::NoteGone(note_id) => match ledger.note_removed(&note_id, &now_utc()) {
+            Ok(outcome) => return !outcome.is_noop(),
+            Err(err) => {
                 eprintln!("ledger could not retire note {note_id}: {err}");
             }
-        }
+        },
         LedgerJob::RestoreIfEmpty => {
             let Some(root) = vault_root else {
                 return false;
             };
-            match ledger.restore_from_snapshots_if_empty(root) {
-                Ok(report) if !report.restored => {}
+            let restored = match ledger.restore_from_snapshots_if_empty(root) {
+                Ok(report) if !report.restored => false,
                 Ok(report) => {
                     if report.entries_restored > 0 {
                         eprintln!(
@@ -642,9 +734,25 @@ fn handle_job(ledger: &mut Ledger, vault_root: Option<&Path>, job: LedgerJob) ->
                     for warning in &report.warnings {
                         eprintln!("ledger restore: {warning}");
                     }
+                    report.entries_restored > 0
                 }
-                Err(err) => eprintln!("ledger restore failed: {err}"),
-            }
+                Err(err) => {
+                    eprintln!("ledger restore failed: {err}");
+                    false
+                }
+            };
+            // Whatever the restore did or did not find, the answer to "is this
+            // ledger still empty?" is settled *now*, before the first sync can
+            // put anything in it. That is the whole reason this job is queued
+            // before any handle escapes `initialize`.
+            *backfill_pending = matches!(ledger.is_empty(), Ok(true));
+            return restored;
+        }
+        LedgerJob::TakeStartupBackfill { reply } => {
+            let _ = reply.send(*backfill_pending);
+            // Consume-once: the seed is idempotent, but asking twice in one
+            // session would log a second, misleading count.
+            *backfill_pending = false;
         }
         LedgerJob::DrainLegacyOverrides => {
             // A one-time move of the per-meeting tracking override out of this
@@ -656,11 +764,16 @@ fn handle_job(ledger: &mut Ledger, vault_root: Option<&Path>, job: LedgerJob) ->
             };
             match ledger.drain_legacy_note_overrides(root, &now_utc()) {
                 Ok(outcome) if outcome == ledger::DrainOutcome::default() => {}
-                Ok(outcome) => eprintln!(
-                    "ledger: moved {} tracking override(s) into their notes ({} dropped, {} deferred)",
-                    outcome.graduated, outcome.discarded, outcome.deferred
-                ),
-                Err(err) => eprintln!("ledger: couldn't drain the legacy tracking overrides: {err}"),
+                Ok(outcome) => {
+                    eprintln!(
+                        "ledger: moved {} tracking override(s) into their notes ({} dropped, {} deferred)",
+                        outcome.graduated, outcome.discarded, outcome.deferred
+                    );
+                    return outcome.graduated > 0;
+                }
+                Err(err) => {
+                    eprintln!("ledger: couldn't drain the legacy tracking overrides: {err}")
+                }
             }
         }
         LedgerJob::Flush(ack) => {
@@ -811,7 +924,9 @@ fn apply_mutation(ledger: &mut Ledger, op: LedgerOp) -> ledger::Result<MutateRep
 /// Reconciles one note, logging a failure rather than propagating it — the
 /// database is transactional, so a failed sync leaves the ledger consistent and
 /// the next re-derivation of that note converges it.
-fn sync_one(ledger: &mut Ledger, facts: &NoteFacts) {
+///
+/// Returns whether anything was written, which is what the worker announces on.
+fn sync_one(ledger: &mut Ledger, facts: &NoteFacts) -> bool {
     let now = now_utc();
     let result = ledger.sync_note_items(&NoteSync {
         note_id: &facts.note_id,
@@ -826,18 +941,24 @@ fn sync_one(ledger: &mut Ledger, facts: &NoteFacts) {
     });
     match result {
         Ok(outcome) => {
-            if !outcome.is_noop() {
-                eprintln!(
-                    "ledger {}: {} new, {} relinked, {} re-mentioned, {} to review",
-                    facts.note_id,
-                    outcome.created.len(),
-                    outcome.relinked.len(),
-                    outcome.rementioned.len(),
-                    outcome.sent_to_review.len()
-                );
+            if outcome.is_noop() {
+                return false;
             }
+            eprintln!(
+                "ledger {}: {} new, {} relinked, {} re-mentioned, {} to review, {} moved",
+                facts.note_id,
+                outcome.created.len(),
+                outcome.relinked.len(),
+                outcome.rementioned.len(),
+                outcome.sent_to_review.len(),
+                outcome.moved.len()
+            );
+            true
         }
-        Err(err) => eprintln!("ledger sync failed for {}: {err}", facts.note_id),
+        Err(err) => {
+            eprintln!("ledger sync failed for {}: {err}", facts.note_id);
+            false
+        }
     }
 }
 
@@ -863,7 +984,9 @@ pub fn project_slug(project: Option<&str>) -> String {
 mod tests {
     use super::*;
     use kodabi_core::ledger::{Direction, EntryFilter, EntryState};
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc::Sender;
+    use std::sync::Arc;
 
     const QUIET: Duration = Duration::from_millis(60);
     const MAX_DELAY: Duration = Duration::from_millis(240);
@@ -894,12 +1017,31 @@ mod tests {
     /// Runs the worker on a background thread against a fresh vault, returning
     /// the job sender and the vault dir.
     fn spawn_worker(vault: &tempfile::TempDir) -> (Sender<LedgerJob>, std::thread::JoinHandle<()>) {
+        let (sender, handle, _) = spawn_counting_worker(vault);
+        (sender, handle)
+    }
+
+    /// The same, plus a counter of how many times the worker announced a
+    /// change — standing in for the `ledger:changed` emit, which needs an
+    /// `AppHandle` a unit test has no way to build.
+    fn spawn_counting_worker(
+        vault: &tempfile::TempDir,
+    ) -> (
+        Sender<LedgerJob>,
+        std::thread::JoinHandle<()>,
+        Arc<AtomicUsize>,
+    ) {
         let ledger = Ledger::open_in_memory().unwrap();
         let root = vault.path().to_path_buf();
         let (sender, jobs) = mpsc::channel::<LedgerJob>();
-        let handle =
-            std::thread::spawn(move || run_worker(jobs, ledger, Some(root), QUIET, MAX_DELAY));
-        (sender, handle)
+        let announced = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&announced);
+        let handle = std::thread::spawn(move || {
+            run_worker(jobs, ledger, Some(root), QUIET, MAX_DELAY, move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+            })
+        });
+        (sender, handle, announced)
     }
 
     /// Blocks until the worker acknowledges a flush, so a test never sleeps on a
@@ -1498,6 +1640,172 @@ mod tests {
         worker.join().unwrap();
     }
 
+    /// Asks the worker whether it still owes a startup backfill, the way the
+    /// index worker's `LedgerHandle::take_startup_backfill` does.
+    fn take_startup_backfill(sender: &Sender<LedgerJob>) -> bool {
+        let (reply, answer) = mpsc::channel();
+        sender
+            .send(LedgerJob::TakeStartupBackfill { reply })
+            .unwrap();
+        answer.recv_timeout(Duration::from_secs(5)).unwrap()
+    }
+
+    #[test]
+    fn an_empty_ledger_asks_for_a_startup_backfill_exactly_once() {
+        let vault = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(vault.path().join("Ops")).unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+
+        // No snapshots to restore from, so the ledger is still empty after the
+        // restore — which is exactly the first-run-on-an-existing-vault case.
+        sender.send(LedgerJob::RestoreIfEmpty).unwrap();
+
+        assert!(take_startup_backfill(&sender), "the seed is owed");
+        assert!(
+            !take_startup_backfill(&sender),
+            "claimed, so a second reconcile does not re-run it"
+        );
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn a_restored_snapshot_suppresses_the_startup_backfill() {
+        // The ledger was rebuilt from the vault's own snapshots, so it already
+        // holds the user's commitments and seeding would be redundant.
+        let vault = tempfile::tempdir().unwrap();
+        let dir = vault.path().join("Ops");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            dir.join("_ledger.yml"),
+            "version: 1\nentries:\n\
+             - entry_id: le_aaaaaaaaaaaa\n  \
+               state: open\n  \
+               direction: theirs\n  \
+               owner: Priya\n  \
+               description: an old promise\n  \
+               created_at: 2026-07-01T00:00:00Z\n  \
+               updated_at: 2026-07-01T00:00:00Z\n  \
+               last_mention: 2026-07-01T00:00:00Z\n",
+        )
+        .unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+
+        sender.send(LedgerJob::RestoreIfEmpty).unwrap();
+
+        assert!(!take_startup_backfill(&sender));
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn machine_ingest_announces_only_when_it_writes() {
+        let vault = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(vault.path().join("Ops")).unwrap();
+        let (sender, worker, announced) = spawn_counting_worker(&vault);
+        let facts = || {
+            LedgerJob::Sync(Box::new(facts_for(
+                "n_a1b2c3",
+                "Ops",
+                "a_111111",
+                "send the deck",
+            )))
+        };
+
+        sender.send(facts()).unwrap();
+        flush_and_wait(&sender);
+        assert_eq!(announced.load(Ordering::SeqCst), 1, "a new entry is news");
+
+        // The identical note again: every item is already linked, so the pass
+        // writes nothing and must stay silent, or an idle watcher burst would
+        // have every Commitments view refetching on a loop.
+        sender.send(facts()).unwrap();
+        flush_and_wait(&sender);
+        assert_eq!(announced.load(Ordering::SeqCst), 1);
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn a_refile_announces_even_though_no_item_changed() {
+        // The end-to-end pin for `SyncOutcome::moved`: re-filing a note leaves
+        // every item exactly as it was, so without the move being reported this
+        // sync reads as a no-op and an open Commitments view keeps showing the
+        // old project.
+        let vault = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(vault.path().join("Ops")).unwrap();
+        std::fs::create_dir_all(vault.path().join("Growth")).unwrap();
+        let (sender, worker, announced) = spawn_counting_worker(&vault);
+
+        sender
+            .send(LedgerJob::Sync(Box::new(facts_for(
+                "n_a1b2c3",
+                "Ops",
+                "a_111111",
+                "send the deck",
+            ))))
+            .unwrap();
+        flush_and_wait(&sender);
+        let after_create = announced.load(Ordering::SeqCst);
+
+        // The same note, same items, filed somewhere new.
+        sender
+            .send(LedgerJob::Sync(Box::new(facts_for(
+                "n_a1b2c3",
+                "Growth",
+                "a_111111",
+                "send the deck",
+            ))))
+            .unwrap();
+        flush_and_wait(&sender);
+
+        assert_eq!(
+            announced.load(Ordering::SeqCst),
+            after_create + 1,
+            "the move is a write and has to be announced"
+        );
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn a_note_leaving_the_vault_announces_its_retirement() {
+        let vault = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(vault.path().join("Ops")).unwrap();
+        let (sender, worker, announced) = spawn_counting_worker(&vault);
+
+        sender
+            .send(LedgerJob::Sync(Box::new(facts_for(
+                "n_a1b2c3",
+                "Ops",
+                "a_111111",
+                "send the deck",
+            ))))
+            .unwrap();
+        flush_and_wait(&sender);
+        let after_create = announced.load(Ordering::SeqCst);
+
+        sender
+            .send(LedgerJob::NoteGone("n_a1b2c3".to_string()))
+            .unwrap();
+        flush_and_wait(&sender);
+        assert_eq!(announced.load(Ordering::SeqCst), after_create + 1);
+
+        // A note the ledger never knew retires nothing, so it says nothing.
+        sender
+            .send(LedgerJob::NoteGone("n_zzzzzz".to_string()))
+            .unwrap();
+        flush_and_wait(&sender);
+        assert_eq!(announced.load(Ordering::SeqCst), after_create + 1);
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
     #[test]
     fn restore_runs_before_the_first_sync() {
         // Seed a vault snapshot, then queue RestoreIfEmpty *and* a sync behind
@@ -1535,8 +1843,9 @@ mod tests {
                 "send the deck",
             ))))
             .unwrap();
-        let worker =
-            std::thread::spawn(move || run_worker(jobs, ledger, Some(root), QUIET, MAX_DELAY));
+        let worker = std::thread::spawn(move || {
+            run_worker(jobs, ledger, Some(root), QUIET, MAX_DELAY, || {})
+        });
         // Dropping the sender disconnects the channel, which flushes on the way
         // out; joining is then a deterministic wait for that flush.
         drop(sender);
@@ -1567,6 +1876,7 @@ mod tests {
         handle_job(
             &mut ledger,
             Some(vault.path()),
+            &mut false,
             LedgerJob::NoteGone("n_a1b2c3".to_string()),
         );
 

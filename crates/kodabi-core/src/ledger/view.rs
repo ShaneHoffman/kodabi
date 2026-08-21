@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use chrono::NaiveDate;
+use chrono::{DateTime, Duration, NaiveDate, SecondsFormat, Utc};
 
 use crate::index::{ActionItemRow, ActionItemStatus};
 
@@ -83,6 +83,23 @@ pub struct AgingConfig {
 /// where it has most likely been forgotten rather than merely delayed.
 pub const DEFAULT_AGING_AFTER_DAYS: u32 = 14;
 pub const DEFAULT_STALE_AFTER_DAYS: u32 = 30;
+
+/// The RFC 3339 UTC instant `days` before `now` — the floor of the enrolment
+/// window, for comparing lexically against a note's `date_utc`.
+///
+/// The ledger enrols a *historical* note's items only inside this window, and it
+/// is measured in the same days as the aging thresholds because it answers the
+/// same question from the other end: an item older than the stale threshold
+/// would arrive already stale, sorting above everything current and burying the
+/// work the user actually has. Enrolling it would be honest and useless.
+///
+/// Saturates at the epoch rather than panicking on an absurd `days`, so a
+/// hand-edited settings file cannot take the backfill down.
+pub fn mention_window_cutoff(now: DateTime<Utc>, days: u32) -> String {
+    now.checked_sub_signed(Duration::days(i64::from(days)))
+        .unwrap_or(DateTime::<Utc>::UNIX_EPOCH)
+        .to_rfc3339_opts(SecondsFormat::Secs, true)
+}
 
 impl Default for AgingConfig {
     fn default() -> Self {
@@ -422,6 +439,23 @@ mod tests {
 
     fn today() -> NaiveDate {
         NaiveDate::from_ymd_opt(2026, 8, 17).unwrap()
+    }
+
+    #[test]
+    fn the_enrolment_window_cutoff_is_a_lexically_comparable_utc_instant() {
+        let now: DateTime<Utc> = "2026-08-17T12:00:00Z".parse().unwrap();
+
+        let cutoff = mention_window_cutoff(now, DEFAULT_STALE_AFTER_DAYS);
+        assert_eq!(cutoff, "2026-07-18T12:00:00Z");
+        // A note dated inside the window sorts at or above it, one outside below
+        // — the whole point of the `Z`-normalized form.
+        assert!("2026-08-01T00:00:00Z" > cutoff.as_str());
+        assert!("2026-07-01T00:00:00Z" < cutoff.as_str());
+
+        // A zero window is "today only", not an error.
+        assert_eq!(mention_window_cutoff(now, 0), "2026-08-17T12:00:00Z");
+        // And an absurd setting saturates rather than panicking.
+        assert!(mention_window_cutoff(now, u32::MAX) < cutoff);
     }
 
     fn fact(id: &str, owner: &str, description: &str) -> ActionItemFact {

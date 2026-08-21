@@ -1,5 +1,5 @@
 //! `list_outstanding_items`: not-done action items across notes, each linked
-//! back to its source note (a meeting or a chat).
+//! back to its source note (a meeting, a chat, or a hand-written note).
 
 use chrono::Local;
 use serde_json::Value;
