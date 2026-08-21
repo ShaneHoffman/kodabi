@@ -248,9 +248,10 @@ Principles:
 ## 6. Roadmap
 
 *The **working roadmap** is [`ROADMAP.md`](ROADMAP.md), which carries the per-phase checklists and
-their shipped state. This section keeps only what lives nowhere else: each phase's goal and
-milestone, and the full detail behind the Phase 5 candidates. Phases 0–3 are complete; Phase 4 is
-in progress.*
+their shipped state. This section keeps the vision side: each phase's milestone (mirrored in
+[`ROADMAP.md`](ROADMAP.md), which states the goal beside it), Phase 5's goal, and the full detail
+behind the Phase 5 candidates, which lives nowhere else. Phases 0–3 are complete; Phase 4 is in
+progress, and Phase 5 opened 2026-08-18 with the commitment-ledger lane.*
 
 ### Phase 0 — Foundations (decisions + skeleton) — ✅ complete
 
@@ -291,12 +292,17 @@ Checklist in [`ROADMAP.md`](ROADMAP.md).
 Checklist in [`ROADMAP.md`](ROADMAP.md).
 **Milestone:** a signed, onboarded, documented Windows release, launched publicly.
 
-### Phase 5 — Growth (pulled by daily use, not pushed by roadmap)
+### Phase 5 — Growth (pulled by daily use, not pushed by roadmap) — in progress
 
-[`ROADMAP.md`](ROADMAP.md) lists these by name only; the detail lives here. Candidates, in rough
-order of expected value — each earns its place only after the core loop proves reliable:
+**Goal:** the app starts working for you *between* meetings, not only after them — commitments track themselves, and each automation lane earns its place by daily use before it is built.
+**Milestone:** I join a meeting and a brief is already waiting; I end my week with a status draft I didn't write and a to-do list that closed itself.
 
-- **Commitment ledger (flagship)** — the self-writing, self-erasing to-do: extraction is already in the v1 pipeline; the ledger adds tracked state per project, closure by evidence (starting with GitHub MCP: commitments reconciled against PRs/commits — said vs. shipped), aging, and pre-meeting resurfacing
+**Opened 2026-08-18** with the commitment-ledger lane (Theme 1).
+[`ROADMAP.md`](ROADMAP.md) carries the working checklist for the lane in flight and names the
+themes queued behind it; the detail behind every candidate lives here. Candidates, in rough order
+of expected value — an unscheduled one earns its place only after the core loop proves reliable:
+
+- **Commitment ledger (flagship)** — *in progress since 2026-08-18; checklist in [`ROADMAP.md`](ROADMAP.md)* — the self-writing, self-erasing to-do: extraction is already in the v1 pipeline; the ledger adds tracked state per project, closure by evidence (starting with GitHub MCP: commitments reconciled against PRs/commits — said vs. shipped), aging, and pre-meeting resurfacing
 - Azure DevOps board integration (per-project connectors, isolated; feeds ledger closure)
 - Weekly digests per project; "what did I commit to this week"
 - Decision log queries ("when and why did we choose X")
