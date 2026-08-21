@@ -563,6 +563,51 @@ fn ledger_context_block(open: &[OpenCommitment]) -> Option<String> {
 const CATEGORY_CONTEXT_MAX_EXAMPLES: usize = 8;
 const CATEGORY_CONTEXT_MAX_CHARS: usize = 2_000;
 
+/// The prompt block naming who the local user is, or `None` when they have not
+/// said.
+///
+/// The channel labels are already ground truth: `"You:"` is the mic, `"Them:"`
+/// is the loopback, and that split is the whole of v1's speaker attribution
+/// ([`crate::transcription::Channel`]). What the model lacks is the *name* that
+/// goes with the mic, and without it a first-person commitment spoken on the
+/// mic channel can be attributed to whichever name it happened to hear in the
+/// room. This block closes that gap.
+///
+/// **It does not change the owner spelling.** [`RESPONSE_SHAPE_SPEC`] still
+/// asks for `"You"` when the local user took something on, and this block
+/// reinforces that rather than competing with it - the name is here to identify
+/// the person, not to be copied into the owner field. Emitting the name instead
+/// would re-mint every action-item id against a spelling the existing ledger
+/// has never seen, so `owner_norm` would stop matching the commitments already
+/// tracked as `"You"`.
+fn identity_context_block(identity: &crate::settings::IdentitySettings) -> Option<String> {
+    let identity = identity.normalized();
+    if identity.is_unset() {
+        return None;
+    }
+
+    let mut names = String::new();
+    if !identity.display_name.is_empty() {
+        let _ = write!(names, "\"{}\"", identity.display_name);
+    }
+    for alias in &identity.aliases {
+        if !names.is_empty() {
+            names.push_str(", ");
+        }
+        let _ = write!(names, "\"{alias}\"");
+    }
+
+    let mut block = format!("The local user - the \"You\" channel - is {names}.");
+    let _ = write!(
+        block,
+        " A commitment that person takes on is owned by \"You\", however the \
+transcript happens to name them and whoever said it out loud. A first-person \
+commitment on a \"Them\" line belongs to that speaker: use their name when the \
+conversation gives one, otherwise \"Them\"."
+    );
+    Some(block)
+}
+
 /// Renders a project's category prior and recent corrections as a prompt block,
 /// or `None` when it has neither.
 ///
@@ -1555,6 +1600,7 @@ pub fn distill_session(
     runner: &dyn HeadlessClaude,
     vault_root: &Path,
     session_path: &Path,
+    identity: Option<&crate::settings::IdentitySettings>,
     route: &dyn Fn(&DistillOutput, &str) -> Routing,
     open_entries: &dyn Fn(&routing::RouteGuess) -> Vec<OpenCommitment>,
 ) -> Result<DistilledNote, DistillError> {
@@ -1613,6 +1659,7 @@ pub fn distill_session(
             prompt_date: &meeting_date,
             source,
             title_seed_fallback: parsed_name.and_then(|parsed| parsed.slug),
+            identity,
         },
         route,
         open_entries,
@@ -1633,6 +1680,9 @@ pub(crate) struct RenderedDistill<'a> {
     pub(crate) source: Source,
     /// Filename-slug seed used only when the model returns no title.
     pub(crate) title_seed_fallback: Option<String>,
+    /// Who the local user is, for the identity block; `None` on passes where
+    /// the question does not arise.
+    pub(crate) identity: Option<&'a crate::settings::IdentitySettings>,
 }
 
 /// The model-and-write half both distill passes share: budget-check the
@@ -1678,40 +1728,54 @@ pub(crate) fn distill_rendered(
             .and_then(category_context_block);
         // The note always wins over the context: a transcript already near the
         // budget takes the plain prompt rather than being chunked for the sake
-        // of blocks that only ever add precision. Both blocks together, then
-        // the ledger alone, then neither — the ledger block goes last because a
-        // missed commitment update silently loses a tracked promise, while a
-        // missed prior costs one classification the user can correct in a click.
+        // of blocks that only ever add precision. Blocks are dropped from the
+        // cheapest loss upward - all three, then identity and ledger, then
+        // identity alone, then neither.
+        //
+        // The ordering is by what each miss costs. A missed prior costs one
+        // classification the user can correct in a click. A missed commitment
+        // update silently loses a tracked promise. A missed identity is the
+        // worst of the three and much the smallest to carry: in a context-only
+        // meeting the direction *is* the enrolment gate, so an owner the model
+        // named a person for produces no ledger row at all, and one sentence
+        // naming the user costs a fraction of what either list does.
         let ledger_block = ledger_context_block(&open);
+        let identity_block = input.identity.and_then(identity_context_block);
         let fits =
             |request: &LlmRequest| request.prompt.chars().count() <= DISTILL_INPUT_BUDGET_CHARS;
-        let build = |block: &str| {
-            request_from_transcript(&transcript, input.prompt_date, input.flavor, Some(block))
+        let build = |blocks: &[&str]| {
+            request_from_transcript(
+                &transcript,
+                input.prompt_date,
+                input.flavor,
+                Some(blocks.join("\n\n").as_str()),
+            )
         };
-        let request = match (&ledger_block, &category_block) {
-            (Some(ledger), Some(category)) => {
-                let both = build(&format!("{ledger}\n\n{category}"));
-                if fits(&both) {
-                    both
-                } else {
-                    let ledger_only = build(ledger);
-                    if fits(&ledger_only) {
-                        ledger_only
-                    } else {
-                        bare
-                    }
-                }
-            }
-            (Some(block), None) | (None, Some(block)) => {
-                let with_context = build(block);
-                if fits(&with_context) {
-                    with_context
-                } else {
-                    bare
-                }
-            }
-            (None, None) => bare,
-        };
+        // Most-preferred rung first; the first that fits wins, and the bare
+        // prompt is the floor that always does.
+        let ladder: Vec<Vec<&str>> = [
+            vec![
+                identity_block.as_deref(),
+                ledger_block.as_deref(),
+                category_block.as_deref(),
+            ],
+            vec![identity_block.as_deref(), ledger_block.as_deref()],
+            vec![identity_block.as_deref()],
+        ]
+        .into_iter()
+        .map(|rung| rung.into_iter().flatten().collect::<Vec<_>>())
+        .filter(|rung| !rung.is_empty())
+        .collect();
+        // Dropping a block that was never there leaves the rung it was on
+        // identical to the one below, and building the same prompt twice to
+        // measure it twice is pure waste.
+        let mut ladder = ladder;
+        ladder.dedup();
+        let request = ladder
+            .iter()
+            .map(|rung| build(rung))
+            .find(fits)
+            .unwrap_or(bare);
         let mut output = parse_output(&runner.run(&request)?)?;
         // The model can only report on what it was shown. An id it invented,
         // or one from a list it was never given, is dropped here rather than
@@ -2402,6 +2466,7 @@ mod tests {
             &runner,
             vault.path(),
             &imported,
+            None,
             &|_, _| inbox_routing(),
             &no_open_entries,
         )
@@ -2460,6 +2525,7 @@ mod tests {
             &runner,
             vault.path(),
             &session_path,
+            None,
             &|_, _| inbox_routing(),
             &no_open_entries,
         )
@@ -2517,6 +2583,7 @@ mod tests {
             &runner,
             vault.path(),
             &session_path,
+            None,
             &|output, _| {
                 assert_eq!(output.summary, "Talked through the Q3 budget.");
                 Routing::Routed {
@@ -2811,6 +2878,7 @@ mod tests {
             &runner,
             vault.path(),
             &session_path,
+            None,
             &|output, body| {
                 route_distilled(vault.path(), output, body, &RoutingConfig::default()).0
             },
@@ -2853,6 +2921,7 @@ mod tests {
             &runner,
             vault.path(),
             &session_path,
+            None,
             &|output, body| {
                 route_distilled(vault.path(), output, body, &RoutingConfig::default()).0
             },
@@ -2889,6 +2958,7 @@ mod tests {
             &runner,
             vault.path(),
             &session_path,
+            None,
             &|output, body| {
                 route_distilled(vault.path(), output, body, &RoutingConfig::default()).0
             },
@@ -2936,6 +3006,7 @@ mod tests {
             &runner,
             vault.path(),
             &session_path,
+            None,
             &|output, body| {
                 route_distilled(vault.path(), output, body, &RoutingConfig::default()).0
             },
@@ -2966,6 +3037,7 @@ mod tests {
             &runner,
             vault.path(),
             &session_path,
+            None,
             &|_, _| inbox_routing(),
             &no_open_entries,
         )
@@ -2981,6 +3053,7 @@ mod tests {
             &runner,
             vault.path(),
             &bare_session,
+            None,
             &|_, _| inbox_routing(),
             &no_open_entries,
         )
@@ -3009,6 +3082,7 @@ mod tests {
             &runner,
             vault.path(),
             &session_path,
+            None,
             &|_, _| inbox_routing(),
             &no_open_entries,
         )
@@ -3042,6 +3116,7 @@ mod tests {
                 &PanicRunner,
                 vault.path(),
                 &session,
+                None,
                 &|_, _| inbox_routing(),
                 &no_open_entries,
             )
@@ -3060,6 +3135,7 @@ mod tests {
             &runner,
             vault.path(),
             &session_path,
+            None,
             &|_, _| inbox_routing(),
             &no_open_entries,
         )
@@ -3079,6 +3155,7 @@ mod tests {
             &runner,
             vault.path(),
             &session_path,
+            None,
             &|_, _| inbox_routing(),
             &no_open_entries,
         )
@@ -3098,6 +3175,7 @@ mod tests {
             &PanicRunner,
             vault.path(),
             &session_path,
+            None,
             &|_, _| inbox_routing(),
             &no_open_entries,
         )
@@ -3115,6 +3193,7 @@ mod tests {
             &PanicRunner,
             vault.path(),
             &missing,
+            None,
             &|_, _| inbox_routing(),
             &no_open_entries,
         )
@@ -3608,6 +3687,77 @@ consecutive parts. The partial results, in order:\n"
     }
 
     #[test]
+    fn the_identity_block_names_the_user_without_changing_the_owner_spelling() {
+        let block = identity_context_block(&crate::settings::IdentitySettings {
+            display_name: "Avery".to_string(),
+            aliases: vec!["Avery Kim".to_string()],
+        })
+        .unwrap();
+
+        assert_eq!(
+            block,
+            "The local user - the \"You\" channel - is \"Avery\", \"Avery Kim\". \
+A commitment that person takes on is owned by \"You\", however the transcript \
+happens to name them and whoever said it out loud. A first-person commitment on \
+a \"Them\" line belongs to that speaker: use their name when the conversation \
+gives one, otherwise \"Them\"."
+        );
+
+        // It reinforces the shared contract rather than competing with it.
+        assert!(RESPONSE_SHAPE_SPEC.contains(r#"\"You\" when the local user took it on"#));
+    }
+
+    #[test]
+    fn no_configured_name_means_no_identity_block() {
+        assert_eq!(
+            identity_context_block(&crate::settings::IdentitySettings::default()),
+            None
+        );
+        // Whitespace is not an answer either.
+        assert_eq!(
+            identity_context_block(&crate::settings::IdentitySettings {
+                display_name: "   ".to_string(),
+                aliases: Vec::new(),
+            }),
+            None
+        );
+    }
+
+    #[test]
+    fn the_identity_block_survives_an_identity_that_is_only_aliases() {
+        let block = identity_context_block(&crate::settings::IdentitySettings {
+            display_name: String::new(),
+            aliases: vec!["Avery Kim".to_string()],
+        })
+        .unwrap();
+        assert!(block.starts_with("The local user - the \"You\" channel - is \"Avery Kim\"."));
+    }
+
+    #[test]
+    fn a_prompt_with_an_identity_keeps_the_transcript_last() {
+        let identity = identity_context_block(&crate::settings::IdentitySettings {
+            display_name: "Avery".to_string(),
+            aliases: Vec::new(),
+        })
+        .unwrap();
+        let ledger = ledger_context_block(&[open_commitment("le_aaa", "send the deck")]).unwrap();
+        let request = request_from_transcript(
+            "You: hello\n",
+            "2026-07-12",
+            &MEETING_FLAVOR,
+            Some(&[identity.as_str(), ledger.as_str()].join("\n\n")),
+        );
+
+        // Identity first, then the commitments, and the transcript still last.
+        let identity_at = request.prompt.find("The local user").unwrap();
+        let ledger_at = request.prompt.find("Open commitments").unwrap();
+        let transcript_at = request.prompt.find("Transcript:").unwrap();
+        assert!(identity_at < ledger_at, "{}", request.prompt);
+        assert!(ledger_at < transcript_at, "{}", request.prompt);
+        assert!(request.prompt.ends_with("Transcript:\nYou: hello\n"));
+    }
+
+    #[test]
     fn a_distill_only_reports_on_commitments_it_was_shown() {
         let output_json = r#"{"summary": "Talked it through.",
             "ledger_updates": [
@@ -3633,6 +3783,7 @@ consecutive parts. The partial results, in order:\n"
             &runner,
             vault.path(),
             &session_path,
+            None,
             &|_, _| inbox_routing(),
             &|guess| {
                 // The guess is what decides whose commitments are worth
@@ -3993,6 +4144,7 @@ consecutive parts. The partial results, in order:\n"
             &runner,
             vault.path(),
             &session_path,
+            None,
             &|_, _| inbox_routing(),
             &no_open_entries,
         )
@@ -4028,6 +4180,7 @@ consecutive parts. The partial results, in order:\n"
             &runner,
             vault.path(),
             &session_path,
+            None,
             &|_, _| inbox_routing(),
             &no_open_entries,
         )
@@ -4101,6 +4254,7 @@ consecutive parts. The partial results, in order:\n"
             &runner,
             vault.path(),
             &session_path,
+            None,
             &|_, _| inbox_routing(),
             &no_open_entries,
         )
@@ -4133,6 +4287,7 @@ consecutive parts. The partial results, in order:\n"
             &runner,
             vault.path(),
             &session_path,
+            None,
             &|_, _| inbox_routing(),
             &no_open_entries,
         )

@@ -282,6 +282,46 @@ One drift is accepted and named: recategorizing a note by hand in Obsidian re-sy
 watcher, so it enrols the missing, but no retro runs, so it leaves the strays tracked until that
 meeting is touched in the app.
 
+**Which commitments are yours is a resolved question, not a guessed one.** The action-item grammar
+emits free-text owner names, so something has to decide that "Avery to send the deck" means *you*.
+That is `settings::IdentitySettings` — a display name plus the other spellings meetings use for the
+same person — resolved by `ledger::Direction::resolve` against an `OwnerIdentity`, the flattened,
+normalized set of both. The grammar's own tokens win first and no alias can redefine them: `You` is
+always yours, `Unassigned` is always neither. Matching is **normalization, not fuzzy matching** —
+NFC, case, and whitespace, the same `owner_norm` folding the reconcile tiers already use, so a name
+matched here and a name matched by `sync` can never disagree. No prefix matching and no edit
+distance: a miss is cheap and self-correcting, while a false positive puts a promise in your mouth
+that you never made.
+
+An owner the identity does not resolve defaults to **theirs**, the same asymmetry the context-only
+rule rests on: a stray sitting in Waiting-on-them is one click to fix, while a missed own commitment
+is a real failure. That click is the correction loop the routing examples established — claiming a
+row both moves it to Mine and *learns* the name it was filed under, so the next meeting gets it
+right unprompted. Three spellings are refused rather than learned
+(`ledger::learnable_alias`): `You` and `Unassigned` are the grammar's own tokens, already resolved
+before any alias is consulted, and `Them` is the sharper case, because it is what the distill
+guidance writes for an unnamed other, so adopting it would quietly claim every future them-side
+commitment. A refusal is not a failure and the view does not report it as one. Claiming goes through the ordinary mutation path, which marks the entry `touched`,
+which is exactly right: a person has now judged that row. That flag is also what protects the claim
+from the reconcile tiers: an entry's `direction` is normally re-derived from the owner string every
+time a reworded line relinks, and a claimed one is the case that string cannot express, so the
+rewrite skips a `touched` entry already sitting in Mine.
+
+Learning a name is retrospective, unlike a genre default. Saving one sweeps the entries already
+recorded (`ledger::Ledger::retro_resolve_owners`), bound by the same rule as every other retro pass —
+live states, `touched = 0` — and it only ever moves entries *toward* Mine. Removing a name re-files
+nothing, because silently dropping a commitment out of Mine is the failure you would never see
+coming. One gap is accepted and named: an item a context-only meeting gated out has no row for any
+sweep to find, and enrols when its note next re-syncs.
+
+The distill pass is told the same name, as an optional prompt block beside the commitments and
+category ones. It does **not** change the owner spelling: the shared `RESPONSE_SHAPE_SPEC` still asks
+for `"You"`, and the block exists so a first-person commitment on the mic channel is attributed to
+the configured person rather than to whichever name the room happened to say. Emitting the name
+instead would re-mint every item id against a spelling the existing ledger has never seen. Because a
+misattributed owner in a context-only meeting produces no row at all, the identity block outranks
+both others when the budget ladder has to drop one.
+
 **Meetings have a genre, and it is correctable.** Beside the document `type` (meeting / note /
 chat), a meeting note carries a `category`: `standup`, `one-on-one`, `client`, `working-session`,
 `review`, `all-hands`, or `observer` (`kodabi_core::note::MeetingCategory`). A closed set, so the

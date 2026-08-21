@@ -194,11 +194,11 @@ pub struct CategoryPrefs {
 
 /// Per-genre settings, one field per [`crate::note::MeetingCategory`].
 ///
-/// Seven named fields rather than a map: [`Settings`] is `Copy`, which a
-/// `HashMap` would take away from every caller that passes settings by value,
-/// and the genre set is closed, so a map's only advantage — arbitrary keys —
-/// is one this type must not have. Adding a genre is a field here and a variant
-/// there, and the compiler finds the rest.
+/// Seven named fields rather than a map: this type is `Copy`, which a `HashMap`
+/// would take away from every caller that reads it out of a [`Settings`]
+/// snapshot by value, and the genre set is closed, so a map's only advantage —
+/// arbitrary keys — is one this type must not have. Adding a genre is a field
+/// here and a variant there, and the compiler finds the rest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct CategorySettings {
@@ -227,14 +227,113 @@ impl CategorySettings {
     }
 }
 
+/// Who the local user is, for deciding which extracted commitments are theirs.
+///
+/// The action-item grammar emits free-text owner names (`crate::distill`), and
+/// the ledger's [`crate::ledger::Direction`] has to decide which of them mean
+/// "me". `display_name` is the answer the user gave once; `aliases` are the
+/// other spellings meetings actually use for them — a surname form, a
+/// nickname, whatever a transcript produced that a person then claimed.
+///
+/// Both halves are matched the same way, normalized rather than fuzzy
+/// (`crate::ledger::OwnerIdentity`): an unresolved owner defaults to *them*,
+/// because a stray in Waiting-on-them is one click to fix while a missed own
+/// commitment is a real failure.
+///
+/// Machine-local like the rest of [`Settings`], not vault data: it describes
+/// the person at this desk, not the knowledge base, and a vault copied to a
+/// colleague must not tell them they are the author of everything in it.
+///
+/// The one field here that isn't `Copy` (`aliases` grows without bound), which
+/// is why [`Settings`] is `Clone` rather than `Copy`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct IdentitySettings {
+    /// What the user calls themselves, e.g. `"Avery"`. Empty until they say.
+    pub display_name: String,
+    /// Other spellings that also mean the user, e.g. `"Avery Kim"`. Grown by
+    /// the Commitments view's claim affordance as much as by hand: every
+    /// correction is training data.
+    pub aliases: Vec<String>,
+}
+
+impl IdentitySettings {
+    /// The matcher the ledger resolves owner strings against.
+    ///
+    /// Display name and aliases form one flat set — the ledger has no use for
+    /// the distinction, and treating the primary name as just another spelling
+    /// means clearing it can never orphan the aliases.
+    pub fn owner_identity(&self) -> crate::ledger::OwnerIdentity {
+        crate::ledger::OwnerIdentity::new(&self.display_name, &self.aliases)
+    }
+
+    /// Whether the user has ever answered the question. Drives the first-run
+    /// seed: nothing is stored to say "asked", so emptiness is the signal.
+    pub fn is_unset(&self) -> bool {
+        self.display_name.trim().is_empty() && self.aliases.is_empty()
+    }
+
+    /// Trims every spelling, drops the blanks and the reserved tokens, and
+    /// de-duplicates on the normalized form, keeping the first spelling of
+    /// each.
+    ///
+    /// Applied at the write boundary so what is stored is what will be
+    /// matched: a trailing space or a second `"avery"` in a different case
+    /// would survive a round-trip and read as two different names in the UI.
+    ///
+    /// The reserved-token filter is [`crate::ledger::learnable_alias`], the
+    /// same gate the claim affordance learns through, applied here because a
+    /// free-text field is the other door into this set. It matters most for
+    /// `"Them"`: the distill guidance writes it for a commitment an *unnamed*
+    /// other took on, so storing it as one of the user's names would claim
+    /// every future them-side line the room never put a name to.
+    pub fn normalized(&self) -> IdentitySettings {
+        let mut seen = std::collections::BTreeSet::new();
+        let display_name = crate::ledger::learnable_alias(&self.display_name)
+            .unwrap_or_default()
+            .to_string();
+        if !display_name.is_empty() {
+            seen.insert(crate::ledger::normalize_owner(&display_name));
+        }
+        let aliases = self
+            .aliases
+            .iter()
+            .filter_map(|alias| crate::ledger::learnable_alias(alias))
+            .map(str::to_string)
+            .filter(|alias| seen.insert(crate::ledger::normalize_owner(alias)))
+            .collect();
+        IdentitySettings {
+            display_name,
+            aliases,
+        }
+    }
+
+    /// Adds `alias` unless some spelling of it is already known, returning
+    /// whether the set grew. The verbatim spelling is what gets stored — it is
+    /// what the user saw on the row they claimed.
+    pub fn learn_alias(&mut self, alias: &str) -> bool {
+        let alias = alias.trim();
+        if alias.is_empty() {
+            return false;
+        }
+        if self.owner_identity().is_me(alias) {
+            return false;
+        }
+        self.aliases.push(alias.to_string());
+        true
+    }
+}
+
 /// The persisted app settings. `#[serde(default)]` makes every field optional
 /// on load, so an older file missing a field (or a future file with an extra
 /// one) still deserializes — forward/backward compatibility for a config the
 /// user may carry across app versions.
 ///
 /// `PartialEq` only, not `Eq`: `MicCheckOutcome::Speakers`'s `f32` fields
-/// aren't `Eq`.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, Default)]
+/// aren't `Eq`. `Clone` rather than `Copy`: [`IdentitySettings::aliases`] is a
+/// `Vec`. Every other field stays `Copy`, so reading one out of a snapshot
+/// (`settings.ledger`, `settings.categories`) still costs nothing.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Settings {
     /// Whether the user has acknowledged the recording-consent nudge. Gates
@@ -252,10 +351,16 @@ pub struct Settings {
     pub mic_check: Option<MicCheckResult>,
     /// Commitment-ledger tuning.
     pub ledger: LedgerSettings,
-    /// Per-meeting-genre settings. Last field deliberately: serde emits fields
-    /// in declaration order, so appending leaves the existing JSON/TOML prefix
-    /// byte-identical for anything mirroring the older shape.
+    /// Per-meeting-genre settings.
     pub categories: CategorySettings,
+    /// Who the user is, for the ledger's mine/theirs split. Last field
+    /// deliberately: serde emits fields in declaration order, so appending
+    /// leaves the existing JSON/TOML prefix byte-identical for anything
+    /// mirroring the older shape. (TOML has the sharper version of the same
+    /// rule — a scalar declared after a table would parse back *inside* it —
+    /// which is why a new setting is a table appended here, never a bare field
+    /// slipped in above.)
+    pub identity: IdentitySettings,
 }
 
 /// Loads the settings stored at `config_path`, writing defaults on first run.
@@ -397,6 +502,7 @@ mod tests {
                 mic_check: None,
                 ledger: LedgerSettings::default(),
                 categories: CategorySettings::default(),
+                identity: IdentitySettings::default(),
             };
             save(&path, &settings).unwrap();
             assert_eq!(load_or_create(&path).unwrap(), settings);
@@ -423,6 +529,7 @@ mod tests {
             mic_check: None,
             ledger: LedgerSettings::default(),
             categories: CategorySettings::default(),
+            identity: IdentitySettings::default(),
         };
         save(&path, &settings).unwrap();
         assert_eq!(load_or_create(&path).unwrap(), settings);
@@ -442,6 +549,7 @@ mod tests {
             mic_check: None,
             ledger: LedgerSettings::default(),
             categories: CategorySettings::default(),
+            identity: IdentitySettings::default(),
         })
         .unwrap();
         assert!(toml.contains("consent_acknowledged = true"), "{toml}");
@@ -559,7 +667,7 @@ mod tests {
         let json = serde_json::to_string(&Settings::default()).unwrap();
         assert_eq!(
             json,
-            r#"{"consent_acknowledged":false,"retention":{"policy":"keep_all"},"overlay":{"manual_captures":false,"auto_captures":true},"appearance":{"theme":"system"},"mic_check":null,"ledger":{"aging_after_days":14,"stale_after_days":30,"conversation_autoclose":0.8},"categories":{"standup":{"enrollment_default":null},"one_on_one":{"enrollment_default":null},"client":{"enrollment_default":null},"working_session":{"enrollment_default":null},"review":{"enrollment_default":null},"all_hands":{"enrollment_default":null},"observer":{"enrollment_default":null}}}"#
+            r#"{"consent_acknowledged":false,"retention":{"policy":"keep_all"},"overlay":{"manual_captures":false,"auto_captures":true},"appearance":{"theme":"system"},"mic_check":null,"ledger":{"aging_after_days":14,"stale_after_days":30,"conversation_autoclose":0.8},"categories":{"standup":{"enrollment_default":null},"one_on_one":{"enrollment_default":null},"client":{"enrollment_default":null},"working_session":{"enrollment_default":null},"review":{"enrollment_default":null},"all_hands":{"enrollment_default":null},"observer":{"enrollment_default":null}},"identity":{"display_name":"","aliases":[]}}"#
         );
 
         let keep = serde_json::to_string(&Settings {
@@ -581,12 +689,140 @@ mod tests {
             }),
             ledger: LedgerSettings::default(),
             categories: CategorySettings::default(),
+            identity: IdentitySettings::default(),
         })
         .unwrap();
         assert_eq!(
             keep,
-            r#"{"consent_acknowledged":true,"retention":{"policy":"keep_days","days":30},"overlay":{"manual_captures":true,"auto_captures":false},"appearance":{"theme":"dark"},"mic_check":{"outcome":"speakers","echo_db":12.5,"delay_ms":85.0,"measured_at":"2026-07-22T00:48:18Z"},"ledger":{"aging_after_days":14,"stale_after_days":30,"conversation_autoclose":0.8},"categories":{"standup":{"enrollment_default":null},"one_on_one":{"enrollment_default":null},"client":{"enrollment_default":null},"working_session":{"enrollment_default":null},"review":{"enrollment_default":null},"all_hands":{"enrollment_default":null},"observer":{"enrollment_default":null}}}"#
+            r#"{"consent_acknowledged":true,"retention":{"policy":"keep_days","days":30},"overlay":{"manual_captures":true,"auto_captures":false},"appearance":{"theme":"dark"},"mic_check":{"outcome":"speakers","echo_db":12.5,"delay_ms":85.0,"measured_at":"2026-07-22T00:48:18Z"},"ledger":{"aging_after_days":14,"stale_after_days":30,"conversation_autoclose":0.8},"categories":{"standup":{"enrollment_default":null},"one_on_one":{"enrollment_default":null},"client":{"enrollment_default":null},"working_session":{"enrollment_default":null},"review":{"enrollment_default":null},"all_hands":{"enrollment_default":null},"observer":{"enrollment_default":null}},"identity":{"display_name":"","aliases":[]}}"#
         );
+    }
+
+    #[test]
+    fn an_identity_round_trips_through_toml() {
+        let dir = temp_dir("identity-roundtrip");
+        let path = dir.join("settings.toml");
+
+        let settings = Settings {
+            identity: IdentitySettings {
+                display_name: "Avery".to_string(),
+                aliases: vec!["Avery Kim".to_string(), "A. Kim".to_string()],
+            },
+            ..Settings::default()
+        };
+        save(&path, &settings).unwrap();
+        assert_eq!(load_or_create(&path).unwrap(), settings);
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn the_identity_table_sorts_after_every_scalar() {
+        // TOML's sharper version of the append-last rule: a scalar declared
+        // after a table parses back *inside* it, so the shape is pinned.
+        let toml = toml::to_string_pretty(&Settings {
+            consent_acknowledged: true,
+            identity: IdentitySettings {
+                display_name: "Avery".to_string(),
+                aliases: vec!["Avery Kim".to_string()],
+            },
+            ..Settings::default()
+        })
+        .unwrap();
+        let scalar = toml.find("consent_acknowledged = true").unwrap();
+        let table = toml.find("[identity]").unwrap();
+        assert!(scalar < table, "{toml}");
+        assert!(toml.contains(r#"display_name = "Avery""#), "{toml}");
+        assert!(toml.contains(r#"aliases = ["Avery Kim"]"#), "{toml}");
+    }
+
+    #[test]
+    fn a_file_written_before_the_identity_setting_existed_loads_with_defaults() {
+        let dir = temp_dir("identity-backcompat");
+        let path = dir.join("settings.toml");
+        // Verbatim shape of an install from before this field. It must load
+        // without a migration and land on "no name configured", which resolves
+        // owners exactly the way the app did before it could ask.
+        fs::write(
+            &path,
+            "consent_acknowledged = true\n\n[retention]\npolicy = \"keep_all\"\n",
+        )
+        .unwrap();
+
+        let settings = load_or_create(&path).unwrap();
+        assert!(settings.consent_acknowledged);
+        assert_eq!(settings.identity, IdentitySettings::default());
+        assert!(settings.identity.is_unset());
+        assert!(settings.identity.owner_identity().is_empty());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn normalizing_an_identity_trims_and_drops_duplicate_spellings() {
+        let identity = IdentitySettings {
+            display_name: "  Avery  ".to_string(),
+            aliases: vec![
+                "Avery Kim".to_string(),
+                "  ".to_string(),
+                "avery".to_string(),
+                "AVERY KIM".to_string(),
+            ],
+        };
+
+        let normalized = identity.normalized();
+
+        assert_eq!(normalized.display_name, "Avery");
+        assert_eq!(
+            normalized.aliases,
+            vec!["Avery Kim".to_string()],
+            "a blank, the display name again, and a re-cased duplicate all drop"
+        );
+    }
+
+    #[test]
+    fn normalizing_an_identity_refuses_the_grammars_own_tokens() {
+        // The free-text Settings field is the other door into this set, so it
+        // gets the same gate the claim affordance learns through. "Them" is the
+        // one that would do real damage: it is what the distill guidance writes
+        // for an unnamed other, so keeping it would claim every future
+        // them-side line.
+        let identity = IdentitySettings {
+            display_name: "Them".to_string(),
+            aliases: vec![
+                "You".to_string(),
+                "them".to_string(),
+                crate::distill::UNASSIGNED_OWNER.to_string(),
+                "Avery Kim".to_string(),
+            ],
+        };
+
+        let normalized = identity.normalized();
+
+        assert_eq!(normalized.display_name, "");
+        assert_eq!(normalized.aliases, vec!["Avery Kim".to_string()]);
+        assert!(!normalized.owner_identity().is_me("Them"));
+    }
+
+    #[test]
+    fn learning_an_alias_skips_a_spelling_already_known() {
+        let mut identity = IdentitySettings {
+            display_name: "Avery".to_string(),
+            aliases: Vec::new(),
+        };
+
+        assert!(identity.learn_alias("Avery Kim"));
+        assert_eq!(identity.aliases, vec!["Avery Kim".to_string()]);
+
+        // Already the display name, already an alias in another case, and blank.
+        assert!(!identity.learn_alias("avery"));
+        assert!(!identity.learn_alias("AVERY KIM"));
+        assert!(!identity.learn_alias("   "));
+        assert_eq!(identity.aliases, vec!["Avery Kim".to_string()]);
+
+        // The verbatim spelling is what gets stored: it is what the user saw.
+        assert!(identity.learn_alias("  Priya Raman  "));
+        assert_eq!(identity.aliases.last().unwrap(), "Priya Raman");
     }
 
     #[test]

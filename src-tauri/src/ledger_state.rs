@@ -38,8 +38,8 @@ use chrono::{SecondsFormat, Utc};
 use kodabi_core::distill::LedgerUpdateDraft;
 use kodabi_core::ledger::{
     self, AppliedUpdates, ClosedVia, DistillFollowUp, EnrollmentMode, EntryDetail, EntryFilter,
-    Evidence, Ledger, LedgerEntry, NoteSync, NoteTrackingOutcome, RetroSource, UntrackedVia,
-    LEDGER_DB_FILE,
+    Evidence, Ledger, LedgerEntry, NoteSync, NoteTrackingOutcome, OwnerIdentity,
+    OwnerResolutionOutcome, RetroSource, UntrackedVia, LEDGER_DB_FILE,
 };
 use kodabi_core::meeting::ActionItemFact;
 use kodabi_core::note::INBOX;
@@ -90,6 +90,9 @@ pub struct NoteFacts {
     /// `AppHandle` and so cannot reach `SettingsState`; this is the same shape
     /// as `LedgerJob::DistillFollowUp`'s `autoclose_threshold`.
     pub category_default: Option<EnrollmentMode>,
+    /// Who the local user is, resolved from `SettingsState` at the same
+    /// boundary and for the same reason — see `ledger::sync::NoteSync::identity`.
+    pub identity: OwnerIdentity,
 }
 
 /// A mutation a person asked for, addressed to one entry.
@@ -118,6 +121,10 @@ pub enum LedgerOp {
     /// Remove from the working set: it never should have been in it. Distinct
     /// from [`LedgerOp::Waive`], which says it was mine and stopped mattering.
     Untrack { entry_id: String },
+    /// Re-file as the local user's own, because they said so. Only the
+    /// direction moves: a claim corrects who a commitment belongs to, never
+    /// where it stands.
+    ClaimMine { entry_id: String },
 }
 
 impl LedgerOp {
@@ -130,7 +137,8 @@ impl LedgerOp {
             | LedgerOp::Reopen { entry_id }
             | LedgerOp::ConfirmEvidence { entry_id, .. }
             | LedgerOp::DismissEvidence { entry_id, .. }
-            | LedgerOp::Untrack { entry_id } => entry_id,
+            | LedgerOp::Untrack { entry_id }
+            | LedgerOp::ClaimMine { entry_id } => entry_id,
         }
     }
 }
@@ -204,6 +212,13 @@ enum LedgerJob {
         request: Box<TrackItemRequest>,
         reply: Sender<ledger::Result<LedgerEntry>>,
     },
+    /// Re-evaluate which open commitments are the user's own, after the
+    /// configured identity changed. The settings write happens first, in the
+    /// command; this is only its consequence.
+    RetroResolveOwners {
+        identity: OwnerIdentity,
+        reply: Sender<ledger::Result<OwnerResolutionOutcome>>,
+    },
 }
 
 /// One manual promote, owned so it can cross the channel.
@@ -212,6 +227,9 @@ pub struct TrackItemRequest {
     pub project: String,
     pub note_date_utc: String,
     pub item: ActionItemFact,
+    /// Who the local user is, for the direction the promoted entry is minted
+    /// with.
+    pub identity: OwnerIdentity,
 }
 
 /// A [`DistillFollowUp`] that owns its strings, so it can cross the channel.
@@ -230,6 +248,8 @@ pub struct OwnedFollowUp {
     /// The default that note's meeting category resolved to, read from the
     /// same `Note` against the user's settings.
     pub category_default: Option<EnrollmentMode>,
+    /// Who the local user is, from the same settings snapshot.
+    pub identity: OwnerIdentity,
 }
 
 /// A handle to the background ledger worker, held as Tauri managed state.
@@ -345,6 +365,15 @@ impl LedgerClient {
             source,
             reply,
         })
+    }
+
+    /// Re-evaluates which open commitments are the user's own, after the
+    /// configured identity changed. The caller saves the settings first.
+    pub fn retro_resolve_owners(
+        &self,
+        identity: OwnerIdentity,
+    ) -> std::result::Result<OwnerResolutionOutcome, LedgerCallError> {
+        self.request(|reply| LedgerJob::RetroResolveOwners { identity, reply })
     }
 
     /// Promotes one extracted line by hand.
@@ -666,6 +695,7 @@ fn handle_job(ledger: &mut Ledger, vault_root: Option<&Path>, job: LedgerJob) ->
                     updates: &follow_up.updates,
                     note_override: follow_up.note_override,
                     category_default: follow_up.category_default,
+                    identity: &follow_up.identity,
                 },
                 autoclose_threshold,
                 &now,
@@ -687,6 +717,10 @@ fn handle_job(ledger: &mut Ledger, vault_root: Option<&Path>, job: LedgerJob) ->
                 ledger.retro_apply_note_tracking(&note_id, &project, context_only, source, &now);
             let _ = reply.send(result);
         }
+        LedgerJob::RetroResolveOwners { identity, reply } => {
+            let now = now_utc();
+            let _ = reply.send(ledger.retro_resolve_owners(&identity, &now));
+        }
         LedgerJob::TrackItem { request, reply } => {
             let now = now_utc();
             let result = ledger
@@ -695,6 +729,7 @@ fn handle_job(ledger: &mut Ledger, vault_root: Option<&Path>, job: LedgerJob) ->
                     &request.item,
                     &request.project,
                     &request.note_date_utc,
+                    &request.identity,
                     &now,
                 )
                 // A promote is a person's judgement, so it counts as touching
@@ -748,6 +783,7 @@ fn apply_mutation(ledger: &mut Ledger, op: LedgerOp) -> ledger::Result<MutateRep
         LedgerOp::Untrack { entry_id } => {
             (ledger.untrack(entry_id, UntrackedVia::Manual, &now)?, None)
         }
+        LedgerOp::ClaimMine { entry_id } => (ledger.claim_mine(entry_id, &now)?, None),
     };
 
     ledger.mark_touched(&entry_id)?;
@@ -785,6 +821,7 @@ fn sync_one(ledger: &mut Ledger, facts: &NoteFacts) {
         link_hints: &[],
         note_override: facts.note_override,
         category_default: facts.category_default,
+        identity: &facts.identity,
         now: &now,
     });
     match result {
@@ -825,7 +862,7 @@ pub fn project_slug(project: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kodabi_core::ledger::{EntryFilter, EntryState};
+    use kodabi_core::ledger::{Direction, EntryFilter, EntryState};
     use std::sync::mpsc::Sender;
 
     const QUIET: Duration = Duration::from_millis(60);
@@ -844,6 +881,7 @@ mod tests {
 
     fn facts_for(note_id: &str, project: &str, item: &str, description: &str) -> NoteFacts {
         NoteFacts {
+            identity: OwnerIdentity::default(),
             note_id: note_id.to_string(),
             project: project.to_string(),
             date_utc: "2026-08-01T00:00:00Z".to_string(),
@@ -1101,6 +1139,7 @@ mod tests {
 
         let entry = request(&sender, |reply| LedgerJob::TrackItem {
             request: Box::new(TrackItemRequest {
+                identity: OwnerIdentity::default(),
                 note_id: "n_a1b2c3".to_string(),
                 project: "Ops".to_string(),
                 note_date_utc: "2026-08-01T00:00:00Z".to_string(),
@@ -1115,6 +1154,90 @@ mod tests {
             entry.touched,
             "a promote is a judgement, so no later flip may undo it"
         );
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn claiming_a_commitment_records_it_as_a_persons_judgement() {
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+        let entry_id = seed_entry(&sender);
+
+        let reply = request(&sender, |reply| LedgerJob::Mutate {
+            op: LedgerOp::ClaimMine {
+                entry_id: entry_id.clone(),
+            },
+            reply,
+        })
+        .unwrap();
+
+        assert_eq!(reply.entry.direction, Direction::Mine);
+        assert_eq!(
+            reply.entry.state,
+            EntryState::Open,
+            "a claim corrects who it belongs to, not where it stands"
+        );
+        assert!(
+            reply.entry.touched,
+            "the claim is a judgement, so no later sweep may overrule it"
+        );
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn the_worker_re_files_what_a_new_name_resolves() {
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+        // Synced before the user said who they were, so their own line landed
+        // on the them side.
+        let entry_id = seed_entry(&sender);
+
+        let outcome = request(&sender, |reply| LedgerJob::RetroResolveOwners {
+            identity: OwnerIdentity::new("Priya", &[]),
+            reply,
+        })
+        .unwrap();
+
+        assert_eq!(outcome.claimed, vec![entry_id.clone()]);
+
+        let details = request(&sender, |reply| LedgerJob::ListDetails {
+            filter: EntryFilter::default(),
+            reply,
+        })
+        .unwrap();
+        assert_eq!(details[0].entry.direction, Direction::Mine);
+        assert!(
+            !details[0].entry.touched,
+            "a sweep is a default, not a person acting"
+        );
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn a_sync_carrying_an_identity_enrols_the_users_own_line_under_context_only() {
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+        // The gate would drop this line outright if "Priya" did not resolve to
+        // the local user.
+        let mut facts = facts_for("n_a1b2c3", "Ops", "a_111111", "send the deck");
+        facts.note_override = Some(EnrollmentMode::ContextOnly);
+        facts.identity = OwnerIdentity::new("Priya", &[]);
+        sender.send(LedgerJob::Sync(Box::new(facts))).unwrap();
+
+        let details = request(&sender, |reply| LedgerJob::ListDetails {
+            filter: EntryFilter::default(),
+            reply,
+        })
+        .unwrap();
+
+        assert_eq!(details.len(), 1);
+        assert_eq!(details[0].entry.direction, Direction::Mine);
 
         drop(sender);
         worker.join().unwrap();
@@ -1467,6 +1590,7 @@ mod tests {
         // A later conversation reporting the commitment done, confidently.
         let applied = request(&sender, |reply| LedgerJob::DistillFollowUp {
             follow_up: Box::new(OwnedFollowUp {
+                identity: OwnerIdentity::default(),
                 note_id: "n_d4e5f6".to_string(),
                 project: "Ops".to_string(),
                 note_date_utc: "2026-08-19T00:00:00Z".to_string(),

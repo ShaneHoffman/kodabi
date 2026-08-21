@@ -68,7 +68,11 @@ Pulled by daily use, not pushed by roadmap. Each earns its place only after the 
   verb distinct from waive, and enrollment provenance on every entry), now driven by meeting
   category: each genre carries an enrollment default (all-hands and observer track direct asks only),
   recategorizing a meeting re-evaluates its still-open entries both ways without ever overruling a
-  person, and a row's source line names the kind of room it came from;
+  person, and a row's source line names the kind of room it came from; and owner identity, which is
+  what makes the Mine / Waiting-on-them split mean anything (a name and its other spellings in
+  Settings, seeded at the consent gate, matched by normalization rather than guesswork, taught the
+  distill pass so a first-person commitment on the mic channel is attributed to you, and corrected in
+  one click by claiming a row, which also learns the name for next time);
   GitHub evidence remains
 - Azure DevOps board integration
 - Weekly digests per project

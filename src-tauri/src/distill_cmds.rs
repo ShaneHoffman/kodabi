@@ -406,10 +406,17 @@ fn run(app: &AppHandle, session_path: &Path) -> Result<PathBuf, DistillFailure> 
     let kb = knowledge_base_dir(app).map_err(DistillFailure::Other)?;
     let runner = ClaudeRunner::new(ClaudeConfig::distill_from_env());
     let config = routing_config_from_env();
+    // Who the user is, so a first-person commitment on the mic channel is
+    // attributed to them rather than to whichever name the room happened to
+    // say. One snapshot, taken before the call rather than inside the closures.
+    let settings = app
+        .state::<crate::settings_cmds::SettingsState>()
+        .snapshot();
     kodabi_core::distill::distill_session(
         &runner,
         &kb,
         session_path,
+        Some(&settings.identity),
         &|output, body| {
             let (routing, diagnostics) = route_distilled(&kb, output, body, &config);
             // Discovery failed outright: the note fell back to Inbox. Warn the UI so

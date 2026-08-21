@@ -541,6 +541,41 @@ impl Ledger {
         )
     }
 
+    /// Re-files an entry as the local user's own, because they said so.
+    ///
+    /// The direction is the only thing that moves: a claim is a correction of
+    /// *who* the commitment belongs to, never of where it stands, so a snoozed
+    /// entry stays snoozed and a needs-review entry keeps its evidence. Nothing
+    /// rewrites the stored `owner` either — the note's line still says what it
+    /// says, and the ledger's copy of it is what the next re-mention matches
+    /// against. What changes is the answer to "is this mine", plus the alias the
+    /// shell learns from it so the next meeting gets it right unprompted.
+    ///
+    /// Idempotent: claiming an entry that is already `mine` returns it
+    /// unchanged, so a double-click cannot produce a second `updated_at`.
+    pub fn claim_mine(&mut self, entry_id: &str, now: &str) -> Result<LedgerEntry> {
+        let entry = self
+            .get_entry(entry_id)?
+            .ok_or_else(|| LedgerError::EntryNotFound {
+                entry_id: entry_id.to_string(),
+            })?
+            .entry;
+        if entry.direction == Direction::Mine {
+            return Ok(entry);
+        }
+        self.conn.execute(
+            "UPDATE ledger_entries SET direction = 'mine', updated_at = ?2 WHERE entry_id = ?1",
+            params![entry_id, now],
+        )?;
+        self.mark_dirty(&entry.project);
+        let detail = self
+            .get_entry(entry_id)?
+            .ok_or_else(|| LedgerError::EntryNotFound {
+                entry_id: entry_id.to_string(),
+            })?;
+        Ok(detail.entry)
+    }
+
     /// Records that a person has acted on this entry.
     ///
     /// **Deliberately does not bump `updated_at`.** The operation that preceded
@@ -1059,6 +1094,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -1385,6 +1421,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap()
@@ -1426,6 +1463,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap()
@@ -1451,6 +1489,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap()
@@ -1500,6 +1539,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -1512,6 +1552,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -1596,6 +1637,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -1624,6 +1666,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -1650,6 +1693,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap()

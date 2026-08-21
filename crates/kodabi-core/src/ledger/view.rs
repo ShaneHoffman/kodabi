@@ -227,8 +227,14 @@ impl ItemTracking {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoteItemEnrollment {
     pub item: ActionItemRow,
-    /// Derived from the line's owner, not from the entry: an un-enrolled item
-    /// has no entry to ask, and the two always agree for one that does.
+    /// The entry's own direction where there is an entry, and the line's owner
+    /// resolved against the user's names where there is not.
+    ///
+    /// That order, not the other way round: an un-enrolled item has nothing to
+    /// ask, but an enrolled one may have been *claimed*
+    /// ([`crate::ledger::Ledger::claim_mine`]), and a claim is precisely the
+    /// case the owner string cannot express - the spelling it was filed under
+    /// may be one no alias will ever resolve.
     pub direction: Direction,
     pub tracking: ItemTracking,
     /// Why it left the working set; present only when `tracking` is
@@ -250,6 +256,7 @@ pub fn assemble_note_items(
     note_id: &str,
     items: Vec<ActionItemRow>,
     details: &[EntryDetail],
+    identity: &crate::ledger::OwnerIdentity,
 ) -> Vec<NoteItemEnrollment> {
     let mut by_item: HashMap<&str, &EntryDetail> = HashMap::new();
     for detail in details {
@@ -264,7 +271,10 @@ pub fn assemble_note_items(
         .into_iter()
         .map(|item| {
             let matched = by_item.get(item.id.as_str());
-            let direction = Direction::from_owner(&item.owner);
+            let direction = match matched {
+                Some(detail) => detail.entry.direction,
+                None => Direction::resolve(&item.owner, identity),
+            };
             match matched {
                 Some(detail) => NoteItemEnrollment {
                     item,
@@ -466,6 +476,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -498,6 +509,7 @@ mod tests {
                 link_hints: &[],
                 note_override: Some(EnrollmentMode::ContextOnly),
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -517,6 +529,7 @@ mod tests {
                 row("a_222222", "You", "book the venue", None, false),
             ],
             &details,
+            &crate::ledger::OwnerIdentity::default(),
         );
 
         // Body order is the reader's order.
@@ -529,6 +542,34 @@ mod tests {
         assert_eq!(assembled[1].direction, Direction::Mine);
         assert_eq!(assembled[1].untracked_via, Some(UntrackedVia::Manual));
         assert_eq!(assembled[1].entry_state, Some(EntryState::Untracked));
+    }
+
+    #[test]
+    fn a_claimed_line_reads_as_the_users_own_in_its_note() {
+        let (mut ledger, entry_id) = seeded();
+        // Claimed under a spelling no alias resolves, so the entry is the only
+        // record of the verdict.
+        ledger.claim_mine(&entry_id, NOW).unwrap();
+
+        let details = ledger.list_details(&Default::default()).unwrap();
+        let assembled = assemble_note_items(
+            "n_a1b2c3",
+            vec![row(
+                "a_111111",
+                "Priya",
+                "send the revised deck",
+                None,
+                false,
+            )],
+            &details,
+            &crate::ledger::OwnerIdentity::default(),
+        );
+
+        assert_eq!(assembled[0].direction, Direction::Mine);
+        assert_eq!(
+            assembled[0].item.owner, "Priya",
+            "the note's line still says what it says"
+        );
     }
 
     #[test]
@@ -548,6 +589,7 @@ mod tests {
                 false,
             )],
             &details,
+            &crate::ledger::OwnerIdentity::default(),
         );
         assert_eq!(elsewhere[0].tracking, ItemTracking::NotEnrolled);
 
@@ -561,6 +603,7 @@ mod tests {
                 false,
             )],
             &details,
+            &crate::ledger::OwnerIdentity::default(),
         );
         assert_eq!(here[0].tracking, ItemTracking::Tracked);
         assert_eq!(here[0].untracked_via, None);
@@ -579,6 +622,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -593,6 +637,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -605,6 +650,7 @@ mod tests {
                 row("a_111111", "Priya", "send the revised deck", None, false),
             ],
             &details,
+            &crate::ledger::OwnerIdentity::default(),
         );
 
         assert_eq!(assembled[0].tracking, ItemTracking::Tracked);
@@ -658,6 +704,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();

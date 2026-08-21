@@ -14,6 +14,7 @@ import {
   setAppearance,
   setCaptureOverlay,
   setCategoryPrefs,
+  setIdentity,
   setLedgerTuning,
   setRetentionPolicy,
   THEME_OPTIONS,
@@ -155,6 +156,58 @@ function NumberField({
       onBlur={onCommit}
     />
   );
+}
+
+/** A settings text field, committing on Enter and on blur.
+ *
+ * The text sibling of `NumberField`, and it commits the same two ways for the
+ * same reason: blur alone leaves a keyboard user with no deliberate commit. */
+function TextField({
+  label,
+  value,
+  placeholder,
+  width = "w-56",
+  onChange,
+  onCommit,
+}: {
+  label: string;
+  value: string;
+  placeholder?: string;
+  width?: string;
+  onChange: (value: string) => void;
+  onCommit: () => void;
+}) {
+  return (
+    <input
+      type="text"
+      value={value}
+      placeholder={placeholder}
+      aria-label={label}
+      className={`focus-ring ${width} rounded-button border border-edge bg-wash px-2.5 py-2 font-ui text-[12.5px] text-ink caret-kodama shadow-[inset_0_1px_0_var(--color-edge-lit)] transition-[border-color] duration-140 ease-out-strong outline-hidden placeholder:text-ink-faint focus:border-ink-faint`}
+      onChange={(event) => onChange(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          onCommit();
+        }
+      }}
+      onBlur={onCommit}
+    />
+  );
+}
+
+/** Which of the Identity card's two fields a commit came from. */
+type IdentityField = "display_name" | "aliases";
+
+/** The aliases field is one line of text, so the list is comma-separated going
+ * in and coming out. Splitting here rather than in the backend keeps the wire
+ * shape a real list: the backend trims and de-duplicates, and what it returns
+ * is what gets re-seeded. */
+function parseAliases(raw: string): string[] {
+  return raw
+    .split(",")
+    .map((alias) => alias.trim())
+    .filter((alias) => alias !== "");
 }
 
 /** Which of the Commitments card's three fields a commit came from. */
@@ -602,6 +655,16 @@ export function SettingsView() {
   // is the row's own status line, and an error two rows below the control that
   // raised it reads as belonging to the wrong setting.
   const [ledgerFoot, setLedgerFoot] = useState<LedgerField>("aging_after_days");
+  const [displayName, setDisplayName] = useState("");
+  const [aliases, setAliases] = useState("");
+  const [seededIdentity, setSeededIdentity] = useState(false);
+  const [identityError, setIdentityError] = useState<string | null>(null);
+  const [identitySaved, setIdentitySaved] = useState(false);
+  const [identitySavedTick, setIdentitySavedTick] = useState(0);
+  const [savingIdentity, setSavingIdentity] = useState(false);
+  // Which field asked for the write, so its outcome lands under it — the same
+  // reason `ledgerFoot` exists.
+  const [identityFoot, setIdentityFoot] = useState<IdentityField>("display_name");
   // The failing kind travels with its message, for the reason `ledgerFoot`
   // exists: this card is seven rows tall, so an error parked at its head reads
   // as a claim about the card rather than about the write that raised it.
@@ -611,6 +674,12 @@ export function SettingsView() {
   } | null>(null);
   // Which kind is mid-write, so only that row's Select reads as busy.
   const [savingCategory, setSavingCategory] = useState<CategoryKey | null>(null);
+  if (!seededIdentity && settings) {
+    setSeededIdentity(true);
+    setDisplayName(settings.identity.display_name);
+    setAliases(settings.identity.aliases.join(", "));
+  }
+
   if (!seededLedger && settings) {
     setSeededLedger(true);
     setAgingDays(String(settings.ledger.aging_after_days));
@@ -623,6 +692,68 @@ export function SettingsView() {
     ledgerSaved ? CONFIRMATION_MS : null,
     ledgerSavedTick,
   );
+
+  useTimeout(
+    () => setIdentitySaved(false),
+    identitySaved ? CONFIRMATION_MS : null,
+    identitySavedTick,
+  );
+
+  const identityFootLines = (
+    <>
+      {identitySaved && <ConfirmLine>Saved.</ConfirmLine>}
+      {identityError && (
+        <StatusMessage variant="error" compact>
+          {identityError}
+        </StatusMessage>
+      )}
+    </>
+  );
+
+  // Both fields commit the whole identity, because the backend takes it as one
+  // value and the two halves are matched as a single set of spellings.
+  const applyIdentity = async (field: IdentityField) => {
+    // Enter then blur: the same double-commit guard the ledger fields use.
+    if (!settings || savingIdentity) return;
+    const merged = {
+      display_name: displayName.trim(),
+      aliases: parseAliases(aliases),
+    };
+    setIdentityFoot(field);
+    const unchanged =
+      merged.display_name === settings.identity.display_name &&
+      merged.aliases.length === settings.identity.aliases.length &&
+      merged.aliases.every((alias, index) => alias === settings.identity.aliases[index]);
+    if (unchanged) {
+      // Still re-seed: a trailing comma or a stray space should settle into the
+      // stored spelling rather than sit there looking unsaved.
+      setDisplayName(merged.display_name);
+      setAliases(merged.aliases.join(", "));
+      return;
+    }
+    setIdentityError(null);
+    setSavingIdentity(true);
+    try {
+      const updated = await setIdentity(merged);
+      setSettings(updated);
+      // Re-seed from what actually persisted: the backend drops blanks and
+      // duplicate spellings, so this is where a de-duplicated list shows up.
+      setDisplayName(updated.identity.display_name);
+      setAliases(updated.identity.aliases.join(", "));
+      setIdentitySaved(true);
+      setIdentitySavedTick((tick) => tick + 1);
+    } catch (err) {
+      setIdentityError(
+        backendCopy(
+          err,
+          "Couldn't save your name. The previous value still applies; try again.",
+        ),
+      );
+      setIdentitySaved(false);
+    } finally {
+      setSavingIdentity(false);
+    }
+  };
 
   // One pair of lines, rendered under whichever row asked for the write.
   const ledgerFootLines = (
@@ -925,6 +1056,40 @@ export function SettingsView() {
                   onBlur={() => apply("keep_days", Number(days), true)}
                 />
               )}
+            </Row>
+          </Card>
+
+          {/* Ahead of Commitments, because it is what makes that card's
+              Mine / Waiting on them split mean anything: without a name, every
+              commitment the transcript attributes by name reads as someone
+              else's. */}
+          <Card title="You">
+            <Row
+              label="Your name"
+              hint="How you are named in meetings. Commitments you take on file under Mine."
+              foot={identityFoot === "display_name" && identityFootLines}
+            >
+              <TextField
+                label="Your name"
+                value={displayName}
+                placeholder="Not set"
+                onChange={setDisplayName}
+                onCommit={() => void applyIdentity("display_name")}
+              />
+            </Row>
+
+            <Row
+              label="Also known as"
+              hint="Other spellings meetings use for you, separated by commas. Claiming a commitment as yours adds to this list."
+              foot={identityFoot === "aliases" && identityFootLines}
+            >
+              <TextField
+                label="Other names"
+                value={aliases}
+                placeholder="None"
+                onChange={setAliases}
+                onCommit={() => void applyIdentity("aliases")}
+              />
             </Row>
           </Card>
 

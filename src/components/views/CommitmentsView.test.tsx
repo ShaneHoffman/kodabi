@@ -418,6 +418,140 @@ describe("CommitmentsView", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
+  it("claims a commitment as mine from the row menu", async () => {
+    const user = userEvent.setup();
+    serve({
+      entries: [
+        commitment({
+          entry_id: "le_theirs",
+          direction: "theirs",
+          owner: "Avery",
+          description: "circulate the minutes",
+          item: item({ description: "circulate the minutes" }),
+        }),
+      ],
+    });
+    onCommand("claim_commitment_mine", () => ({
+      entry: {
+        entry_id: "le_theirs",
+        state: "open",
+        snoozed_until: null,
+        closed_via: null,
+        review_reason: null,
+        updated_at: "2026-08-17T12:00:00Z",
+      },
+      alias: "saved",
+    }));
+
+    await openCommitments(user);
+    await user.click(
+      await screen.findByRole("button", { name: 'Actions for "circulate the minutes"' }),
+    );
+    await user.click(await screen.findByRole("menuitem", { name: "This is mine" }));
+
+    await waitFor(() =>
+      expect(
+        invoke.mock.calls.some(([command]) => command === "claim_commitment_mine"),
+      ).toBe(true),
+    );
+    // The name was learned, so there is nothing to say: the refetch moves the
+    // row and that is the whole report.
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("says so when the claim landed but the name was not learned", async () => {
+    const user = userEvent.setup();
+    serve({
+      entries: [
+        commitment({
+          entry_id: "le_theirs",
+          direction: "theirs",
+          owner: "Avery",
+          description: "circulate the minutes",
+          item: item({ description: "circulate the minutes" }),
+        }),
+      ],
+    });
+    onCommand("claim_commitment_mine", () => ({
+      entry: {
+        entry_id: "le_theirs",
+        state: "open",
+        snoozed_until: null,
+        closed_via: null,
+        review_reason: null,
+        updated_at: "2026-08-17T12:00:00Z",
+      },
+      alias: "failed",
+    }));
+
+    await openCommitments(user);
+    await user.click(
+      await screen.findByRole("button", { name: 'Actions for "circulate the minutes"' }),
+    );
+    await user.click(await screen.findByRole("menuitem", { name: "This is mine" }));
+
+    // The move landed; the part that quietly failed is the part that would
+    // have stopped the same misfiling next time, so it is worth a line.
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /wasn't saved as one of your names/,
+    );
+  });
+
+  it("stays quiet when the owner was a name the app declines to learn", async () => {
+    const user = userEvent.setup();
+    serve({
+      entries: [
+        commitment({
+          entry_id: "le_them",
+          direction: "theirs",
+          owner: "Them",
+          description: "get you the numbers",
+          item: item({ description: "get you the numbers" }),
+        }),
+      ],
+    });
+    // "Them" is what the distill guidance writes for an unnamed other, so the
+    // backend refuses to learn it on purpose. That refusal is not a failure and
+    // must not read as one.
+    onCommand("claim_commitment_mine", () => ({
+      entry: {
+        entry_id: "le_them",
+        state: "open",
+        snoozed_until: null,
+        closed_via: null,
+        review_reason: null,
+        updated_at: "2026-08-17T12:00:00Z",
+      },
+      alias: "not_needed",
+    }));
+
+    await openCommitments(user);
+    await user.click(
+      await screen.findByRole("button", { name: 'Actions for "get you the numbers"' }),
+    );
+    await user.click(await screen.findByRole("menuitem", { name: "This is mine" }));
+
+    await waitFor(() =>
+      expect(
+        invoke.mock.calls.some(([command]) => command === "claim_commitment_mine"),
+      ).toBe(true),
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("offers no claim on a row that is already mine", async () => {
+    const user = userEvent.setup();
+    serve({ entries: [commitment({ entry_id: "le_mine", item: item() })] });
+
+    await openCommitments(user);
+    await user.click(
+      await screen.findByRole("button", { name: 'Actions for "book the venue"' }),
+    );
+
+    expect(await screen.findByRole("menuitem", { name: "Waive" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "This is mine" })).toBeNull();
+  });
+
   it("files an untracked entry on the settled shelf, saying so, with its undo", async () => {
     const user = userEvent.setup();
     serve({

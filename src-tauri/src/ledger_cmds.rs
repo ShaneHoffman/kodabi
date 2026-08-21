@@ -654,6 +654,115 @@ pub struct CommitmentEntryInput {
     entry_id: String,
 }
 
+/// What became of the name a claimed row was filed under.
+///
+/// Three outcomes rather than a bool, because two of them look identical from
+/// the outside and mean opposite things. Refusing to learn `"Them"` is the
+/// design working (`ledger::learnable_alias`); failing to write a real name is
+/// the one case worth telling the user about, since the same misfiling will
+/// happen again. A bool would have the view apologising for the former.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AliasOutcome {
+    /// The spelling joined the user's names.
+    Saved,
+    /// Nothing to learn: a reserved token, or a spelling already known.
+    NotNeeded,
+    /// There was a name to learn and it could not be saved.
+    Failed,
+}
+
+/// What a claim settled on: the re-filed entry, and what became of the name it
+/// was filed under.
+#[derive(serde::Serialize)]
+pub struct ClaimMineDto {
+    pub entry: CommitmentEntryDto,
+    pub alias: AliasOutcome,
+}
+
+/// Re-files a commitment as the user's own, and learns the name it was filed
+/// under so the next meeting gets it right unprompted.
+///
+/// The correction loop the routing examples established: every correction is
+/// training data. Three writes, in a deliberate order.
+///
+/// 1. **The claim itself**, through the ordinary mutation path - so it marks
+///    the entry `touched`, which is exactly right: a person has now judged this
+///    row, and no later sweep may overrule them.
+/// 2. **The alias**, unless the owner string is one the app already owns
+///    (`ledger::learnable_alias`). A failure here does not fail the command:
+///    the user's actual request - move this to Mine - has already landed, and
+///    reporting it as an error would be a lie about what the ledger holds. The
+///    view is told through [`AliasOutcome`] instead, which separates a refusal
+///    from a failure so it only speaks up for the second.
+/// 3. **The sweep**, best-effort in the background, so the sibling entries that
+///    same name is sitting on move with it rather than needing a click each.
+#[tauri::command]
+pub async fn claim_commitment_mine(
+    app: AppHandle,
+    input: CommitmentEntryInput,
+) -> Result<ClaimMineDto, String> {
+    let (client, _) = handles(&app);
+    let reply = mutate(
+        &app,
+        "claim_commitment_mine",
+        client,
+        LedgerOp::ClaimMine {
+            entry_id: input.entry_id,
+        },
+    )
+    .await?;
+
+    let alias = learn_owner_alias(&app, &reply.entry.owner);
+    Ok(ClaimMineDto {
+        entry: entry_dto(&reply.entry),
+        alias,
+    })
+}
+
+/// Adds `owner` to the user's aliases and re-checks the rest of the ledger
+/// against the new set.
+///
+/// Never fails the command - see [`claim_commitment_mine`]'s step 2. The return
+/// value distinguishes the two ways nothing was learned, because only one of
+/// them is the user's problem.
+fn learn_owner_alias(app: &AppHandle, owner: &str) -> AliasOutcome {
+    // A reserved token: "You" and "Unassigned" are resolved before any alias is
+    // consulted, and "Them" is what the distill guidance writes for an unnamed
+    // other, so adopting it would claim every future them-side line.
+    let Some(alias) = kodabi_core::ledger::learnable_alias(owner) else {
+        return AliasOutcome::NotNeeded;
+    };
+    let state = app.state::<SettingsState>();
+    let mut learned = false;
+    let updated = state.update(
+        "Couldn't save that name, so future mentions of it may still file under \
+Waiting on them.",
+        |s| learned = s.identity.learn_alias(alias),
+    );
+
+    match updated {
+        Ok(settings) if learned => {
+            let _ = app.emit(
+                crate::settings_cmds::SETTINGS_CHANGED_EVENT,
+                settings.clone(),
+            );
+            crate::settings_cmds::resolve_owners_in_background(
+                app,
+                settings.identity.owner_identity(),
+            );
+            AliasOutcome::Saved
+        }
+        // The write landed but changed nothing: some spelling of this name was
+        // already known.
+        Ok(_) => AliasOutcome::NotNeeded,
+        Err(err) => {
+            eprintln!("claim_commitment_mine: couldn't learn {owner:?}: {err}");
+            AliasOutcome::Failed
+        }
+    }
+}
+
 /// Marks a commitment as deliberately not happening.
 ///
 /// Ledger-only, and that is the whole point of the verb: waiving exists so a
@@ -878,13 +987,13 @@ pub async fn list_note_commitments(
     input: NoteCommitmentsInput,
 ) -> Result<NoteCommitmentsDto, String> {
     let (client, index) = handles(&app);
-    let categories = app.state::<SettingsState>().snapshot().categories;
+    let enrolment = crate::index_state::enrolment_settings(&app);
     tauri::async_runtime::spawn_blocking(move || {
         let note_id = input.note_id;
         let details = client
             .note_entries(note_id.clone())
             .map_err(|err| ledger_error("list_note_commitments", err, LEDGER_READ_REFUSED))?;
-        let facts = index.and_then(|index| index.note_facts(&note_id, &categories));
+        let facts = index.and_then(|index| index.note_facts(&note_id, &enrolment));
         // The *effective* mode, so the panel reports what actually gates this
         // meeting: a note with no override of its own still reads as context
         // only when its category says so.
@@ -909,7 +1018,7 @@ pub async fn list_note_commitments(
             .unwrap_or_default();
         Ok(NoteCommitmentsDto {
             context_only: mode == Some(EnrollmentMode::ContextOnly),
-            items: view::assemble_note_items(&note_id, items, &details)
+            items: view::assemble_note_items(&note_id, items, &details, enrolment.identity())
                 .into_iter()
                 .map(note_item_dto)
                 .collect(),
@@ -1092,9 +1201,9 @@ pub async fn track_commitment_item(
     let (client, index) = handles(&app);
     let note_id = input.note_id.clone();
     let item_id = input.item_id.clone();
-    let categories = app.state::<SettingsState>().snapshot().categories;
+    let enrolment = crate::index_state::enrolment_settings(&app);
     let entry = tauri::async_runtime::spawn_blocking(move || {
-        let Some(facts) = index.and_then(|index| index.note_facts(&note_id, &categories)) else {
+        let Some(facts) = index.and_then(|index| index.note_facts(&note_id, &enrolment)) else {
             return Err(
                 "Kodabi doesn't have this meeting indexed yet, so this line can't be \
                         tracked. Try again in a moment."
@@ -1114,6 +1223,7 @@ pub async fn track_commitment_item(
                 project: facts.project,
                 note_date_utc: facts.date_utc,
                 item,
+                identity: facts.identity,
             })
             .map_err(|err| ledger_error("track_commitment_item", err, LEDGER_REFUSED))
     })

@@ -29,6 +29,7 @@ const ACKNOWLEDGED: Settings = {
     all_hands: { enrollment_default: null },
     observer: { enrollment_default: null },
   },
+  identity: { display_name: "", aliases: [] },
 };
 
 function primaryButton(): HTMLElement {
@@ -68,8 +69,26 @@ describe("ConsentNudge", () => {
     expect(invokedCommands()).toEqual(["acknowledge_consent", "start_capture"]);
     expect(invoke).toHaveBeenCalledWith("acknowledge_consent", {
       retention: { policy: "keep_all" },
+      displayName: "",
     });
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("seeds the name the user's own commitments file under", async () => {
+    const user = userEvent.setup();
+    onCommand("acknowledge_consent", () => ACKNOWLEDGED);
+    onCommand("start_capture", () => null);
+    render(<ConsentNudge onClose={vi.fn()} />);
+
+    // The one gate every install passes before its first capture, which makes
+    // it the last moment this answer is still ahead of the first meeting.
+    await user.type(screen.getByRole("textbox", { name: /Your name/ }), "  Avery  ");
+    await user.click(primaryButton());
+
+    expect(invoke).toHaveBeenCalledWith("acknowledge_consent", {
+      retention: { policy: "keep_all" },
+      displayName: "Avery",
+    });
   });
 
   it("carries the chosen retention policy into acknowledge_consent", async () => {
@@ -83,6 +102,7 @@ describe("ConsentNudge", () => {
 
     expect(invoke).toHaveBeenCalledWith("acknowledge_consent", {
       retention: { policy: "discard_after_distill" },
+      displayName: "",
     });
   });
 
@@ -101,6 +121,7 @@ describe("ConsentNudge", () => {
 
     expect(invoke).toHaveBeenCalledWith("acknowledge_consent", {
       retention: { policy: "keep_days", days: 7 },
+      displayName: "",
     });
   });
 
@@ -118,6 +139,7 @@ describe("ConsentNudge", () => {
 
     expect(invoke).toHaveBeenCalledWith("acknowledge_consent", {
       retention: { policy: "keep_days", days: 1 },
+      displayName: "",
     });
   });
 

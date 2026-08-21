@@ -37,7 +37,7 @@ mod sync;
 pub mod view;
 
 pub use distill_apply::{apply_distill_follow_up, AppliedUpdates, AutoClose, DistillFollowUp};
-pub use enrollment::{DrainOutcome, NoteTrackingOutcome, RetroSource};
+pub use enrollment::{DrainOutcome, NoteTrackingOutcome, OwnerResolutionOutcome, RetroSource};
 pub use snapshot::{ProjectSnapshot, RestoreReport, LEDGER_SNAPSHOT_FILE, LEDGER_SNAPSHOT_VERSION};
 pub use store::{EntryDetail, EntryFilter, EntryLink, Evidence, ItemRef, LedgerEntry};
 pub use sync::{LinkHint, NoteSync, SyncOutcome};
@@ -249,19 +249,46 @@ pub enum Direction {
 }
 
 impl Direction {
-    /// Derives the direction from the grammar's owner string.
+    /// Derives the direction from the grammar's owner string, knowing nothing
+    /// about who the user is.
     ///
     /// `"You"` is the distill prompt's convention for the local user
     /// ([`crate::distill`]), and [`crate::distill::UNASSIGNED_OWNER`] its
     /// sentinel for an unattributed line. Everything else is a named other.
     /// Case-insensitive: the owner is free text and only the renderer
     /// capitalizes it.
+    ///
+    /// This is [`Direction::resolve`] against an empty [`OwnerIdentity`], and
+    /// exists for the callers that genuinely have no identity to offer (tests,
+    /// and reads that only care whether a line said `Unassigned`). A path that
+    /// enrols or re-files a commitment wants `resolve`: a user who has told the
+    /// app their name expects `"Avery to send the deck"` to be theirs.
     pub fn from_owner(owner: &str) -> Direction {
+        Direction::resolve(owner, &OwnerIdentity::default())
+    }
+
+    /// Derives the direction from the owner string, resolving the user's own
+    /// names to [`Direction::Mine`].
+    ///
+    /// The grammar's `"You"` always wins first: it is the prompt's own spelling
+    /// for the local user, so it means "me" whether or not a name is
+    /// configured, and no alias can redefine it. `Unassigned` is likewise
+    /// reserved — it exists precisely so an unattributed line does *not*
+    /// silently become the user's, and an alias set must never swallow it.
+    ///
+    /// Everything else falls to the identity, and an unresolved name is
+    /// **theirs**. That asymmetry is deliberate and matches the enrolment
+    /// gate's observer rule: a stray sitting in Waiting-on-them is one click to
+    /// fix, while a commitment wrongly filed as the user's own is a promise
+    /// they never made.
+    pub fn resolve(owner: &str, identity: &OwnerIdentity) -> Direction {
         let owner = owner.trim();
         if owner.eq_ignore_ascii_case("you") {
             Direction::Mine
         } else if owner.eq_ignore_ascii_case(crate::distill::UNASSIGNED_OWNER) {
             Direction::Unassigned
+        } else if identity.is_me(owner) {
+            Direction::Mine
         } else {
             Direction::Theirs
         }
@@ -288,6 +315,91 @@ impl Direction {
             )),
         }
     }
+}
+
+/// The set of owner spellings that mean the local user.
+///
+/// Built from [`crate::settings::IdentitySettings`] — display name and aliases
+/// flattened together — and matched with [`normalize_owner`], the same
+/// normalization that produced the stored `owner_norm` column, so a name
+/// matched here and a name matched by [`sync`] can never disagree.
+///
+/// **Normalization, not fuzzy matching.** Case, surrounding and interior
+/// whitespace, and the two Unicode spellings of an accented name are folded;
+/// nothing else is. No prefix matching (`"Avery"` must not claim `"Avery Kim"`
+/// unless the user said so), no edit distance, no first-name-of guessing —
+/// every one of those trades a silent, unexplainable mis-filing for
+/// convenience the claim affordance already provides in one click. A miss is
+/// cheap and self-correcting; a false positive puts words in the user's mouth.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OwnerIdentity {
+    aliases: BTreeSet<String>,
+}
+
+impl OwnerIdentity {
+    /// Builds the matcher from a display name and its other spellings. Blank
+    /// entries are dropped, so an unconfigured identity is simply empty and
+    /// every owner resolves the way it did before there was an identity at all.
+    pub fn new(display_name: &str, aliases: &[String]) -> OwnerIdentity {
+        let aliases = std::iter::once(display_name)
+            .chain(aliases.iter().map(String::as_str))
+            .map(normalize_owner)
+            .filter(|alias| !alias.is_empty())
+            .collect();
+        OwnerIdentity { aliases }
+    }
+
+    /// Whether `owner` is one of the user's names.
+    ///
+    /// Blind to `"You"` and `Unassigned` on purpose: those are the grammar's
+    /// tokens, decided by [`Direction::resolve`] before it ever asks here.
+    pub fn is_me(&self, owner: &str) -> bool {
+        let owner = normalize_owner(owner);
+        !owner.is_empty() && self.aliases.contains(&owner)
+    }
+
+    /// Whether no name has been configured. An empty identity resolves owners
+    /// exactly as [`Direction::from_owner`] does.
+    pub fn is_empty(&self) -> bool {
+        self.aliases.is_empty()
+    }
+
+    /// The normalized spellings, for the sweep's `owner_norm` lookup.
+    pub(crate) fn normalized_aliases(&self) -> &BTreeSet<String> {
+        &self.aliases
+    }
+}
+
+/// Normalizes an owner string for matching: NFC, lowercase, whitespace runs
+/// collapsed, trimmed.
+///
+/// The public face of the normalization behind the `owner_norm` column, so
+/// callers outside this module (settings de-duplicating a learned alias) fold
+/// names the exact same way the database does.
+pub fn normalize_owner(owner: &str) -> String {
+    store::normalize(owner)
+}
+
+/// The owner string a "this is me" claim may learn as an alias, or `None` when
+/// the spelling is one the app already owns.
+///
+/// Three spellings are refused. `"You"` and [`crate::distill::UNASSIGNED_OWNER`]
+/// are the grammar's own tokens, already resolved before any alias is
+/// consulted; learning them would be a no-op at best. `"Them"` is the sharper
+/// case: the distill guidance writes it for a commitment the *other* side took
+/// when nobody named the speaker, so adopting it as one of the user's names
+/// would quietly claim every future unnamed them-side commitment — the exact
+/// failure the unresolved-defaults-to-theirs rule exists to prevent.
+pub fn learnable_alias(owner: &str) -> Option<&str> {
+    let owner = owner.trim();
+    if owner.is_empty()
+        || owner.eq_ignore_ascii_case("you")
+        || owner.eq_ignore_ascii_case("them")
+        || owner.eq_ignore_ascii_case(crate::distill::UNASSIGNED_OWNER)
+    {
+        return None;
+    }
+    Some(owner)
 }
 
 /// How a closure was reached. Source-agnostic by design: GitHub and conversation
@@ -935,6 +1047,92 @@ mod tests {
         assert_eq!(Direction::from_owner("Priya"), Direction::Theirs);
         // "Yourself" is a named other, not the local user.
         assert_eq!(Direction::from_owner("Yourself"), Direction::Theirs);
+    }
+
+    #[test]
+    fn an_identity_resolves_the_users_own_names_to_mine() {
+        let identity = OwnerIdentity::new("Avery", &["Avery Kim".to_string()]);
+        assert_eq!(Direction::resolve("Avery", &identity), Direction::Mine);
+        assert_eq!(Direction::resolve("Avery Kim", &identity), Direction::Mine);
+        // Case and stray whitespace fold; the same name typed either way is the
+        // same person.
+        assert_eq!(Direction::resolve("  avery  ", &identity), Direction::Mine);
+        assert_eq!(Direction::resolve("AVERY KIM", &identity), Direction::Mine);
+        // Interior whitespace runs collapse too.
+        assert_eq!(
+            Direction::resolve("Avery   Kim", &identity),
+            Direction::Mine
+        );
+        // Someone else stays theirs, and so does a name that merely starts the
+        // same way: no prefix matching.
+        assert_eq!(Direction::resolve("Priya", &identity), Direction::Theirs);
+        assert_eq!(
+            Direction::resolve("Avery Chen", &identity),
+            Direction::Theirs
+        );
+    }
+
+    #[test]
+    fn the_grammars_own_tokens_outrank_any_alias() {
+        // A user who somehow configured these as names must not be able to
+        // redefine what the prompt's own vocabulary means.
+        let identity = OwnerIdentity::new("You", &[crate::distill::UNASSIGNED_OWNER.to_string()]);
+        assert_eq!(Direction::resolve("You", &identity), Direction::Mine);
+        assert_eq!(
+            Direction::resolve(crate::distill::UNASSIGNED_OWNER, &identity),
+            Direction::Unassigned,
+            "an unattributed line never becomes the user's own"
+        );
+    }
+
+    #[test]
+    fn the_two_unicode_spellings_of_an_accented_name_resolve_alike() {
+        // NFC first, so a name typed into Settings and a name the model wrote
+        // fold together even when the bytes differ.
+        let identity = OwnerIdentity::new("Zo\u{00e9}", &[]);
+        assert_eq!(
+            Direction::resolve("Zoe\u{0301}", &identity),
+            Direction::Mine
+        );
+    }
+
+    #[test]
+    fn an_empty_identity_resolves_exactly_as_the_identity_less_form() {
+        let empty = OwnerIdentity::default();
+        assert!(empty.is_empty());
+        for owner in ["You", "Priya", crate::distill::UNASSIGNED_OWNER, "Yourself"] {
+            assert_eq!(
+                Direction::resolve(owner, &empty),
+                Direction::from_owner(owner),
+                "{owner} should resolve alike"
+            );
+        }
+        // Blank spellings never join the set, so they cannot match a blank owner.
+        let blank = OwnerIdentity::new("   ", &["".to_string()]);
+        assert!(blank.is_empty());
+        assert!(!blank.is_me(""));
+    }
+
+    #[test]
+    fn a_claim_only_learns_a_spelling_the_app_does_not_already_own() {
+        assert_eq!(learnable_alias("Priya"), Some("Priya"));
+        assert_eq!(learnable_alias("  Priya Raman  "), Some("Priya Raman"));
+        // The grammar's tokens are resolved before any alias is consulted, and
+        // "Them" would claim every future unnamed them-side commitment.
+        for reserved in [
+            "You",
+            "you",
+            "Them",
+            "them",
+            crate::distill::UNASSIGNED_OWNER,
+            "  ",
+        ] {
+            assert_eq!(
+                learnable_alias(reserved),
+                None,
+                "{reserved} is not learnable"
+            );
+        }
     }
 
     #[test]

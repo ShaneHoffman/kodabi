@@ -11,10 +11,10 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use kodabi_core::settings::{
-    self, AppearanceSettings, CategorySettings, LedgerSettings, OverlaySettings, RetentionPolicy,
-    Settings,
+    self, AppearanceSettings, CategorySettings, IdentitySettings, LedgerSettings, OverlaySettings,
+    RetentionPolicy, Settings,
 };
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// Event emitted after settings change over IPC, carrying the new [`Settings`].
 /// Lets a view already mounted when the change lands (e.g. the Settings view
@@ -44,13 +44,16 @@ impl SettingsState {
         }
     }
 
-    /// A copy of the current settings. `Settings` is `Copy`, so this never
-    /// holds the lock across a caller's work.
+    /// A copy of the current settings, so the lock is never held across a
+    /// caller's work. A clone rather than a `Copy`: `IdentitySettings` carries
+    /// a `Vec` of alias spellings. Every other field is still `Copy`, so the
+    /// usual `snapshot().ledger` / `snapshot().categories` read costs nothing
+    /// beyond the one short-lived allocation.
     pub fn snapshot(&self) -> Settings {
-        *self
-            .current
+        self.current
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
     }
 
     /// Applies `mutate` to the settings, persists the result, and returns it.
@@ -73,11 +76,11 @@ impl SettingsState {
             .current
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let mut next = *guard;
+        let mut next = guard.clone();
         mutate(&mut next);
         settings::save(&self.path, &next)
             .map_err(|err| crate::user_errors::reported("settings", err, failed))?;
-        *guard = next;
+        *guard = next.clone();
         Ok(next)
     }
 }
@@ -102,7 +105,7 @@ pub fn set_retention_policy(
         "Couldn't save the retention policy. The previous policy still applies; try again.",
         |s| s.retention = policy,
     )?;
-    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
+    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings.clone());
     crate::retention::spawn_prune(&app);
     Ok(settings)
 }
@@ -122,7 +125,7 @@ pub fn set_capture_overlay(
         "Couldn't save the capture pill setting. The previous setting still applies; try again.",
         |s| s.overlay = overlay,
     )?;
-    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
+    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings.clone());
     crate::overlay::apply_settings_change(&app);
     Ok(settings)
 }
@@ -143,7 +146,7 @@ pub fn set_appearance(
         "Couldn't save the theme. The previous theme still applies; try again.",
         |s| s.appearance = appearance,
     )?;
-    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
+    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings.clone());
     Ok(settings)
 }
 
@@ -165,7 +168,7 @@ pub fn set_ledger_tuning(
         "Couldn't save the commitment settings. The previous values still apply; try again.",
         |s| s.ledger = ledger,
     )?;
-    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
+    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings.clone());
     let _ = app.emit(crate::events::LEDGER_CHANGED_EVENT, ());
     Ok(settings)
 }
@@ -193,27 +196,117 @@ pub fn set_category_prefs(
         "Couldn't save the meeting-kind settings. The previous values still apply; try again.",
         |s| s.categories = categories,
     )?;
-    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
+    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings.clone());
     Ok(settings)
+}
+
+/// Sets who the user is: the name they go by, plus the other spellings meetings
+/// use for them.
+///
+/// **Retrospective, unlike `set_category_prefs`.** Learning a name is not a
+/// preference about what happens next; it is the answer to a question the
+/// ledger has already been guessing at, and every commitment filed under
+/// Waiting-on-them because the app did not know the user's name is wrong right
+/// now. So the save is followed by a sweep
+/// (`ledger::Ledger::retro_resolve_owners`), which moves untouched open entries
+/// into Mine and never the other way.
+///
+/// The sweep is best-effort by design: the name is saved either way, and a
+/// failure here costs re-filing that the next claim or the next sync redoes.
+/// What the user asked for - "this is my name" - has landed regardless.
+#[tauri::command]
+pub fn set_identity(
+    app: AppHandle,
+    state: State<'_, SettingsState>,
+    identity: IdentitySettings,
+) -> Result<Settings, String> {
+    // Normalized at the boundary, so what is stored is what will be matched.
+    let identity = identity.normalized();
+    let settings = state.update(
+        "Couldn't save your name. The previous value still applies; try again.",
+        |s| s.identity = identity,
+    )?;
+    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings.clone());
+    resolve_owners_in_background(&app, settings.identity.owner_identity());
+    Ok(settings)
+}
+
+/// Re-files the commitments an identity change re-resolves, off the IPC thread.
+///
+/// Spawned rather than awaited because the caller is a synchronous command and
+/// the sweep talks to the ledger worker: the settings write is what the user is
+/// waiting on, and the re-filing announces itself through `ledger:changed`
+/// whenever it lands.
+pub(crate) fn resolve_owners_in_background(
+    app: &AppHandle,
+    identity: kodabi_core::ledger::OwnerIdentity,
+) {
+    let app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let client = app.state::<crate::ledger_state::LedgerState>().client();
+        match client.retro_resolve_owners(identity) {
+            Ok(outcome) if outcome.claimed.is_empty() => {}
+            Ok(outcome) => {
+                let _ = app.emit(crate::events::LEDGER_CHANGED_EVENT, ());
+                eprintln!(
+                    "identity: re-filed {} commitment(s) as yours",
+                    outcome.claimed.len()
+                );
+            }
+            Err(err) => {
+                eprintln!("identity: couldn't re-check existing commitments: {err:?}");
+            }
+        }
+    });
 }
 
 /// Records that the user acknowledged the recording-consent nudge and stores
 /// the retention policy they chose in the same write. After this, the capture
 /// gate lets recording proceed.
+///
+/// `display_name` is the first-run seed for the ledger's mine/theirs split, and
+/// is optional in both senses: an `Option` parameter, so a payload that omits
+/// the key deserializes to `None` and every existing caller is unaffected, and
+/// the user may leave the field blank. This is the one gate every
+/// install passes before its first capture, which is the last moment the answer
+/// is still ahead of the first meeting rather than behind it. A blank leaves
+/// the setting untouched rather than writing an empty name over one the user
+/// already gave, and a reserved token reads as a blank
+/// (`ledger::learnable_alias`, the same gate `set_identity` writes through).
+///
+/// **A name given here sweeps, exactly as `set_identity` does.** "Ahead of the
+/// first meeting" is true of the recordings, not of the ledger: settings are
+/// machine-local while the vault is not, so a first run against an existing
+/// vault has a full ledger by the time this gate is answered — the startup
+/// reconcile built it, and every commitment in it is filed under Waiting on
+/// them because nobody had said who the user was yet.
 #[tauri::command]
 pub fn acknowledge_consent(
     app: AppHandle,
     state: State<'_, SettingsState>,
     retention: RetentionPolicy,
+    display_name: Option<String>,
 ) -> Result<Settings, String> {
+    let display_name = display_name
+        .as_deref()
+        .and_then(kodabi_core::ledger::learnable_alias)
+        .unwrap_or_default()
+        .to_string();
+    let named = !display_name.is_empty();
     let settings = state.update(
         "Couldn't save your choice, so recording stays off. Try again.",
         |s| {
             s.consent_acknowledged = true;
             s.retention = retention;
+            if named {
+                s.identity.display_name = display_name.clone();
+            }
         },
     )?;
-    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings);
+    let _ = app.emit(SETTINGS_CHANGED_EVENT, settings.clone());
+    if named {
+        resolve_owners_in_background(&app, settings.identity.owner_identity());
+    }
     // The chosen policy may prune immediately (e.g. KeepDays over pre-existing
     // sessions), same as an explicit policy change.
     crate::retention::spawn_prune(&app);

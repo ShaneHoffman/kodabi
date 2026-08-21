@@ -677,6 +677,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -898,6 +899,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -931,6 +933,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap();
@@ -1026,6 +1029,7 @@ mod tests {
                 link_hints: &[],
                 note_override: None,
                 category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
                 now: NOW,
             })
             .unwrap()
@@ -1079,6 +1083,7 @@ mod tests {
                     link_hints: &[],
                     note_override: None,
                     category_default: None,
+                    identity: &crate::ledger::OwnerIdentity::default(),
                     now: NOW,
                 })
                 .unwrap();

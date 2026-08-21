@@ -568,7 +568,10 @@ pub async fn run_mic_test(
         "The mic test ran but its result couldn't be saved. Run it again.",
         |s| s.mic_check = Some(result),
     )?;
-    let _ = app.emit(crate::settings_cmds::SETTINGS_CHANGED_EVENT, updated);
+    let _ = app.emit(
+        crate::settings_cmds::SETTINGS_CHANGED_EVENT,
+        updated.clone(),
+    );
     Ok(updated)
 }
 
