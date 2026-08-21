@@ -152,9 +152,10 @@ export async function launchKodabi({ exe, seed = [], startupTimeoutMs = 120_000 
 
   await assertPortFree(CDP_PORT);
 
-  // One directory, not two: `KODABI_SANDBOX` derives the vault root, the index
-  // (`.index/index.db`), the config dir and the WebView2 profile from a single
-  // base, so the harness names a base and lets Rust lay it out.
+  // One directory, not three: `KODABI_SANDBOX` derives the vault root, the
+  // index (`.index/index.db`), the commitment ledger (`ledger.db`), the config
+  // dir and the WebView2 profile from a single base, so the harness names a
+  // base and lets Rust lay it out.
   const vaultDir = await mkdtemp(join(tmpdir(), "kodabi-e2e-"));
   const indexDb = indexDbFor(vaultDir);
   const port = CDP_PORT;

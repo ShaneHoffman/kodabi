@@ -109,7 +109,7 @@ over.
 
 | Condition | Message |
 |---|---|
-| `KODABI_KB_ROOT`, `KODABI_INDEX_DB`, or `KODABI_LEDGER_DB` set alongside the switch | `<var> is set alongside KODABI_SANDBOX, which derives the vault and index itself. Unset <var>, or drop KODABI_SANDBOX to use it directly.` |
+| `KODABI_KB_ROOT`, `KODABI_INDEX_DB`, or `KODABI_LEDGER_DB` set alongside the switch | `<var> is set alongside KODABI_SANDBOX, which derives the vault, index and ledger itself. Unset <var>, or drop KODABI_SANDBOX to use it directly.` |
 | A relative base | ``KODABI_SANDBOX must be `1`, `true`, or an absolute path; got the relative path …`` |
 | A base that equals, contains, sits inside, or walks (`..`) into a real app dir | `sandbox base … overlaps the real app directory …. Refusing to touch real data in sandbox mode; choose a base outside it.` |
 

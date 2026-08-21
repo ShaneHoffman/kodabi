@@ -136,8 +136,8 @@ pub enum SandboxError {
     /// drives. Honouring both is impossible and picking one silently is exactly
     /// the half-set hazard the switch exists to remove.
     #[error(
-        "{variable} is set alongside {sandbox}, which derives the vault and index itself. \
-         Unset {variable}, or drop {sandbox} to use it directly."
+        "{variable} is set alongside {sandbox}, which derives the vault, index and ledger \
+         itself. Unset {variable}, or drop {sandbox} to use it directly."
     )]
     ExplicitOverride {
         variable: &'static str,
