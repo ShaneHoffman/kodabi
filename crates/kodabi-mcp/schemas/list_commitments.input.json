@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "project": {
+      "$ref": "#/$defs/ProjectSlug",
+      "description": "Restrict to commitments filed under this project. \"Inbox\" (any casing) matches unfiled ones."
+    },
+    "include_descendants": {
+      "type": "boolean",
+      "default": true,
+      "description": "When a project filter is set, also include commitments from nested sub-projects."
+    },
+    "direction": {
+      "$ref": "#/$defs/Direction",
+      "description": "Restrict to commitments the user owes, is waiting on, or that nobody was attributed."
+    },
+    "state": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/EntryState"
+      },
+      "uniqueItems": true,
+      "default": [
+        "open",
+        "needs_review",
+        "snoozed"
+      ],
+      "description": "Entry states to include. Defaults to the live working set. Pass the settled states explicitly to see what was closed, waived, superseded or untracked."
+    },
+    "source_note_id": {
+      "$ref": "#/$defs/NoteId",
+      "description": "Restrict to commitments whose live source line is in this note."
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100,
+      "default": 50,
+      "description": "Max commitments per page."
+    },
+    "cursor": {
+      "type": "string",
+      "description": "Opaque pagination token from a prior response's page.next_cursor."
+    }
+  },
+  "$defs": {
+    "Direction": {
+      "type": "string",
+      "enum": [
+        "mine",
+        "theirs",
+        "unassigned"
+      ],
+      "description": "Which way a commitment points: something the user owes ('mine'), something they are waiting on ('theirs'), or something nobody was attributed ('unassigned')."
+    },
+    "EntryState": {
+      "type": "string",
+      "enum": [
+        "open",
+        "needs_review",
+        "closed",
+        "superseded",
+        "waived",
+        "snoozed",
+        "untracked"
+      ],
+      "description": "Where a tracked commitment stands. Deliberately not a done/not-done axis: the note's checkbox owns that, and these are the states a checkbox cannot spell. 'open' is live; 'needs_review' lost its source line; 'closed' was resolved; 'superseded' was replaced by a later commitment; 'waived' is deliberately not happening; 'snoozed' is hidden until a date; 'untracked' was removed from the working set while its source line stays."
+    },
+    "NoteId": {
+      "type": "string",
+      "pattern": "^n_[0-9a-z]{6,}$",
+      "description": "Stable note identifier, e.g. \"n_a1b2c3\". Generated at creation, never rewritten on move/re-route. This is the write handle."
+    },
+    "ProjectSlug": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 300,
+      "pattern": "^[^/\\\\]+(?:/[^/\\\\]+)*$",
+      "description": "Hierarchical project path/slug relative to the KB root, e.g. \"Growth/Q3\". Segments are folder names; no leading/trailing or empty segments. Each segment must also be a legal Windows folder name (no reserved device names such as CON/PRN/NUL, no trailing dot or space, none of the characters Windows forbids in a path segment), and may not start with \".\" or \"_\" — those prefixes mark infra folders (\".obsidian\", \"_assets\") that routing discovery skips, so such a project would be writable yet invisible to routing. The Phase 2 writer rejects violations. \"Inbox\" (any casing) is a reserved folder name — a real project may not use it — and \"sessions\", \"raw\", and \"chats\" (any casing) are reserved as first segments: <KB root>/sessions/ holds raw session artifacts and <KB root>/chats/ holds raw chat transcripts, never notes (\"raw\" stays reserved alongside them; a nested segment like \"Data/raw\" is fine). This is the canonical project handle accepted by tools. Because no real project can be named \"Inbox\", read tools that filter by project reuse it as a sentinel meaning \"unfiled\" — see search_notes's project field."
+    }
+  }
+}

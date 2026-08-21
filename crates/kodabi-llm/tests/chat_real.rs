@@ -134,6 +134,8 @@ fn a_write_tool_prompts_over_the_control_protocol_and_deny_is_honored() {
         mcp_binary,
         index_db: kb.path().join("index.db"),
         kb_root: kb.path().to_path_buf(),
+        ledger_db: kb.path().join("ledger.db"),
+        aging: Default::default(),
     })
     .unwrap();
     std::fs::write(&mcp_config, config_body).unwrap();

@@ -1,9 +1,10 @@
-//! The eight tools' static metadata and their committed JSON Schemas.
+//! The ten tools' static metadata and their committed JSON Schemas.
 //!
-//! Six read tools (`search_notes`, `get_note`, `get_meeting_transcript`,
-//! `list_outstanding_items`, `list_projects`, `get_project_context`) and two
-//! write tools (`file_note_to_project`, `add_glossary_term`); the write tools
-//! differ only in carrying `readOnlyHint: false`.
+//! Seven read tools (`search_notes`, `get_note`, `get_meeting_transcript`,
+//! `list_outstanding_items`, `list_commitments`, `list_projects`,
+//! `get_project_context`) and three write tools (`file_note_to_project`,
+//! `add_glossary_term`, `update_action_item`); the write tools differ only in
+//! carrying `readOnlyHint: false`.
 //!
 //! Each schema is a verbatim copy of the matching block in
 //! `docs/MCP_TOOL_SURFACE.md` (one file per tool per direction, under
@@ -21,11 +22,13 @@ use std::sync::OnceLock;
 const SEARCH_NOTES_DESCRIPTION: &str = "Hybrid full-text + semantic search across all notes. Returns ranked hits with snippets. Filter by project (and subtree), note type, tags, and date range; page with limit + cursor.";
 const GET_NOTE_DESCRIPTION: &str = "Fetch a note's full distilled content by stable id: frontmatter metadata plus the rendered markdown body, and any extracted action items. For meetings, also returns extracted decisions and session metadata. Use after search_notes to read a hit in full.";
 const GET_MEETING_TRANSCRIPT_DESCRIPTION: &str = "Fetch the per-channel transcript (you/them attribution, millisecond offsets) and metadata for a meeting note by stable id. Returns transcript_available=false with empty segments when no transcript is stored; errors if the id is not a meeting note.";
-const LIST_OUTSTANDING_ITEMS_DESCRIPTION: &str = "List action items that are not done (open/overdue), extracted from meetings, chats and hand-written notes, and linked to their source note. Filter by project subtree, owner, status, due-before date, or source note.";
+const LIST_OUTSTANDING_ITEMS_DESCRIPTION: &str = "List action items that are not done (open/overdue), extracted from meetings, chats and hand-written notes, and linked to their source note. Filter by project subtree, owner, status, due-before date, or source note. This is raw extraction: it includes items the commitment ledger has since closed, waived, superseded, or never tracked. For the curated working set (\"what am I tracking\", \"what am I waiting on\"), use list_commitments instead.";
+const LIST_COMMITMENTS_DESCRIPTION: &str = "List tracked commitments from the commitment ledger: what the user is actually tracking, after enrollment and after any closures, waivers, snoozes, or removals they have made. Each carries its lifecycle state, direction (owed by the user vs waited on), aging tier, and its live source line. Defaults to the live working set; pass state explicitly to see settled ones. Prefer this over list_outstanding_items whenever the question is about what is outstanding, owed, or being waited on, so the answer matches the app's Commitments view.";
 const LIST_PROJECTS_DESCRIPTION: &str = "Enumerate routing-target projects with hierarchy (parent + slug), display name, note/meeting counts, and last activity. Use to resolve a project name to its slug before filtering other tools.";
 const GET_PROJECT_CONTEXT_DESCRIPTION: &str = "Aggregate context for one project in a single call: description, glossary, recent notes, outstanding items, and counts. Toggle and limit each section. Ideal for grounding a chat about a project.";
 const FILE_NOTE_TO_PROJECT_DESCRIPTION: &str = "Route or re-route a note to a project (the human correction loop). Moves the file, updates its frontmatter project + confidence, preserves the stable id, and returns the new path. Mutating but reversible.";
 const ADD_GLOSSARY_TERM_DESCRIPTION: &str = "Add or update a glossary term (term, definition, aliases) for a project. Upsert by normalized term. Used for transcription biasing and post-pass cleanup.";
+const UPDATE_ACTION_ITEM_DESCRIPTION: &str = "Mark an action item done, or reopen it. Ticks the checkbox in its source note and records the matching judgement in the commitment ledger, so chat and the app's Commitments view agree. Identify the item by note_id + item_id from list_outstanding_items, get_note, or list_commitments. Reversible: call again with done=false.";
 
 const _: () = assert!(SEARCH_NOTES_DESCRIPTION.len() < 2048);
 const _: () = assert!(GET_NOTE_DESCRIPTION.len() < 2048);
@@ -35,6 +38,8 @@ const _: () = assert!(LIST_PROJECTS_DESCRIPTION.len() < 2048);
 const _: () = assert!(GET_PROJECT_CONTEXT_DESCRIPTION.len() < 2048);
 const _: () = assert!(FILE_NOTE_TO_PROJECT_DESCRIPTION.len() < 2048);
 const _: () = assert!(ADD_GLOSSARY_TERM_DESCRIPTION.len() < 2048);
+const _: () = assert!(LIST_COMMITMENTS_DESCRIPTION.len() < 2048);
+const _: () = assert!(UPDATE_ACTION_ITEM_DESCRIPTION.len() < 2048);
 
 /// One tool's immutable definition.
 struct ToolSpec {
@@ -44,7 +49,8 @@ struct ToolSpec {
     input_schema: &'static str,
     output_schema: &'static str,
     /// Drives the `readOnlyHint` annotation: `true` for the read tools, `false`
-    /// for the two write tools (`file_note_to_project`, `add_glossary_term`).
+    /// for the three write tools (`file_note_to_project`, `add_glossary_term`,
+    /// `update_action_item`).
     read_only: bool,
 }
 
@@ -82,6 +88,14 @@ const TOOLS: &[ToolSpec] = &[
         read_only: true,
     },
     ToolSpec {
+        name: "list_commitments",
+        title: "List commitments",
+        description: LIST_COMMITMENTS_DESCRIPTION,
+        input_schema: include_str!("../schemas/list_commitments.input.json"),
+        output_schema: include_str!("../schemas/list_commitments.output.json"),
+        read_only: true,
+    },
+    ToolSpec {
         name: "list_projects",
         title: "List projects",
         description: LIST_PROJECTS_DESCRIPTION,
@@ -113,12 +127,21 @@ const TOOLS: &[ToolSpec] = &[
         output_schema: include_str!("../schemas/add_glossary_term.output.json"),
         read_only: false,
     },
+    ToolSpec {
+        name: "update_action_item",
+        title: "Update action item",
+        description: UPDATE_ACTION_ITEM_DESCRIPTION,
+        input_schema: include_str!("../schemas/update_action_item.input.json"),
+        output_schema: include_str!("../schemas/update_action_item.output.json"),
+        read_only: false,
+    },
 ];
 
 /// The `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint` block.
 /// `readOnlyHint` tracks the tool's `read_only` flag; the other three hints are
-/// uniform across all eight tools (both write tools are reversible upserts, so
-/// neither is destructive — see `docs/MCP_TOOL_SURFACE.md` §7/§8).
+/// uniform across all ten tools (every write is a reversible upsert or a state
+/// transition that can be asked for again the other way, so none is destructive
+/// — see `docs/MCP_TOOL_SURFACE.md` §8/§9/§10).
 fn tool_annotations(read_only: bool) -> Value {
     json!({
         "readOnlyHint": read_only,
@@ -295,16 +318,22 @@ mod tests {
                 "get_note",
                 "get_meeting_transcript",
                 "list_outstanding_items",
+                "list_commitments",
                 "list_projects",
                 "get_project_context",
                 "file_note_to_project",
                 "add_glossary_term",
+                "update_action_item",
             ]
         );
 
-        // The two write tools carry readOnlyHint: false; the reads carry true.
-        // Every other hint is uniform across the eight.
-        let write_tools = ["file_note_to_project", "add_glossary_term"];
+        // The three write tools carry readOnlyHint: false; the reads carry
+        // true. Every other hint is uniform across the ten.
+        let write_tools = [
+            "file_note_to_project",
+            "add_glossary_term",
+            "update_action_item",
+        ];
         for tool in tools {
             let name = tool["name"].as_str().unwrap();
             let expected_read_only = !write_tools.contains(&name);

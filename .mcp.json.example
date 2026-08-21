@@ -5,7 +5,10 @@
       "args": [],
       "env": {
         "KODABI_INDEX_DB": "<path-to-app-data>/index.db",
-        "KODABI_KB_ROOT": "<path-to-knowledge-base-root>"
+        "KODABI_KB_ROOT": "<path-to-knowledge-base-root>",
+        "KODABI_LEDGER_DB": "<path-to-app-config>/ledger.db",
+        "KODABI_AGING_AFTER_DAYS": "14",
+        "KODABI_STALE_AFTER_DAYS": "30"
       }
     }
   }

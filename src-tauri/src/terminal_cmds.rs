@@ -383,24 +383,35 @@ const WIRING_DIR: &str = "_claude";
 /// install is self-healing. Shared with the chat session (`chat_cmds`), which
 /// wires the same server into its headless spawn.
 ///
-/// All three paths come from the app's own resolvers rather than from
+/// Every path comes from the app's own resolvers rather than from
 /// `app_config_dir()`/`app_data_dir()` inline, so the sidecar is handed the same
-/// vault, the same index and the same config dir this process opened — under the
+/// vault, the same index and the same ledger this process opened — under the
 /// dev sandbox that means the sidecar lands in the sandbox too (`crate::sandbox`).
-/// `KODABI_KB_ROOT` and `KODABI_INDEX_DB` move together or not at all (see
-/// `index_state::index_db_path`); resolving one here and hard-coding the other
-/// would split the sidecar's reads from its writes.
+/// The three state seams move together or not at all (see
+/// `index_state::index_db_path` and `ledger_state::ledger_db_path`); resolving
+/// one here and hard-coding another would split the sidecar's reads from its
+/// writes, or let it close commitments in a different ledger than the one the
+/// Commitments view shows.
+///
+/// The aging thresholds ride along for a different reason: they are the user's
+/// settings, and the sidecar has no path to `settings.toml` and no business
+/// parsing it. Passing them keeps a commitment's tier reading the same in chat
+/// as in the app. Written on every open, so a change in Settings reaches the
+/// sidecar the next time a terminal or chat session starts.
 pub(crate) fn write_mcp_config(app: &AppHandle) -> Result<PathBuf, String> {
     let mcp_binary = resolve_mcp_binary(app)?;
     let config_dir = crate::sandbox::config_dir(app)?;
     let index_db = crate::index_state::index_db_path(app)?;
     let kb_root = crate::transcribe::knowledge_base_dir(app)?;
+    let ledger_db = crate::ledger_state::ledger_db_path(app)?;
     remove_legacy_wiring(&config_dir);
 
     let paths = terminal::McpPaths {
         mcp_binary,
         index_db,
         kb_root,
+        ledger_db,
+        aging: crate::ledger_cmds::aging_config(app),
     };
     let mcp_json = terminal::mcp_config_json(&paths)
         .map_err(|err| reported("terminal_wiring", err, TERMINAL_START_FAILED))?;

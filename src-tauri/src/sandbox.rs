@@ -43,6 +43,7 @@ static SANDBOX_BASE: OnceLock<Option<PathBuf>> = OnceLock::new();
 /// sandbox without knowing it exists.
 const KB_ROOT_ENV: &str = "KODABI_KB_ROOT";
 const INDEX_DB_ENV: &str = "KODABI_INDEX_DB";
+pub(crate) const LEDGER_DB_ENV: &str = "KODABI_LEDGER_DB";
 const WEBVIEW2_ENV: &str = "WEBVIEW2_USER_DATA_FOLDER";
 const DISABLE_CHAT_DISTILL_ENV: &str = "KODABI_DISABLE_CHAT_DISTILL";
 
@@ -73,6 +74,7 @@ pub(crate) fn activate(identifier: &str) {
         switch,
         explicit_kb_root: non_empty(KB_ROOT_ENV),
         explicit_index_db: non_empty(INDEX_DB_ENV),
+        explicit_ledger_db: non_empty(LEDGER_DB_ENV),
     };
 
     let paths = match sandbox::resolve(&env, &real) {
@@ -96,7 +98,7 @@ pub(crate) fn activate(identifier: &str) {
 
 /// Points the rest of the process at the sandbox.
 ///
-/// The two vault seams are overwritten unconditionally — [`sandbox::resolve`]
+/// The three state seams are overwritten unconditionally — [`sandbox::resolve`]
 /// has already refused the case where the caller set them, so there is nothing
 /// here to clobber. The other two defer to an explicit value, because each has
 /// a legitimate reason to be set from outside: a launcher that wants its own
@@ -106,6 +108,7 @@ pub(crate) fn activate(identifier: &str) {
 fn install(paths: &SandboxPaths) {
     std::env::set_var(KB_ROOT_ENV, &paths.base);
     std::env::set_var(INDEX_DB_ENV, &paths.index_db);
+    std::env::set_var(LEDGER_DB_ENV, &paths.ledger_db);
 
     if non_empty(WEBVIEW2_ENV).is_none() {
         // Tauri leaves this unset, so WebView2 derives the profile from the

@@ -28,18 +28,23 @@ use serde::Serialize;
 pub const MCP_SERVER_KEY: &str = "kodabi";
 
 /// The read tools, pre-approved so chat-over-the-KB needs no per-tool
-/// permission prompt. The two write tools (`file_note_to_project`,
-/// `add_glossary_term`) are deliberately omitted, so Claude Code still prompts
-/// for them — there is a real TTY in the terminal to answer.
+/// permission prompt. The three write tools (`file_note_to_project`,
+/// `add_glossary_term`, `update_action_item`) are deliberately omitted, so
+/// Claude Code still prompts for them — there is a real TTY in the terminal to
+/// answer.
 ///
 /// Must list every `read_only` entry of `crates/kodabi-mcp/src/schemas.rs`'s
-/// `TOOLS` table: a read tool missing here still works, but prompts on every
-/// call, which is exactly the friction the embedded terminal exists to remove.
-pub const READ_TOOL_PERMISSIONS: [&str; 6] = [
+/// `TOOLS` table, **in that table's order**: a read tool missing here still
+/// works, but prompts on every call, which is exactly the friction the embedded
+/// terminal exists to remove. The parity test lives in `schemas.rs` (kodabi-core
+/// cannot see kodabi-mcp) and compares the whole list, so a new read tool is
+/// inserted at its table position rather than appended.
+pub const READ_TOOL_PERMISSIONS: [&str; 7] = [
     "mcp__kodabi__search_notes",
     "mcp__kodabi__get_note",
     "mcp__kodabi__get_meeting_transcript",
     "mcp__kodabi__list_outstanding_items",
+    "mcp__kodabi__list_commitments",
     "mcp__kodabi__list_projects",
     "mcp__kodabi__get_project_context",
 ];
@@ -55,7 +60,8 @@ pub const SKIP_HISTORY_ENV: &str = "CLAUDE_CODE_SKIP_PROMPT_HISTORY";
 /// wild value from a detached or zero-size container; clamp rather than trust.
 const MAX_DIMENSION: u16 = 1000;
 
-/// Resolved, machine-local absolute paths the shell computes and hands in.
+/// Resolved, machine-local absolute paths the shell computes and hands in,
+/// plus the few settings the server cannot read for itself.
 #[derive(Debug, Clone)]
 pub struct McpPaths {
     /// Absolute path to the `kodabi-mcp` binary.
@@ -64,6 +70,17 @@ pub struct McpPaths {
     pub index_db: PathBuf,
     /// The knowledge-base (vault) root (`KODABI_KB_ROOT`).
     pub kb_root: PathBuf,
+    /// The commitment ledger (`KODABI_LEDGER_DB`).
+    ///
+    /// The server reads it for `list_commitments` and writes it for
+    /// `update_action_item`. It lives in the *config* dir rather than beside the
+    /// index, so neither of the other two variables locates it.
+    pub ledger_db: PathBuf,
+    /// The user's aging thresholds, which live in `settings.toml` — a file the
+    /// server has no path to and no business parsing. Passed through so a
+    /// commitment's tier reads the same in chat as it does in the Commitments
+    /// view; the server falls back to the same defaults if they are absent.
+    pub aging: crate::ledger::AgingConfig,
 }
 
 #[derive(Serialize)]
@@ -81,13 +98,25 @@ struct McpConfigFile {
 
 /// Builds the `.mcp.json` body that wires the `kodabi` stdio server into Claude
 /// Code, mirroring `.mcp.json.example`: `command` is the resolved binary, `args`
-/// is empty, and `env` carries the two paths `kodabi-mcp` reads at startup
+/// is empty, and `env` carries the settings `kodabi-mcp` reads at startup
 /// (`crates/kodabi-mcp/src/config.rs`). An entry with no `type`/`url` field is
 /// read by Claude Code as a stdio server.
+///
+/// Regenerated on every terminal and chat open, so a moved vault or a changed
+/// aging threshold is picked up without the user knowing this file exists.
 pub fn mcp_config_json(paths: &McpPaths) -> serde_json::Result<String> {
     let mut env = BTreeMap::new();
     env.insert("KODABI_INDEX_DB".to_owned(), path_string(&paths.index_db));
     env.insert("KODABI_KB_ROOT".to_owned(), path_string(&paths.kb_root));
+    env.insert("KODABI_LEDGER_DB".to_owned(), path_string(&paths.ledger_db));
+    env.insert(
+        "KODABI_AGING_AFTER_DAYS".to_owned(),
+        paths.aging.aging_after_days.to_string(),
+    );
+    env.insert(
+        "KODABI_STALE_AFTER_DAYS".to_owned(),
+        paths.aging.stale_after_days.to_string(),
+    );
 
     let mut servers = BTreeMap::new();
     servers.insert(
@@ -347,6 +376,11 @@ mod tests {
             mcp_binary: PathBuf::from("C:/app/resources/kodabi-mcp.exe"),
             index_db: PathBuf::from("C:/app-data/index.db"),
             kb_root: PathBuf::from("C:/vault"),
+            ledger_db: PathBuf::from("C:/app-config/ledger.db"),
+            aging: crate::ledger::AgingConfig {
+                aging_after_days: 21,
+                stale_after_days: 45,
+            },
         }
     }
 
@@ -360,6 +394,11 @@ mod tests {
         assert_eq!(server["args"], serde_json::json!([]));
         assert_eq!(server["env"]["KODABI_INDEX_DB"], "C:/app-data/index.db");
         assert_eq!(server["env"]["KODABI_KB_ROOT"], "C:/vault");
+        assert_eq!(server["env"]["KODABI_LEDGER_DB"], "C:/app-config/ledger.db");
+        // The user's own thresholds, not the defaults, and stringified because
+        // an `env` block's values are strings.
+        assert_eq!(server["env"]["KODABI_AGING_AFTER_DAYS"], "21");
+        assert_eq!(server["env"]["KODABI_STALE_AFTER_DAYS"], "45");
         // No `type`/`url` field → Claude Code reads it as a stdio server.
         assert!(server.get("type").is_none());
         assert!(server.get("url").is_none());
@@ -383,6 +422,7 @@ mod tests {
         for write_tool in [
             "mcp__kodabi__file_note_to_project",
             "mcp__kodabi__add_glossary_term",
+            "mcp__kodabi__update_action_item",
         ] {
             assert!(
                 !allow.iter().any(|entry| entry == write_tool),

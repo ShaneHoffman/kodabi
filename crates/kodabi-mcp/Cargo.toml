@@ -1,6 +1,6 @@
 [package]
 name = "kodabi-mcp"
-description = "Kodabi's stdio MCP server — hand-rolled JSON-RPC 2.0 exposing the v1 tool surface (six read, two write) over kodabi-core."
+description = "Kodabi's stdio MCP server — hand-rolled JSON-RPC 2.0 exposing the v1 tool surface (seven read, three write) over kodabi-core."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -14,3 +14,6 @@ serde_json = "1"
 
 [dev-dependencies]
 tempfile = "3"
+# Only to stand in for the app's writer in the contention test: the integration
+# suite holds a real transaction on `ledger.db` while the server writes it.
+rusqlite = { version = "0.37", features = ["bundled"] }

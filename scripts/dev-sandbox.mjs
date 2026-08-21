@@ -77,7 +77,7 @@ async function isEmpty(dir) {
 /**
  * The child's environment: the switch, and none of the seams it drives.
  *
- * The two vault variables are stripped rather than left alone because a shell
+ * The three state variables are stripped rather than left alone because a shell
  * that still carries them from an older manual preview would otherwise trip the
  * startup refusal — correct behaviour, but a confusing failure when the user
  * asked for nothing more than a sandbox. `KODABI_DISABLE_CHAT_DISTILL` is left
@@ -88,5 +88,6 @@ function sandboxEnv() {
   const env = { ...process.env, KODABI_SANDBOX: SANDBOX_DIR };
   delete env.KODABI_KB_ROOT;
   delete env.KODABI_INDEX_DB;
+  delete env.KODABI_LEDGER_DB;
   return env;
 }

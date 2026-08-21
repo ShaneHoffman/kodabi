@@ -46,7 +46,7 @@ const execFileAsync = promisify(execFile);
  * means a developer's own retention setting can no longer prune fixtures out
  * from under a run.
  *
- * The two vault variables are deleted rather than passed through: they are
+ * The three state variables are deleted rather than passed through: they are
  * refused alongside the switch, so a developer's shell carrying them from an
  * older manual preview would otherwise fail every slice with a startup error.
  */
@@ -54,6 +54,7 @@ function sandboxEnv(base) {
   const env = { ...process.env, KODABI_SANDBOX: base };
   delete env.KODABI_KB_ROOT;
   delete env.KODABI_INDEX_DB;
+  delete env.KODABI_LEDGER_DB;
   delete env.WEBVIEW2_USER_DATA_FOLDER;
   return env;
 }

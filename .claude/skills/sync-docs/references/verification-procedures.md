@@ -223,14 +223,22 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
   the documented annotation.
   (The crate's own tests cover `$ref` resolution, the open-`NoteSummary` invariant,
   the 2 KB description cap, and — via `kodabi_core::terminal::READ_TOOL_PERMISSIONS`
-  — that every read tool is pre-approved. None of them compare against the spec,
-  which is what this anchor is for.)
+  — that every read tool is pre-approved, in the spec's table order. None of them
+  compare against the spec, which is what this anchor is for.)
+- **Shortcut:** the comparison is mechanical, so it can be scripted rather than
+  eyeballed: parse every ```json block in the spec, index the per-tool
+  `inputSchema`/`outputSchema` blocks by section, then for each file assert the body
+  equals its block once `$defs` is set aside, and that the file's `$defs` equals
+  exactly the transitive closure of the `$ref`s reachable from that block. That check
+  is what caught the `ProjectSlug` "chats" drift that thirteen files had carried
+  since the chats directory was reserved.
 
 ## Anchor 8 — Dev sandbox state map ↔ the resolvers
 
 - **Source of truth:** `crates/kodabi-core/src/sandbox.rs` (the layout constants
-  `INDEX_SUBDIR`/`INDEX_FILE`/`WEBVIEW2_SUBDIR`/`DEV_SUFFIX`, the switch keywords, and
-  the three `SandboxError` variants), `src-tauri/src/sandbox.rs` (which environment
+  `INDEX_SUBDIR`/`INDEX_FILE`/`WEBVIEW2_SUBDIR`/`DEV_SUFFIX` plus the flat
+  `ledger::LEDGER_DB_FILE`, the switch keywords, and the three `SandboxError`
+  variants), `src-tauri/src/sandbox.rs` (which environment
   variables `install` writes, and `config_dir`), and every `KODABI_*` env-var const in
   `src-tauri/` and `crates/`.
 - **Mirror:** `docs/DEV_SANDBOX.md` — the state-map table (state → default location →
@@ -243,16 +251,21 @@ behavior is audited separately (the sync-docs "prose audit" step), not here.
 - **Verify:**
   1. Every path in the state-map table still resolves the way the table says: grep the
      four `sandbox::config_dir` call sites (`lib.rs` setup, `terminal_cmds`'s
-     `write_mcp_config` and `write_config_files`, and `ledger_state`'s `open_ledger`)
-     and confirm no `app_config_dir()` call has reappeared outside `sandbox.rs` itself.
+     `write_mcp_config` and `write_config_files`, and `ledger_state`'s
+     `ledger_db_path`) and confirm no `app_config_dir()` call has reappeared outside
+     `sandbox.rs` itself.
      That seam is the *only* thing sandboxing the config dir — there is no
      relocate-by-directory sweep — so a new file resolved any other way silently writes
      into the user's real data under `KODABI_SANDBOX`.
   2. The derived subpaths in the doc match the constants (`.index/index.db`,
-     `.webview2`, the `-dev` suffix), and `indexDbFor()` in `e2e/lib/vault.mjs` still
+     `ledger.db` flat in the base, `.webview2`, the `-dev` suffix), and `indexDbFor()`
+     in `e2e/lib/vault.mjs` still
      computes the same index path as `INDEX_SUBDIR`/`INDEX_FILE` — the two
      cross-reference each other and are the pair most likely to drift.
-  3. The three refusal messages quoted in the doc match the `#[error(...)]` strings.
+  3. The three refusal messages quoted in the doc match the `#[error(...)]` strings,
+     and the `ExplicitOverride` row still names all three refused variables
+     (`KODABI_KB_ROOT`, `KODABI_INDEX_DB`, `KODABI_LEDGER_DB`) — one arm per variable in
+     `sandbox::resolve`, checked before anything else.
   4. `e2e/lib/app.mjs` still sets `KODABI_SANDBOX` and no second isolation mechanism has
      grown beside it.
   5. `README.md`'s data-location table still names every user-visible thing the state map

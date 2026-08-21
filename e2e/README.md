@@ -112,18 +112,20 @@ does not follow `KODABI_KB_ROOT` leaves the console clean and playback dead.
 Each run gets a throwaway everything under a fresh `mkdtemp` directory, via
 **one** environment variable: `KODABI_SANDBOX`, pointed at that directory.
 Rust derives the rest (`kodabi_core::sandbox`) — vault root, index at
-`.index/index.db`, config dir, and the WebView2 profile at `.webview2`. Removed
-on teardown unless `stop({ keepArtifacts: true })`.
+`.index/index.db`, the commitment ledger at `ledger.db`, config dir, and the
+WebView2 profile at `.webview2`. Removed on teardown unless
+`stop({ keepArtifacts: true })`.
 
 This is the same switch `pnpm dev:sandbox` and the `/preview` skill use; the
 harness has no isolation mechanism of its own. See
 [`docs/DEV_SANDBOX.md`](../docs/DEV_SANDBOX.md).
 
 The lower-level seams the switch drives are still there —  `KODABI_KB_ROOT`
-(`transcribe::knowledge_base_dir`) and `KODABI_INDEX_DB`
-(`index_state::open_index`) — but setting either **alongside** the switch is
-refused at startup, and the harness deletes both from the child's environment so
-a developer's shell cannot trip that refusal. The pairing is why the switch
+(`transcribe::knowledge_base_dir`), `KODABI_INDEX_DB`
+(`index_state::index_db_path`) and `KODABI_LEDGER_DB`
+(`ledger_state::ledger_db_path`) — but setting any of them **alongside** the
+switch is refused at startup, and the harness deletes all three from the child's
+environment so a developer's shell cannot trip that refusal. The pairing is why the switch
 exists: setting only the vault root is destructive, because
 `IndexState::initialize` hands that root to the watcher and to a startup
 reconcile job, so an index still living in the real app-data dir would be
