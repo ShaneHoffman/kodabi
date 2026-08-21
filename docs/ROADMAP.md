@@ -1,10 +1,11 @@
 # Kodabi — Roadmap (Phases 2–5)
 
-Phases 0 through 3 are complete; their goals and milestones are summarized in `docs/FOUNDING_DOC.md`
-§6, and the checklists below record what shipped. This file holds the **remaining phases as
-planning material** — goals, milestones, and checklists that get broken into tickets when their
-phase comes up. The vision this is derived from is `docs/FOUNDING_DOC.md`; the architecture as
-built is `docs/ARCHITECTURE.md`.
+Phases 0 through 3 are complete, and the checklists below record what shipped. This file holds the
+**working checklists** — each phase's goal, its milestone, and the shipped state of every item,
+with `docs/FOUNDING_DOC.md` §6 carrying the same goals and milestones on the vision side. A lane
+that has not opened yet stays planning material: named here, broken into tickets when its turn
+comes. The vision this is derived from is `docs/FOUNDING_DOC.md`; the architecture as built is
+`docs/ARCHITECTURE.md`.
 
 **Decisions already locked that affect later phases:** License = AGPL-3.0-only · Frontend = React +
 Tailwind · Transcription = per-channel (you/them attribution) · Default STT engine = Parakeet TDT,
@@ -55,33 +56,47 @@ Glossary-cleanup post-pass pulled forward into Phase 1.
 - [x] Crash reporting decision (opt-in only) — decided 2026-08-14: v1 ships none, and the app captures no crash data at all (no panic hook, no crash log, so there is nothing to report even if reporting existed). Any future reporting is strictly opt-in, local-capture-first, and never transmits user-derived content automatically. Evidence and revisit triggers: `docs/decisions/crash-reporting.md`
 - [ ] Launch: GitHub, relevant communities — **deliberately held.** The release pipeline is ready; launch waits on more feature work first (the 2026-08-14 Phase 4 gap audit, tickets #183–#203)
 
-## Phase 5 — Parking Lot (growth candidates)
-Pulled by daily use, not pushed by roadmap. Each earns its place only after the core loop proves reliable. Names only — the full detail behind each candidate lives in `FOUNDING_DOC.md` §6:
+## Phase 5 — Growth (pulled by daily use, not pushed by roadmap) — in progress
+**Goal:** The app starts working for you *between* meetings, not only after them — commitments track themselves, and each automation lane earns its place by daily use before it is built.
+**Milestone:** I join a meeting and a brief is already waiting; I end my week with a status draft I didn't write and a to-do list that closed itself.
 
-- Commitment ledger (flagship) — *in progress*: the core model, the durable `ledger.db`, the vault
-  snapshots, the ingest wiring and the Commitments view (the Mine / Waiting-on-them split, live
-  checkboxes that write the note, snooze and waive) have landed, as have aging tiers
-  (fresh / aging / stale, with the thresholds in Settings) and conversational evidence at distill
-  time (a later conversation, meeting or chat alike, refreshes, supersedes or closes a commitment an
-  earlier one recorded), and the enrollment gate that separates extraction from tracking (a
-  per-meeting "context only" mode that enrols only what you were asked for directly, untrack as a
-  verb distinct from waive, and enrollment provenance on every entry), now driven by meeting
-  category: each genre carries an enrollment default (all-hands and observer track direct asks only),
-  recategorizing a meeting re-evaluates its still-open entries both ways without ever overruling a
-  person, and a row's source line names the kind of room it came from; and owner identity, which is
-  what makes the Mine / Waiting-on-them split mean anything (a name and its other spellings in
-  Settings, seeded at the consent gate, matched by normalization rather than guesswork, taught the
-  distill pass so a first-person commitment on the mic channel is attributed to you, and corrected in
-  one click by claiming a row, which also learns the name for next time);
-  GitHub evidence remains
+The phase **opened 2026-08-18** with Theme 1. Themes open one at a time and are broken into tickets
+when they do, so only the lane in flight carries a checklist. For a lane that has not opened, the
+candidate detail lives in `FOUNDING_DOC.md` §6; for what Theme 1 has already built, the system as
+it stands is `docs/ARCHITECTURE.md` (the ledger, its enrollment chain, and the category taxonomy).
+
+### Theme 1 — Commitment ledger + meeting categories — in flight
+
+- [x] Ledger core: the commitment data model and `ledger.db` — the one durable database, deliberately **not** the index, living in the config dir beside `settings.toml` — ingest off the index reconcile, so every note the reconcile touches is forwarded rather than only distill's own output (the distill follow-up is a best-effort second path), and vault snapshots so a restored or re-synced vault rebuilds the store (#231 `feat/commitment-ledger-core`, PR #199)
+- [x] Commitments view: the first-class Mine / Waiting-on-them split, live checkboxes that write the note back, snooze, waive, and the one undo behind each of them (#232 `feat/commitment-ledger-ui`, PR #200)
+- [x] Aging tiers (fresh / aging / stale), re-mention linking, and conversational evidence at distill time — a later conversation, meeting or chat alike, refreshes, supersedes or closes a commitment an earlier one recorded, and a close it is not confident enough to make parks for review with its evidence attached rather than firing. An evidence close annotates the note that recorded the commitment (ticks the box, appends a `Closed <date>:` line). All three thresholds live in Settings (#237 `feat/ledger-aging`, PR #201)
+- [x] Enrollment gate — **extraction is not tracking**: a per-meeting "context only" mode that enrolls only what you were asked for directly, a note-side commitments panel carrying that switch plus per-item manual promotion, untrack as a verb distinct from waive, and enrollment provenance on every entry (#238 `feat/ledger-enrollment-gate`, PR #202)
+- [x] Meeting categories: a seeded, correctable genre taxonomy classified at distill time, each correction recorded in the project's `_category.yml` so it teaches the next distill (#235 `feat/meeting-categories`, PR #203)
+- [x] Category enrollment defaults: each genre carries an enrollment default — a per-genre Settings value falling back to the built-in, under which all-hands and observer track direct asks only — recategorizing a meeting re-evaluates its still-open entries both ways without ever overruling a person, and a row's source line names the kind of room it came from (#236 `feat/category-enrollment-defaults`, PR #205)
+- [x] Owner identity — what makes the Mine / Waiting-on-them split mean anything: a name and its other spellings in Settings, seeded at the consent gate, matched by normalization rather than guesswork, taught to the distill pass so a first-person commitment on the mic channel is attributed to you, and corrected in one click by claiming a row, which also learns the name for next time (#239 `feat/ledger-owner-identity`, PR #206)
+- [ ] Lifecycle hardening: item edits, re-routing, non-distill enrollment, and first-run backfill — the four lifecycle seams the core tickets left implicit (#240)
+- [ ] Ledger over MCP: coherent commitments reads plus a mark-done write tool, so chat and the Commitments view can never disagree (#241)
+- [ ] GitHub evidence pass: closure by evidence with a confidence split (said vs. shipped, reconciled against PRs and commits) — **deliberately last in the lane**, since evidence closes over the lifecycle #240 hardens (#243)
+
+### Theme 2 — Ambient automation — upcoming, not yet ticketed
+Meeting auto-detection (Teams / Meet / Zoom via the mic-in-use signal, under its
+*auto-detect, never auto-silently-record* rule) · pre-meeting prep briefs, auto-triggered by that
+detection · the background workflow scheduler plus its first workflows, drawn from the six §6 names
+(contradiction reconciliation, status-report drafting, self-building dossiers, open-question
+tracking, inbox self-draining, the living onboarding doc) — which ones open the lane is a planning
+call, not a decision this file has made.
+
+### Theme 3 — Daily engagement — upcoming, not yet ticketed
+Dictated voice memos (hotkey → speak a thought → transcribed and routed like any note) ·
+decision-log queries ("when and why did we choose X").
+
+### Unscheduled candidates
+No theme yet — names only, detail in `FOUNDING_DOC.md` §6:
+
+- Pre-meeting resurfacing of ledger entries — the flagship's fourth capability (`FOUNDING_DOC.md` §6), which Theme 1 does not schedule and Theme 2's prep briefs are the nearest home for; needs a deliberate call
 - Azure DevOps board integration
 - Weekly digests per project
-- Decision log queries
-- Pre-meeting prep briefs (auto-triggered by meeting detection)
 - Live meeting assistance
-- Background workflows: contradiction reconciliation; status report drafting; self-building dossiers; open-question tracking; inbox self-draining; living onboarding doc
-- Dictated voice memos
 - Meeting context feeding Claude Code coding sessions
-- Meeting auto-detection (Teams / Meet / Zoom, mic-in-use signal)
 - Speaker identity: active-speaker scraping; Claude attribution in post-pass; local diarization; post-meeting naming + voice profiles
 - macOS / Linux ports (community)

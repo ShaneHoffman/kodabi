@@ -378,7 +378,11 @@ are the placement and byte-level rules it establishes.
   surface, is explicitly informed by this schema).
 - **→ Phase 5 commitment ledger:** reads `tracking` (through the index row) to gate which extracted
   items earn a ledger entry — the note file, not a database table, is where that judgement lives.
-  `category` is the level the *next* default attaches at and has no behavior consumer yet.
+  `category` is the level the default beneath it attaches at, and now has a behavior consumer: the
+  meeting's genre resolves to an enrollment default — a per-genre Settings value, falling back to
+  the built-in when the user has set none, which is the shipping state
+  (`kodabi_core::ledger::category_default_for`, read from the same index row) — and a `tracking`
+  value overrides it whenever the note carries one.
 
 ---
 
