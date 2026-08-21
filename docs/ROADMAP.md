@@ -1,11 +1,12 @@
 # Kodabi — Roadmap (Phases 2–5)
 
-Phases 0 through 3 are complete, and the checklists below record what shipped. This file holds the
-**working checklists** — each phase's goal, its milestone, and the shipped state of every item,
-with `docs/FOUNDING_DOC.md` §6 carrying the same goals and milestones on the vision side. A lane
-that has not opened yet stays planning material: named here, broken into tickets when its turn
-comes. The vision this is derived from is `docs/FOUNDING_DOC.md`; the architecture as built is
-`docs/ARCHITECTURE.md`.
+Phases 0 through 3 are complete; Phases 0 and 1 predate this file and are summarized in
+`docs/FOUNDING_DOC.md` §6, and the checklists below record what shipped from Phase 2 on. This file
+holds the **working checklists** — each phase's goal, its milestone, and the shipped state of every
+item, with `docs/FOUNDING_DOC.md` §6 carrying the same milestones on the vision side (and, from
+Phase 5, the goal alongside them). A lane that has not opened yet stays planning material: named
+here, broken into tickets when its turn comes. The vision this is derived from is
+`docs/FOUNDING_DOC.md`; the architecture as built is `docs/ARCHITECTURE.md`.
 
 **Decisions already locked that affect later phases:** License = AGPL-3.0-only · Frontend = React +
 Tailwind · Transcription = per-channel (you/them attribution) · Default STT engine = Parakeet TDT,

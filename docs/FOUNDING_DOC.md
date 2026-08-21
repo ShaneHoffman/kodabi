@@ -248,10 +248,10 @@ Principles:
 ## 6. Roadmap
 
 *The **working roadmap** is [`ROADMAP.md`](ROADMAP.md), which carries the per-phase checklists and
-their shipped state. This section keeps the vision side: each phase's goal and milestone (mirrored
-in [`ROADMAP.md`](ROADMAP.md)), and the full detail behind the Phase 5 candidates, which lives
-nowhere else. Phases 0–3 are complete; Phase 4 is
-in progress, and Phase 5 opened 2026-08-18 with the commitment-ledger lane.*
+their shipped state. This section keeps the vision side: each phase's milestone (mirrored in
+[`ROADMAP.md`](ROADMAP.md), which states the goal beside it), Phase 5's goal, and the full detail
+behind the Phase 5 candidates, which lives nowhere else. Phases 0–3 are complete; Phase 4 is in
+progress, and Phase 5 opened 2026-08-18 with the commitment-ledger lane.*
 
 ### Phase 0 — Foundations (decisions + skeleton) — ✅ complete
 
