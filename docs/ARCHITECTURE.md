@@ -263,7 +263,7 @@ memory would be re-enrolled by the watcher seconds later. The marker is stripped
 the grammar is parsed and before the item id is hashed, so a firm line renders exactly as it always
 did and no existing id re-mints. That also makes the marker an ordinary edit: deleting it by hand
 promotes the item on the next reconcile, and the note rail's Track button
-(`ledger::track_item`) promotes it without touching the file. Every unreadable case defaults to
+(`Ledger::track_item`) promotes it without touching the file. Every unreadable case defaults to
 firm, so a model that ignores the field keeps the previous behaviour: enrolling something tentative
 is a recoverable annoyance, and silently dropping a real commitment is not.
 
