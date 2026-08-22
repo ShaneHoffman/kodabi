@@ -264,17 +264,26 @@ export function arrangeTriage(
  * day and the other twenty vanish. Keeping a row out of order is therefore
  * cheap and safe: it simply reappears next time, until the rows before it are
  * dealt with too.
+ *
+ * `active` is the set of entries the ledger still lists as live. A batch row
+ * missing from it was settled while the strip was open, by the queue below or
+ * by a later meeting, which is a stronger judgement than "reviewed" and cannot
+ * be recorded in the strip because the row is no longer drawn there. Such a row
+ * therefore counts as dealt with: leaving it to block the prefix would mean a
+ * person who cleared everything still on screen recorded nothing at all, and
+ * met the same list again on the next mount.
  */
 export function triageWatermark(
   batch: readonly { entry_id: string; created_at: string }[],
   reviewed: ReadonlySet<string>,
+  active: ReadonlySet<string>,
 ): string | null {
   const ordered = [...batch].sort((left, right) =>
     left.created_at.localeCompare(right.created_at),
   );
   let watermark: string | null = null;
   for (const row of ordered) {
-    if (!reviewed.has(row.entry_id)) break;
+    if (!reviewed.has(row.entry_id) && active.has(row.entry_id)) break;
     watermark = row.created_at;
   }
   return watermark;

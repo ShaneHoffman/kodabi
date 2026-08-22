@@ -430,7 +430,10 @@ machine's reading position is not the other's. It is seeded once at startup behi
 restore, so a ledger that predates the feature does not greet its owner with its entire history, and
 it advances only through the **contiguous reviewed prefix** of the batch rather than to the newest
 row clicked. A single instant cannot describe a set with holes in it, so advancing past a row still
-outstanding would hide it permanently; keeping a row out of order simply leaves it for next time.
+outstanding would hide it permanently; keeping a row out of order simply leaves it for next time. A
+row that settles while the strip is open — ticked off in the queue below, closed by a later meeting —
+counts as dealt with rather than outstanding, since it has left the strip and can no longer be
+reviewed there, and holding the prefix behind it would discard the review of everything after it.
 The batch itself is frozen when the view mounts, because the refetch each of these writes triggers
 would otherwise recompute the list against a marker the review had just moved. The strip is
 whole-vault only for the same reason the marker is a single instant: reviewing inside one project

@@ -215,6 +215,11 @@ export function CommitmentsView({ slug }: Props) {
   // the whole ledger, so reviewing inside a project would silently mark other
   // projects' commitments seen as well.
   const batchIds = new Set(batch?.rows.map((row) => row.entry_id) ?? []);
+  // What the ledger still lists as live. A batch row that has left it was
+  // settled elsewhere while the strip was open, so it is gone from the strip
+  // and can never be reviewed in it; the watermark treats it as dealt with
+  // rather than letting it block every row behind it.
+  const activeIds = new Set(entries.map((commitment) => commitment.entry_id));
   const triageGroups =
     slug === null
       ? arrangeTriage(
@@ -234,7 +239,7 @@ export function CommitmentsView({ slug }: Props) {
   /** Moves the last-seen marker as far as the reviewed rows allow. */
   const advanceMarker = async (reviewed: ReadonlySet<string>) => {
     if (!batch) return;
-    const watermark = triageWatermark(batch.rows, reviewed);
+    const watermark = triageWatermark(batch.rows, reviewed, activeIds);
     // Only ever forward, and only when it actually moved: the backend keeps the
     // later of the two anyway, so a redundant call would be a wasted round trip
     // rather than a bug.

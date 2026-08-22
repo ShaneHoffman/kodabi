@@ -445,9 +445,11 @@ describe("triageWatermark", () => {
     { entry_id: "le_b", created_at: "2026-08-03T10:00:00Z" },
     { entry_id: "le_c", created_at: "2026-08-03T11:00:00Z" },
   ];
+  /** Every row still live, which is the ordinary case. */
+  const allActive = new Set(batch.map((row) => row.entry_id));
 
   it("advances through the reviewed prefix", () => {
-    expect(triageWatermark(batch, new Set(["le_a", "le_b"]))).toBe(
+    expect(triageWatermark(batch, new Set(["le_a", "le_b"]), allActive)).toBe(
       "2026-08-03T10:00:00Z",
     );
   });
@@ -455,22 +457,47 @@ describe("triageWatermark", () => {
   // The bug this rule exists to prevent: taking the maximum would carry the
   // marker past le_a, which would then never be offered again.
   it("stops at the first unreviewed row rather than taking the maximum", () => {
-    expect(triageWatermark(batch, new Set(["le_b", "le_c"]))).toBeNull();
+    expect(
+      triageWatermark(batch, new Set(["le_b", "le_c"]), allActive),
+    ).toBeNull();
   });
 
   it("is null until the oldest row is reviewed", () => {
-    expect(triageWatermark(batch, new Set())).toBeNull();
+    expect(triageWatermark(batch, new Set(), allActive)).toBeNull();
   });
 
   it("reaches the newest row once every row is reviewed", () => {
     expect(
-      triageWatermark(batch, new Set(["le_a", "le_b", "le_c"])),
+      triageWatermark(batch, new Set(["le_a", "le_b", "le_c"]), allActive),
     ).toBe("2026-08-03T11:00:00Z");
   });
 
   it("orders the batch itself rather than trusting the caller", () => {
     expect(
-      triageWatermark([...batch].reverse(), new Set(["le_a"])),
+      triageWatermark([...batch].reverse(), new Set(["le_a"]), allActive),
     ).toBe("2026-08-03T09:00:00Z");
+  });
+
+  // A row settled from the queue below leaves the strip, so it can never be
+  // reviewed there. Blocking on it would throw away the review of every row
+  // behind it, and the same list would be offered again on the next mount.
+  it("steps over a row that is no longer live", () => {
+    const active = new Set(["le_b", "le_c"]);
+
+    expect(triageWatermark(batch, new Set(["le_b"]), active)).toBe(
+      "2026-08-03T10:00:00Z",
+    );
+    expect(triageWatermark(batch, new Set(["le_b", "le_c"]), active)).toBe(
+      "2026-08-03T11:00:00Z",
+    );
+  });
+
+  // Settled-elsewhere is not blanket permission: the prefix still stops dead
+  // at the first row that is live and unreviewed, however many settled rows
+  // sat in front of it.
+  it("still stops at a live unreviewed row behind a settled one", () => {
+    expect(triageWatermark(batch, new Set(), new Set(["le_b", "le_c"]))).toBe(
+      "2026-08-03T09:00:00Z",
+    );
   });
 });
