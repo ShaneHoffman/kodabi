@@ -83,6 +83,9 @@ function serve(payload: Partial<CommitmentsPayload>): void {
   onCommand("list_commitments", () => ({
     entries: payload.entries ?? [],
     settled: payload.settled ?? [],
+    // Null unless a test opts in, so the triage strip stays out of the way of
+    // every test that is not about it.
+    last_seen: payload.last_seen ?? null,
   }));
 }
 
@@ -962,5 +965,204 @@ describe("CommitmentsView", () => {
     const mine = await screen.findByTestId("commitments-mine");
     expect(within(mine).queryByText(/ · · /)).toBeNull();
     expect(within(mine).getByText(/Briarwood Golf/)).toBeInTheDocument();
+  });
+
+  describe("the triage strip", () => {
+    /** Two commitments from one meeting and one from another, all newer than
+     * the marker. */
+    function newlyEnrolled() {
+      return [
+        commitment({
+          entry_id: "le_a",
+          description: "send the deck",
+          created_at: "2026-08-03T09:00:00Z",
+        }),
+        commitment({
+          entry_id: "le_b",
+          description: "book the venue",
+          created_at: "2026-08-03T10:00:00Z",
+        }),
+        commitment({
+          entry_id: "le_c",
+          description: "chase the caterer",
+          created_at: "2026-08-03T11:00:00Z",
+          source: {
+            note_id: "n_standup",
+            title: "Standup",
+            project: "Briarwood Golf",
+            path: "Briarwood Golf/standup.md",
+            category: null,
+          },
+        }),
+      ];
+    }
+
+    it("counts what is new and groups it by the meeting that produced it", async () => {
+      const user = userEvent.setup();
+      serve({
+        entries: newlyEnrolled(),
+        last_seen: "2026-08-02T00:00:00Z",
+      });
+
+      await openCommitments(user);
+
+      const strip = await screen.findByTestId("triage-strip");
+      expect(within(strip).getByText("3 new since you last looked")).toBeInTheDocument();
+      expect(within(strip).getByText("2 from Kickoff")).toBeInTheDocument();
+      expect(within(strip).getByText("1 from Standup")).toBeInTheDocument();
+    });
+
+    it("stays hidden when nothing enrolled since the marker", async () => {
+      const user = userEvent.setup();
+      serve({
+        entries: [commitment({ entry_id: "le_a", created_at: "2026-08-01T00:00:00Z" })],
+        last_seen: "2026-08-02T00:00:00Z",
+      });
+
+      await openCommitments(user);
+
+      await screen.findByTestId("commitments-mine");
+      expect(screen.queryByTestId("triage-strip")).toBeNull();
+    });
+
+    // An unknown marker must not be read as "everything is new".
+    it("stays hidden when the ledger supplied no marker", async () => {
+      const user = userEvent.setup();
+      serve({ entries: newlyEnrolled(), last_seen: null });
+
+      await openCommitments(user);
+
+      await screen.findByTestId("commitments-mine");
+      expect(screen.queryByTestId("triage-strip")).toBeNull();
+    });
+
+    // One marker covers the whole ledger, so reviewing inside a project would
+    // silently mark other projects' commitments seen.
+    it("stays out of the project-scoped view", async () => {
+      const user = userEvent.setup();
+      serve({
+        entries: newlyEnrolled(),
+        last_seen: "2026-08-02T00:00:00Z",
+      });
+
+      await openCommitments(user, "briarwood-golf");
+
+      await screen.findByTestId("commitments-mine");
+      expect(screen.queryByTestId("triage-strip")).toBeNull();
+    });
+
+    it("advances the marker to the oldest kept row and drops it from the strip", async () => {
+      const user = userEvent.setup();
+      serve({
+        entries: newlyEnrolled(),
+        last_seen: "2026-08-02T00:00:00Z",
+      });
+
+      await openCommitments(user);
+      const strip = await screen.findByTestId("triage-strip");
+      const keeps = within(strip).getAllByRole("button", { name: "Keep" });
+      await user.click(keeps[0]);
+
+      await waitFor(() =>
+        expect(
+          invoke.mock.calls.find(([command]) => command === "mark_commitments_seen"),
+        ).toBeTruthy(),
+      );
+      const call = invoke.mock.calls.find(
+        ([command]) => command === "mark_commitments_seen",
+      );
+      expect(call?.[1]).toEqual({
+        input: { seen_through: "2026-08-03T09:00:00Z" },
+      });
+      await waitFor(() =>
+        expect(
+          within(screen.getByTestId("triage-strip")).getByText(
+            "2 new since you last looked",
+          ),
+        ).toBeInTheDocument(),
+      );
+    });
+
+    // The contiguous-prefix rule: keeping a newer row while an older one is
+    // still outstanding must not carry the marker past the older one, which
+    // would hide it forever.
+    it("does not advance the marker past a row that is still outstanding", async () => {
+      const user = userEvent.setup();
+      serve({
+        entries: newlyEnrolled(),
+        last_seen: "2026-08-02T00:00:00Z",
+      });
+
+      await openCommitments(user);
+      const strip = await screen.findByTestId("triage-strip");
+      const keeps = within(strip).getAllByRole("button", { name: "Keep" });
+      await user.click(keeps[1]);
+
+      await waitFor(() =>
+        expect(
+          within(screen.getByTestId("triage-strip")).getByText(
+            "2 new since you last looked",
+          ),
+        ).toBeInTheDocument(),
+      );
+      expect(
+        invoke.mock.calls.find(([command]) => command === "mark_commitments_seen"),
+      ).toBeUndefined();
+    });
+
+    it("untracks a whole group through one batched call", async () => {
+      const user = userEvent.setup();
+      serve({
+        entries: newlyEnrolled(),
+        last_seen: "2026-08-02T00:00:00Z",
+      });
+      onCommand("untrack_commitments", () => ({ updated: 2, skipped: 0 }));
+
+      await openCommitments(user);
+      const strip = await screen.findByTestId("triage-strip");
+      await user.click(
+        within(strip).getByRole("checkbox", { name: "Select all from Kickoff" }),
+      );
+      const selection = await screen.findByTestId("triage-selection");
+      expect(within(selection).getByText("2 selected")).toBeInTheDocument();
+      await user.click(within(selection).getByRole("button", { name: "Untrack" }));
+
+      await waitFor(() =>
+        expect(
+          invoke.mock.calls.find(([command]) => command === "untrack_commitments"),
+        ).toBeTruthy(),
+      );
+      const call = invoke.mock.calls.find(
+        ([command]) => command === "untrack_commitments",
+      );
+      expect(call?.[1]).toEqual({ input: { entry_ids: ["le_a", "le_b"] } });
+      // One call for the group, never one per row.
+      expect(
+        invoke.mock.calls.filter(([command]) => command === "untrack_commitment"),
+      ).toHaveLength(0);
+    });
+
+    it("reports the rows the ledger declined", async () => {
+      const user = userEvent.setup();
+      serve({
+        entries: newlyEnrolled(),
+        last_seen: "2026-08-02T00:00:00Z",
+      });
+      onCommand("untrack_commitments", () => ({ updated: 1, skipped: 1 }));
+
+      await openCommitments(user);
+      const strip = await screen.findByTestId("triage-strip");
+      await user.click(
+        within(strip).getByRole("checkbox", { name: "Select all from Kickoff" }),
+      );
+      const selection = await screen.findByTestId("triage-selection");
+      await user.click(within(selection).getByRole("button", { name: "Untrack" }));
+
+      expect(
+        await screen.findByText(
+          "1 commitment couldn't be changed. It may need review first.",
+        ),
+      ).toBeInTheDocument();
+    });
   });
 });

@@ -168,6 +168,98 @@ export function arrangeCommitments(
   return { groups, snoozed, settled };
 }
 
+/** One meeting's worth of newly enrolled commitments, for the triage strip. */
+export type TriageGroup = {
+  /** The source note's id, or `""` for the run of rows whose source line is
+   * gone. Unique across groups, so it is safe as a React key. */
+  noteId: string;
+  /** The heading a person reads: the source note's title. */
+  label: string;
+  rows: Commitment[];
+};
+
+/** The label for rows the ledger holds but whose source note it cannot name. */
+const UNSOURCED_LABEL = "Other";
+
+/**
+ * Groups the commitments enrolled since `lastSeen` by the meeting that
+ * produced them.
+ *
+ * `created_at` is the only stable "when did this enter my ledger" instant:
+ * `updated_at` moves on every judgement and `last_mention` moves whenever a
+ * later meeting restates the commitment, so either would drag old rows back
+ * into a review list that is supposed to be about what is new.
+ *
+ * Grouped by source note because a meeting is the unit a person actually
+ * reviews: six commitments from one standup are one decision, not six. Groups
+ * come oldest-first so a review works forwards through the day, which is also
+ * the order the watermark below can advance through.
+ *
+ * A `null` marker yields nothing at all. That is the honest reading of "we do
+ * not know when you last looked": declaring every commitment new would turn a
+ * convenience into a wall of work nobody asked for.
+ */
+export function arrangeTriage(
+  entries: Commitment[],
+  lastSeen: string | null,
+): TriageGroup[] {
+  if (!lastSeen) return [];
+
+  const groups = new Map<string, TriageGroup>();
+  for (const commitment of entries) {
+    // RFC 3339 UTC on both sides, so a lexical compare is a chronological one.
+    if (commitment.created_at <= lastSeen) continue;
+    const noteId = commitment.source?.note_id ?? "";
+    const label = commitment.source?.title ?? UNSOURCED_LABEL;
+    const group = groups.get(noteId);
+    if (group) {
+      group.rows.push(commitment);
+    } else {
+      groups.set(noteId, { noteId, label, rows: [commitment] });
+    }
+  }
+
+  for (const group of groups.values()) {
+    group.rows.sort((left, right) =>
+      left.created_at.localeCompare(right.created_at),
+    );
+  }
+  return [...groups.values()].sort((left, right) =>
+    left.rows[0].created_at.localeCompare(right.rows[0].created_at),
+  );
+}
+
+/**
+ * How far the last-seen marker may advance, given which rows have been
+ * reviewed.
+ *
+ * The largest `created_at` whose entire earlier-or-equal prefix is reviewed, or
+ * `null` when the very oldest row is still outstanding.
+ *
+ * **Contiguous prefix, not the maximum.** The marker is a single instant, so
+ * advancing it past an unreviewed row hides that row forever: it would fall
+ * below the cut on the next mount and never be offered again. Taking the
+ * maximum of whatever was clicked is exactly that bug, and it bites hardest in
+ * the case the strip is for, where somebody keeps one commitment out of a busy
+ * day and the other twenty vanish. Keeping a row out of order is therefore
+ * cheap and safe: it simply reappears next time, until the rows before it are
+ * dealt with too.
+ */
+export function triageWatermark(
+  batch: readonly { entry_id: string; created_at: string }[],
+  reviewed: ReadonlySet<string>,
+): string | null {
+  const ordered = [...batch].sort((left, right) =>
+    left.created_at.localeCompare(right.created_at),
+  );
+  let watermark: string | null = null;
+  for (const row of ordered) {
+    if (!reviewed.has(row.entry_id)) break;
+    watermark = row.created_at;
+  }
+  return watermark;
+}
+
 /**
  * The queue's workload sentence: what is on you, and what you are waiting on.
  *

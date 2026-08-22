@@ -109,6 +109,21 @@ export type Commitment = {
 export type CommitmentsPayload = {
   entries: Commitment[];
   settled: Commitment[];
+  /** When the user last reviewed newly enrolled commitments, RFC 3339 UTC.
+   * The triage strip lists entries whose `created_at` sorts above it.
+   *
+   * `null` only when the ledger could not supply it, in which case the strip
+   * stays hidden rather than declaring every commitment new. */
+  last_seen: string | null;
+};
+
+/** Mirrors `ledger_cmds::BulkMutateDto`: what a batched gesture settled on.
+ *
+ * Counts, not entries: the `ledger:changed` the command broadcasts brings the
+ * full truth, and the strip needs only enough to say how many were declined. */
+export type BulkMutateResult = {
+  updated: number;
+  skipped: number;
 };
 
 /** Mirrors `ledger_cmds::CommitmentEntryDto`: a mutation's echo. */
@@ -178,6 +193,48 @@ export function waiveCommitment(entryId: string): Promise<CommitmentEntry> {
 export function untrackCommitment(entryId: string): Promise<CommitmentEntry> {
   return invoke<CommitmentEntry>("untrack_commitment", {
     input: { entry_id: entryId },
+  });
+}
+
+/** Untracks several commitments as one gesture, for the triage strip's group
+ * and selection verbs.
+ *
+ * One invoke rather than N: the backend applies them in a single worker job and
+ * broadcasts one `ledger:changed`, so the view refetches once instead of
+ * flickering through a dozen refetches. Semantics are `untrackCommitment`'s,
+ * repeated per entry.
+ *
+ * Best-effort: an entry the ledger refuses (one already settled) lands in
+ * `skipped` rather than failing the whole gesture. */
+export function untrackCommitments(
+  entryIds: string[],
+): Promise<BulkMutateResult> {
+  return invoke<BulkMutateResult>("untrack_commitments", {
+    input: { entry_ids: entryIds },
+  });
+}
+
+/** Snoozes several commitments as one gesture. Same batching and same
+ * best-effort rule as `untrackCommitments`; a needs-review entry is one the
+ * ledger declines, because it is still asking a question. */
+export function snoozeCommitments(
+  entryIds: string[],
+  until: string,
+): Promise<BulkMutateResult> {
+  return invoke<BulkMutateResult>("snooze_commitments", {
+    input: { entry_ids: entryIds, until },
+  });
+}
+
+/** Records that the user has reviewed newly enrolled commitments up to
+ * `seenThrough` (RFC 3339 UTC, taken from a row's `created_at`).
+ *
+ * Emits no `ledger:changed` by design: nothing about a commitment changed, and
+ * a refetch would recompute the review batch out from under the hand clearing
+ * it. */
+export function markCommitmentsSeen(seenThrough: string): Promise<void> {
+  return invoke<void>("mark_commitments_seen", {
+    input: { seen_through: seenThrough },
   });
 }
 
@@ -258,6 +315,7 @@ export function useCommitments(slug: string | null) {
   return {
     entries: data?.entries ?? [],
     settled: data?.settled ?? [],
+    lastSeen: data?.last_seen ?? null,
     /** The response object itself, for pruning per-row state during render:
      * key on this, never on a derived array, whose identity changes every
      * render. */
