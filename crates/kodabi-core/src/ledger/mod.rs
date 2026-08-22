@@ -40,7 +40,9 @@ pub mod view;
 pub use distill_apply::{apply_distill_follow_up, AppliedUpdates, AutoClose, DistillFollowUp};
 pub use enrollment::{DrainOutcome, NoteTrackingOutcome, OwnerResolutionOutcome, RetroSource};
 pub use snapshot::{ProjectSnapshot, RestoreReport, LEDGER_SNAPSHOT_FILE, LEDGER_SNAPSHOT_VERSION};
-pub use store::{EntryDetail, EntryFilter, EntryLink, Evidence, ItemRef, LedgerEntry};
+pub use store::{
+    EntryDetail, EntryFilter, EntryLink, Evidence, ItemRef, LedgerEntry, TRIAGE_LAST_SEEN_KEY,
+};
 pub use sync::{LinkHint, NoteSync, SyncOutcome};
 pub use view::{
     mention_window_cutoff, AgingConfig, AgingTier, Commitment, CommitmentItem, CommitmentSource,
@@ -1071,6 +1073,7 @@ mod tests {
                     owner: "Jane".to_string(),
                     due_date: None,
                     done: false,
+                    firm: true,
                     extracted_date: None,
                 }],
                 link_hints: &[],

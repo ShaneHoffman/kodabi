@@ -2,6 +2,7 @@ import { Fragment, useState, type CSSProperties, type ReactNode } from "react";
 
 import {
   arrangeCommitments,
+  arrangeTriage,
   commitmentOwner,
   commitmentText,
   formatConfidence,
@@ -11,8 +12,10 @@ import {
   nextWeekIso,
   settledBy,
   tomorrowIso,
+  triageWatermark,
   workloadSummary,
   type CommitmentGroup,
+  type TriageGroup,
 } from "../../commitmentGroups";
 import { backendCopy } from "../../errorCopy";
 import { useNavigation, type View } from "../../useNavigation";
@@ -20,13 +23,17 @@ import { categoryLabel } from "../../useNotes";
 import {
   confirmCommitmentEvidence,
   dismissCommitmentEvidence,
+  markCommitmentsSeen,
   reopenCommitment,
   setCommitmentDone,
   snoozeCommitment,
+  snoozeCommitments,
   untrackCommitment,
+  untrackCommitments,
   claimCommitmentMine,
   useCommitments,
   waiveCommitment,
+  type BulkMutateResult,
   type Commitment,
 } from "../../useCommitments";
 import { SpiritMark } from "../capture/SpiritMark";
@@ -93,6 +100,37 @@ function staggerStyle(position: number): CSSProperties | undefined {
 /** One in-flight write, named so the row that owns it can go busy. */
 type Pending = { entryId: string; verb: string };
 
+/** The commitments enrolled since the marker, frozen at this mount's first
+ * read. `lastSeen` is kept beside them so the arrangement can re-apply the cut
+ * it was built from rather than a marker the review has since moved. */
+type TriageBatch = {
+  lastSeen: string | null;
+  rows: { entry_id: string; created_at: string }[];
+};
+
+/** Shared empty set, so an untouched selection keeps one identity. */
+const EMPTY_IDS: ReadonlySet<string> = new Set<string>();
+
+/** `ids` minus `remove`, or the same set when nothing was in it. */
+function withoutIds(
+  ids: ReadonlySet<string>,
+  remove: readonly string[],
+): ReadonlySet<string> {
+  if (!remove.some((id) => ids.has(id))) return ids;
+  const next = new Set(ids);
+  for (const id of remove) next.delete(id);
+  return next;
+}
+
+/** `ids` narrowed to those still present, or the same set when all are. */
+function pruneIds(
+  ids: ReadonlySet<string>,
+  live: ReadonlySet<string>,
+): ReadonlySet<string> {
+  const kept = [...ids].filter((id) => live.has(id));
+  return kept.length === ids.size ? ids : new Set(kept);
+}
+
 /**
  * The commitment ledger, as a person reads it: what you owe, what you are
  * waiting on, and what just settled.
@@ -116,6 +154,20 @@ export function CommitmentsView({ slug }: Props) {
   const [showSnoozed, setShowSnoozed] = useState(false);
   const [showSettled, setShowSettled] = useState(false);
   const [snoozeTarget, setSnoozeTarget] = useState<Commitment | null>(null);
+  // The review batch, frozen at the first read of this mount. It is held in
+  // state rather than derived because every `ledger:changed` refetch would
+  // otherwise recompute it against a marker the review itself has advanced,
+  // and rows would vanish from under the hand clearing them. What the strip
+  // renders is this batch intersected with what is still live, minus what has
+  // been reviewed, so a row settled elsewhere still drops out.
+  const [batch, setBatch] = useState<TriageBatch | null>(null);
+  const [reviewedIds, setReviewedIds] = useState<ReadonlySet<string>>(EMPTY_IDS);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(EMPTY_IDS);
+  const [bulkPending, setBulkPending] = useState<string | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
+  const [bulkSkipped, setBulkSkipped] = useState<number>(0);
+  const [bulkSnoozeOpen, setBulkSnoozeOpen] = useState(false);
+  const [markedThrough, setMarkedThrough] = useState<string | null>(null);
 
   // Adjust-state-during-render, not an effect: when a refetch drops a row, its
   // error and any dialog aimed at it have to go with it. Keyed on the response
@@ -134,6 +186,22 @@ export function CommitmentsView({ slug }: Props) {
         : Object.fromEntries(kept);
     });
     if (snoozeTarget && !live.has(snoozeTarget.entry_id)) setSnoozeTarget(null);
+    // Seeded from the first read only, and never re-seeded: a second read is a
+    // consequence of this session's own writes.
+    if (batch === null && response) {
+      const lastSeen = response.last_seen;
+      setBatch({
+        lastSeen,
+        rows: lastSeen
+          ? entries
+              .filter((commitment) => commitment.created_at > lastSeen)
+              .map(({ entry_id, created_at }) => ({ entry_id, created_at }))
+          : [],
+      });
+      setMarkedThrough(lastSeen);
+    }
+    // A selection may not outlive the rows it named.
+    setSelectedIds((ids) => pruneIds(ids, live));
   }
 
   const { groups, snoozed, settled: settledRows } = arrangeCommitments(
@@ -142,6 +210,121 @@ export function CommitmentsView({ slug }: Props) {
   );
   const isEmpty =
     groups.length === 0 && snoozed.length === 0 && settledRows.length === 0;
+
+  // The strip is the whole-vault view's alone. The marker is one instant for
+  // the whole ledger, so reviewing inside a project would silently mark other
+  // projects' commitments seen as well.
+  const batchIds = new Set(batch?.rows.map((row) => row.entry_id) ?? []);
+  // What the ledger still lists as live. A batch row that has left it was
+  // settled elsewhere while the strip was open, so it is gone from the strip
+  // and can never be reviewed in it; the watermark treats it as dealt with
+  // rather than letting it block every row behind it.
+  const activeIds = new Set(entries.map((commitment) => commitment.entry_id));
+  const triageGroups =
+    slug === null
+      ? arrangeTriage(
+          entries.filter(
+            (commitment) =>
+              batchIds.has(commitment.entry_id) &&
+              !reviewedIds.has(commitment.entry_id),
+          ),
+          batch?.lastSeen ?? null,
+        )
+      : [];
+  const triageCount = triageGroups.reduce(
+    (total, group) => total + group.rows.length,
+    0,
+  );
+
+  /** Moves the last-seen marker as far as the reviewed rows allow. */
+  const advanceMarker = async (reviewed: ReadonlySet<string>) => {
+    if (!batch) return;
+    const watermark = triageWatermark(batch.rows, reviewed, activeIds);
+    // Only ever forward, and only when it actually moved: the backend keeps the
+    // later of the two anyway, so a redundant call would be a wasted round trip
+    // rather than a bug.
+    if (!watermark || (markedThrough && watermark <= markedThrough)) return;
+    setMarkedThrough(watermark);
+    try {
+      await markCommitmentsSeen(watermark);
+    } catch (err) {
+      // The review still happened on screen; only the memory of it failed, and
+      // the copy says exactly that rather than pretending the rows are back.
+      setBulkError(
+        backendCopy(
+          err,
+          "Couldn't save your place in this list. These may show up again next time.",
+        ),
+      );
+    }
+  };
+
+  /** Marks rows reviewed locally and advances the marker behind them. */
+  const markReviewed = async (ids: string[]) => {
+    const next = new Set([...reviewedIds, ...ids]);
+    setReviewedIds(next);
+    setSelectedIds((selected) => withoutIds(selected, ids));
+    await advanceMarker(next);
+  };
+
+  /** Runs one batched gesture, reporting what the ledger declined. */
+  const runBulk = async (
+    verb: string,
+    ids: string[],
+    fallback: string,
+    write: () => Promise<BulkMutateResult>,
+  ) => {
+    if (ids.length === 0) return;
+    setBulkPending(verb);
+    setBulkError(null);
+    setBulkSkipped(0);
+    try {
+      const result = await write();
+      setBulkSkipped(result.skipped);
+      await markReviewed(ids);
+    } catch (err) {
+      setBulkError(backendCopy(err, fallback));
+    } finally {
+      setBulkPending(null);
+    }
+  };
+
+  const keepRows = (rows: Commitment[]) => {
+    // Keep changes no ledger state at all: the commitment is already tracked,
+    // and the only thing being recorded is that a person looked at it.
+    setBulkError(null);
+    setBulkSkipped(0);
+    void markReviewed(rows.map((row) => row.entry_id));
+  };
+
+  const untrackRows = (rows: Commitment[]) =>
+    void runBulk(
+      "untrack",
+      rows.map((row) => row.entry_id),
+      "Couldn't untrack these commitments. The ledger is unchanged; try again.",
+      () => untrackCommitments(rows.map((row) => row.entry_id)),
+    );
+
+  const selectedRows = triageGroups
+    .flatMap((group) => group.rows)
+    .filter((row) => selectedIds.has(row.entry_id));
+
+  const snoozeSelected = (until: string) =>
+    runBulk(
+      "snooze",
+      selectedRows.map((row) => row.entry_id),
+      "Couldn't snooze these commitments. The ledger is unchanged; try again.",
+      () =>
+        snoozeCommitments(
+          selectedRows.map((row) => row.entry_id),
+          until,
+        ),
+    );
+
+  const toggleSelected = (ids: string[], selected: boolean) =>
+    setSelectedIds((current) =>
+      selected ? new Set([...current, ...ids]) : withoutIds(current, ids),
+    );
 
   /** Runs one write, keeping the row's own control busy while it is in flight. */
   const run = async (
@@ -325,6 +508,20 @@ export function CommitmentsView({ slug }: Props) {
         <StatusMessage variant="error">{error}</StatusMessage>
       ) : (
         <>
+          {triageCount > 0 && (
+            <TriageStrip
+              groups={triageGroups}
+              count={triageCount}
+              selectedIds={selectedIds}
+              pending={bulkPending}
+              error={bulkError}
+              skipped={bulkSkipped}
+              onToggle={toggleSelected}
+              onKeep={keepRows}
+              onUntrack={untrackRows}
+              onSnooze={() => setBulkSnoozeOpen(true)}
+            />
+          )}
           {isEmpty
             ? // Gated on `!loading`: without it a cold start tells the user
               // their ledger is empty before the first read has landed.
@@ -442,7 +639,8 @@ export function CommitmentsView({ slug }: Props) {
 
       {snoozeTarget && (
         <SnoozeDialog
-          commitment={snoozeTarget}
+          title="Snooze this commitment"
+          subject={commitmentText(snoozeTarget)}
           busy={pending?.entryId === snoozeTarget.entry_id}
           onClose={() => setSnoozeTarget(null)}
           onConfirm={async (until) => {
@@ -451,9 +649,192 @@ export function CommitmentsView({ slug }: Props) {
           }}
         />
       )}
+
+      {bulkSnoozeOpen && (
+        <SnoozeDialog
+          title={
+            selectedIds.size === 1
+              ? "Snooze this commitment"
+              : `Snooze ${selectedIds.size} commitments`
+          }
+          subject="They stay tracked, and come back on the day you pick."
+          busy={bulkPending === "snooze"}
+          onClose={() => setBulkSnoozeOpen(false)}
+          onConfirm={async (until) => {
+            await snoozeSelected(until);
+            setBulkSnoozeOpen(false);
+          }}
+        />
+      )}
     </ViewFrame>
   );
 }
+
+type TriageStripProps = {
+  groups: TriageGroup[];
+  count: number;
+  selectedIds: ReadonlySet<string>;
+  pending: string | null;
+  error: string | null;
+  skipped: number;
+  onToggle: (ids: string[], selected: boolean) => void;
+  onKeep: (rows: Commitment[]) => void;
+  onUntrack: (rows: Commitment[]) => void;
+  onSnooze: () => void;
+};
+
+/**
+ * The review-after-the-fact strip: what the ledger enrolled since you last
+ * looked, grouped by the meeting that produced it.
+ *
+ * **Not a gate, and the design says so.** Every row here is already live and
+ * already counted in the queue below; nothing waited for a blessing. The strip
+ * is contextual chrome doing one job — clearing a backlog of attention, not of
+ * work — and it disappears the moment there is nothing new, so it can never
+ * become an inbox that goes stale and takes the ledger's credibility with it.
+ *
+ * That is also why Keep is the primary rectangle and Untrack is quiet: the
+ * common answer is "yes, that is a real commitment", and the strip should cost
+ * a glance, not a decision per row.
+ *
+ * The row carries three controls where the two-affordance ceiling
+ * (UI_CONVENTIONS §5) allows two. The argued exception is the checkbox: it is
+ * selection chrome for the bar below, not a third verb on the item, and it is
+ * what lets a heavy day be cleared by the meeting rather than by the row.
+ */
+function TriageStrip({
+  groups,
+  count,
+  selectedIds,
+  pending,
+  error,
+  skipped,
+  onToggle,
+  onKeep,
+  onUntrack,
+  onSnooze,
+}: TriageStripProps) {
+  const allRows = groups.flatMap((group) => group.rows);
+  const selectedRows = allRows.filter((row) => selectedIds.has(row.entry_id));
+  const busy = pending !== null;
+
+  return (
+    <section
+      className={`mt-4 mb-6 rounded-card border border-edge px-5 py-4 ${RISES_IN}`}
+      aria-label="New commitments to review"
+      data-testid="triage-strip"
+    >
+      <p className="text-[13px] text-ink">
+        {count === 1
+          ? "1 new since you last looked"
+          : `${count} new since you last looked`}
+      </p>
+
+      {groups.map((group) => {
+        const ids = group.rows.map((row) => row.entry_id);
+        const allSelected = ids.every((id) => selectedIds.has(id));
+        return (
+          <div key={group.noteId} className="mt-4">
+            <div className="flex items-center gap-2.5">
+              <Checkbox
+                checked={allSelected}
+                hideLabel
+                label={`Select all from ${group.label}`}
+                onChange={(next) => onToggle(ids, next)}
+              />
+              <p className={TRIAGE_GROUP_LABEL}>
+                {group.rows.length} from {group.label}
+              </p>
+            </div>
+            <ul className="mt-1.5 flex flex-col">
+              {group.rows.map((row) => (
+                <li
+                  key={row.entry_id}
+                  className="flex items-center gap-2.5 border-t border-edge py-2 first:border-t-0"
+                >
+                  <Checkbox
+                    checked={selectedIds.has(row.entry_id)}
+                    hideLabel
+                    label={`Select ${commitmentText(row)}`}
+                    onChange={(next) => onToggle([row.entry_id], next)}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-[12.5px] text-ink-dim">
+                    {commitmentOwner(row)} · {commitmentText(row)}
+                  </span>
+                  <Button
+                    variant="action"
+                    disabled={busy}
+                    onClick={() => onKeep([row])}
+                  >
+                    Keep
+                  </Button>
+                  <Button
+                    variant="quiet"
+                    disabled={busy}
+                    onClick={() => onUntrack([row])}
+                  >
+                    Untrack
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        );
+      })}
+
+      {selectedRows.length > 0 && (
+        <div
+          className="mt-4 flex items-center gap-2.5 border-t border-edge pt-3.5"
+          data-testid="triage-selection"
+        >
+          <span className="flex-1 font-data text-[10.5px] text-ink-faint tabular-nums">
+            {selectedRows.length} selected
+          </span>
+          <Button
+            variant="action"
+            disabled={busy}
+            onClick={() => onKeep(selectedRows)}
+          >
+            Keep
+          </Button>
+          <Button
+            variant="quiet"
+            loading={pending === "untrack"}
+            disabled={busy && pending !== "untrack"}
+            onClick={() => onUntrack(selectedRows)}
+          >
+            Untrack
+          </Button>
+          <Button variant="quiet" disabled={busy} onClick={onSnooze}>
+            Snooze
+          </Button>
+        </div>
+      )}
+
+      {skipped > 0 && (
+        <div className="mt-3">
+          <StatusMessage variant="status" compact>
+            {skipped === 1
+              ? "1 commitment couldn't be changed. It may need review first."
+              : `${skipped} commitments couldn't be changed. They may need review first.`}
+          </StatusMessage>
+        </div>
+      )}
+      {error && (
+        <div className="mt-3">
+          <StatusMessage variant="error" compact>
+            {error}
+          </StatusMessage>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/** The strip's group heading. Same eyebrow recipe as the queue's, without the
+ * queue's own top margin: the strip sets its own rhythm. */
+const TRIAGE_GROUP_LABEL =
+  "font-data text-[10px] uppercase tracking-[0.22em] text-ink-faint";
 
 /** The stagger counts one sequence over the whole page, labels included. */
 function staggerPosition(
@@ -875,15 +1256,24 @@ function EmptyLedger({ scoped }: { scoped: boolean }) {
 }
 
 type SnoozeDialogProps = {
-  commitment: Commitment;
+  /** The heading, which names how many commitments are in hand. */
+  title: string;
+  /** What is being snoozed, as the person reads it: one commitment's text, or
+   * a count when the gesture covers several. */
+  subject: string;
   busy: boolean;
   onClose: () => void;
   onConfirm: (until: string) => void;
 };
 
-/** The custom snooze date, for the two presets that do not fit. */
+/** The custom snooze date, for the two presets that do not fit.
+ *
+ * Takes its copy rather than a `Commitment` so the triage strip's bulk snooze
+ * reuses it: the date field and its floor are the whole point of the dialog,
+ * and neither depends on how many rows are behind it. */
 function SnoozeDialog({
-  commitment,
+  title,
+  subject,
   busy,
   onClose,
   onConfirm,
@@ -891,10 +1281,10 @@ function SnoozeDialog({
   const [until, setUntil] = useState(tomorrowIso());
 
   return (
-    <Dialog open onDismiss={onClose} label="Snooze this commitment">
-      <p className="text-[13.5px] text-ink">Snooze this commitment</p>
+    <Dialog open onDismiss={onClose} label={title}>
+      <p className="text-[13.5px] text-ink">{title}</p>
       <p className="mt-1.5 text-[12.5px] leading-[1.55] text-ink-dim">
-        {commitmentText(commitment)}
+        {subject}
       </p>
       <div className="mt-4">
         <Field

@@ -239,6 +239,9 @@ pub struct ActionItemRow {
     pub owner: String,
     pub due_date: Option<String>,
     pub done: bool,
+    /// Mirrors [`crate::meeting::ActionItemFact::firm`]: false only for a
+    /// tentative item the ledger must not enroll.
+    pub firm: bool,
     pub extracted_date: Option<String>,
 }
 

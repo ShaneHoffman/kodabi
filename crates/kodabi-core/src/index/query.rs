@@ -389,7 +389,7 @@ impl NoteIndex {
     /// is not stored — the caller derives it from `done` + `due_date`.
     pub fn get_action_items(&self, id: &str) -> Result<Vec<ActionItemRow>> {
         let mut stmt = self.conn.prepare_cached(
-            "SELECT item_id, description, owner, due_date, done, extracted_date
+            "SELECT item_id, description, owner, due_date, done, firm, extracted_date
              FROM note_action_items WHERE note_id = ?1 ORDER BY seq",
         )?;
         let items = stmt
@@ -400,6 +400,7 @@ impl NoteIndex {
                     owner: row.get("owner")?,
                     due_date: row.get("due_date")?,
                     done: row.get("done")?,
+                    firm: row.get("firm")?,
                     extracted_date: row.get("extracted_date")?,
                 })
             })?
@@ -501,8 +502,9 @@ fn write_meeting_facts(
     {
         let mut insert_item = tx.prepare(
             "INSERT INTO note_action_items
-                 (note_id, seq, item_id, description, owner, due_date, done, extracted_date)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                 (note_id, seq, item_id, description, owner, due_date, done, firm,
+                  extracted_date)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         )?;
         for (seq, item) in facts.action_items.iter().enumerate() {
             insert_item.execute(params![
@@ -513,6 +515,7 @@ fn write_meeting_facts(
                 item.owner,
                 item.due_date,
                 item.done,
+                item.firm,
                 item.extracted_date,
             ])?;
         }
@@ -561,6 +564,7 @@ mod tests {
                     owner: "Jane".to_string(),
                     due_date: Some("2026-07-15".to_string()),
                     done: false,
+                    firm: true,
                     extracted_date: Some("2026-07-10".to_string()),
                 },
                 ActionItemFact {
@@ -569,6 +573,7 @@ mod tests {
                     owner: "Unassigned".to_string(),
                     due_date: None,
                     done: true,
+                    firm: true,
                     extracted_date: Some("2026-07-10".to_string()),
                 },
             ],
@@ -732,6 +737,7 @@ mod tests {
             owner: "You".to_string(),
             due_date: None,
             done,
+            firm: true,
             extracted_date: None,
         };
         let with_items = |id: &str, date: &str, items: Vec<ActionItemFact>| {

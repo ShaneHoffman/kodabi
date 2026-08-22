@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import {
   arrangeCommitments,
+  arrangeTriage,
   formatDay,
+  formatInstant,
   nextWeekIso,
   settledBy,
   tomorrowIso,
+  triageWatermark,
   workloadSummary,
 } from "./commitmentGroups";
 import type { Commitment, CommitmentItem } from "./useCommitments";
@@ -352,5 +355,149 @@ describe("dates", () => {
 
   it("carries a preset across a month boundary", () => {
     expect(tomorrowIso(new Date(2026, 7, 31))).toBe("2026-09-01");
+  });
+});
+
+describe("arrangeTriage", () => {
+  const source = (noteId: string, title: string) => ({
+    note_id: noteId,
+    title,
+    project: "Briarwood Golf",
+    path: `${noteId}.md`,
+    category: null,
+  });
+
+  it("lists only what enrolled after the marker", () => {
+    const groups = arrangeTriage(
+      [
+        commitment({ entry_id: "le_old", created_at: "2026-08-01T00:00:00Z" }),
+        commitment({ entry_id: "le_new", created_at: "2026-08-03T00:00:00Z" }),
+      ],
+      "2026-08-02T00:00:00Z",
+    );
+
+    expect(groups.flatMap((group) => group.rows.map((row) => row.entry_id))).toEqual([
+      "le_new",
+    ]);
+  });
+
+  it("groups by source note and orders both groups and rows oldest first", () => {
+    const groups = arrangeTriage(
+      [
+        commitment({
+          entry_id: "le_c",
+          created_at: "2026-08-03T12:00:00Z",
+          source: source("n_standup", "Standup"),
+        }),
+        commitment({
+          entry_id: "le_a",
+          created_at: "2026-08-03T09:00:00Z",
+          source: source("n_kickoff", "Kickoff"),
+        }),
+        commitment({
+          entry_id: "le_b",
+          created_at: "2026-08-03T10:00:00Z",
+          source: source("n_standup", "Standup"),
+        }),
+      ],
+      "2026-08-02T00:00:00Z",
+    );
+
+    // The day disambiguates two runs of the same recurring meeting. Expected
+    // through `formatInstant` rather than hard-coded, so the assertion does not
+    // depend on the machine's timezone, and so the heading is pinned to the
+    // same rendering the row's own "heard" meta uses.
+    expect(groups.map((group) => group.label)).toEqual([
+      `Kickoff ${formatInstant("2026-08-01T00:00:00Z")}`,
+      `Standup ${formatInstant("2026-08-01T00:00:00Z")}`,
+    ]);
+    expect(groups[1].rows.map((row) => row.entry_id)).toEqual(["le_b", "le_c"]);
+  });
+
+  it("collects rows whose source note is gone under one heading", () => {
+    const groups = arrangeTriage(
+      [
+        commitment({ entry_id: "le_a", created_at: "2026-08-03T00:00:00Z" }),
+        commitment({ entry_id: "le_b", created_at: "2026-08-04T00:00:00Z" }),
+      ],
+      "2026-08-02T00:00:00Z",
+    );
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].label).toBe("Other");
+  });
+
+  // Declaring every commitment new would turn a convenience into a wall of
+  // work, so an unknown marker shows nothing at all.
+  it("shows nothing when the marker is unknown", () => {
+    expect(
+      arrangeTriage(
+        [commitment({ entry_id: "le_a", created_at: "2026-08-03T00:00:00Z" })],
+        null,
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe("triageWatermark", () => {
+  const batch = [
+    { entry_id: "le_a", created_at: "2026-08-03T09:00:00Z" },
+    { entry_id: "le_b", created_at: "2026-08-03T10:00:00Z" },
+    { entry_id: "le_c", created_at: "2026-08-03T11:00:00Z" },
+  ];
+  /** Every row still live, which is the ordinary case. */
+  const allActive = new Set(batch.map((row) => row.entry_id));
+
+  it("advances through the reviewed prefix", () => {
+    expect(triageWatermark(batch, new Set(["le_a", "le_b"]), allActive)).toBe(
+      "2026-08-03T10:00:00Z",
+    );
+  });
+
+  // The bug this rule exists to prevent: taking the maximum would carry the
+  // marker past le_a, which would then never be offered again.
+  it("stops at the first unreviewed row rather than taking the maximum", () => {
+    expect(
+      triageWatermark(batch, new Set(["le_b", "le_c"]), allActive),
+    ).toBeNull();
+  });
+
+  it("is null until the oldest row is reviewed", () => {
+    expect(triageWatermark(batch, new Set(), allActive)).toBeNull();
+  });
+
+  it("reaches the newest row once every row is reviewed", () => {
+    expect(
+      triageWatermark(batch, new Set(["le_a", "le_b", "le_c"]), allActive),
+    ).toBe("2026-08-03T11:00:00Z");
+  });
+
+  it("orders the batch itself rather than trusting the caller", () => {
+    expect(
+      triageWatermark([...batch].reverse(), new Set(["le_a"]), allActive),
+    ).toBe("2026-08-03T09:00:00Z");
+  });
+
+  // A row settled from the queue below leaves the strip, so it can never be
+  // reviewed there. Blocking on it would throw away the review of every row
+  // behind it, and the same list would be offered again on the next mount.
+  it("steps over a row that is no longer live", () => {
+    const active = new Set(["le_b", "le_c"]);
+
+    expect(triageWatermark(batch, new Set(["le_b"]), active)).toBe(
+      "2026-08-03T10:00:00Z",
+    );
+    expect(triageWatermark(batch, new Set(["le_b", "le_c"]), active)).toBe(
+      "2026-08-03T11:00:00Z",
+    );
+  });
+
+  // Settled-elsewhere is not blanket permission: the prefix still stops dead
+  // at the first row that is live and unreviewed, however many settled rows
+  // sat in front of it.
+  it("still stops at a live unreviewed row behind a settled one", () => {
+    expect(triageWatermark(batch, new Set(), new Set(["le_b", "le_c"]))).toBe(
+      "2026-08-03T09:00:00Z",
+    );
   });
 });

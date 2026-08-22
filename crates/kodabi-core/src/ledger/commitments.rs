@@ -549,6 +549,7 @@ mod tests {
             owner: owner.to_string(),
             due_date: None,
             done: false,
+            firm: true,
             extracted_date: Some("2026-08-01".to_string()),
         }
     }

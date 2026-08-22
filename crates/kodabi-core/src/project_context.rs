@@ -448,6 +448,7 @@ mod tests {
                     owner: "You".to_string(),
                     due_date: Some("2026-07-01".to_string()),
                     done: false,
+                    firm: true,
                     extracted_date: Some("2026-07-10".to_string()),
                 },
                 ActionItemFact {
@@ -456,6 +457,7 @@ mod tests {
                     owner: "Priya".to_string(),
                     due_date: Some("2026-08-01".to_string()),
                     done: false,
+                    firm: true,
                     extracted_date: Some("2026-07-10".to_string()),
                 },
                 ActionItemFact {
@@ -464,6 +466,7 @@ mod tests {
                     owner: "You".to_string(),
                     due_date: None,
                     done: true,
+                    firm: true,
                     extracted_date: Some("2026-07-10".to_string()),
                 },
             ],
@@ -575,6 +578,7 @@ mod tests {
                     owner: "Priya".to_string(),
                     due_date: None,
                     done: false,
+                    firm: true,
                     extracted_date: None,
                 }],
                 link_hints: &[],

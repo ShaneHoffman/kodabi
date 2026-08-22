@@ -1054,7 +1054,47 @@ impl Ledger {
             self.mark_dirty(&project);
         }
     }
+
+    /// Reads one `ledger_meta` value, or `None` when the key was never set.
+    pub fn meta_get(&self, key: &str) -> Result<Option<String>> {
+        let value = self
+            .conn
+            .query_row(
+                "SELECT value FROM ledger_meta WHERE key = ?1",
+                params![key],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        Ok(value)
+    }
+
+    /// Sets one `ledger_meta` value, but only ever forward: an existing value
+    /// that sorts higher is kept.
+    ///
+    /// Monotonic because every writer of these keys is a *marker* — the point
+    /// last reviewed — and two windows reporting their reads out of order must
+    /// not rewind one another. Values are RFC 3339 UTC (`Z`), where a lexical
+    /// comparison is a chronological one, which is what makes SQL's `max` the
+    /// right operator (see `.claude/rules/utc-timestamps.md`).
+    ///
+    /// Deliberately does **not** mark any project dirty: `ledger_meta` is
+    /// device-local viewing state and reaches no snapshot, so arming the
+    /// snapshot debounce for it would rewrite `_ledger.yml` every time someone
+    /// glanced at the Commitments view.
+    pub fn meta_advance(&mut self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO ledger_meta (key, value) VALUES (?1, ?2)
+             ON CONFLICT (key) DO UPDATE SET value = max(value, excluded.value)",
+            params![key, value],
+        )?;
+        Ok(())
+    }
 }
+
+/// The `ledger_meta` key holding the instant the user last reviewed newly
+/// enrolled commitments. The triage strip lists entries whose `created_at`
+/// sorts above it.
+pub const TRIAGE_LAST_SEEN_KEY: &str = "triage_last_seen";
 
 /// Whether `value` is a `YYYY-MM-DD` calendar day.
 fn is_calendar_day(value: &str) -> bool {
@@ -1077,6 +1117,7 @@ mod tests {
             owner: owner.to_string(),
             due_date: None,
             done: false,
+            firm: true,
             extracted_date: Some("2026-08-17".to_string()),
         }
     }
@@ -1305,6 +1346,54 @@ mod tests {
             after.updated_at, before.updated_at,
             "the op that preceded this already stamped it"
         );
+    }
+
+    #[test]
+    fn the_triage_marker_only_ever_moves_forward() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        assert_eq!(ledger.meta_get(TRIAGE_LAST_SEEN_KEY).unwrap(), None);
+
+        ledger
+            .meta_advance(TRIAGE_LAST_SEEN_KEY, "2026-08-17T12:00:00Z")
+            .unwrap();
+        assert_eq!(
+            ledger.meta_get(TRIAGE_LAST_SEEN_KEY).unwrap().as_deref(),
+            Some("2026-08-17T12:00:00Z")
+        );
+
+        // A later read advances it.
+        ledger
+            .meta_advance(TRIAGE_LAST_SEEN_KEY, "2026-08-18T09:00:00Z")
+            .unwrap();
+        assert_eq!(
+            ledger.meta_get(TRIAGE_LAST_SEEN_KEY).unwrap().as_deref(),
+            Some("2026-08-18T09:00:00Z")
+        );
+
+        // A stale one — a second window reporting its read late — does not
+        // rewind it, which would resurface commitments already reviewed.
+        ledger
+            .meta_advance(TRIAGE_LAST_SEEN_KEY, "2026-08-17T12:00:00Z")
+            .unwrap();
+        assert_eq!(
+            ledger.meta_get(TRIAGE_LAST_SEEN_KEY).unwrap().as_deref(),
+            Some("2026-08-18T09:00:00Z")
+        );
+    }
+
+    /// The marker is device-local viewing state; `_ledger.yml` is vault truth.
+    /// Marking a review must therefore leave the snapshot debounce disarmed, or
+    /// merely opening the view would rewrite every project's snapshot.
+    #[test]
+    fn advancing_the_triage_marker_dirties_nothing() {
+        let (mut ledger, _) = seeded();
+        ledger.clear_all_dirty();
+
+        ledger
+            .meta_advance(TRIAGE_LAST_SEEN_KEY, "2026-08-18T09:00:00Z")
+            .unwrap();
+
+        assert!(ledger.dirty_projects().is_empty());
     }
 
     #[test]

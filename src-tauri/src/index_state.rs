@@ -283,6 +283,7 @@ fn note_facts_from(idx: &NoteIndex, id: &str, settings: &EnrolmentSettings) -> O
                 owner: item.owner,
                 due_date: item.due_date,
                 done: item.done,
+                firm: item.firm,
                 extracted_date: item.extracted_date,
             })
             .collect(),

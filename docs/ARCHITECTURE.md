@@ -243,10 +243,29 @@ and re-link across those edits (`kodabi_core::ledger::sync`).
 **Extraction is not tracking.** The distill pass always records what was said, and the note, the
 index and the MCP read surface look the same either way; what the ledger holds is the separate
 question of what you are *tracking*. The gate sits at enrollment, in reconcile's create leg
-(`kodabi_core::ledger::sync`), and resolves through one seam and one chain: a per-meeting override,
-then the meeting category's default, then the global default of `tracked`
-(`ledger::effective_mode`). The one non-default mode is **context only**, which enrolls just the
-items you own, because a direct ask is a commitment regardless of why you attended.
+(`kodabi_core::ledger::sync`), and has a per-item step ahead of a per-meeting chain: an item's
+**firmness**, then a per-meeting override, then the meeting category's default, then the global
+default of `tracked` (`ledger::effective_mode`). The one non-default mode is **context only**, which
+enrolls just the items you own, because a direct ask is a commitment regardless of why you attended.
+
+**Firmness is the per-item half, and it comes first.** The distill response classifies each action
+item `firm` or `soft` ("I'll send the budget Friday" against "we should probably look into that
+sometime"), and a soft item is declined before the meeting's mode is consulted at all: no
+meeting-level setting can turn a musing into a commitment. A soft item still extracts, still renders
+into the note, and still reaches the index and the MCP read surface like any other; it simply earns
+no ledger entry. It is declined rather than enrolled-then-untracked on purpose, because the Settled
+shelf is a record of judgements somebody made and would stop being readable as one if every idle
+remark landed there.
+
+Firmness travels in the note's own line, as a ` (tentative)` tail after the terminal period, because
+enrollment re-derives action items from the Markdown on every index pass — a signal held only in
+memory would be re-enrolled by the watcher seconds later. The marker is stripped before the rest of
+the grammar is parsed and before the item id is hashed, so a firm line renders exactly as it always
+did and no existing id re-mints. That also makes the marker an ordinary edit: deleting it by hand
+promotes the item on the next reconcile, and the note rail's Track button
+(`Ledger::track_item`) promotes it without touching the file. Every unreadable case defaults to
+firm, so a model that ignores the field keeps the previous behaviour: enrolling something tentative
+is a recoverable annoyance, and silently dropping a real commitment is not.
 
 The per-meeting override is stored in the note's **frontmatter** (`tracking:`), not in a ledger
 table: it is a judgement about the meeting, so it belongs with the meeting, and it then survives a
@@ -396,6 +415,37 @@ said. Since the ledger worker owns the database single-threaded, commands reach 
 request/reply channel (`ledger_state::LedgerClient`) that reports an unavailable ledger rather than
 dropping a person's judgement silently, and mutations announce themselves on `ledger:changed` —
 distinct from `vault:changed`, which would be a lie for a write that touched no note.
+
+**A day's enrollments get a review moment, and it is deliberately not a gate.** The whole-vault view
+opens with a strip naming what enrolled since the last time anyone looked, grouped by the meeting
+that produced it, with Keep and Untrack on each row and a selection bar carrying the same verbs plus
+Snooze for a whole group. Nothing waits for approval: every row in the strip is already tracked and
+already counted in the queue below, and the strip vanishes the moment there is nothing new. That is
+the point — a mandatory inbox that nobody clears goes stale and takes the credibility of the ledger
+with it, so Keep records only that a person looked.
+
+The marker behind it is device-local viewing state, so it lives in a `ledger_meta` row in `ledger.db`
+and never in `_ledger.yml`: the snapshot is vault truth that travels between machines, and one
+machine's reading position is not the other's. It is seeded once at startup behind the snapshot
+restore, so a ledger that predates the feature does not greet its owner with its entire history, and
+it advances only through the **contiguous reviewed prefix** of the batch rather than to the newest
+row clicked. A single instant cannot describe a set with holes in it, so advancing past a row still
+outstanding would hide it permanently; keeping a row out of order simply leaves it for next time. A
+row that settles while the strip is open — ticked off in the queue below, closed by a later meeting —
+counts as dealt with rather than outstanding, since it has left the strip and can no longer be
+reviewed there, and holding the prefix behind it would discard the review of everything after it.
+The batch itself is frozen when the view mounts, because the refetch each of these writes triggers
+would otherwise recompute the list against a marker the review had just moved. The strip is
+whole-vault only for the same reason the marker is a single instant: reviewing inside one project
+would mark every other project's new commitments seen.
+
+Group and selection verbs route through batched commands (`untrack_commitments`,
+`snooze_commitments`) and a single worker job, so a heavy day costs one transaction sweep, one
+`ledger:changed` and one refetch rather than one of each per row. They are best-effort: the
+transition table legitimately refuses some rows (a needs-review entry cannot be snoozed), and those
+are reported beside the group rather than failing the gesture, because a sweep over rows the view
+drew a moment ago will always race something. A bulk untrack is a person's own judgement like the
+single verb, so it stamps `untracked_via: manual` and survives a later re-track.
 
 Two things age. A row's **tier** (`fresh` / `aging` / `stale`) is derived at read time by
 `ledger::view` from the later of `last_mention` and `last_evidence_check`, against a `today` the

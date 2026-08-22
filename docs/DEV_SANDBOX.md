@@ -46,8 +46,11 @@ sweep, so there is no separate state to isolate.
 be deleted and reconstructed from the Markdown at any time; `ledger.db` holds
 judgements (a waiver, a snooze, a closure and its evidence) that exist nowhere
 else, so it is the one *database* that is durable rather than derived. Its backup is the vault, not the config dir:
-every change is mirrored into a per-project `_ledger.yml`, and a missing or empty
-`ledger.db` is rebuilt from those at startup. A sandboxed run therefore gets both
+every change to an *entry* is mirrored into a per-project `_ledger.yml`, and a
+missing or empty `ledger.db` is rebuilt from those at startup. The one thing that
+never reaches a snapshot is `ledger_meta`, which holds device-local viewing state
+(the triage marker) rather than a judgement, and is re-stamped on a rebuilt
+database. A sandboxed run therefore gets both
 halves under `<base>` — the database directly, the snapshots inside the fixture
 vault — so re-seeding the fixtures discards the two together and leaves them
 consistent.

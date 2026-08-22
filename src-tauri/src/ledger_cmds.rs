@@ -157,6 +157,12 @@ pub struct CommitmentsDto {
     entries: Vec<CommitmentDto>,
     /// Recently closed or waived entries, newest first, for the undo shelf.
     settled: Vec<CommitmentDto>,
+    /// When the user last reviewed newly enrolled commitments, RFC 3339 UTC.
+    /// The triage strip lists entries whose `created_at` sorts above this.
+    ///
+    /// `None` only on a ledger that never opened far enough to be seeded, in
+    /// which case the strip stays hidden rather than declaring everything new.
+    last_seen: Option<String>,
 }
 
 /// A mutation's echo: enough to recognise the row that changed. The full truth
@@ -501,6 +507,18 @@ pub async fn list_commitments(
                  shown. Restart Kodabi; your notes are untouched.",
                 )
             })?;
+        // Read while the ledger answer is still in hand, before the index lock:
+        // same store, same worker, so it costs one more queue round-trip and
+        // keeps the two-store ordering rule intact.
+        //
+        // A marker the ledger cannot supply degrades to `None` rather than
+        // failing the whole read. The strip is a convenience; the commitments
+        // are the point, and a list that refuses to render because a viewing
+        // timestamp is unreadable would be the wrong trade.
+        let last_seen = client.triage_last_seen().unwrap_or_else(|err| {
+            eprintln!("list_commitments could not read the triage marker: {err:?}");
+            None
+        });
         let cutoff = (Utc::now() - Duration::days(SETTLED_WINDOW_DAYS))
             .to_rfc3339_opts(SecondsFormat::Secs, true);
         let settled = view::recently_settled(settled, &cutoff, SETTLED_CAP);
@@ -521,6 +539,7 @@ pub async fn list_commitments(
                 .into_iter()
                 .map(commitment_dto)
                 .collect(),
+            last_seen,
         })
     })
     .await
@@ -965,6 +984,108 @@ pub async fn untrack_commitment(
     Ok(entry_dto(&reply.entry))
 }
 
+/// A request naming several entries.
+#[derive(serde::Deserialize)]
+pub struct CommitmentEntriesInput {
+    entry_ids: Vec<String>,
+}
+
+/// The same, plus the day to sleep until.
+#[derive(serde::Deserialize)]
+pub struct SnoozeCommitmentsInput {
+    entry_ids: Vec<String>,
+    until: String,
+}
+
+/// What a batched gesture settled on: how many rows moved, and how many the
+/// ledger declined.
+///
+/// Counts rather than entries because the caller refetches anyway — the
+/// `ledger:changed` this broadcasts is the full truth, and the strip needs only
+/// enough to say "3 couldn't be snoozed" beside the group.
+#[derive(serde::Serialize)]
+pub struct BulkMutateDto {
+    updated: usize,
+    skipped: usize,
+}
+
+/// Untracks several commitments as one gesture, for the triage strip's
+/// group and selection verbs.
+///
+/// Semantics are the single verb's, repeated: refs stay active, the rows land
+/// on the Settled shelf, Reopen is the undo, and each is stamped
+/// `untracked_via = manual` so a later meeting re-track leaves them alone.
+#[tauri::command]
+pub async fn untrack_commitments(
+    app: AppHandle,
+    input: CommitmentEntriesInput,
+) -> Result<BulkMutateDto, String> {
+    let (client, _) = handles(&app);
+    let ops = input
+        .entry_ids
+        .into_iter()
+        .map(|entry_id| LedgerOp::Untrack { entry_id })
+        .collect();
+    mutate_many(&app, "untrack_commitments", client, ops).await
+}
+
+/// Snoozes several commitments as one gesture.
+///
+/// An entry the transition table refuses (a needs-review row cannot be snoozed
+/// while it is asking a question) is reported in `skipped`, not fatal: the rest
+/// of the group still sleeps.
+#[tauri::command]
+pub async fn snooze_commitments(
+    app: AppHandle,
+    input: SnoozeCommitmentsInput,
+) -> Result<BulkMutateDto, String> {
+    let (client, _) = handles(&app);
+    let until = input.until;
+    let ops = input
+        .entry_ids
+        .into_iter()
+        .map(|entry_id| LedgerOp::Snooze {
+            entry_id,
+            until: until.clone(),
+        })
+        .collect();
+    mutate_many(&app, "snooze_commitments", client, ops).await
+}
+
+/// A request advancing the triage marker.
+#[derive(serde::Deserialize)]
+pub struct MarkSeenInput {
+    seen_through: String,
+}
+
+/// Records that the user has reviewed newly enrolled commitments up to
+/// `seen_through` (RFC 3339 UTC).
+///
+/// **Deliberately silent.** No `ledger:changed`: no commitment changed, and
+/// announcing would make every Keep refetch the list and recompute the strip
+/// out from under the hand that is clearing it. The marker is read once per
+/// view mount, which is exactly when it matters.
+#[tauri::command]
+pub async fn mark_commitments_seen(app: AppHandle, input: MarkSeenInput) -> Result<(), String> {
+    let (client, _) = handles(&app);
+    tauri::async_runtime::spawn_blocking(move || client.mark_triage_seen(input.seen_through))
+        .await
+        .map_err(|err| {
+            reported(
+                "mark_commitments_seen",
+                err,
+                "Couldn't save your place in the review list. It will show these again next time.",
+            )
+        })?
+        .map_err(|err| {
+            ledger_error(
+                "mark_commitments_seen",
+                err,
+                "Couldn't save your place in the review list. It will show these again next time.",
+            )
+        })
+}
+
 /// A request naming one note.
 #[derive(serde::Deserialize)]
 pub struct NoteCommitmentsInput {
@@ -1011,6 +1132,7 @@ pub async fn list_note_commitments(
                         owner: item.owner,
                         due_date: item.due_date,
                         done: item.done,
+                        firm: item.firm,
                         extracted_date: item.extracted_date,
                     })
                     .collect()
@@ -1272,4 +1394,53 @@ async fn mutate(
         .map_err(|err| ledger_error(cmd, err, LEDGER_REFUSED))?;
     broadcast_ledger_changed(app);
     Ok(reply)
+}
+
+/// Runs a batch of mutations as one gesture: one worker job, one reply, **one**
+/// `ledger:changed`.
+///
+/// That last part is the reason this exists rather than the caller looping
+/// [`mutate`]. N single mutations would emit N events, each triggering a full
+/// refetch of the Commitments view, so clearing a standup's worth of
+/// commitments would re-render the list a dozen times and rearm the snapshot
+/// debounce on each pass. One job also means the ops cannot interleave with
+/// another window's write half way through the sweep.
+///
+/// An empty batch still reports success and announces nothing — there is
+/// nothing to hear about, and refusing it would make the caller special-case a
+/// selection the user already emptied.
+async fn mutate_many(
+    app: &AppHandle,
+    cmd: &'static str,
+    client: LedgerClient,
+    ops: Vec<LedgerOp>,
+) -> Result<BulkMutateDto, String> {
+    if ops.is_empty() {
+        return Ok(BulkMutateDto {
+            updated: 0,
+            skipped: 0,
+        });
+    }
+    let reply = tauri::async_runtime::spawn_blocking(move || client.mutate_many(ops))
+        .await
+        .map_err(|err| {
+            reported(
+                cmd,
+                err,
+                "Couldn't update these commitments. Reopen this view to see the current list.",
+            )
+        })?
+        .map_err(|err| ledger_error(cmd, err, LEDGER_REFUSED))?;
+    // Anything at all landed is worth announcing; a wholly declined batch
+    // changed nothing, and the copy the caller renders says so.
+    if !reply.applied.is_empty() {
+        broadcast_ledger_changed(app);
+    }
+    for (entry_id, err) in &reply.skipped {
+        eprintln!("{cmd} skipped {entry_id}: {err}");
+    }
+    Ok(BulkMutateDto {
+        updated: reply.applied.len(),
+        skipped: reply.skipped.len(),
+    })
 }

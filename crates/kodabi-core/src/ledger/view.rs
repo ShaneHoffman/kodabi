@@ -465,6 +465,7 @@ mod tests {
             owner: owner.to_string(),
             due_date: None,
             done: false,
+            firm: true,
             extracted_date: Some("2026-08-17".to_string()),
         }
     }
@@ -482,6 +483,7 @@ mod tests {
             owner: owner.to_string(),
             due_date: due.map(str::to_string),
             done,
+            firm: true,
             extracted_date: Some("2026-08-17".to_string()),
         }
     }

@@ -158,6 +158,27 @@ pub struct MutateReply {
     pub active_ref: Option<(String, String)>,
 }
 
+/// What a batched gesture settled on: the entries it moved, and the ones it
+/// could not, each with the reason.
+///
+/// **Best-effort by design, not by omission.** A bulk untrack of a day's
+/// enrollments is a sweep over rows the user is looking at, and the ledger's
+/// transition table legitimately refuses some of them — a needs-review entry
+/// cannot be snoozed, a closed one cannot be untracked. Failing the whole
+/// gesture because one row moved on since the view rendered would make the
+/// button unusable exactly when there is most to clear; the caller reports the
+/// remainder instead.
+///
+/// Nothing here is atomic across entries, and nothing needs to be: each op is
+/// independently meaningful, and a partial sweep leaves the ledger in a state
+/// the user can see and finish.
+#[derive(Debug, Default)]
+pub struct MutateManyReply {
+    pub applied: Vec<MutateReply>,
+    /// `(entry_id, why)` for each op the ledger declined.
+    pub skipped: Vec<(String, ledger::LedgerError)>,
+}
+
 /// A unit of work for the ledger worker.
 enum LedgerJob {
     /// Reconcile one note's items after an in-app write.
@@ -186,6 +207,31 @@ enum LedgerJob {
         op: LedgerOp,
         reply: Sender<ledger::Result<MutateReply>>,
     },
+    /// Apply several mutations as one gesture, replying with what landed and
+    /// what was declined. See [`MutateManyReply`].
+    MutateMany {
+        ops: Vec<LedgerOp>,
+        reply: Sender<ledger::Result<MutateManyReply>>,
+    },
+    /// Read the triage marker: when the user last reviewed newly enrolled
+    /// commitments, or `None` on a ledger that has never been reviewed.
+    TriageLastSeen {
+        reply: Sender<ledger::Result<Option<String>>>,
+    },
+    /// Advance the triage marker to `seen_through`, keeping the later of the
+    /// two. Never announces `ledger:changed`: no commitment changed, and a
+    /// refetch would race the strip's own batch out from under the user.
+    MarkTriageSeen {
+        seen_through: String,
+        reply: Sender<ledger::Result<()>>,
+    },
+    /// Set the triage marker to now, but only if it was never set.
+    ///
+    /// Queued once at startup, before any handle escapes, so a ledger that
+    /// predates triage does not greet its owner with every commitment it has
+    /// ever held. Everything already enrolled counts as seen; only what arrives
+    /// afterwards is new.
+    SeedTriageMarker,
     /// Sync a freshly distilled note and apply what its conversation said
     /// about commitments the ledger already held.
     DistillFollowUp {
@@ -380,6 +426,33 @@ impl LedgerClient {
         self.request(|reply| LedgerJob::Mutate { op, reply })
     }
 
+    /// Applies several mutations as one gesture. One job, one transaction per
+    /// entry, one reply — so the caller broadcasts `ledger:changed` once and
+    /// the snapshot debounce arms once, however many rows moved.
+    pub fn mutate_many(
+        &self,
+        ops: Vec<LedgerOp>,
+    ) -> std::result::Result<MutateManyReply, LedgerCallError> {
+        self.request(|reply| LedgerJob::MutateMany { ops, reply })
+    }
+
+    /// When the user last reviewed newly enrolled commitments.
+    pub fn triage_last_seen(&self) -> std::result::Result<Option<String>, LedgerCallError> {
+        self.request(|reply| LedgerJob::TriageLastSeen { reply })
+    }
+
+    /// Advances the triage marker, keeping the later of the stored and given
+    /// instants.
+    pub fn mark_triage_seen(
+        &self,
+        seen_through: String,
+    ) -> std::result::Result<(), LedgerCallError> {
+        self.request(|reply| LedgerJob::MarkTriageSeen {
+            seen_through,
+            reply,
+        })
+    }
+
     /// The entries one note produced. Its tracking *mode* is frontmatter, and
     /// reaches the caller through the index row instead.
     pub fn note_entries(
@@ -506,6 +579,11 @@ impl LedgerState {
         // Behind the restore on the same FIFO, so a pre-graduation `_ledger.yml`
         // has already put its rows in the table by the time the drain reads it.
         let _ = sender.send(LedgerJob::DrainLegacyOverrides);
+        // Last of the three, and behind the restore for the same reason: a
+        // ledger rebuilt from vault snapshots must have its rows in place
+        // before "everything already here counts as seen" is stamped, or the
+        // first triage strip would list the user's entire history back at them.
+        let _ = sender.send(LedgerJob::SeedTriageMarker);
 
         Self {
             sender: Some(Mutex::new(sender)),
@@ -856,6 +934,39 @@ fn handle_job(
             let now = now_utc();
             let _ = reply.send(ledger.retro_resolve_owners(&identity, &now));
         }
+        LedgerJob::MutateMany { ops, reply } => {
+            let mut result = MutateManyReply::default();
+            for op in ops {
+                let entry_id = op.entry_id().to_string();
+                match apply_mutation(ledger, op) {
+                    Ok(applied) => result.applied.push(applied),
+                    Err(err) => result.skipped.push((entry_id, err)),
+                }
+            }
+            let _ = reply.send(Ok(result));
+        }
+        LedgerJob::TriageLastSeen { reply } => {
+            let _ = reply.send(ledger.meta_get(ledger::TRIAGE_LAST_SEEN_KEY));
+        }
+        LedgerJob::MarkTriageSeen {
+            seen_through,
+            reply,
+        } => {
+            let _ = reply.send(ledger.meta_advance(ledger::TRIAGE_LAST_SEEN_KEY, &seen_through));
+        }
+        LedgerJob::SeedTriageMarker => {
+            match ledger.meta_get(ledger::TRIAGE_LAST_SEEN_KEY) {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    if let Err(err) = ledger.meta_advance(ledger::TRIAGE_LAST_SEEN_KEY, &now_utc())
+                    {
+                        eprintln!("ledger could not seed the triage marker: {err}");
+                    }
+                }
+                Err(err) => eprintln!("ledger could not read the triage marker: {err}"),
+            }
+            // Viewing state, not a commitment: nothing to announce.
+        }
         LedgerJob::TrackItem { request, reply } => {
             let now = now_utc();
             let result = ledger
@@ -1020,6 +1131,7 @@ mod tests {
             owner: owner.to_string(),
             due_date: None,
             done: false,
+            firm: true,
             extracted_date: Some("2026-08-01".to_string()),
         }
     }
@@ -1102,6 +1214,206 @@ mod tests {
         .unwrap();
         assert_eq!(details.len(), 1);
         details[0].entry.entry_id.clone()
+    }
+
+    /// Seeds `count` open entries in one project and returns their ids.
+    fn seed_entries(sender: &Sender<LedgerJob>, count: usize) -> Vec<String> {
+        for index in 0..count {
+            sender
+                .send(LedgerJob::Sync(Box::new(facts_for(
+                    &format!("n_note{index:02}"),
+                    "Ops",
+                    &format!("a_item{index:02}"),
+                    &format!("send deck {index}"),
+                ))))
+                .unwrap();
+        }
+        let details = request(sender, |reply| LedgerJob::ListDetails {
+            filter: EntryFilter::default(),
+            reply,
+        })
+        .unwrap();
+        assert_eq!(details.len(), count);
+        details
+            .into_iter()
+            .map(|detail| detail.entry.entry_id)
+            .collect()
+    }
+
+    #[test]
+    fn a_batch_untrack_lands_every_eligible_entry_and_reports_the_rest() {
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+        let ids = seed_entries(&sender, 3);
+
+        // One of them is already settled by a real judgement, which the
+        // transition table refuses to untrack. The other two must still land:
+        // a sweep over rows the view rendered a moment ago will always race
+        // something, and failing the gesture whole would make it unusable.
+        request(&sender, |reply| LedgerJob::Mutate {
+            op: LedgerOp::Waive {
+                entry_id: ids[1].clone(),
+            },
+            reply,
+        })
+        .unwrap();
+
+        let result = request(&sender, |reply| LedgerJob::MutateMany {
+            ops: ids
+                .iter()
+                .map(|entry_id| LedgerOp::Untrack {
+                    entry_id: entry_id.clone(),
+                })
+                .collect(),
+            reply,
+        })
+        .unwrap();
+
+        assert_eq!(result.applied.len(), 2);
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(result.skipped[0].0, ids[1]);
+
+        let untracked = request(&sender, |reply| LedgerJob::ListDetails {
+            filter: EntryFilter {
+                states: Some(vec![EntryState::Untracked]),
+                ..EntryFilter::default()
+            },
+            reply,
+        })
+        .unwrap();
+        assert_eq!(untracked.len(), 2);
+        // A person's own untrack, so a later meeting re-track leaves it alone.
+        assert!(untracked.iter().all(|detail| detail.entry.touched));
+        assert!(untracked
+            .iter()
+            .all(|detail| detail.entry.untracked_via == Some(UntrackedVia::Manual)));
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn a_batch_snooze_skips_an_entry_the_transition_table_refuses() {
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+        let ids = seed_entries(&sender, 2);
+
+        // A closed entry cannot be snoozed; the open one still sleeps.
+        request(&sender, |reply| LedgerJob::Mutate {
+            op: LedgerOp::Close {
+                entry_id: ids[0].clone(),
+                via: ClosedVia::Manual,
+            },
+            reply,
+        })
+        .unwrap();
+
+        let result = request(&sender, |reply| LedgerJob::MutateMany {
+            ops: ids
+                .iter()
+                .map(|entry_id| LedgerOp::Snooze {
+                    entry_id: entry_id.clone(),
+                    until: "2026-09-01".to_string(),
+                })
+                .collect(),
+            reply,
+        })
+        .unwrap();
+
+        assert_eq!(result.applied.len(), 1);
+        assert_eq!(result.applied[0].entry.entry_id, ids[1]);
+        assert_eq!(result.skipped.len(), 1);
+        assert_eq!(result.skipped[0].0, ids[0]);
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn an_empty_batch_is_answered_and_writes_nothing() {
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+
+        let result = request(&sender, |reply| LedgerJob::MutateMany {
+            ops: Vec::new(),
+            reply,
+        })
+        .unwrap();
+
+        assert!(result.applied.is_empty());
+        assert!(result.skipped.is_empty());
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    #[test]
+    fn the_triage_marker_is_seeded_once_and_then_only_moves_forward() {
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+
+        assert_eq!(
+            request(&sender, |reply| LedgerJob::TriageLastSeen { reply }).unwrap(),
+            None,
+            "an unseeded ledger has no marker"
+        );
+
+        sender.send(LedgerJob::SeedTriageMarker).unwrap();
+        let seeded = request(&sender, |reply| LedgerJob::TriageLastSeen { reply })
+            .unwrap()
+            .expect("seeding sets it");
+
+        // Seeding again must not move it, or every launch would declare the
+        // day's enrollments already reviewed.
+        sender.send(LedgerJob::SeedTriageMarker).unwrap();
+        assert_eq!(
+            request(&sender, |reply| LedgerJob::TriageLastSeen { reply }).unwrap(),
+            Some(seeded.clone())
+        );
+
+        request(&sender, |reply| LedgerJob::MarkTriageSeen {
+            seen_through: "2099-01-01T00:00:00Z".to_string(),
+            reply,
+        })
+        .unwrap();
+        assert_eq!(
+            request(&sender, |reply| LedgerJob::TriageLastSeen { reply })
+                .unwrap()
+                .as_deref(),
+            Some("2099-01-01T00:00:00Z")
+        );
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    /// The marker is device-local viewing state, so recording a review must
+    /// neither announce a change nor arm the snapshot debounce. Otherwise
+    /// glancing at the Commitments view would rewrite `_ledger.yml`.
+    #[test]
+    fn marking_triage_seen_announces_nothing_and_writes_no_snapshot() {
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker, announced) = spawn_counting_worker(&vault);
+        seed_entry(&sender);
+        flush_and_wait(&sender);
+        let before = announced.load(Ordering::SeqCst);
+
+        sender.send(LedgerJob::SeedTriageMarker).unwrap();
+        request(&sender, |reply| LedgerJob::MarkTriageSeen {
+            seen_through: "2026-08-20T00:00:00Z".to_string(),
+            reply,
+        })
+        .unwrap();
+        flush_and_wait(&sender);
+
+        assert_eq!(
+            announced.load(Ordering::SeqCst),
+            before,
+            "viewing state is not a commitment change"
+        );
+
+        drop(sender);
+        worker.join().unwrap();
     }
 
     #[test]
