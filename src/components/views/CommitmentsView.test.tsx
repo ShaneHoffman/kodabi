@@ -1008,8 +1008,10 @@ describe("CommitmentsView", () => {
 
       const strip = await screen.findByTestId("triage-strip");
       expect(within(strip).getByText("3 new since you last looked")).toBeInTheDocument();
-      expect(within(strip).getByText("2 from Kickoff")).toBeInTheDocument();
-      expect(within(strip).getByText("1 from Standup")).toBeInTheDocument();
+      // Matched loosely on the day, which renders in the machine's timezone
+      // exactly as the row's own "heard" meta does.
+      expect(within(strip).getByText(/^2 from Kickoff /)).toBeInTheDocument();
+      expect(within(strip).getByText(/^1 from Standup /)).toBeInTheDocument();
     });
 
     it("stays hidden when nothing enrolled since the marker", async () => {
@@ -1121,7 +1123,7 @@ describe("CommitmentsView", () => {
       await openCommitments(user);
       const strip = await screen.findByTestId("triage-strip");
       await user.click(
-        within(strip).getByRole("checkbox", { name: "Select all from Kickoff" }),
+        within(strip).getByRole("checkbox", { name: /^Select all from Kickoff / }),
       );
       const selection = await screen.findByTestId("triage-selection");
       expect(within(selection).getByText("2 selected")).toBeInTheDocument();
@@ -1153,7 +1155,7 @@ describe("CommitmentsView", () => {
       await openCommitments(user);
       const strip = await screen.findByTestId("triage-strip");
       await user.click(
-        within(strip).getByRole("checkbox", { name: "Select all from Kickoff" }),
+        within(strip).getByRole("checkbox", { name: /^Select all from Kickoff / }),
       );
       const selection = await screen.findByTestId("triage-selection");
       await user.click(within(selection).getByRole("button", { name: "Untrack" }));

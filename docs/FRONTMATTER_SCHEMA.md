@@ -161,6 +161,10 @@ Canonical key order the writer emits: **`id, type, category, tracking, title, pr
   every action item in its body; only ledger enrolment is gated (see
   [`ARCHITECTURE.md`](ARCHITECTURE.md), "Extraction is not tracking").
 
+  This key is the per-*meeting* half of that gate. The per-item half is an action item's own
+  firmness, which is not frontmatter at all: it rides the body line as a `(tentative)` marker, and
+  is decided ahead of this key, so a tracked meeting still enrols none of its tentative items.
+
 - **`category_confidence`** — how strongly the distill pass backed its own `category` guess, on the
   same `0.0`–`1.0` scale and emitted the same way as `confidence` (always with a decimal point).
   Requires `category`: a score for a category that is not there describes nothing.
@@ -295,6 +299,35 @@ parsed this way: its body is stored verbatim, so a checkbox in it is prose, not 
 The `source` path is the chat transcript under `chats/`, written by the chat view one JSONL record
 per turn. Unlike the `sessions/` scheme it carries no title slug — a chat is named only by when it
 started and which device it started on.
+
+---
+
+## The tentative marker on an action item
+
+An action item the distill pass read as tentative rather than committed carries a marker after its
+terminal period:
+
+```markdown
+- [ ] Dana to send the signed budget memo to finance by 2026-08-29.
+- [ ] Dana to look into pricing. (tentative)
+```
+
+The shape is fixed: a single space, then `(tentative)`, and nothing after it. It means the line was
+extracted like any other but the commitment ledger did not enroll it, because "we should probably
+look into that sometime" is not a promise. Extraction is still unconditional: the item is in the
+body, in the index, and on the MCP read surface exactly like a firm one (see
+[`ARCHITECTURE.md`](ARCHITECTURE.md), "Extraction is not tracking").
+
+**It is ordinary text, and editing it is the point.** The parser strips the marker before splitting
+the line into owner / description / due date and before hashing the item's id, so firmness is not an
+id input: deleting the marker promotes the item on the next reconcile, and adding one demotes it,
+neither re-minting the id nor orphaning an entry already linked to the line. A firm line is
+byte-identical to what the renderer produced before the marker existed, so no note in the field
+re-renders. A description that merely *ends* in the same word (`- [ ] Dana to mark the plan
+(tentative).`) is firm, because the marker sits outside the period and that one does not.
+
+The plain-note grammar has no marker: a `- [ ]` line somebody typed is their own commitment by
+construction, and the words `(tentative)` in it are just words.
 
 ---
 

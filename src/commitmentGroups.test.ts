@@ -4,6 +4,7 @@ import {
   arrangeCommitments,
   arrangeTriage,
   formatDay,
+  formatInstant,
   nextWeekIso,
   settledBy,
   tomorrowIso,
@@ -402,7 +403,14 @@ describe("arrangeTriage", () => {
       "2026-08-02T00:00:00Z",
     );
 
-    expect(groups.map((group) => group.label)).toEqual(["Kickoff", "Standup"]);
+    // The day disambiguates two runs of the same recurring meeting. Expected
+    // through `formatInstant` rather than hard-coded, so the assertion does not
+    // depend on the machine's timezone, and so the heading is pinned to the
+    // same rendering the row's own "heard" meta uses.
+    expect(groups.map((group) => group.label)).toEqual([
+      `Kickoff ${formatInstant("2026-08-01T00:00:00Z")}`,
+      `Standup ${formatInstant("2026-08-01T00:00:00Z")}`,
+    ]);
     expect(groups[1].rows.map((row) => row.entry_id)).toEqual(["le_b", "le_c"]);
   });
 

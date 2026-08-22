@@ -173,13 +173,30 @@ export type TriageGroup = {
   /** The source note's id, or `""` for the run of rows whose source line is
    * gone. Unique across groups, so it is safe as a React key. */
   noteId: string;
-  /** The heading a person reads: the source note's title. */
+  /** The heading a person reads: the source note's title, plus the day the
+   * meeting happened when one is known. The date is not decoration — grouping
+   * is by note, so a recurring meeting would otherwise render two groups with
+   * the same heading and no way to tell Monday's standup from Tuesday's. */
   label: string;
   rows: Commitment[];
 };
 
 /** The label for rows the ledger holds but whose source note it cannot name. */
 const UNSOURCED_LABEL = "Other";
+
+/**
+ * One triage group's heading: the source note's title and the day it happened.
+ *
+ * `last_mention` is the note's own date rather than a clock reading, so it is
+ * the meeting's day even for a commitment enrolled by a backfill days later.
+ * An unsourced row gets no date, because there is no meeting to date.
+ */
+function triageLabel(commitment: Commitment): string {
+  const title = commitment.source?.title;
+  if (!title) return UNSOURCED_LABEL;
+  const day = formatInstant(commitment.last_mention);
+  return day === commitment.last_mention ? title : `${title} ${day}`;
+}
 
 /**
  * Groups the commitments enrolled since `lastSeen` by the meeting that
@@ -210,12 +227,15 @@ export function arrangeTriage(
     // RFC 3339 UTC on both sides, so a lexical compare is a chronological one.
     if (commitment.created_at <= lastSeen) continue;
     const noteId = commitment.source?.note_id ?? "";
-    const label = commitment.source?.title ?? UNSOURCED_LABEL;
     const group = groups.get(noteId);
     if (group) {
       group.rows.push(commitment);
     } else {
-      groups.set(noteId, { noteId, label, rows: [commitment] });
+      groups.set(noteId, {
+        noteId,
+        label: triageLabel(commitment),
+        rows: [commitment],
+      });
     }
   }
 
