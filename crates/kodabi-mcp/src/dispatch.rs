@@ -126,6 +126,7 @@ mod tests {
                             // of when the test runs.
                             due_date: Some("2020-01-01".to_string()),
                             done: false,
+                            firm: true,
                             extracted_date: Some("2026-07-10".to_string()),
                         },
                         ActionItemFact {
@@ -134,6 +135,7 @@ mod tests {
                             owner: "Priya".to_string(),
                             due_date: None,
                             done: true,
+                            firm: true,
                             extracted_date: Some("2026-07-10".to_string()),
                         },
                     ],
@@ -218,6 +220,7 @@ mod tests {
                         // Far enough out to stay `open` however late this runs.
                         due_date: Some("2099-12-31".to_string()),
                         done: false,
+                        firm: true,
                         extracted_date: Some("2026-07-13".to_string()),
                     }],
                 }),
@@ -254,6 +257,7 @@ mod tests {
                         owner: "Jane".to_string(),
                         due_date: None,
                         done: false,
+                        firm: true,
                         extracted_date: Some("2026-07-14".to_string()),
                     }],
                 }),

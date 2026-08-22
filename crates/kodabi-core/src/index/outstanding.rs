@@ -570,6 +570,7 @@ mod tests {
             owner: owner.to_string(),
             due_date: due.map(str::to_string),
             done,
+            firm: true,
             extracted_date: Some("2026-07-10".to_string()),
         }
     }

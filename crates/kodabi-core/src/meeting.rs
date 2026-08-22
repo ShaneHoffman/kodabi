@@ -78,6 +78,15 @@ pub struct ActionItemFact {
     /// Whether the checkbox was checked (`- [x]`). Maps to `done`; an unchecked
     /// box is `open` (and possibly `overdue`, derived later).
     pub done: bool,
+    /// Whether the line reads as an actual commitment rather than a tentative
+    /// one — the absence of `distill`'s soft marker. The ledger's enrollment
+    /// gate refuses to track a soft item; nothing else treats it differently,
+    /// and it is deliberately not an [`action_item_id`] input, so editing the
+    /// marker by hand promotes or demotes the item without re-minting its id.
+    ///
+    /// A plain note's checkbox is always firm: that grammar has no marker, and
+    /// a line the user wrote by hand is their own commitment by construction.
+    pub firm: bool,
     /// The meeting's own calendar day (from the note `date`), or `None` when the
     /// date is unparseable.
     pub extracted_date: Option<String>,
@@ -232,6 +241,7 @@ fn parse_body(
                 owner: SELF_OWNER.to_string(),
                 due_date: None,
                 done,
+                firm: true,
                 extracted_date: extracted_date.clone(),
             });
         }
@@ -264,7 +274,7 @@ fn parse_body(
                 }
             }
             Section::ActionItems => {
-                if let Some((owner, description, due_date)) = parse_action_line(line) {
+                if let Some((owner, description, due_date, firm)) = parse_action_line(line) {
                     let owner = if owner.trim().is_empty() {
                         UNASSIGNED_OWNER.to_string()
                     } else {
@@ -286,6 +296,7 @@ fn parse_body(
                         owner,
                         due_date,
                         done: line.starts_with("- [x] "),
+                        firm,
                         extracted_date: extracted_date.clone(),
                     });
                 }
@@ -357,7 +368,9 @@ pub fn action_item_line(
         if !matches!(section, Section::ActionItems) {
             continue;
         }
-        let Some((owner, description, due_date)) = parse_action_line(line) else {
+        // Firmness is not an id input, so `action_item_line` ignores it: a line
+        // whose only edit was the soft marker still resolves to the same item.
+        let Some((owner, description, due_date, _firm)) = parse_action_line(line) else {
             continue;
         };
         let owner = if owner.trim().is_empty() {
@@ -625,6 +638,50 @@ mod tests {
         let after = parse_body(NOTE_ID, NoteType::Note, "2026-07-09", annotated).1;
         assert_eq!(before, after, "ids and all");
         assert_eq!(after.len(), 1, "the annotation minted no item");
+    }
+
+    /// Firmness must be invisible to the id, or promoting a tentative item by
+    /// deleting its marker would re-mint the id and orphan whatever the ledger
+    /// had already linked to it. The reverse walk has to agree, since that is
+    /// how a line gets rewritten in place.
+    #[test]
+    fn the_soft_marker_changes_firmness_and_nothing_else() {
+        let firm = "# Summary\n\nWe met.\n\n## Action items\n\n\
+             - [ ] Priya to look into pricing.\n";
+        let soft = "# Summary\n\nWe met.\n\n## Action items\n\n\
+             - [ ] Priya to look into pricing. (tentative)\n";
+
+        let firm_items = parse_meeting("n_aaaaaa", "2026-08-01", firm).1;
+        let soft_items = parse_meeting("n_aaaaaa", "2026-08-01", soft).1;
+
+        assert_eq!(firm_items.len(), 1);
+        assert_eq!(soft_items.len(), 1);
+        assert!(firm_items[0].firm);
+        assert!(!soft_items[0].firm);
+        assert_eq!(
+            firm_items[0].id, soft_items[0].id,
+            "the id ignores firmness"
+        );
+        assert_eq!(firm_items[0].description, soft_items[0].description);
+        assert_eq!(firm_items[0].owner, soft_items[0].owner);
+
+        assert_eq!(
+            meeting_item_line("n_aaaaaa", soft, &soft_items[0].id),
+            Some(6),
+            "the reverse walk finds a soft line by the same id"
+        );
+    }
+
+    /// The hand-written grammar has no marker, so a line a person typed is
+    /// their own commitment by construction.
+    #[test]
+    fn a_plain_note_checkbox_is_always_firm() {
+        let body = "- [ ] chase the wire\n- [ ] chase the wire (tentative)\n";
+        let items = parse_body(NOTE_ID, NoteType::Note, "2026-07-09", body).1;
+
+        assert_eq!(items.len(), 2);
+        assert!(items.iter().all(|item| item.firm));
+        assert_eq!(items[1].description, "chase the wire (tentative)");
     }
 
     #[test]

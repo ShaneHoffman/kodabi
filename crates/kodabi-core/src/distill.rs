@@ -40,6 +40,14 @@
 //! - [ ] {Owner} to {description}.
 //! ```
 //!
+//! A tentative ("soft") item renders the same line with [`SOFT_MARKER`]
+//! appended after the terminal `.` — `- [ ] Dana to look into pricing.
+//! (tentative)`. Soft items are extracted and rendered like any other, but the
+//! ledger's enrollment gate never tracks them. The marker is peeled off before
+//! the rest of the grammar is parsed and before the item id is hashed, so a
+//! firm line is byte-identical to what this module has always rendered and no
+//! id depends on firmness.
+//!
 //! `{Owner}` is the item's owner, or the fixed token [`UNASSIGNED_OWNER`]
 //! when nobody could be attributed (the MCP `ActionItem.owner` field is a
 //! required non-null string). The renderer guarantees: the owner never
@@ -189,7 +197,9 @@ or agreed during the meeting>\"], \"action_items\": [{\"owner\": \"<the responsi
 or \\\"You\\\" when the local user took it on; null when unclear>\", \"description\": \"<what is \
 to be done, as a verb phrase like \\\"send the signed budget memo to finance\\\" - no owner name \
 and no due date inside it>\", \"due_date\": \"<YYYY-MM-DD when a date was stated or clearly \
-implied relative to the meeting date; otherwise null>\"}], \"open_questions\": [\"<questions \
+implied relative to the meeting date; otherwise null>\", \"firmness\": \"<firm when someone \
+actually committed to doing it; soft when it was only tentative or aspirational, like \\\"we \
+should probably look into that sometime\\\">\"}], \"open_questions\": [\"<questions \
 raised but left unresolved>\"], \"tags\": [\"<zero to five lowercase-kebab-case topic tags>\"], \
 \"category\": \"<the kind of meeting this was, exactly one of: standup | one-on-one | client | \
 working-session | review | all-hands | observer. standup is a short recurring status round; \
@@ -376,6 +386,16 @@ pub struct ActionItemDraft {
     pub owner: Option<String>,
     /// Validated `YYYY-MM-DD`, or `None`.
     pub due_date: Option<String>,
+    /// Whether the speaker actually committed to this, rather than floating it
+    /// as tentative or aspirational. Soft items are still extracted and still
+    /// render into the note (as a [`SOFT_MARKER`]-suffixed line), but the
+    /// ledger's enrollment gate never tracks them — extraction is not tracking.
+    ///
+    /// Defaults to firm everywhere it cannot be read: a model that ignores the
+    /// field, an older response, an unparseable value. Enrolling something
+    /// tentative is a recoverable annoyance; silently dropping a real
+    /// commitment is not.
+    pub firm: bool,
 }
 
 /// [`distill_session`]'s successful result: where the note landed, its
@@ -445,6 +465,11 @@ struct RawActionItem {
     owner: Option<String>,
     #[serde(default)]
     due_date: Option<String>,
+    /// `"firm"` / `"soft"`, and `None` when the model omitted it. Anything
+    /// other than a case-insensitive `"soft"` normalizes to firm, so a model
+    /// that never learned the field keeps today's behaviour exactly.
+    #[serde(default)]
+    firmness: Option<String>,
 }
 
 /// The `{You|Them|Unknown}: ` prefix each transcript line carries in the
@@ -1079,7 +1104,16 @@ fn normalize_action_item(raw: RawActionItem) -> Option<ActionItemDraft> {
         description,
         owner,
         due_date,
+        firm: is_firm(raw.firmness.as_deref()),
     })
+}
+
+/// Reads the model's `firmness` field. Only an explicit, case-insensitive
+/// `"soft"` is soft; absent, empty, and unrecognized values are all firm, so
+/// the gate this feeds can never silently stop enrolling because a model
+/// answered the new field in a way we did not anticipate.
+fn is_firm(firmness: Option<&str>) -> bool {
+    !firmness.is_some_and(|value| value.trim().eq_ignore_ascii_case("soft"))
 }
 
 /// Splits a `"{head} by {YYYY-MM-DD}"` description into its head and date.
@@ -1146,11 +1180,24 @@ fn normalize_tags(raw: Vec<String>) -> Vec<Tag> {
 /// checkbox, which [`render_body`] adds).
 fn render_action_item(item: &ActionItemDraft) -> String {
     let owner = item.owner.as_deref().unwrap_or(UNASSIGNED_OWNER);
+    let soft = if item.firm { "" } else { SOFT_MARKER };
     match &item.due_date {
-        Some(due) => format!("{owner} to {} by {due}.", item.description),
-        None => format!("{owner} to {}.", item.description),
+        Some(due) => format!("{owner} to {} by {due}.{soft}", item.description),
+        None => format!("{owner} to {}.{soft}", item.description),
     }
 }
+
+/// The suffix a soft (tentative) action item carries, after the line's
+/// terminal `.`. A firm line renders byte-identical to what this module
+/// rendered before firmness existed, so no existing note re-renders and no
+/// existing item id re-mints.
+///
+/// Deliberately readable prose rather than a sigil: it is the note's own
+/// explanation of why the ledger is not tracking that line, and deleting it
+/// by hand is a legitimate way to promote the item. It is stripped before
+/// [`crate::meeting::action_item_id`] hashes the line, so editing firmness
+/// alone never re-mints the id.
+pub(crate) const SOFT_MARKER: &str = " (tentative)";
 
 /// The two action-item checkbox markers, exactly as the grammar accepts them
 /// (lowercase `x` only).
@@ -1175,28 +1222,39 @@ pub(crate) fn parse_checkbox_line(line: &str) -> Option<(&str, bool)> {
 }
 
 /// Parses one rendered action-item line back into `(owner, description,
-/// due_date)` — the inverse of [`render_action_item`] and the exact parse the
-/// meeting-facts extractor ([`crate::meeting`]) runs against a note body.
+/// due_date, firm)` — the inverse of [`render_action_item`] and the exact parse
+/// the meeting-facts extractor ([`crate::meeting`]) runs against a note body.
 ///
 /// Accepts either checkbox state (`- [ ] ` / `- [x] `); the caller inspects the
 /// prefix itself when it needs the done/open distinction. Returns `None` for a
-/// line that does not fit the grammar. The owner is the prefix before the
-/// *first* `" to "`; a trailing `" by {YYYY-MM-DD}"` immediately before the
-/// terminal `.` is peeled off as the due date only when it is a valid calendar
-/// date, so a description ending in a date-like phrase is not misread.
-pub(crate) fn parse_action_line(line: &str) -> Option<(String, String, Option<String>)> {
+/// line that does not fit the grammar. A [`SOFT_MARKER`] suffix is peeled off
+/// first — it sits *after* the terminal `.`, so the period check below would
+/// otherwise reject every soft line — and its presence is the returned
+/// firmness. The owner is the prefix before the *first* `" to "`; a trailing
+/// `" by {YYYY-MM-DD}"` immediately before the terminal `.` is peeled off as
+/// the due date only when it is a valid calendar date, so a description ending
+/// in a date-like phrase is not misread.
+///
+/// Because both this and [`crate::meeting::action_item_line`] run through this
+/// one function, the marker cannot fall out of lockstep between the facts
+/// extractor and the line rewriter.
+pub(crate) fn parse_action_line(line: &str) -> Option<(String, String, Option<String>, bool)> {
     let (rest, _done) = parse_checkbox_line(line)?;
+    let (rest, firm) = match rest.strip_suffix(SOFT_MARKER) {
+        Some(rest) => (rest, false),
+        None => (rest, true),
+    };
     let rest = rest.strip_suffix('.')?;
     let (owner, rest) = rest.split_once(" to ")?;
     // An optional " by YYYY-MM-DD" tail: 4 marker chars + 10 date chars.
     if let Some(idx) = rest.len().checked_sub(14) {
         if rest.is_char_boundary(idx) && rest[idx..].starts_with(" by ") {
             if let Some(date) = valid_iso_date(&rest[idx + 4..]) {
-                return Some((owner.to_string(), rest[..idx].to_string(), Some(date)));
+                return Some((owner.to_string(), rest[..idx].to_string(), Some(date), firm));
             }
         }
     }
-    Some((owner.to_string(), rest.to_string(), None))
+    Some((owner.to_string(), rest.to_string(), None, firm))
 }
 
 /// Renders the note's Markdown body: `# Summary`, then `## Decisions`,
@@ -1328,15 +1386,40 @@ pub struct RoutingDiagnostics {
     pub example_failures: Vec<ExamplesLoadFailure>,
 }
 
-/// Drops exact cross-chunk repeats — the same decision, action item (all three
-/// fields equal), or open question surfacing in more than one part — keeping
-/// the first occurrence, in part order.
+/// Drops exact cross-chunk repeats — the same decision, action item (same
+/// owner, description and due date), or open question surfacing in more than
+/// one part — keeping the first occurrence, in part order.
 ///
 /// Deliberately mechanical: near-duplicates ("send the memo" vs "send the
 /// budget memo") are the merge model's judgment call, but an item repeated
 /// verbatim because two chunks overlapped on the same commitment is dropped
 /// here, deterministically, before it can bias the merge or survive it twice.
+///
+/// Firmness is deliberately *not* part of that identity. The same commitment
+/// heard twice reads as firm in the chunk that caught the actual promise and
+/// soft in the one that caught someone musing about it; keying on firmness
+/// would keep both copies, and keeping whichever landed first would let chunk
+/// order decide whether a real commitment enrolls. So the surviving copy is
+/// firm when *any* occurrence was firm — the same fail-toward-enrolling
+/// posture the rest of the firmness path takes, and the reason a soft
+/// classification can never be an artefact of the chunked path alone.
 fn dedup_across_chunks(parts: Vec<DistillOutput>) -> Vec<DistillOutput> {
+    type ItemKey = (Option<String>, String, Option<String>);
+    fn key(item: &ActionItemDraft) -> ItemKey {
+        (
+            item.owner.clone(),
+            item.description.clone(),
+            item.due_date.clone(),
+        )
+    }
+
+    let firm_anywhere: std::collections::HashSet<ItemKey> = parts
+        .iter()
+        .flat_map(|part| part.action_items.iter())
+        .filter(|item| item.firm)
+        .map(key)
+        .collect();
+
     let mut seen_decisions = std::collections::HashSet::new();
     let mut seen_items = std::collections::HashSet::new();
     let mut seen_questions = std::collections::HashSet::new();
@@ -1346,8 +1429,14 @@ fn dedup_across_chunks(parts: Vec<DistillOutput>) -> Vec<DistillOutput> {
         .map(|mut part| {
             part.decisions
                 .retain(|decision| seen_decisions.insert(decision.clone()));
-            part.action_items
-                .retain(|item| seen_items.insert(item.clone()));
+            part.action_items.retain_mut(|item| {
+                let key = key(item);
+                if !seen_items.insert(key.clone()) {
+                    return false;
+                }
+                item.firm = firm_anywhere.contains(&key);
+                true
+            });
             part.open_questions
                 .retain(|question| seen_questions.insert(question.clone()));
             part
@@ -1385,6 +1474,11 @@ struct MergeActionItem<'a> {
     owner: Option<&'a str>,
     description: &'a str,
     due_date: Option<&'a str>,
+    /// Carried in the same spelling the response spec asks for, so the merging
+    /// model can hand it straight back. Without it the merge would re-answer
+    /// firmness from the part summaries alone and every long meeting would
+    /// classify differently from a short one.
+    firmness: &'static str,
 }
 
 /// Builds a merge request from the (already deduped) chunk outputs.
@@ -1413,6 +1507,7 @@ fn build_merge_request(
                     owner: item.owner.as_deref(),
                     description: &item.description,
                     due_date: item.due_date.as_deref(),
+                    firmness: if item.firm { "firm" } else { "soft" },
                 })
                 .collect(),
             open_questions: &part.open_questions,
@@ -2004,6 +2099,28 @@ mod tests {
             description: description.to_string(),
             owner: owner.map(str::to_string),
             due_date: due_date.map(str::to_string),
+            firm: true,
+        }
+    }
+
+    /// The same draft, classified soft — the shape that renders a
+    /// [`SOFT_MARKER`] tail and never reaches the ledger.
+    fn soft_draft(
+        description: &str,
+        owner: Option<&str>,
+        due_date: Option<&str>,
+    ) -> ActionItemDraft {
+        ActionItemDraft {
+            firm: false,
+            ..draft(description, owner, due_date)
+        }
+    }
+
+    /// One chunk's result carrying just the action items under test.
+    fn part_with(action_items: Vec<ActionItemDraft>) -> DistillOutput {
+        DistillOutput {
+            action_items,
+            ..distill_output(None, "A part.", &[])
         }
     }
 
@@ -2448,8 +2565,9 @@ mod tests {
 
         for item in &drafts {
             let line = format!("- [ ] {}", render_action_item(item));
-            let (owner, description, due) =
+            let (owner, description, due, firm) =
                 parse_action_line(&line).unwrap_or_else(|| panic!("unparsable line: {line}"));
+            assert!(firm, "firmness mismatch for {line}");
 
             assert_eq!(
                 owner,
@@ -3673,6 +3791,76 @@ consecutive parts. The partial results, in order:\n"
     }
 
     #[test]
+    fn an_absent_or_unrecognized_firmness_is_firm() {
+        // Absent (every response written before the field existed), empty,
+        // and a value no one anticipated. All three enroll, because the cost
+        // of guessing wrong the other way is a dropped commitment.
+        let output = parse_output(
+            r#"{"summary": "Talked it through.",
+                "action_items": [
+                  {"description": "send the deck", "owner": "You"},
+                  {"description": "book the venue", "owner": "You", "firmness": ""},
+                  {"description": "call the vendor", "owner": "You", "firmness": "maybe"},
+                  {"description": "look into pricing", "owner": "You", "firmness": "SOFT"},
+                  {"description": "renew the domain", "owner": "You", "firmness": " soft "}
+                ]}"#,
+        )
+        .unwrap();
+
+        let firmness: Vec<bool> = output.action_items.iter().map(|item| item.firm).collect();
+        assert_eq!(firmness, vec![true, true, true, false, false]);
+    }
+
+    #[test]
+    fn a_soft_item_renders_with_the_marker_and_round_trips() {
+        let soft = soft_draft("look into pricing", Some("Dana"), None);
+        let dated = soft_draft("draft the brief", Some("Dana"), Some("2026-08-29"));
+
+        assert_eq!(
+            render_action_item(&soft),
+            "Dana to look into pricing. (tentative)"
+        );
+        assert_eq!(
+            render_action_item(&dated),
+            "Dana to draft the brief by 2026-08-29. (tentative)"
+        );
+
+        for item in [&soft, &dated] {
+            let line = format!("- [ ] {}", render_action_item(item));
+            let (owner, description, due, firm) = parse_action_line(&line).expect("parses back");
+            assert_eq!(owner, "Dana");
+            assert_eq!(description, item.description);
+            assert_eq!(due, item.due_date);
+            assert!(!firm, "the marker survives the round trip: {line}");
+        }
+    }
+
+    /// The marker is the only thing firmness adds to a line, so a firm item
+    /// must render exactly what it rendered before firmness existed. Every
+    /// action-item id in every vault in the field depends on this.
+    #[test]
+    fn a_firm_item_renders_exactly_as_it_always_did() {
+        assert_eq!(
+            render_action_item(&draft("send the memo", Some("Jane"), Some("2026-07-15"))),
+            "Jane to send the memo by 2026-07-15."
+        );
+        assert_eq!(
+            render_action_item(&draft("book the venue", None, None)),
+            format!("{UNASSIGNED_OWNER} to book the venue.")
+        );
+    }
+
+    /// A description that legitimately ends in the marker's own words must not
+    /// be misread as soft — the marker is only the tail *after* the period.
+    #[test]
+    fn a_description_ending_in_the_marker_words_is_still_firm() {
+        let line = "- [ ] Dana to mark the plan (tentative).";
+        let (_, description, _, firm) = parse_action_line(line).expect("parses");
+        assert_eq!(description, "mark the plan (tentative)");
+        assert!(firm);
+    }
+
+    #[test]
     fn the_context_block_lists_what_the_model_may_refer_to() {
         let block = ledger_context_block(&[
             open_commitment("le_aaa", "send the signed budget memo to finance"),
@@ -3962,6 +4150,66 @@ gives one, otherwise \"Them\"."
 
         let merge_prompt = runner.requests()[2].prompt.clone();
         assert_eq!(merge_prompt.matches("send the memo").count(), 1);
+    }
+
+    /// The same commitment can read as a firm promise in the chunk that caught
+    /// it and as idle musing in the chunk that caught someone repeating it.
+    /// Dedup must not let chunk order decide whether it enrolls, so the
+    /// survivor is firm whenever any occurrence was — and the merge model is
+    /// told so, since the merge is where firmness would otherwise be re-guessed
+    /// from the part summaries alone.
+    #[test]
+    fn a_duplicate_that_is_firm_in_any_chunk_survives_as_firm() {
+        let soft_then_firm = dedup_across_chunks(vec![
+            part_with(vec![soft_draft("send the memo", Some("Jane"), None)]),
+            part_with(vec![draft("send the memo", Some("Jane"), None)]),
+        ]);
+        let kept: Vec<&ActionItemDraft> = soft_then_firm
+            .iter()
+            .flat_map(|part| part.action_items.iter())
+            .collect();
+        assert_eq!(kept.len(), 1, "the duplicate is still deduped");
+        assert!(
+            kept[0].firm,
+            "the firm reading wins even when it came second"
+        );
+
+        // Soft everywhere stays soft — firm-anywhere-wins is not firm-always.
+        let soft_twice = dedup_across_chunks(vec![
+            part_with(vec![soft_draft("look into pricing", Some("Jane"), None)]),
+            part_with(vec![soft_draft("look into pricing", Some("Jane"), None)]),
+        ]);
+        let kept: Vec<&ActionItemDraft> = soft_twice
+            .iter()
+            .flat_map(|part| part.action_items.iter())
+            .collect();
+        assert_eq!(kept.len(), 1);
+        assert!(!kept[0].firm);
+    }
+
+    #[test]
+    fn firmness_reaches_the_merge_request() {
+        let parts = vec![part_with(vec![
+            draft("send the memo", Some("Jane"), None),
+            soft_draft("look into pricing", Some("Jane"), None),
+        ])];
+
+        let request = build_merge_request(&parts, "2026-07-12", &MEETING_FLAVOR).unwrap();
+
+        assert!(
+            request
+                .prompt
+                .contains(r#""description":"send the memo","due_date":null,"firmness":"firm""#),
+            "firm item carries its classification into the merge: {}",
+            request.prompt
+        );
+        assert!(
+            request
+                .prompt
+                .contains(r#""description":"look into pricing","due_date":null,"firmness":"soft""#),
+            "soft item carries its classification into the merge: {}",
+            request.prompt
+        );
     }
 
     #[test]

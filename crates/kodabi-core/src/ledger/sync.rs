@@ -42,7 +42,15 @@
 //! and the distill follow-up — are gated identically; a gate either of them
 //! could forget to apply is not a gate.
 //!
-//! Both halves of the chain now arrive as inputs — the per-meeting override
+//! The chain has a per-item step ahead of the per-meeting one: an item the
+//! distill pass read as tentative rather than committed
+//! ([`ActionItemFact::firm`](crate::meeting::ActionItemFact::firm)) is declined
+//! before the mode is even consulted, because no meeting-level setting can turn
+//! "we should probably look into that sometime" into a commitment. It rides in
+//! on the fact itself, recovered from the note body's own soft marker, so both
+//! ingest paths see it for the same reason they see the owner.
+//!
+//! Both halves of the meeting-level chain arrive as inputs — the per-meeting override
 //! ([`NoteSync::note_override`], which lives in the note's frontmatter) and the
 //! meeting category's default ([`NoteSync::category_default`], which lives in
 //! the settings file) — because this store can read neither the vault nor the
@@ -178,15 +186,25 @@ pub struct SyncOutcome {
     /// Reported for the log, not stored, for the same reason as
     /// `not_enrolled`: nothing is written.
     pub skipped_done: usize,
+    /// Items the distill pass read as tentative rather than committed, which
+    /// mint no entry whatever the meeting's mode says.
+    ///
+    /// Counted apart from `not_enrolled` because the two answer different
+    /// questions — "this meeting is not tracked" versus "this line is not a
+    /// commitment" — and a log that conflated them would make a mis-tuned
+    /// category and a chatty transcript look identical. Nothing is written
+    /// either way.
+    pub skipped_soft: usize,
 }
 
 impl SyncOutcome {
     /// Whether the pass wrote anything.
     ///
-    /// `not_enrolled` and `skipped_done` are deliberately excluded: both mean an
-    /// item was declined and *no row was written*, so a pass that declines every
-    /// item must stay silent or the snapshot debounce would rearm on every
-    /// reconcile of a context-only meeting (or of an all-ticked note).
+    /// `not_enrolled`, `skipped_done` and `skipped_soft` are deliberately
+    /// excluded: all three mean an item was declined and *no row was written*,
+    /// so a pass that declines every item must stay silent or the snapshot
+    /// debounce would rearm on every reconcile of a context-only meeting (or of
+    /// an all-ticked note, or of a brainstorm full of maybes).
     ///
     /// `moved` is deliberately included: a project move is a real `UPDATE` and
     /// dirties two snapshots.
@@ -451,9 +469,22 @@ fn reconcile(
                     outcome.skipped_done += 1;
                     continue;
                 }
-                // The gate. An item the mode excludes gets no entry and no ref,
-                // so nothing downstream — aging, evidence, the Commitments
-                // view — ever sees it.
+                // Firmness is the per-item half of the gate, and it comes
+                // first: a tentative line is not a commitment at all, so no
+                // meeting-level mode can make one out of it. Declining here
+                // rather than untracking later is deliberate — an untracked row
+                // would put every idle musing on the Settled shelf, and the
+                // shelf is a record of judgements, not a landfill. Promoting a
+                // soft item by hand still works: `track_item` never consults
+                // firmness, and deleting the marker from the line makes the
+                // next reconcile enroll it normally.
+                if !item.firm {
+                    outcome.skipped_soft += 1;
+                    continue;
+                }
+                // The rest of the gate. An item the mode excludes gets no entry
+                // and no ref, so nothing downstream — aging, evidence, the
+                // Commitments view — ever sees it.
                 let direction = Direction::resolve(&item.owner, sync.identity);
                 if !mode.enrolls(direction) {
                     outcome.not_enrolled += 1;
@@ -733,6 +764,7 @@ mod tests {
             owner: owner.to_string(),
             due_date: None,
             done: false,
+            firm: true,
             extracted_date: Some("2026-08-01".to_string()),
         }
     }
@@ -871,6 +903,124 @@ mod tests {
             ledger.list_entries(&EntryFilter::default()).unwrap().len(),
             0
         );
+    }
+
+    /// The same fact, read as tentative. The item still exists in the note —
+    /// extraction is unconditional — but it leaves nothing behind here.
+    fn soft_fact(id: &str, owner: &str, description: &str) -> ActionItemFact {
+        ActionItemFact {
+            firm: false,
+            ..fact(id, owner, description)
+        }
+    }
+
+    #[test]
+    fn a_soft_item_is_not_enrolled_and_leaves_no_row() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![
+            fact("a_111111", "Priya", "send the revised deck"),
+            soft_fact("a_222222", "Priya", "look into pricing sometime"),
+        ];
+
+        let outcome = sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &items);
+
+        assert_eq!(outcome.created.len(), 1);
+        assert_eq!(outcome.skipped_soft, 1);
+        // Counted apart from the meeting-level gate, which declined nothing.
+        assert_eq!(outcome.not_enrolled, 0);
+        let entries = ledger.list_entries(&EntryFilter::default()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].description, "send the revised deck");
+    }
+
+    /// Firmness is the per-item half of the gate and sits ahead of the
+    /// meeting-level half, so no override can promote a musing into a
+    /// commitment. The user's own escape hatch is `track_item`, not a mode.
+    #[test]
+    fn an_explicitly_tracked_meeting_still_skips_its_soft_items() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![soft_fact("a_222222", "You", "look into pricing sometime")];
+
+        let outcome = sync_note_tracked_as(
+            &mut ledger,
+            "n_a1b2c3",
+            "Briarwood Golf",
+            DAY_ONE,
+            &items,
+            Some(EnrollmentMode::Tracked),
+        );
+
+        assert_eq!(outcome.created.len(), 0);
+        assert_eq!(outcome.skipped_soft, 1);
+        assert!(ledger
+            .list_entries(&EntryFilter::default())
+            .unwrap()
+            .is_empty());
+    }
+
+    /// A pass that declines every item wrote nothing, so it must read as a
+    /// no-op — otherwise a brainstorm full of maybes rearms the snapshot
+    /// debounce on every reconcile.
+    #[test]
+    fn a_pass_that_skips_only_soft_items_is_a_noop() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![soft_fact("a_222222", "Priya", "look into pricing sometime")];
+
+        let outcome = sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &items);
+
+        assert_eq!(outcome.skipped_soft, 1);
+        assert!(outcome.is_noop());
+    }
+
+    /// Softness gates the *mint*, never the re-mention: someone saying "we
+    /// should probably still do that" about a live commitment is evidence it is
+    /// alive, and dropping it would age the entry out for being spoken of
+    /// tentatively.
+    #[test]
+    fn a_soft_restatement_still_re_mentions_a_live_commitment() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let items = vec![fact("a_111111", "Priya", "send the revised deck")];
+        sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &items);
+
+        let restated = vec![soft_fact("a_444444", "Priya", "send the revised deck")];
+        let outcome = sync_note(
+            &mut ledger,
+            "n_d4e5f6",
+            "Briarwood Golf",
+            DAY_TWO,
+            &restated,
+        );
+
+        assert_eq!(outcome.rementioned.len(), 1);
+        assert_eq!(outcome.skipped_soft, 0);
+        let entries = ledger.list_entries(&EntryFilter::default()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].last_mention, DAY_TWO);
+    }
+
+    /// Deleting the marker by hand is a promotion gesture. The line keeps its
+    /// id (firmness is not an id input), so the next reconcile sees the very
+    /// same item arrive firm and mints it.
+    #[test]
+    fn clearing_the_soft_marker_enrolls_the_item_on_the_next_pass() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let soft = vec![soft_fact("a_222222", "Priya", "look into pricing")];
+        sync_note(&mut ledger, "n_a1b2c3", "Briarwood Golf", DAY_ONE, &soft);
+
+        let promoted = vec![fact("a_222222", "Priya", "look into pricing")];
+        let outcome = sync_note(
+            &mut ledger,
+            "n_a1b2c3",
+            "Briarwood Golf",
+            DAY_ONE,
+            &promoted,
+        );
+
+        assert_eq!(outcome.created.len(), 1);
+        assert_eq!(outcome.skipped_soft, 0);
+        let entries = ledger.list_entries(&EntryFilter::default()).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].description, "look into pricing");
     }
 
     #[test]

@@ -22,6 +22,7 @@ fn migrations() -> Vec<fn() -> String> {
         migration_0002_chunked_embeddings,
         migration_0003_meeting_facts,
         migration_0004_note_classification,
+        migration_0005_action_item_firmness,
     ]
 }
 
@@ -252,6 +253,26 @@ CREATE INDEX idx_notes_category ON notes (category);
     .to_string()
 }
 
+/// v5 — whether an action item reads as an actual commitment or a tentative
+/// one, mirroring [`crate::meeting::ActionItemFact::firm`].
+///
+/// The column exists because the shell rebuilds `ActionItemFact`s from these
+/// rows (`note_facts_from`) before handing them to the ledger's enrollment
+/// gate; without it the watcher would re-enroll every soft item seconds after
+/// the distill pass declined to.
+///
+/// `DEFAULT 1` (firm) backfills every pre-existing row, which is both the
+/// fail-soft posture the rest of the firmness path takes and simply true: those
+/// rows were written by a distill that had no notion of soft, and the first
+/// reconcile after this migration re-derives them from the note body anyway.
+fn migration_0005_action_item_firmness() -> String {
+    r#"
+ALTER TABLE note_action_items ADD COLUMN firm INTEGER NOT NULL DEFAULT 1
+    CHECK (firm IN (0, 1));
+"#
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::NoteIndex;
@@ -291,7 +312,7 @@ mod tests {
             assert!(table_exists(&index, table), "missing table {table}");
         }
 
-        assert_eq!(user_version(&index), 4);
+        assert_eq!(user_version(&index), 5);
     }
 
     #[test]
@@ -301,7 +322,7 @@ mod tests {
         // would if it tried to re-create existing tables).
         super::apply(&mut index.conn).unwrap();
 
-        assert_eq!(user_version(&index), 4);
+        assert_eq!(user_version(&index), 5);
     }
 
     #[test]
@@ -345,7 +366,7 @@ mod tests {
 
         super::apply(&mut index.conn).unwrap();
 
-        assert_eq!(user_version(&index), 4);
+        assert_eq!(user_version(&index), 5);
         for table in [
             "note_chunks",
             "note_meetings",
@@ -407,7 +428,7 @@ mod tests {
 
         super::apply(&mut index.conn).unwrap();
 
-        assert_eq!(user_version(&index), 4);
+        assert_eq!(user_version(&index), 5);
         for table in ["note_meetings", "note_decisions", "note_action_items"] {
             assert!(table_exists(&index, table), "missing table {table}");
         }
@@ -426,7 +447,7 @@ mod tests {
     }
 
     #[test]
-    fn a_v3_database_upgrades_to_v4_on_open() {
+    fn a_v3_database_upgrades_to_the_latest_schema_on_open() {
         // Reconstruct a genuine v3 database: the three classification columns
         // did not exist. Roll a freshly-opened (v4) database back to exactly
         // that shape so `apply` performs the real additive upgrade a field
@@ -435,7 +456,8 @@ mod tests {
         index
             .conn
             .execute_batch(
-                "DROP INDEX idx_notes_category;
+                "ALTER TABLE note_action_items DROP COLUMN firm;
+                 DROP INDEX idx_notes_category;
                  ALTER TABLE notes DROP COLUMN category;
                  ALTER TABLE notes DROP COLUMN category_confidence;
                  ALTER TABLE notes DROP COLUMN tracking;
@@ -452,7 +474,7 @@ mod tests {
 
         super::apply(&mut index.conn).unwrap();
 
-        assert_eq!(user_version(&index), 4);
+        assert_eq!(user_version(&index), 5);
         // The pre-existing row survives with NULL facets — nothing is lost, and
         // the reconcile pass backfills it from frontmatter.
         let (category, tracking): (Option<String>, Option<String>) = index
@@ -473,6 +495,63 @@ mod tests {
                                   tracking = 'context-only' WHERE id = 'n_old';",
             )
             .expect("the upgraded columns accept valid values");
+    }
+
+    /// The firmness column is the shell's only way to know an item was
+    /// tentative when it rebuilds facts from index rows, so an upgraded
+    /// database must both gain it and keep every row it already had — and those
+    /// rows must read back as firm, or the first reconcile after an upgrade
+    /// would silently stop enrolling everything the ledger already tracks.
+    #[test]
+    fn a_v4_database_upgrades_to_v5_keeping_every_row_firm() {
+        let mut index = NoteIndex::open_in_memory().unwrap();
+        index
+            .conn
+            .execute_batch(
+                "ALTER TABLE note_action_items DROP COLUMN firm;
+                 PRAGMA user_version = 4;",
+            )
+            .unwrap();
+        index
+            .conn
+            .execute_batch(
+                "INSERT INTO notes (id, path, title, type, project, date_raw, date_utc, source, body)
+                 VALUES ('n_old', 'n_old.md', 'Old', 'meeting', NULL, '2026-01-01', '2026-01-01T00:00:00Z', 'manual', 'body');
+                 INSERT INTO note_meetings (note_id) VALUES ('n_old');
+                 INSERT INTO note_action_items
+                     (note_id, seq, item_id, description, owner, due_date, done, extracted_date)
+                 VALUES ('n_old', 0, 'a_old001', 'send the memo', 'Jane', NULL, 0, '2026-01-01');",
+            )
+            .expect("a v4 action-item row inserts");
+
+        super::apply(&mut index.conn).unwrap();
+
+        assert_eq!(user_version(&index), 5);
+        let (item_id, firm): (String, bool) = index
+            .conn
+            .query_row(
+                "SELECT item_id, firm FROM note_action_items WHERE note_id = 'n_old'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .expect("the upgraded row reads back");
+        assert_eq!(item_id, "a_old001");
+        assert!(firm, "a pre-firmness row backfills as firm");
+
+        index
+            .conn
+            .execute(
+                "UPDATE note_action_items SET firm = 0 WHERE note_id = 'n_old'",
+                [],
+            )
+            .expect("the upgraded column accepts a soft item");
+        index
+            .conn
+            .execute(
+                "UPDATE note_action_items SET firm = 2 WHERE note_id = 'n_old'",
+                [],
+            )
+            .expect_err("the CHECK rejects anything but 0 or 1");
     }
 
     /// The `CHECK` constraints restate closed sets Rust owns, and SQL cannot

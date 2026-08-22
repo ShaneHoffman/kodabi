@@ -140,6 +140,7 @@ fn stdio_server_handshakes_reads_and_writes_with_clean_stdout() {
                         // Safely in the past → `overdue` whenever this runs.
                         due_date: Some("2020-01-01".to_string()),
                         done: false,
+                        firm: true,
                         extracted_date: Some("2026-07-10".to_string()),
                     }],
                 }),

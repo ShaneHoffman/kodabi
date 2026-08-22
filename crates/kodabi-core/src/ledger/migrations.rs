@@ -20,7 +20,7 @@ use super::Result;
 /// opened database lands on it. Not read at runtime: [`apply`] derives the
 /// version it writes from the list's length, so the two can never disagree.
 #[cfg(test)]
-pub(crate) const CURRENT_VERSION: i64 = 3;
+pub(crate) const CURRENT_VERSION: i64 = 4;
 
 /// The ordered migrations, as lazy builders. Each is applied in its own
 /// transaction, so a failure leaves the database at the last fully-applied
@@ -31,6 +31,7 @@ fn migrations() -> Vec<fn() -> String> {
         migration_0001_initial_schema,
         migration_0002_enrollment,
         migration_0003_category_provenance,
+        migration_0004_ledger_meta,
     ]
 }
 
@@ -334,6 +335,35 @@ CREATE INDEX idx_ledger_entries_mention ON ledger_entries (last_mention);
     .to_string()
 }
 
+/// v4 — a small key/value table for the ledger's own device-local state.
+///
+/// Its first and only tenant is the triage marker: the instant the user last
+/// reviewed newly enrolled commitments, which the Commitments view diffs
+/// `created_at` against to answer "what is new since you last looked".
+///
+/// **Deliberately here rather than in `_ledger.yml`.** The snapshot is vault
+/// truth and travels with the vault, so a marker written into it would tell a
+/// second machine that this machine's reading counted as its own — the
+/// same reasoning that keeps the device id out of the vault. Nothing in
+/// [`super::snapshot`] reads this table, so the snapshot version does not move.
+///
+/// Also deliberately not in `settings.toml`, which is written by a different
+/// lock: the marker is compared against ledger rows inside the same worker that
+/// writes them, and splitting the two stores would make "advance the marker"
+/// and "read what is new" race.
+///
+/// A new table carries every existing row forward untouched, so this needs
+/// none of the create-copy-drop-rename dance v2 and v3 did.
+fn migration_0004_ledger_meta() -> String {
+    r#"
+CREATE TABLE ledger_meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+"#
+    .to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use rusqlite::Connection;
@@ -597,6 +627,32 @@ mod tests {
             .pragma_query_value(None, "user_version", |row| row.get(0))
             .unwrap();
         assert_eq!(version, super::CURRENT_VERSION);
+    }
+
+    /// The meta table is additive, so the ledger's one hard rule — every
+    /// existing row survives every migration — must hold trivially here. Worth
+    /// pinning anyway: it is the rule the whole module exists to protect.
+    #[test]
+    fn v4_adds_the_meta_table_without_disturbing_a_row() {
+        let mut conn = migrated_to_v1();
+        seed_full_row_set(&conn);
+        let before: i64 = conn
+            .query_row("SELECT count(*) FROM ledger_entries", [], |row| row.get(0))
+            .unwrap();
+
+        super::apply(&mut conn).unwrap();
+
+        assert!(table_exists(&conn, "ledger_meta"));
+        let after: i64 = conn
+            .query_row("SELECT count(*) FROM ledger_entries", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(before, after, "no entry may be lost to a migration");
+        let refs: i64 = conn
+            .query_row("SELECT count(*) FROM ledger_item_refs", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert!(refs > 0, "the seeded refs survive too");
     }
 
     #[test]

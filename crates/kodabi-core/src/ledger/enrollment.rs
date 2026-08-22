@@ -496,6 +496,7 @@ mod tests {
             owner: owner.to_string(),
             due_date: None,
             done: false,
+            firm: true,
             extracted_date: Some("2026-08-01".to_string()),
         }
     }
@@ -526,6 +527,50 @@ mod tests {
 
     fn entry_for(ledger: &Ledger, item_id: &str) -> LedgerEntry {
         ledger.entry_for_item(NOTE, item_id).unwrap().unwrap()
+    }
+
+    /// The sanctioned exception to the firmness gate: the note rail's Track
+    /// button. `track_item` decides on the person's say-so alone and never
+    /// consults firmness, which is what keeps "not tracked" from meaning "not
+    /// trackable" — and stamps the entry manual, so a later sweep leaves it be.
+    #[test]
+    fn a_soft_item_can_still_be_tracked_by_hand() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        let item = ActionItemFact {
+            firm: false,
+            ..fact("a_111111", "You", "look into pricing sometime")
+        };
+        ledger
+            .sync_note_items(&NoteSync {
+                note_id: NOTE,
+                project: PROJECT,
+                note_date_utc: DAY_ONE,
+                items: std::slice::from_ref(&item),
+                link_hints: &[],
+                note_override: None,
+                category_default: None,
+                identity: &crate::ledger::OwnerIdentity::default(),
+                now: NOW,
+            })
+            .unwrap();
+        assert!(
+            ledger.entry_for_item(NOTE, "a_111111").unwrap().is_none(),
+            "the gate declined it on the way in"
+        );
+
+        let entry = ledger
+            .track_item(
+                NOTE,
+                &item,
+                PROJECT,
+                DAY_ONE,
+                &crate::ledger::OwnerIdentity::default(),
+                LATER,
+            )
+            .unwrap();
+
+        assert_eq!(entry.state, EntryState::Open);
+        assert_eq!(entry.enrolled_via, EnrolledVia::Manual);
     }
 
     /// The same note, synced by a user who has told the app their name.
