@@ -1,5 +1,5 @@
 import { clsx } from "clsx";
-import { AnimatePresence, motion, type Variants } from "motion/react";
+import { AnimatePresence, motion } from "motion/react";
 import { useMemo, useState } from "react";
 import {
   pipelineStage,
@@ -33,15 +33,17 @@ import { useTimeout } from "../../useTimeout";
 import { SpiritMark } from "../capture/SpiritMark";
 import { CreateProjectDialog } from "../dialogs/CreateProjectDialog";
 import { DeleteNoteDialog } from "../dialogs/DeleteNoteDialog";
+import {
+  cardVariants,
+  EASE_OUT_STRONG,
+  slotVariants,
+  VANISH_MS,
+} from "./vanishMotion";
 import { Button } from "../ui/Button";
 import { Menu } from "../ui/Menu";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
 
-/** How long the placeholder's travel-left-and-vanish plays once distill routes
- * it to a project: the card clears in 220ms inside a slot that closes in 280,
- * so this is the slot's clock — the moment there is nothing left to see. */
-const VANISH_MS = 280;
 /** How long "Filed to <project>" stays up before it goes — the same dwell
  * `CaptureToast` used to give a success notice. */
 const TOAST_DWELL_MS = 3500;
@@ -67,152 +69,18 @@ const FILL_IN_MS = 200;
 const GRACE_MS = 10_000;
 
 /*
- * THE MOTION OF A ROW IN THIS LIST.
+ * THE MOTION OF A ROW IN THIS LIST lives in `./vanishMotion`, shared with the
+ * Commitments view: doctrine treats a routed capture leaving under the app's
+ * power and a checked commitment leaving under the user's as one move
+ * (docs/DESIGN_SYSTEM.md §4), so they read from one table. The reasoning for
+ * the slot/card split, the missing `layout` prop and the missing `exit`
+ * variants is there.
  *
- * The `motion` package drives it rather than CSS, and this list is why the
- * package is in the stack at all: a row leaving has to collapse a height nobody
- * measured, while its neighbours glide up to meet it, while a new row may be
- * arriving into the same list — three things on one timeline, interruptible
- * halfway through. CSS can express any one of them and none of them together.
- * Everything else in the app stays CSS (docs/UI_CONVENTIONS.md).
- *
- * Two elements per row, and the split is load-bearing: the SLOT (the `li`) owns
- * the space, the CARD inside it owns the travel. Collapsing the space and
- * sliding the card are different clocks on purpose — the card is gone at 220ms
- * while the slot is still closing at 280, so the space hands itself back behind
- * a card that has already left, and the row below never appears to shove it
- * out. They are one movement because they overlap, not because they match.
- *
- * The variants are keyed by label, so the slot and the card can be told
- * "you are leaving" once, on the parent, and each answer in its own values.
- *
- * TWO THINGS THIS DELIBERATELY DOES NOT USE, both of which the ticket named.
- *
- * No `layout` prop. The neighbours glide because the slot's HEIGHT is animating
- * and they are in normal flow behind it — the same trick the prototype used,
- * and it needs no projection. `layout` would put every row in a projection tree
- * that writes its own transforms, fighting the card's `x` underneath it: two
- * writers of one property. It earns its keep when items REORDER, and nothing
- * here reorders. Rows only arrive and leave.
- *
- * No `exit` variant on the list's children either, and this one is a real
- * constraint rather than a preference. A departure here is always something the
- * app already knows about BEFORE the element unmounts — `vanishing` on the
- * placeholder, `leaving` on a row — because both start the moment the command
- * succeeds rather than whenever the vault refetch happens to land. Animating
- * from that state is both earlier and more honest than animating on the way
- * out. `exit` would also make each row's unmount wait on an animation
- * completing inside a subtree that holds a base-ui menu and two dialogs, and a
- * row that can fail to unmount is a far worse bug than a collapse that gets
- * clipped. `AnimatePresence` is kept for the filed toast, whose departure genuinely
- * has no state to animate from: it is dropped and then gone.
- *
- * The placeholder's silent handoff is the case that proves the rule — see the
- * comment on its `motion.li`.
- *
- * Each table is one FROZEN module constant per reduced-motion setting, picked
- * by a getter, rather than an object literal built during render. A variants
- * object is part of a `motion` element's identity: handing it a structurally
- * identical but newly-allocated one on every render is a change as far as the
- * animator is concerned, and it re-reads the whole table each time — on a list
- * that re-renders on every vault refetch, every keystroke in a dialog and
- * every menu open.
+ * The placeholder's silent handoff is the case that proves the no-`exit` rule
+ * — see the comment on its `motion.li`. `AnimatePresence` is kept here for the
+ * filed toast, whose departure genuinely has no state to animate from: it is
+ * dropped and then gone.
  */
-
-/** `--ease-out-strong`, as numbers: entrances and arrivals. */
-const EASE_OUT_STRONG = [0.23, 1, 0.32, 1] as const;
-/** `--ease-in-out-strong`, as numbers: departures, which leave under power. */
-const EASE_IN_OUT_STRONG = [0.77, 0, 0.175, 1] as const;
-
-/** The gap between rows, in px. It lives on each slot as an animated margin
- * rather than on the list as a flex `gap`, because a gap cannot collapse: a
- * row whose height reaches zero with a live gap under it still holds 14px of
- * the list open, and the neighbours land with a jump at the end of a
- * choreography built to avoid exactly that. */
-const ROW_GAP = 14;
-
-/**
- * The slot: the space a row occupies, and the only thing that ever animates a
- * height. `height: "auto"` is motion measuring the row for us — the same
- * problem the `1fr → 0fr` grid trick used to solve, minus the grid.
- *
- * `overflow: "clip"` is set (not animated) at the start of the exit, so the
- * clipping exists only while collapsing. A resting row must never be clipped:
- * it would crop its own hover lift and, worse, its focus ring, in the densest
- * list in the app.
- */
-const SLOT_MOVING: Variants = {
-  enter: { height: 0, opacity: 0, marginBottom: 0 },
-  rest: {
-    height: "auto",
-    opacity: 1,
-    marginBottom: ROW_GAP,
-    // Rise-in, the band for a row appearing (docs/DESIGN_SYSTEM.md §4), and
-    // the same 280 the collapse below runs on.
-    transition: { duration: 0.28, ease: EASE_OUT_STRONG },
-  },
-  gone: {
-    height: 0,
-    marginBottom: 0,
-    overflow: "clip",
-    transition: { duration: 0.28, ease: EASE_IN_OUT_STRONG },
-  },
-};
-/** Fades only. No height: the collapse IS the movement, and the rule is that
- * movement goes while life stays (docs/DESIGN_SYSTEM.md §4).
- *
- * The margin is NOT movement, though, and it is not optional either: it is the
- * list's 14px gap, which lives here rather than on the `ul` so it can collapse
- * with the row that owns it. Every state carries the same value, so it is set
- * once and never animated — leave it out of one of them and the rows go flush
- * the moment the preference is on. */
-const SLOT_STILL: Variants = {
-  enter: { opacity: 0, marginBottom: ROW_GAP },
-  rest: { opacity: 1, marginBottom: ROW_GAP, transition: { duration: 0.2 } },
-  gone: {
-    opacity: 0,
-    marginBottom: ROW_GAP,
-    transition: { duration: TOAST_FADE_S },
-  },
-};
-
-function slotVariants(reduce: boolean): Variants {
-  return reduce ? SLOT_STILL : SLOT_MOVING;
-}
-
-/**
- * The card: what the eye actually follows. Out to the LEFT, because that is
- * where this list came from — a row leaves along the axis it arrived on rather
- * than picking a new direction on the way out — carrying a 2px blur, which is
- * the part that makes it read as departing rather than as being deleted.
- */
-/* The blur appears ONLY in `gone`, never in the resting states, and that is a
-   correctness point rather than a tidiness one: a `filter` in the resting
-   variant would sit in the inline style of every card in the list forever, and
-   a filtered element is a containing block for fixed-position descendants and
-   its own stacking context. Each row holds a menu and two dialogs that position
-   against the viewport, so a resting `blur(0px)` would quietly re-anchor them
-   to the card. Motion reads the computed value as the start of the exit, which
-   is what it should be animating from anyway. */
-const CARD_MOVING: Variants = {
-  enter: { opacity: 0, x: 0 },
-  rest: { opacity: 1, x: 0 },
-  gone: {
-    opacity: 0,
-    x: -24,
-    filter: "blur(2px)",
-    transition: { duration: 0.22, ease: EASE_IN_OUT_STRONG },
-  },
-};
-const CARD_STILL: Variants = {
-  enter: { opacity: 0 },
-  rest: { opacity: 1 },
-  gone: { opacity: 0, transition: { duration: TOAST_FADE_S } },
-};
-
-function cardVariants(reduce: boolean): Variants {
-  return reduce ? CARD_STILL : CARD_MOVING;
-}
 
 /* The folder hues, written out rather than interpolated: Tailwind cannot see a
    constructed class name and would emit none of these

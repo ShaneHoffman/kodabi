@@ -1,6 +1,6 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LEDGER_CHANGED_EVENT, VAULT_CHANGED_EVENT } from "../../events";
 import {
@@ -83,6 +83,11 @@ function serve(payload: Partial<CommitmentsPayload>): void {
   onCommand("list_commitments", () => ({
     entries: payload.entries ?? [],
     settled: payload.settled ?? [],
+    settled_summary: payload.settled_summary ?? {
+      cleared: 0,
+      closed_from_conversation: 0,
+      closed_from_github: 0,
+    },
     // Null unless a test opts in, so the triage strip stays out of the way of
     // every test that is not about it.
     last_seen: payload.last_seen ?? null,
@@ -258,7 +263,8 @@ describe("CommitmentsView", () => {
       },
     });
 
-    // The backend's echo is what moves the row, not an optimistic flip.
+    // The MOTION starts on the click, but the STATE still comes from the
+    // backend's echo: this is the refetch that actually files the row.
     serve({
       settled: [
         commitment({
@@ -712,8 +718,12 @@ describe("CommitmentsView", () => {
     await user.click(await screen.findByTestId("show-settled-commitments"));
     const shelf = await screen.findByTestId("settled-commitments");
 
-    // Never silent: it says who closed it, and links what it saw.
-    expect(within(shelf).getByText(/closed from GitHub/)).toBeInTheDocument();
+    // Never silent, and never modest about it: an auto-close says so in the
+    // active voice, dated from the claim, with how sure that claim was.
+    expect(
+      within(shelf).getByText(/closed itself from GitHub on/),
+    ).toBeInTheDocument();
+    expect(within(shelf).getByText(/97% confident/)).toBeInTheDocument();
     expect(within(shelf).getByRole("link", { name: "evidence" })).toHaveAttribute(
       "href",
       "https://example.com/pull/42",
@@ -1166,5 +1176,323 @@ describe("CommitmentsView", () => {
         ),
       ).toBeInTheDocument();
     });
+  });
+});
+
+/** The completion moment's own clocks, mirrored from `CommitmentsView`. */
+const SETTLE_BEAT_MS = 300;
+const VANISH_MS = 280;
+
+/** Drive motion's frame loop until a row the app has dropped actually leaves.
+ *
+ * Same reasoning as `InboxView.test.tsx`'s helper: with animations skipped the
+ * unmount still lands on a later tick of the loop, and plain `waitFor` polls
+ * without driving it. The step stays far below both clocks above, so settling
+ * an exit cannot advance the choreography along with it. */
+async function waitForRemoval(find: () => HTMLElement | null): Promise<void> {
+  const FRAME_MS = 20;
+  const MAX_FRAMES = 40;
+  for (let frame = 0; frame < MAX_FRAMES && find() !== null; frame += 1) {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(FRAME_MS);
+    });
+  }
+  expect(find()).toBeNull();
+}
+
+/** The row currently leaving, or null. */
+function vanishingRow(): HTMLElement | null {
+  return document.querySelector<HTMLElement>("[data-vanishing]");
+}
+
+function mineRow(): HTMLElement | null {
+  return screen.queryByText("book the venue");
+}
+
+const advanceTimers = (delay: number) => vi.advanceTimersByTimeAsync(delay);
+
+/** The echo a successful tick gets back. */
+const CLOSED_ECHO = {
+  entry: {
+    entry_id: "le_mine",
+    state: "closed",
+    snoozed_until: null,
+    closed_via: "manual",
+    review_reason: null,
+    updated_at: "2026-08-17T12:00:00Z",
+  },
+  note_updated: true,
+};
+
+/** The same row, as the shelf sees it after the write. */
+function settledMine() {
+  return [
+    commitment({
+      entry_id: "le_mine",
+      state: "closed",
+      closed_via: "manual",
+      item: item({ done: true }),
+    }),
+  ];
+}
+
+describe("the completion moment", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const tick = async (user: ReturnType<typeof userEvent.setup>) =>
+    user.click(
+      await screen.findByRole("checkbox", { name: 'Mark "book the venue" done' }),
+    );
+
+  it("states the change on the click and leaves without waiting for the write", async () => {
+    const user = userEvent.setup({ advanceTimers });
+    serve({ entries: [commitment({ entry_id: "le_mine", item: item() })] });
+    // A write that never answers: everything below is the screen acting on its
+    // own, which is the point of an optimistic moment.
+    onCommand("set_commitment_done", () => new Promise(() => {}));
+
+    await openCommitments(user);
+    await tick(user);
+
+    // Stated immediately: the check is drawn and the title struck while the
+    // ledger is still thinking.
+    const box = screen.getByRole("checkbox", {
+      name: 'Mark "book the venue" done',
+    });
+    expect(box).toBeChecked();
+    expect(screen.getByText("book the venue")).toHaveClass("line-through");
+    // ... and inert, so it cannot be clicked again mid-departure.
+    expect(box).toHaveAttribute("aria-disabled", "true");
+
+    // The beat first: nothing is leaving yet.
+    expect(vanishingRow()).toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SETTLE_BEAT_MS);
+    });
+    expect(vanishingRow()).not.toBeNull();
+  });
+
+  it("travels the row back when the write fails", async () => {
+    const user = userEvent.setup({ advanceTimers });
+    serve({ entries: [commitment({ entry_id: "le_mine", item: item() })] });
+    let reject: (err: unknown) => void = () => {};
+    onCommand(
+      "set_commitment_done",
+      () =>
+        new Promise((_resolve, rejectWrite) => {
+          reject = rejectWrite;
+        }),
+    );
+
+    await openCommitments(user);
+    await tick(user);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SETTLE_BEAT_MS);
+    });
+    expect(vanishingRow()).not.toBeNull();
+
+    await act(async () => {
+      reject("The note is read-only.");
+      await vi.advanceTimersByTimeAsync(0);
+    });
+
+    // The departure is withdrawn: the row is back at rest, unticked, and says
+    // what went wrong.
+    expect(vanishingRow()).toBeNull();
+    expect(mineRow()).toBeInTheDocument();
+    expect(
+      screen.getByRole("checkbox", { name: 'Mark "book the venue" done' }),
+    ).not.toBeChecked();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "The note is read-only.",
+    );
+  });
+
+  it("holds the row on screen when the refetch outruns the choreography", async () => {
+    const user = userEvent.setup({ advanceTimers });
+    serve({ entries: [commitment({ entry_id: "le_mine", item: item() })] });
+    onCommand("set_commitment_done", () => CLOSED_ECHO);
+
+    await openCommitments(user);
+    await tick(user);
+
+    // The local write announces itself almost at once. Without the snapshot
+    // this refetch would unmount the card mid-beat and it would pop out of the
+    // list, which is the flatness this whole moment exists to fix.
+    serve({ settled: settledMine() });
+    await act(async () => {
+      emitFromBackend(VAULT_CHANGED_EVENT, undefined);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(
+      within(screen.getByTestId("commitments-mine")).getByText("book the venue"),
+    ).toBeInTheDocument();
+
+    // It leaves on its own clock, and lands on the shelf.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SETTLE_BEAT_MS + VANISH_MS);
+    });
+    await waitForRemoval(() => screen.queryByTestId("commitments-mine"));
+    await user.click(await screen.findByTestId("show-settled-commitments"));
+    expect(
+      within(screen.getByTestId("settled-commitments")).getByText(
+        "book the venue",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the collapsed slot until a slow refetch lands", async () => {
+    const user = userEvent.setup({ advanceTimers });
+    serve({ entries: [commitment({ entry_id: "le_mine", item: item() })] });
+    onCommand("set_commitment_done", () => CLOSED_ECHO);
+
+    await openCommitments(user);
+    await tick(user);
+    // The write resolved but nothing refetched. The row stays mounted rather
+    // than snapping back open on a truth that has not arrived.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SETTLE_BEAT_MS + VANISH_MS + 200);
+    });
+    expect(mineRow()).toBeInTheDocument();
+
+    serve({ settled: settledMine() });
+    await act(async () => {
+      emitFromBackend(LEDGER_CHANGED_EVENT, undefined);
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    await waitForRemoval(() => screen.queryByTestId("commitments-mine"));
+  });
+
+  it("gives a reduced-motion reader the whole change and none of the travel", async () => {
+    document.documentElement.setAttribute("data-reduce-motion", "on");
+    try {
+      const user = userEvent.setup({ advanceTimers });
+      serve({ entries: [commitment({ entry_id: "le_mine", item: item() })] });
+      onCommand("set_commitment_done", () => CLOSED_ECHO);
+
+      await openCommitments(user);
+      await tick(user);
+
+      // Every piece of information the moment carries is still here.
+      expect(
+        screen.getByRole("checkbox", { name: 'Mark "book the venue" done' }),
+      ).toBeChecked();
+      expect(screen.getByText("book the venue")).toHaveClass("line-through");
+
+      serve({ settled: settledMine() });
+      await act(async () => {
+        emitFromBackend(VAULT_CHANGED_EVENT, undefined);
+        await vi.advanceTimersByTimeAsync(SETTLE_BEAT_MS + VANISH_MS);
+      });
+      await waitForRemoval(() => screen.queryByTestId("commitments-mine"));
+
+      // And it still ends up where it went.
+      await user.click(await screen.findByTestId("show-settled-commitments"));
+      expect(
+        within(screen.getByTestId("settled-commitments")).getByText(
+          "book the venue",
+        ),
+      ).toBeInTheDocument();
+    } finally {
+      document.documentElement.removeAttribute("data-reduce-motion");
+    }
+  });
+
+  it("leaves a theirs row alone: a register is not a queue", async () => {
+    const user = userEvent.setup({ advanceTimers });
+    serve({
+      entries: [
+        commitment({
+          entry_id: "le_theirs",
+          direction: "theirs",
+          owner: "Priya",
+          item: item({ owner: "Priya" }),
+        }),
+      ],
+    });
+    onCommand("set_commitment_done", () => new Promise(() => {}));
+
+    await openCommitments(user);
+    await tick(user);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(SETTLE_BEAT_MS + VANISH_MS);
+    });
+
+    expect(vanishingRow()).toBeNull();
+    expect(mineRow()).toBeInTheDocument();
+  });
+});
+
+describe("the settled shelf as a win surface", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+  });
+
+  it("leads with the week's wins, before the shelf is even opened", async () => {
+    const user = userEvent.setup();
+    serve({
+      settled: [
+        commitment({
+          entry_id: "le_auto",
+          state: "closed",
+          closed_via: "conversation",
+          item: item({ done: true }),
+          evidence: [
+            {
+              evidence_id: "ev_1",
+              source: "conversation",
+              reference: "n_standup",
+              confidence: 0.91,
+              observed_at: "2026-08-19T00:00:00Z",
+            },
+          ],
+        }),
+      ],
+      settled_summary: {
+        cleared: 5,
+        closed_from_conversation: 2,
+        closed_from_github: 0,
+      },
+    });
+
+    await openCommitments(user);
+    // Visible while the shelf is still shut: the win should not be something
+    // you have to open a drawer to find.
+    expect(
+      await screen.findByText(
+        "5 cleared this week, 2 closed themselves from conversation",
+      ),
+    ).toBeInTheDocument();
+
+    await user.click(await screen.findByTestId("show-settled-commitments"));
+    const shelf = await screen.findByTestId("settled-commitments");
+    expect(
+      within(shelf).getByText(/closed itself from the .* conversation/),
+    ).toBeInTheDocument();
+    expect(within(shelf).getByText(/91% confident/)).toBeInTheDocument();
+  });
+
+  it("says nothing about a week that cleared nothing", async () => {
+    const user = userEvent.setup();
+    serve({
+      settled: [
+        commitment({
+          entry_id: "le_untracked",
+          state: "untracked",
+          item: item(),
+        }),
+      ],
+    });
+
+    await openCommitments(user);
+    await screen.findByTestId("show-settled-commitments");
+    expect(screen.queryByText(/cleared this week/)).not.toBeInTheDocument();
   });
 });

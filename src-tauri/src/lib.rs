@@ -305,6 +305,7 @@ pub fn run() {
             glossary_cmds::update_glossary_term,
             glossary_cmds::delete_glossary_term,
             ledger_cmds::list_commitments,
+            ledger_cmds::count_my_commitments,
             ledger_cmds::set_commitment_done,
             ledger_cmds::snooze_commitment,
             ledger_cmds::waive_commitment,

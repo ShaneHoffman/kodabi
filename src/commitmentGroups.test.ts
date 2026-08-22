@@ -3,15 +3,22 @@ import { describe, expect, it } from "vitest";
 import {
   arrangeCommitments,
   arrangeTriage,
+  autoCloseConfidence,
+  closingClaim,
   formatDay,
   formatInstant,
   nextWeekIso,
   settledBy,
+  settledSummaryLine,
   tomorrowIso,
   triageWatermark,
   workloadSummary,
 } from "./commitmentGroups";
-import type { Commitment, CommitmentItem } from "./useCommitments";
+import type {
+  Commitment,
+  CommitmentEvidence,
+  CommitmentItem,
+} from "./useCommitments";
 
 /*
  * The arrangement IS the design on this surface — which half a row belongs to,
@@ -304,6 +311,20 @@ describe("workloadSummary", () => {
   });
 });
 
+function claim(
+  overrides: Partial<CommitmentEvidence> & Pick<CommitmentEvidence, "evidence_id">,
+): CommitmentEvidence {
+  return {
+    source: "conversation",
+    reference: "n_a1b2c3",
+    confidence: 0.9,
+    observed_at: "2026-08-19T00:00:00Z",
+    ...overrides,
+  };
+}
+
+const AUG_19 = formatInstant("2026-08-19T00:00:00Z");
+
 describe("settledBy", () => {
   it("never leaves a settled row unexplained", () => {
     expect(
@@ -314,20 +335,126 @@ describe("settledBy", () => {
         commitment({ entry_id: "le_2", state: "closed", closed_via: "manual" }),
       ),
     ).toBe("closed by you");
+  });
+
+  it("dates an auto-close from the claim that closed it", () => {
     expect(
       settledBy(
-        commitment({ entry_id: "le_3", state: "closed", closed_via: "github" }),
+        commitment({
+          entry_id: "le_3",
+          state: "closed",
+          closed_via: "conversation",
+          evidence: [claim({ evidence_id: "ev_1" })],
+        }),
       ),
-    ).toBe("closed from GitHub");
+    ).toBe(`closed itself from the ${AUG_19} conversation`);
     expect(
       settledBy(
         commitment({
           entry_id: "le_4",
           state: "closed",
+          closed_via: "github",
+          evidence: [claim({ evidence_id: "ev_2", source: "github" })],
+        }),
+      ),
+    ).toBe(`closed itself from GitHub on ${AUG_19}`);
+  });
+
+  it("still speaks when the closing claim is gone", () => {
+    expect(
+      settledBy(
+        commitment({
+          entry_id: "le_5",
+          state: "closed",
           closed_via: "conversation",
         }),
       ),
-    ).toBe("closed from a conversation");
+    ).toBe("closed itself from a conversation");
+  });
+});
+
+describe("closingClaim", () => {
+  it("takes the newest claim whose source matches the closure", () => {
+    // Claims arrive oldest first, and a commitment can gather several before one
+    // clears the threshold: the last matching claim is the one that spoke.
+    const found = closingClaim(
+      commitment({
+        entry_id: "le_1",
+        state: "closed",
+        closed_via: "conversation",
+        evidence: [
+          claim({ evidence_id: "ev_old", observed_at: "2026-08-12T00:00:00Z" }),
+          claim({ evidence_id: "ev_github", source: "github" }),
+          claim({ evidence_id: "ev_new", observed_at: "2026-08-19T00:00:00Z" }),
+        ],
+      }),
+    );
+    expect(found?.evidence_id).toBe("ev_new");
+  });
+
+  it("is null for a row nothing closed", () => {
+    expect(closingClaim(commitment({ entry_id: "le_2" }))).toBeNull();
+    expect(
+      closingClaim(commitment({ entry_id: "le_3", state: "waived" })),
+    ).toBeNull();
+  });
+
+  it("reports confidence for a pass, never for a person", () => {
+    expect(
+      autoCloseConfidence(
+        commitment({
+          entry_id: "le_4",
+          state: "closed",
+          closed_via: "conversation",
+          evidence: [claim({ evidence_id: "ev_1", confidence: 0.82 })],
+        }),
+      ),
+    ).toBe("82% confident");
+    expect(
+      autoCloseConfidence(
+        commitment({ entry_id: "le_5", state: "closed", closed_via: "manual" }),
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("settledSummaryLine", () => {
+  it("leads with the week's wins and what the app noticed itself", () => {
+    expect(
+      settledSummaryLine({
+        cleared: 5,
+        closed_from_conversation: 2,
+        closed_from_github: 0,
+      }),
+    ).toBe("5 cleared this week, 2 closed themselves from conversation");
+  });
+
+  it("says itself for one and spends the verb once across both sources", () => {
+    expect(
+      settledSummaryLine({
+        cleared: 3,
+        closed_from_conversation: 1,
+        closed_from_github: 1,
+      }),
+    ).toBe("3 cleared this week, 1 closed itself from conversation, 1 from GitHub");
+    expect(
+      settledSummaryLine({
+        cleared: 2,
+        closed_from_conversation: 0,
+        closed_from_github: 2,
+      }),
+    ).toBe("2 cleared this week, 2 closed themselves from GitHub");
+  });
+
+  it("says nothing about a week that cleared nothing", () => {
+    expect(
+      settledSummaryLine({
+        cleared: 0,
+        closed_from_conversation: 0,
+        closed_from_github: 0,
+      }),
+    ).toBeUndefined();
+    expect(settledSummaryLine(null)).toBeUndefined();
   });
 });
 

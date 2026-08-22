@@ -1,8 +1,10 @@
 import { Fragment, useState, type CSSProperties, type ReactNode } from "react";
+import { motion } from "motion/react";
 
 import {
   arrangeCommitments,
   arrangeTriage,
+  autoCloseConfidence,
   commitmentOwner,
   commitmentText,
   formatConfidence,
@@ -11,6 +13,7 @@ import {
   needsReview,
   nextWeekIso,
   settledBy,
+  settledSummaryLine,
   tomorrowIso,
   triageWatermark,
   workloadSummary,
@@ -35,7 +38,10 @@ import {
   waiveCommitment,
   type BulkMutateResult,
   type Commitment,
+  type CommitmentsPayload,
 } from "../../useCommitments";
+import { useReduceMotion } from "../../useReduceMotion";
+import { useTimeout } from "../../useTimeout";
 import { SpiritMark } from "../capture/SpiritMark";
 import { Button } from "../ui/Button";
 import { Checkbox } from "../ui/Checkbox";
@@ -44,6 +50,7 @@ import { Field } from "../ui/Field";
 import { Menu } from "../ui/Menu";
 import { StatusMessage } from "../ui/StatusMessage";
 import { ViewFrame } from "../ui/ViewFrame";
+import { cardVariants, ROW_GAP, slotVariants, VANISH_MS } from "./vanishMotion";
 
 type Props = {
   /** Which ledger to show. `null` is the whole vault. */
@@ -100,6 +107,125 @@ function staggerStyle(position: number): CSSProperties | undefined {
 /** One in-flight write, named so the row that owns it can go busy. */
 type Pending = { entryId: string; verb: string };
 
+/**
+ * THE COMPLETION MOMENT.
+ *
+ * How long the drawn check rests before the card leaves. The check itself lands
+ * in 140ms on the box's own clock; this is the pause after it, so the state
+ * change is finished being stated before the row starts leaving.
+ *
+ * No new move is added to the vocabulary: this is a beat BETWEEN two sanctioned
+ * ones (the press, then Vanish), and 300ms is §4's own number for how long an
+ * in-place state change needs to read as a change rather than a flicker
+ * (docs/DESIGN_SYSTEM.md §4, Morph). Nothing animates during it.
+ *
+ * The reward is deliberately this and the shelf below it, not a flourish: the
+ * one hue that could celebrate is reserved, and Grove stays calm.
+ */
+const SETTLE_BEAT_MS = 300;
+
+/**
+ * A mine row on its way out: the optimistic tick, held together with what the
+ * choreography needs to survive a refetch that outruns it.
+ *
+ * `commitment` is a SNAPSHOT taken at the click. The row keeps rendering from
+ * it after the refetch drops the entry from `entries`, which is the whole
+ * reason this is a map rather than a boolean on the row: the local write
+ * announces itself immediately, so without the snapshot a checked card would
+ * unmount before its beat finished and pop out of the list exactly as it does
+ * today.
+ *
+ * `responseAtClick` is the read the row was ticked against, so the settle
+ * handler can tell "the truth has not arrived yet" from "the truth arrived and
+ * says this is still open".
+ */
+type Departure = {
+  commitment: Commitment;
+  /** The vanish has finished playing; only the refetch is still owed. */
+  settled: boolean;
+  responseAtClick: CommitmentsPayload | null;
+};
+
+/** Shared empty map, so an untouched departure set keeps one identity. */
+const NO_DEPARTURES: ReadonlyMap<string, Departure> = new Map();
+
+/** `departures` minus one id, or the same map when it held none. */
+function withoutDeparture(
+  departures: ReadonlyMap<string, Departure>,
+  entryId: string,
+): ReadonlyMap<string, Departure> {
+  if (!departures.has(entryId)) return departures;
+  const next = new Map(departures);
+  next.delete(entryId);
+  return next;
+}
+
+/**
+ * One mine row's space, and the clock its departure runs on.
+ *
+ * The slot/card split and the variant tables are shared with the Inbox
+ * (`./vanishMotion`): doctrine treats a routed capture leaving under the app's
+ * power and a checked commitment leaving under the user's as ONE move
+ * (docs/DESIGN_SYSTEM.md §4).
+ *
+ * The CSS entrance stays on the inner div, off both motion elements. A filled
+ * (`both`) CSS animation holds its final keyframe at animation-origin priority,
+ * which outranks the inline styles motion writes — put `animate-rise-in` on the
+ * card and the exit would be painted and then immediately overridden, silently.
+ * Entrance and exit therefore live on different elements.
+ */
+function MineSlot({
+  entryId,
+  departing,
+  reduce,
+  stagger,
+  onSettled,
+  children,
+}: {
+  entryId: string;
+  departing: boolean;
+  reduce: boolean;
+  stagger: CSSProperties | undefined;
+  onSettled: (entryId: string) => void;
+  children: ReactNode;
+}) {
+  const [vanishing, setVanishing] = useState(false);
+
+  // The write came back dead and the departure was withdrawn, so the row has to
+  // travel back to rest. Adjust-state-during-render rather than an effect
+  // (`.claude/rules/no-use-effect.md`); motion interrupts its own exit.
+  if (!departing && vanishing) setVanishing(false);
+
+  // The beat, then the vanish. `useTimeout` is the blessed timer, and the state
+  // machine owns the clock rather than an `animationend` listener — there is no
+  // bridge hook for one, and a row that fails to unmount is a worse bug than a
+  // collapse that gets clipped.
+  useTimeout(
+    () => setVanishing(true),
+    departing && !vanishing ? SETTLE_BEAT_MS : null,
+    entryId,
+  );
+  useTimeout(() => onSettled(entryId), vanishing ? VANISH_MS : null, entryId);
+
+  return (
+    <motion.li
+      variants={slotVariants(reduce)}
+      // Rows never motion-enter: the CSS rise-in below owns arrival, and this
+      // element must start at its resting values rather than animating to them.
+      initial={false}
+      animate={vanishing ? "gone" : "rest"}
+      style={{ marginBottom: ROW_GAP }}
+      data-vanishing={vanishing || undefined}
+    >
+      <motion.div variants={cardVariants(reduce)} className="min-h-0">
+        <div className={`${MINE_CARD} ${RISES_IN}`} style={stagger}>
+          {children}
+        </div>
+      </motion.div>
+    </motion.li>
+  );
+}
+
 /** The commitments enrolled since the marker, frozen at this mount's first
  * read. `lastSeen` is kept beside them so the arrangement can re-apply the cut
  * it was built from rather than a marker the review has since moved. */
@@ -148,8 +274,15 @@ function pruneIds(
  */
 export function CommitmentsView({ slug }: Props) {
   const { navigate } = useNavigation();
-  const { entries, settled, response, loading, error } = useCommitments(slug);
+  const { entries, settled, settledSummary, response, loading, error } =
+    useCommitments(slug);
+  // Read here rather than leaning on `MotionConfig`: that setting drops
+  // transforms and keeps opacity, but it does NOT turn off an animated height
+  // or filter, and this list animates both (docs/UI_CONVENTIONS.md §3).
+  const reduce = useReduceMotion();
   const [pending, setPending] = useState<Pending | null>(null);
+  const [departing, setDeparting] =
+    useState<ReadonlyMap<string, Departure>>(NO_DEPARTURES);
   const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
   const [showSnoozed, setShowSnoozed] = useState(false);
   const [showSettled, setShowSettled] = useState(false);
@@ -202,10 +335,34 @@ export function CommitmentsView({ slug }: Props) {
     }
     // A selection may not outlive the rows it named.
     setSelectedIds((ids) => pruneIds(ids, live));
+    // Departures are pruned on a different rule from everything above, and the
+    // asymmetry is the point: a row whose vanish has FINISHED is retired here,
+    // either because the truth agrees it is gone or because the truth says it
+    // is still open and the write is no longer in flight. A row still mid-
+    // choreography is KEPT even though the refetch has already dropped it —
+    // that snapshot is the only thing holding the card on screen long enough to
+    // be seen leaving, which is the whole deliverable.
+    const stillOpen = new Set(entries.map((commitment) => commitment.entry_id));
+    setDeparting((departures) => {
+      const kept = [...departures].filter(
+        ([entryId, departure]) =>
+          !departure.settled ||
+          (stillOpen.has(entryId) && pending?.entryId === entryId),
+      );
+      return kept.length === departures.size ? departures : new Map(kept);
+    });
   }
 
+  // Rows the refetch has already dropped but whose choreography is still
+  // playing, rendered from the snapshot taken at the click. They sort back into
+  // the positions they held (same data, same key), so React keeps the element
+  // and the entrance never replays under the exit.
+  const liveIds = new Set(entries.map((commitment) => commitment.entry_id));
+  const held = [...departing.values()]
+    .filter((departure) => !liveIds.has(departure.commitment.entry_id))
+    .map((departure) => departure.commitment);
   const { groups, snoozed, settled: settledRows } = arrangeCommitments(
-    entries,
+    held.length === 0 ? entries : [...entries, ...held],
     settled,
   );
   const isEmpty =
@@ -359,18 +516,77 @@ export function CommitmentsView({ slug }: Props) {
   const toggleDone = (commitment: Commitment, done: boolean) => {
     const item = commitment.item;
     if (!item) return;
+    // The MOTION is optimistic where the state is not, and the split is
+    // deliberate. Clearing something you owe is the one gesture in the app that
+    // should answer instantly, so the card starts leaving on the click; the
+    // ledger still gets the last word a moment later, and a write that fails
+    // withdraws the departure below and travels the row back.
+    //
+    // Only a mine row being CHECKED departs: unticking is not a disposal, and
+    // the theirs plane is a register rather than a queue (its rows are flat
+    // hairlines, and collapsing one under a border chain is a different
+    // design question).
+    const departs = done && commitment.direction === "mine";
+    if (departs) {
+      setDeparting((departures) => {
+        const next = new Map(departures);
+        next.set(commitment.entry_id, {
+          commitment,
+          settled: false,
+          responseAtClick: response ?? null,
+        });
+        return next;
+      });
+    }
     void run(
       commitment,
       "done",
       "Couldn't update this commitment. Its note is unchanged; try again.",
-      () =>
-        setCommitmentDone({
-          entry_id: commitment.entry_id,
-          note_id: item.note_id,
-          item_id: item.item_id,
-          done,
-        }),
+      async () => {
+        try {
+          return await setCommitmentDone({
+            entry_id: commitment.entry_id,
+            note_id: item.note_id,
+            item_id: item.item_id,
+            done,
+          });
+        } catch (err) {
+          // Withdraw the departure before `run` records the error, so the row
+          // is already travelling back when the message appears under it.
+          if (departs) {
+            setDeparting((departures) =>
+              withoutDeparture(departures, commitment.entry_id),
+            );
+          }
+          throw err;
+        }
+      },
     );
+  };
+
+  /** A row has finished vanishing: retire it, or hand it back to the truth. */
+  const settleDeparture = (entryId: string) => {
+    setDeparting((departures) => {
+      const departure = departures.get(entryId);
+      if (!departure) return departures;
+      const stillOpen = entries.some(
+        (commitment) => commitment.entry_id === entryId,
+      );
+      // Gone from the live read: the snapshot has done its job and the row
+      // unmounts silently at its `gone` values, with the shelf below already
+      // showing where it went.
+      if (!stillOpen) return withoutDeparture(departures, entryId);
+      // Still open, and a read has landed since the click that says so: the
+      // ledger disagrees with the tick, so the row comes back rather than
+      // sitting collapsed on a lie.
+      const answered =
+        response !== departure.responseAtClick && pending?.entryId !== entryId;
+      if (answered) return withoutDeparture(departures, entryId);
+      // The write is slow. Hold the collapsed slot until the refetch lands.
+      const next = new Map(departures);
+      next.set(entryId, { ...departure, settled: true });
+      return next;
+    });
   };
 
   const snooze = (commitment: Commitment, until: string) =>
@@ -469,6 +685,9 @@ export function CommitmentsView({ slug }: Props) {
   const rowProps = (commitment: Commitment) => ({
     commitment,
     pending,
+    /** Ticked here and still leaving: the row states the change on its own
+     * while the write is in flight, rather than waiting to be told. */
+    optimisticDone: departing.has(commitment.entry_id),
     error: rowErrors[commitment.entry_id],
     showProject: slug === null,
     onToggle: toggleDone,
@@ -543,26 +762,38 @@ export function CommitmentsView({ slug }: Props) {
                       <span> · {group.rows.length}</span>
                     </p>
                     <ul
-                      className={
-                        group.direction === "mine"
-                          ? "flex flex-col gap-3.5"
-                          : "flex flex-col"
-                      }
+                      // No flex `gap` on the mine list: each slot carries the
+                      // 14px as a margin it can collapse with itself, because a
+                      // gap cannot collapse (see `ROW_GAP`).
+                      className="flex flex-col"
                       data-testid={`commitments-${group.direction}`}
                     >
-                      {group.rows.map((commitment, rowIndex) => (
-                        <li
-                          key={commitment.entry_id}
-                          className={`${
-                            group.direction === "mine" ? MINE_CARD : WATCH_ROW
-                          } ${RISES_IN}`}
-                          style={staggerStyle(
-                            staggerPosition(groups, groupIndex, rowIndex),
-                          )}
-                        >
-                          <CommitmentRow {...rowProps(commitment)} />
-                        </li>
-                      ))}
+                      {group.rows.map((commitment, rowIndex) =>
+                        group.direction === "mine" ? (
+                          <MineSlot
+                            key={commitment.entry_id}
+                            entryId={commitment.entry_id}
+                            departing={departing.has(commitment.entry_id)}
+                            reduce={reduce}
+                            stagger={staggerStyle(
+                              staggerPosition(groups, groupIndex, rowIndex),
+                            )}
+                            onSettled={settleDeparture}
+                          >
+                            <CommitmentRow {...rowProps(commitment)} />
+                          </MineSlot>
+                        ) : (
+                          <li
+                            key={commitment.entry_id}
+                            className={`${WATCH_ROW} ${RISES_IN}`}
+                            style={staggerStyle(
+                              staggerPosition(groups, groupIndex, rowIndex),
+                            )}
+                          >
+                            <CommitmentRow {...rowProps(commitment)} />
+                          </li>
+                        ),
+                      )}
                     </ul>
                   </Fragment>
                 ))}
@@ -605,6 +836,7 @@ export function CommitmentsView({ slug }: Props) {
             <Shelf
               label="Settled"
               count={settledRows.length}
+              summary={settledSummaryLine(settledSummary)}
               open={showSettled}
               onToggle={() => setShowSettled((open) => !open)}
               testId="settled-commitments"
@@ -613,9 +845,15 @@ export function CommitmentsView({ slug }: Props) {
                 <li key={commitment.entry_id} className={WATCH_ROW}>
                   <ShelfRow
                     commitment={commitment}
-                    // Never silent: an entry an evidence pass closed on its own
-                    // says who closed it, right beside the undo.
-                    meta={settledBy(commitment)}
+                    // Never silent: an entry an evidence pass closed on its
+                    // own says so in the active voice, dated from the claim
+                    // that closed it, with how sure it was beside it.
+                    meta={[
+                      settledBy(commitment),
+                      autoCloseConfidence(commitment),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
                     evidence={commitment.evidence[0]?.reference ?? null}
                     actionLabel="Reopen"
                     busy={
@@ -852,6 +1090,9 @@ function staggerPosition(
 type RowProps = {
   commitment: Commitment;
   pending: Pending | null;
+  /** Ticked on this screen and still on its way out, before the write has been
+   * confirmed. The row states the change itself for as long as that is true. */
+  optimisticDone?: boolean;
   error?: string;
   showProject: boolean;
   onToggle: (commitment: Commitment, done: boolean) => void;
@@ -877,6 +1118,7 @@ type RowProps = {
 function CommitmentRow({
   commitment,
   pending,
+  optimisticDone = false,
   error,
   showProject,
   onToggle,
@@ -894,6 +1136,10 @@ function CommitmentRow({
   const otherRowBusy = pending !== null && !busy;
   const text = commitmentText(commitment);
   const item = commitment.item;
+  // What the row SAYS it is, which leads the ledger by the length of one
+  // choreography: the check is drawn and the title struck the moment the box is
+  // clicked, and the write reconciles behind it.
+  const done = (item?.done ?? false) || optimisticDone;
   const review = needsReview(commitment);
   const claim = commitment.evidence[0];
   // Fresh says nothing: it is the absence of a problem, and a row that reads
@@ -918,8 +1164,11 @@ function CommitmentRow({
           <Checkbox
             hideLabel
             label={`Mark "${text}" done`}
-            checked={item?.done ?? false}
-            busy={busy && pending?.verb === "done"}
+            checked={done}
+            // Inert for the whole departure, not just the write: a box that
+            // could be clicked again mid-vanish would ask the ledger to undo
+            // something the screen is still finishing saying.
+            busy={(busy && pending?.verb === "done") || optimisticDone}
             // A commitment whose source line is gone has no box to tick. The
             // ledger still holds it, which is the entire reason it is here.
             disabled={!item || otherRowBusy}
@@ -937,7 +1186,7 @@ function CommitmentRow({
         >
           <span
             className={`block text-[14.5px] font-semibold ${
-              item?.done ? "text-ink-dim line-through" : "text-ink"
+              done ? "text-ink-dim line-through" : "text-ink"
             }`}
           >
             {text}
@@ -1211,6 +1460,9 @@ function ShelfRow({
 type ShelfProps = {
   label: string;
   count: number;
+  /** A sentence the shelf leads with, read whether or not it is open. Omit it
+   * where the shelf has nothing to claim. */
+  summary?: string;
   open: boolean;
   onToggle: () => void;
   testId: string;
@@ -1219,18 +1471,39 @@ type ShelfProps = {
 
 /** A collapsed register below the live groups. One disclosure per section,
  * never nested (docs/UI_CONVENTIONS.md §5). */
-function Shelf({ label, count, open, onToggle, testId, children }: ShelfProps) {
+function Shelf({
+  label,
+  count,
+  summary,
+  open,
+  onToggle,
+  testId,
+  children,
+}: ShelfProps) {
   return (
     <div className="mt-[22px]">
-      <Button
-        variant="quiet"
-        aria-expanded={open}
-        data-testid={`show-${testId}`}
-        onClick={onToggle}
-      >
-        {label}
-        <span className="text-ink-faint"> · {count}</span>
-      </Button>
+      <div className="flex flex-wrap items-baseline gap-x-3">
+        <Button
+          variant="quiet"
+          aria-expanded={open}
+          data-testid={`show-${testId}`}
+          onClick={onToggle}
+        >
+          {label}
+          <span className="text-ink-faint"> · {count}</span>
+        </Button>
+        {summary && (
+          // Beside the disclosure rather than inside it, and visible while the
+          // shelf is shut: the win is the thing worth reading, and it should
+          // not be something you have to open a drawer to find.
+          //
+          // `ink-dim`, not the meta line's faint: faint is a metadata register,
+          // and the moment it carries a sentence a person is meant to read it
+          // is the wrong token (docs/DESIGN_SYSTEM.md §6). Static text, because
+          // a number that updates in place does not count up (§4).
+          <p className="text-[12px] text-ink-dim">{summary}</p>
+        )}
+      </div>
       {open && (
         <ul className="mt-4 flex flex-col" data-testid={testId}>
           {children}

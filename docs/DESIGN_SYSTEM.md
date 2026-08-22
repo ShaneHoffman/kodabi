@@ -245,7 +245,7 @@ Every view answers four questions, and a view that answers only the first is unf
 | --- | --- | --- | --- |
 | **Press** | 140ms | `ease-out-strong` | Every pressable thing (§2) |
 | **Exit** | 110–130ms | `ease` | Anything leaving: menus, dialogs, toasts |
-| **Vanish** | 220ms card, inside a 280ms collapse | `ease-in-out-strong` | A row leaving a working list under its own power: the Inbox's routed capture |
+| **Vanish** | 220ms card, inside a 280ms collapse | `ease-in-out-strong` | A row leaving a working list under its own power: the Inbox's routed capture, and a commitment checked off in Commitments |
 | **Materialize** | 220ms | `ease-out-strong` | A surface arriving: menu, dialog, toast |
 | **Rise-in** | 280ms, 45ms stagger | `ease-out-strong` | A list of rows appearing |
 | **Morph** | 300ms | `ease-out-strong` | A surface that stays put and changes what it means: the listen pill going on air, the kodama's core taking the green |

@@ -105,10 +105,23 @@ export type Commitment = {
   evidence: CommitmentEvidence[];
 };
 
+/** Mirrors `ledger_cmds::SettledSummaryDto`: what the settled window cleared.
+ *
+ * Counted over the whole seven days before the shelf was capped, so the
+ * sentence stays true on a week that settled more than the shelf shows. */
+export type SettledSummary = {
+  /** Closed or waived. Untracked is excluded: leaving the working set is a
+   * filing correction, not a win. */
+  cleared: number;
+  closed_from_conversation: number;
+  closed_from_github: number;
+};
+
 /** Mirrors `ledger_cmds::CommitmentsDto`. */
 export type CommitmentsPayload = {
   entries: Commitment[];
   settled: Commitment[];
+  settled_summary: SettledSummary;
   /** When the user last reviewed newly enrolled commitments, RFC 3339 UTC.
    * The triage strip lists entries whose `created_at` sorts above it.
    *
@@ -154,6 +167,11 @@ export function listCommitments(
   project: string | null,
 ): Promise<CommitmentsPayload> {
   return invoke<CommitmentsPayload>("list_commitments", { project });
+}
+
+/** How many commitments are on the user, outstanding, across the whole vault. */
+export function countMyCommitments(): Promise<number> {
+  return invoke<number>("count_my_commitments");
 }
 
 /** Ticks or unticks the source note's checkbox and records the judgement. */
@@ -315,6 +333,7 @@ export function useCommitments(slug: string | null) {
   return {
     entries: data?.entries ?? [],
     settled: data?.settled ?? [],
+    settledSummary: data?.settled_summary ?? null,
     lastSeen: data?.last_seen ?? null,
     /** The response object itself, for pruning per-row state during render:
      * key on this, never on a derived array, whose identity changes every
@@ -323,4 +342,21 @@ export function useCommitments(slug: string | null) {
     loading,
     error,
   };
+}
+
+/**
+ * The dock row's count: the user's own outstanding commitments.
+ *
+ * Mounted for the whole session, so it rides the same bus every other vault
+ * read does. Both signals that can change the number are already relayed onto
+ * it at the shell root (`vault:changed` for a ticked box, `ledger:changed` for
+ * a judgement), so this needs no subscription of its own.
+ *
+ * Loading and failure both read as `null`: the row goes quiet rather than
+ * apologising in a nav list, and the Commitments view itself is where a broken
+ * ledger says so.
+ */
+export function useMyCommitmentsCount(): number | null {
+  const { data } = useVaultQuery(useCallback(() => countMyCommitments(), []));
+  return data;
 }
