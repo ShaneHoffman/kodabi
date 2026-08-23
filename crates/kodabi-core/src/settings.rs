@@ -152,6 +152,11 @@ pub struct LedgerSettings {
     /// `EntryState::NeedsReview` with the evidence attached, for a human to
     /// confirm or dismiss. Clamped to `0.0..=1.0` where it is read.
     pub conversation_autoclose: f64,
+    /// Days a commitment someone *else* owes may go unmentioned before the
+    /// daily digest raises it (`ledger::digest`). Separate from the aging
+    /// thresholds, and usually shorter: those ask whether you have forgotten
+    /// something, this asks whether it is time to go and ask about it.
+    pub quiet_after_days: NonZeroU32,
 }
 
 impl Default for LedgerSettings {
@@ -160,6 +165,7 @@ impl Default for LedgerSettings {
             aging_after_days: nonzero(crate::ledger::DEFAULT_AGING_AFTER_DAYS),
             stale_after_days: nonzero(crate::ledger::DEFAULT_STALE_AFTER_DAYS),
             conversation_autoclose: crate::ledger::DEFAULT_CONVERSATION_AUTOCLOSE,
+            quiet_after_days: nonzero(crate::ledger::DEFAULT_QUIET_AFTER_DAYS),
         }
     }
 }
@@ -667,7 +673,7 @@ mod tests {
         let json = serde_json::to_string(&Settings::default()).unwrap();
         assert_eq!(
             json,
-            r#"{"consent_acknowledged":false,"retention":{"policy":"keep_all"},"overlay":{"manual_captures":false,"auto_captures":true},"appearance":{"theme":"system"},"mic_check":null,"ledger":{"aging_after_days":14,"stale_after_days":30,"conversation_autoclose":0.8},"categories":{"standup":{"enrollment_default":null},"one_on_one":{"enrollment_default":null},"client":{"enrollment_default":null},"working_session":{"enrollment_default":null},"review":{"enrollment_default":null},"all_hands":{"enrollment_default":null},"observer":{"enrollment_default":null}},"identity":{"display_name":"","aliases":[]}}"#
+            r#"{"consent_acknowledged":false,"retention":{"policy":"keep_all"},"overlay":{"manual_captures":false,"auto_captures":true},"appearance":{"theme":"system"},"mic_check":null,"ledger":{"aging_after_days":14,"stale_after_days":30,"conversation_autoclose":0.8,"quiet_after_days":10},"categories":{"standup":{"enrollment_default":null},"one_on_one":{"enrollment_default":null},"client":{"enrollment_default":null},"working_session":{"enrollment_default":null},"review":{"enrollment_default":null},"all_hands":{"enrollment_default":null},"observer":{"enrollment_default":null}},"identity":{"display_name":"","aliases":[]}}"#
         );
 
         let keep = serde_json::to_string(&Settings {
@@ -694,7 +700,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             keep,
-            r#"{"consent_acknowledged":true,"retention":{"policy":"keep_days","days":30},"overlay":{"manual_captures":true,"auto_captures":false},"appearance":{"theme":"dark"},"mic_check":{"outcome":"speakers","echo_db":12.5,"delay_ms":85.0,"measured_at":"2026-07-22T00:48:18Z"},"ledger":{"aging_after_days":14,"stale_after_days":30,"conversation_autoclose":0.8},"categories":{"standup":{"enrollment_default":null},"one_on_one":{"enrollment_default":null},"client":{"enrollment_default":null},"working_session":{"enrollment_default":null},"review":{"enrollment_default":null},"all_hands":{"enrollment_default":null},"observer":{"enrollment_default":null}},"identity":{"display_name":"","aliases":[]}}"#
+            r#"{"consent_acknowledged":true,"retention":{"policy":"keep_days","days":30},"overlay":{"manual_captures":true,"auto_captures":false},"appearance":{"theme":"dark"},"mic_check":{"outcome":"speakers","echo_db":12.5,"delay_ms":85.0,"measured_at":"2026-07-22T00:48:18Z"},"ledger":{"aging_after_days":14,"stale_after_days":30,"conversation_autoclose":0.8,"quiet_after_days":10},"categories":{"standup":{"enrollment_default":null},"one_on_one":{"enrollment_default":null},"client":{"enrollment_default":null},"working_session":{"enrollment_default":null},"review":{"enrollment_default":null},"all_hands":{"enrollment_default":null},"observer":{"enrollment_default":null}},"identity":{"display_name":"","aliases":[]}}"#
         );
     }
 
@@ -988,6 +994,7 @@ mod tests {
                 aging_after_days: NonZeroU32::new(7).unwrap(),
                 stale_after_days: NonZeroU32::new(21).unwrap(),
                 conversation_autoclose: 0.95,
+                quiet_after_days: NonZeroU32::new(5).unwrap(),
             },
             ..Settings::default()
         };
@@ -1016,6 +1023,35 @@ policy = \"keep_all\"
         let loaded = load_or_create(&path).unwrap();
         assert!(loaded.consent_acknowledged);
         assert_eq!(loaded.ledger, LedgerSettings::default());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_ledger_table_written_before_the_quiet_threshold_keeps_its_other_values() {
+        // The upgrade path an existing install actually takes: the `[ledger]`
+        // table is already there and tuned, and only the newest field is
+        // missing. `#[serde(default)]` is per-field, so the tuned values must
+        // survive rather than the whole table falling back to defaults.
+        let dir = temp_dir("ledger-quiet-absent");
+        let path = dir.join("settings.toml");
+        fs::write(
+            &path,
+            "[ledger]
+aging_after_days = 7
+stale_after_days = 21
+conversation_autoclose = 0.95
+",
+        )
+        .unwrap();
+
+        let loaded = load_or_create(&path).unwrap().ledger;
+        assert_eq!(loaded.aging_after_days, NonZeroU32::new(7).unwrap());
+        assert_eq!(loaded.stale_after_days, NonZeroU32::new(21).unwrap());
+        assert_eq!(
+            loaded.quiet_after_days,
+            LedgerSettings::default().quiet_after_days
+        );
 
         fs::remove_dir_all(&dir).unwrap();
     }

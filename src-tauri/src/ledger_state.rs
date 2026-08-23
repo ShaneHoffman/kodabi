@@ -179,6 +179,18 @@ pub struct MutateManyReply {
     pub skipped: Vec<(String, ledger::LedgerError)>,
 }
 
+/// What the ledger remembers about the daily digest, read as one answer.
+///
+/// Both halves are `Option` and independently so: `last_run` absent means the
+/// digest has never run on this device, while a `last_run` with no `payload`
+/// means it ran and found nothing worth reporting. The command tells those
+/// apart, and they mean different things to a first launch.
+#[derive(Debug, Default)]
+pub struct DigestState {
+    pub last_run: Option<String>,
+    pub payload: Option<String>,
+}
+
 /// A unit of work for the ledger worker.
 enum LedgerJob {
     /// Reconcile one note's items after an in-app write.
@@ -232,6 +244,26 @@ enum LedgerJob {
     /// ever held. Everything already enrolled counts as seen; only what arrives
     /// afterwards is new.
     SeedTriageMarker,
+    /// Read the daily digest's two keys together: the marker saying when it
+    /// last ran, and the digest that run produced.
+    ///
+    /// One job rather than two because the pair is only meaningful together —
+    /// a marker read separately from its payload could be answered either side
+    /// of a [`LedgerJob::StoreDigest`] and describe two different days.
+    DigestState {
+        reply: Sender<ledger::Result<DigestState>>,
+    },
+    /// Record a digest run: store what it produced, then advance the marker.
+    ///
+    /// In that order on purpose. The marker is what makes a digest not run
+    /// again today, so advancing it first would mean a crash in between left
+    /// the day marked done with nothing to show for it. Storing first can at
+    /// worst recompute, which is idempotent.
+    StoreDigest {
+        run_at: String,
+        payload: String,
+        reply: Sender<ledger::Result<()>>,
+    },
     /// Sync a freshly distilled note and apply what its conversation said
     /// about commitments the ledger already held.
     DistillFollowUp {
@@ -449,6 +481,25 @@ impl LedgerClient {
     ) -> std::result::Result<(), LedgerCallError> {
         self.request(|reply| LedgerJob::MarkTriageSeen {
             seen_through,
+            reply,
+        })
+    }
+
+    /// The daily digest's marker and stored payload, read together.
+    pub fn digest_state(&self) -> std::result::Result<DigestState, LedgerCallError> {
+        self.request(|reply| LedgerJob::DigestState { reply })
+    }
+
+    /// Records a digest run: the payload it produced, then the marker saying
+    /// the day is done.
+    pub fn store_digest(
+        &self,
+        run_at: String,
+        payload: String,
+    ) -> std::result::Result<(), LedgerCallError> {
+        self.request(|reply| LedgerJob::StoreDigest {
+            run_at,
+            payload,
             reply,
         })
     }
@@ -966,6 +1017,26 @@ fn handle_job(
                 Err(err) => eprintln!("ledger could not read the triage marker: {err}"),
             }
             // Viewing state, not a commitment: nothing to announce.
+        }
+        LedgerJob::DigestState { reply } => {
+            let state = ledger
+                .meta_get(ledger::DIGEST_LAST_RUN_KEY)
+                .and_then(|last_run| {
+                    ledger
+                        .meta_get(ledger::DIGEST_PAYLOAD_KEY)
+                        .map(|payload| DigestState { last_run, payload })
+                });
+            let _ = reply.send(state);
+        }
+        LedgerJob::StoreDigest {
+            run_at,
+            payload,
+            reply,
+        } => {
+            let stored = ledger
+                .meta_set(ledger::DIGEST_PAYLOAD_KEY, &payload)
+                .and_then(|()| ledger.meta_advance(ledger::DIGEST_LAST_RUN_KEY, &run_at));
+            let _ = reply.send(stored);
         }
         LedgerJob::TrackItem { request, reply } => {
             let now = now_utc();

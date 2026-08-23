@@ -54,13 +54,16 @@ export type MicCheckResult = MicCheckOutcome & {
 };
 
 /** Mirrors `LedgerSettings` in `crates/kodabi-core/src/settings.rs`: when an
- * untouched commitment reads as aging then stale, and how sure a conversation
- * has to be before a completion claim closes one without asking. */
+ * untouched commitment reads as aging then stale, how sure a conversation has
+ * to be before a completion claim closes one without asking, and how long
+ * something you are waiting on may go unmentioned before the digest says so. */
 export type LedgerSettings = {
   aging_after_days: number;
   stale_after_days: number;
   /** 0..1. At or below this a claim parks for review instead of closing. */
   conversation_autoclose: number;
+  /** Days of silence before the daily digest raises a commitment of theirs. */
+  quiet_after_days: number;
 };
 
 /** Mirrors `CategoryPrefs` in `crates/kodabi-core/src/settings.rs`.

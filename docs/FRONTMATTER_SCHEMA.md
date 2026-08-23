@@ -36,7 +36,7 @@ Canonical key order the writer emits: **`id, type, category, tracking, title, pr
 | `project` | string | yes | A project name; the sentinel `Inbox` when unrouted |
 | `date` | string (ISO 8601) | yes | Timestamp with offset when a time is known (`2026-07-09T14:00:00-07:00`); date-only (`2026-07-11`) otherwise |
 | `tags` | list of strings | no | Lowercase kebab-case, no leading `#`; omit the key entirely when there are no tags |
-| `source` | string | yes | A keyword — `transcript` \| `quick-capture` \| `chat` \| `import` \| `manual` — **or** a repo-relative path to the raw artifact when one exists |
+| `source` | string | yes | A keyword — `transcript` \| `quick-capture` \| `chat` \| `import` \| `manual` \| `digest` — **or** a repo-relative path to the raw artifact when one exists |
 | `confidence` | float | conditional | `0.0`–`1.0`, the routing score |
 | `category_confidence` | float | conditional | `0.0`–`1.0`, how strongly the classifier backed `category`. Requires `category`; **removed** when a person sets the category by hand |
 
@@ -100,9 +100,11 @@ Canonical key order the writer emits: **`id, type, category, tracking, title, pr
   scheme in [`FILENAME_SCHEME.md`](FILENAME_SCHEME.md), so simultaneous capture on two devices
   never collides. When no raw artifact exists — a quick-capture note, an imported file, a
   hand-written note — `source` falls back to the closest keyword. Disambiguation rule: a value
-  **exactly equal** to one of the five keywords (`transcript` | `quick-capture` | `chat` | `import`
-  | `manual`) is that keyword; anything else is a repo-relative raw-artifact path (which may not be
-  absolute). A path-valued `source` is best-effort traceback only: the retention policy may have
+  **exactly equal** to one of the six keywords (`transcript` | `quick-capture` | `chat` | `import`
+  | `manual` | `digest`) is that keyword; anything else is a repo-relative raw-artifact path (which
+  may not be absolute). `digest` is the app writing for itself: the daily commitment digest
+  (`ledger::digest`), which is derived from the ledger rather than captured or typed, and says so
+  rather than claiming a person wrote it. A path-valued `source` is best-effort traceback only: the retention policy may have
   since pruned the referenced raw artifact, so a reader must tolerate a `source` path that no longer
   resolves (the MCP `get_meeting_transcript` tool reports this as `transcript_available: false` — see
   [`MCP_TOOL_SURFACE.md`](MCP_TOOL_SURFACE.md)).
@@ -293,8 +295,19 @@ Its **body** matches a meeting's too. The chat pass shares the meeting pass's re
 distilled chat carries the same `# Summary` / `## Decisions` / `## Action items` / `## Open
 questions` scaffolding (each section omitted when empty), and its decisions and action items are
 parsed back out into the index like a meeting's — so a commitment made in a chat reaches
-`list_outstanding_items` and `get_note`'s `action_items`. A hand-filed note (`type: note`) is not
-parsed this way: its body is stored verbatim, so a checkbox in it is prose, not a tracked item.
+`list_outstanding_items` and `get_note`'s `action_items`.
+
+A hand-filed note (`type: note`) is parsed by a **different** grammar, not left unparsed. The
+plain-checkbox grammar (`kodabi-core`'s `meeting::parse_body`) takes every `- [ ]` / `- [x]` line
+in the body — **wherever it sits, with no `## Action items` heading required** — as one of the
+user's own action items: owner `You`, no due date, always firm. That is deliberate, because quick
+capture writes free text with no headings at all, and requiring a heading would exclude exactly the
+notes the grammar exists for. It has two consequences worth stating, because both have caught
+code: a `## Action items` heading in a plain note means nothing (the grammar has no sections), and
+`tracking: context-only` does not suppress these items, since it gates only what someone *else*
+owns and every plain-note item is self-owned. Anything the app writes as a `type: note` must
+therefore render list items as plain `- ` bullets unless it really does intend to create
+commitments — which is why the daily digest (`ledger::digest`) never renders a checkbox.
 
 The `source` path is the chat transcript under `chats/`, written by the chat view one JSONL record
 per turn. Unlike the `sessions/` scheme it carries no title slug — a chat is named only by when it

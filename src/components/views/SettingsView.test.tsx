@@ -64,7 +64,7 @@ const DEFAULTS: Settings = {
   overlay: { manual_captures: false, auto_captures: true },
   appearance: { theme: "system" },
   mic_check: null,
-  ledger: { aging_after_days: 14, stale_after_days: 30, conversation_autoclose: 0.8 },
+  ledger: { aging_after_days: 14, stale_after_days: 30, conversation_autoclose: 0.8, quiet_after_days: 10 },
   categories: {
     standup: { enrollment_default: null },
     one_on_one: { enrollment_default: null },
@@ -965,7 +965,7 @@ describe("SettingsView About card", () => {
     const user = userEvent.setup();
     const stored: Settings = {
       ...DEFAULTS,
-      ledger: { aging_after_days: 7, stale_after_days: 30, conversation_autoclose: 0.8 },
+      ledger: { aging_after_days: 7, stale_after_days: 30, conversation_autoclose: 0.8, quiet_after_days: 10 },
     };
     onCommand("set_ledger_tuning", () => stored);
     await renderSeeded();
@@ -974,10 +974,10 @@ describe("SettingsView About card", () => {
     await user.clear(aging);
     await user.type(aging, "7{Enter}");
 
-    // The three go together: the backend takes one struct, and the two day
+    // They go together: the backend takes one struct, and the two day
     // thresholds are read against each other.
     expect(invoke).toHaveBeenCalledWith("set_ledger_tuning", {
-      ledger: { aging_after_days: 7, stale_after_days: 30, conversation_autoclose: 0.8 },
+      ledger: { aging_after_days: 7, stale_after_days: 30, conversation_autoclose: 0.8, quiet_after_days: 10 },
     });
     expect(await screen.findByRole("status")).toHaveTextContent("Saved.");
   });
@@ -986,7 +986,7 @@ describe("SettingsView About card", () => {
     const user = userEvent.setup();
     const stored: Settings = {
       ...DEFAULTS,
-      ledger: { aging_after_days: 14, stale_after_days: 30, conversation_autoclose: 0.95 },
+      ledger: { aging_after_days: 14, stale_after_days: 30, conversation_autoclose: 0.95, quiet_after_days: 10 },
     };
     onCommand("set_ledger_tuning", () => stored);
     await renderSeeded();
@@ -998,8 +998,28 @@ describe("SettingsView About card", () => {
     await user.type(confidence, "95{Enter}");
 
     expect(invoke).toHaveBeenCalledWith("set_ledger_tuning", {
-      ledger: { aging_after_days: 14, stale_after_days: 30, conversation_autoclose: 0.95 },
+      ledger: { aging_after_days: 14, stale_after_days: 30, conversation_autoclose: 0.95, quiet_after_days: 10 },
     });
+  });
+
+  it("saves the digest's gone-quiet threshold with the rest of the group", async () => {
+    const user = userEvent.setup();
+    const stored: Settings = {
+      ...DEFAULTS,
+      ledger: { ...DEFAULTS.ledger, quiet_after_days: 5 },
+    };
+    onCommand("set_ledger_tuning", () => stored);
+    await renderSeeded();
+
+    const quiet = screen.getByRole("spinbutton", { name: "Days before gone quiet" });
+    await user.clear(quiet);
+    await user.type(quiet, "5{Enter}");
+
+    // One struct for the whole card, so the other three ride along unchanged.
+    expect(invoke).toHaveBeenCalledWith("set_ledger_tuning", {
+      ledger: { aging_after_days: 14, stale_after_days: 30, conversation_autoclose: 0.8, quiet_after_days: 5 },
+    });
+    expect(await screen.findByRole("status")).toHaveTextContent("Saved.");
   });
 
   it("does not write when a commitment field is committed unchanged", async () => {

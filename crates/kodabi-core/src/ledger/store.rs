@@ -1089,12 +1089,49 @@ impl Ledger {
         )?;
         Ok(())
     }
+
+    /// Sets one `ledger_meta` value outright, whatever was there before.
+    ///
+    /// The complement of [`Ledger::meta_advance`], for the keys that hold a
+    /// *value* rather than a watermark. A marker is monotonic because it
+    /// answers "how far have we got", and two readers must not rewind each
+    /// other; a stored payload — today's computed digest, say — answers "what
+    /// is it now", and each answer replaces the last. Under `max` a payload
+    /// would be compared as text and the alphabetically larger one would win,
+    /// which is meaningless.
+    ///
+    /// Marks nothing dirty, for the same reason [`Ledger::meta_advance`] does
+    /// not: `ledger_meta` is device-local state that reaches no snapshot.
+    pub fn meta_set(&mut self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO ledger_meta (key, value) VALUES (?1, ?2)
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
 }
 
 /// The `ledger_meta` key holding the instant the user last reviewed newly
 /// enrolled commitments. The triage strip lists entries whose `created_at`
 /// sorts above it.
 pub const TRIAGE_LAST_SEEN_KEY: &str = "triage_last_seen";
+
+/// The `ledger_meta` key holding the instant the daily digest last ran.
+///
+/// A watermark, so it is written through [`Ledger::meta_advance`]: the local
+/// day it falls on is what decides whether a digest is due, and two windows
+/// racing to compute one must not walk it backwards into computing a second.
+pub const DIGEST_LAST_RUN_KEY: &str = "digest_last_run";
+
+/// The `ledger_meta` key holding the digest that run produced, as JSON.
+///
+/// Stored rather than recomputed so the card shows the same list all day: the
+/// digest is a statement about a moment ("what changed since yesterday"), and
+/// re-deriving it at 4pm against a marker already advanced to this morning
+/// would correctly return nothing, blanking the card mid-day. Written through
+/// [`Ledger::meta_set`], being a value and not a watermark.
+pub const DIGEST_PAYLOAD_KEY: &str = "digest_last";
 
 /// Whether `value` is a `YYYY-MM-DD` calendar day.
 fn is_calendar_day(value: &str) -> bool {
@@ -1391,6 +1428,64 @@ mod tests {
 
         ledger
             .meta_advance(TRIAGE_LAST_SEEN_KEY, "2026-08-18T09:00:00Z")
+            .unwrap();
+
+        assert!(ledger.dirty_projects().is_empty());
+    }
+
+    #[test]
+    fn a_stored_value_replaces_whatever_was_there() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        assert_eq!(ledger.meta_get(DIGEST_PAYLOAD_KEY).unwrap(), None);
+
+        ledger
+            .meta_set(DIGEST_PAYLOAD_KEY, "{\"items\":[1]}")
+            .unwrap();
+        assert_eq!(
+            ledger.meta_get(DIGEST_PAYLOAD_KEY).unwrap().as_deref(),
+            Some("{\"items\":[1]}")
+        );
+
+        // Unlike the marker, a payload is not monotonic: the newest answer
+        // wins even when it sorts lower, which under `max` it often would.
+        ledger
+            .meta_set(DIGEST_PAYLOAD_KEY, "{\"items\":[]}")
+            .unwrap();
+        assert_eq!(
+            ledger.meta_get(DIGEST_PAYLOAD_KEY).unwrap().as_deref(),
+            Some("{\"items\":[]}")
+        );
+    }
+
+    #[test]
+    fn the_digest_keys_are_independent_of_the_triage_marker() {
+        let mut ledger = Ledger::open_in_memory().unwrap();
+        ledger
+            .meta_advance(TRIAGE_LAST_SEEN_KEY, "2026-08-18T09:00:00Z")
+            .unwrap();
+        ledger
+            .meta_advance(DIGEST_LAST_RUN_KEY, "2026-08-17T06:00:00Z")
+            .unwrap();
+        ledger.meta_set(DIGEST_PAYLOAD_KEY, "{}").unwrap();
+
+        assert_eq!(
+            ledger.meta_get(TRIAGE_LAST_SEEN_KEY).unwrap().as_deref(),
+            Some("2026-08-18T09:00:00Z")
+        );
+        assert_eq!(
+            ledger.meta_get(DIGEST_LAST_RUN_KEY).unwrap().as_deref(),
+            Some("2026-08-17T06:00:00Z")
+        );
+    }
+
+    #[test]
+    fn storing_a_digest_dirties_nothing() {
+        let (mut ledger, _) = seeded();
+        ledger.clear_all_dirty();
+
+        ledger.meta_set(DIGEST_PAYLOAD_KEY, "{}").unwrap();
+        ledger
+            .meta_advance(DIGEST_LAST_RUN_KEY, "2026-08-18T09:00:00Z")
             .unwrap();
 
         assert!(ledger.dirty_projects().is_empty());

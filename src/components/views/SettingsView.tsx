@@ -646,6 +646,7 @@ export function SettingsView() {
   const [agingDays, setAgingDays] = useState("");
   const [staleDays, setStaleDays] = useState("");
   const [autoclose, setAutoclose] = useState("");
+  const [quietDays, setQuietDays] = useState("");
   const [seededLedger, setSeededLedger] = useState(false);
   const [ledgerError, setLedgerError] = useState<string | null>(null);
   const [ledgerSaved, setLedgerSaved] = useState(false);
@@ -685,6 +686,7 @@ export function SettingsView() {
     setAgingDays(String(settings.ledger.aging_after_days));
     setStaleDays(String(settings.ledger.stale_after_days));
     setAutoclose(String(Math.round(settings.ledger.conversation_autoclose * 100)));
+    setQuietDays(String(settings.ledger.quiet_after_days));
   }
 
   useTimeout(
@@ -767,8 +769,8 @@ export function SettingsView() {
     </>
   );
 
-  // Every ledger field commits the whole group, because the backend takes the
-  // three together and the two day thresholds are read against each other.
+  // Every ledger field commits the whole group, because the backend takes them
+  // as one struct and the two day thresholds are read against each other.
   // `field` is only for where the outcome is reported; the values all come
   // from the fields themselves.
   const applyLedger = async (field: LedgerField) => {
@@ -783,19 +785,22 @@ export function SettingsView() {
       conversation_autoclose: clampConfidence(
         fieldNumber(autoclose, settings.ledger.conversation_autoclose * 100) / 100,
       ),
+      quiet_after_days: clampDays(fieldNumber(quietDays, settings.ledger.quiet_after_days)),
     };
     // A cleared or clamped field shows the number the app is actually using
     // rather than what was typed, whether or not the write below happens.
     setAgingDays(String(merged.aging_after_days));
     setStaleDays(String(merged.stale_after_days));
     setAutoclose(String(Math.round(merged.conversation_autoclose * 100)));
+    setQuietDays(String(merged.quiet_after_days));
     setLedgerFoot(field);
     // Nothing to say when the committed value is what was already stored: a
     // blur that changed nothing should not announce a save.
     if (
       merged.aging_after_days === settings.ledger.aging_after_days &&
       merged.stale_after_days === settings.ledger.stale_after_days &&
-      merged.conversation_autoclose === settings.ledger.conversation_autoclose
+      merged.conversation_autoclose === settings.ledger.conversation_autoclose &&
+      merged.quiet_after_days === settings.ledger.quiet_after_days
     ) {
       return;
     }
@@ -809,6 +814,7 @@ export function SettingsView() {
       setAgingDays(String(updated.ledger.aging_after_days));
       setStaleDays(String(updated.ledger.stale_after_days));
       setAutoclose(String(Math.round(updated.ledger.conversation_autoclose * 100)));
+      setQuietDays(String(updated.ledger.quiet_after_days));
       setLedgerSaved(true);
       setLedgerSavedTick((tick) => tick + 1);
     } catch (err) {
@@ -1094,8 +1100,8 @@ export function SettingsView() {
           </Card>
 
           <Card title="Commitments">
-            {/* The three commit as a group, but the outcome belongs to the
-                field that asked for it: a `foot` is the row's own status line
+            {/* They commit as a group, but the outcome belongs to the field
+                that asked for it: a `foot` is the row's own status line
                 (see `Row`), so it follows the commit rather than sitting on
                 whichever row happens to be last. */}
             <Row
@@ -1145,6 +1151,20 @@ export function SettingsView() {
                 onCommit={() => void applyLedger("conversation_autoclose")}
               />
               <span className="font-data text-[12.5px] text-ink-faint">%</span>
+            </Row>
+
+            <Row
+              label="Gone quiet"
+              hint="Days without a mention before the daily digest raises something you are waiting on from someone else. Usually shorter than aging: this one is about when to go and ask."
+              foot={ledgerFoot === "quiet_after_days" && ledgerFootLines}
+            >
+              <NumberField
+                label="Days before gone quiet"
+                value={quietDays}
+                min={1}
+                onChange={setQuietDays}
+                onCommit={() => void applyLedger("quiet_after_days")}
+              />
             </Row>
           </Card>
 

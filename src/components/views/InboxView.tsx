@@ -33,6 +33,7 @@ import { useTimeout } from "../../useTimeout";
 import { SpiritMark } from "../capture/SpiritMark";
 import { CreateProjectDialog } from "../dialogs/CreateProjectDialog";
 import { DeleteNoteDialog } from "../dialogs/DeleteNoteDialog";
+import { DigestCard } from "./DigestCard";
 import {
   cardVariants,
   EASE_OUT_STRONG,
@@ -234,6 +235,13 @@ export function InboxView() {
         <StatusMessage variant="error">{error}</StatusMessage>
       ) : (
         <>
+          {/* The ledger's own news, above the queue and outside it: the Inbox
+              is where the app opens, which is the whole reason the digest
+              lives here rather than in the Commitments view you would have to
+              remember to visit. It renders nothing on a quiet day, so the
+              Inbox's own shape is unchanged whenever there is nothing to
+              say. */}
+          <DigestCard />
           {remaining > 0 && <Progress cleared={cleared} />}
           {remaining === 0 && !placeholder ? (
             !loading && <EmptyInbox />

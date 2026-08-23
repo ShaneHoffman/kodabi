@@ -236,6 +236,57 @@ describe("InboxView", () => {
     expect(screen.getByText("Vendor follow-up")).toBeInTheDocument();
   });
 
+  it("opens with the ledger's digest, above the queue", async () => {
+    // The whole reason the card lives here: the Inbox is where the app opens,
+    // so the ledger's news reaches the user without them going to look for it.
+    serveVault([PLANNING]);
+    onCommand("daily_digest", () => ({
+      date: "2026-08-21",
+      since: "2026-08-20",
+      items: [
+        {
+          entry_id: "le_1",
+          kind: "went_stale",
+          description: "Draft the Q4 brief",
+          owner: "You",
+          project: "Briarwood",
+          note_id: "n_a1b2c3",
+          note_title: "Briarwood kickoff",
+          due_date: null,
+          last_mention: "2026-07-12T09:00:00Z",
+          quiet_days: null,
+          review_reason: null,
+        },
+      ],
+      more: 0,
+    }));
+
+    renderInbox();
+
+    const digest = await screen.findByTestId("digest-card");
+    expect(digest).toHaveTextContent("Draft the Q4 brief");
+    // Above the queue in document order, not merely present.
+    const list = await screen.findByTestId("inbox-list");
+    expect(digest.compareDocumentPosition(list)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+  });
+
+  it("shows no digest card on a day with nothing to report", async () => {
+    serveVault([PLANNING]);
+    onCommand("daily_digest", () => ({
+      date: "2026-08-21",
+      since: "2026-08-20",
+      items: [],
+      more: 0,
+    }));
+
+    renderInbox();
+
+    await screen.findByText("Quarterly planning");
+    expect(screen.queryByTestId("digest-card")).not.toBeInTheDocument();
+  });
+
   it("says what failed and what happens next when the listing errors", async () => {
     serveVault([PLANNING]);
     onCommand("list_notes", () => {

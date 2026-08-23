@@ -413,6 +413,11 @@ pub enum SourceKeyword {
     Chat,
     Import,
     Manual,
+    /// Written by the app itself, from the commitment ledger
+    /// ([`crate::ledger::digest`]) — the daily digest note. Its own keyword
+    /// rather than `manual`, because a permanent record of what the machine
+    /// derived should not claim a person wrote it.
+    Digest,
 }
 
 impl SourceKeyword {
@@ -424,6 +429,7 @@ impl SourceKeyword {
             SourceKeyword::Chat => "chat",
             SourceKeyword::Import => "import",
             SourceKeyword::Manual => "manual",
+            SourceKeyword::Digest => "digest",
         }
     }
 
@@ -434,6 +440,7 @@ impl SourceKeyword {
             "chat" => Some(SourceKeyword::Chat),
             "import" => Some(SourceKeyword::Import),
             "manual" => Some(SourceKeyword::Manual),
+            "digest" => Some(SourceKeyword::Digest),
             _ => None,
         }
     }

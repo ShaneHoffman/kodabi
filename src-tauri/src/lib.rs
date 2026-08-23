@@ -178,6 +178,10 @@ pub fn run() {
             let ledger = ledger_state::LedgerState::initialize(app.handle());
             let ledger_handle = ledger.handle();
             app.manage(ledger);
+            // One gate for the whole process, so the daily digest's
+            // check-compute-write-store window admits a single caller however
+            // many windows are open or refetches land at once.
+            app.manage(ledger_cmds::DigestGate::default());
 
             // Open the note index (best-effort — a cache, never a launch
             // blocker) so the note commands can keep it in sync on write/edit.
@@ -320,6 +324,7 @@ pub fn run() {
             ledger_cmds::list_note_commitments,
             ledger_cmds::set_meeting_tracking,
             ledger_cmds::track_commitment_item,
+            ledger_cmds::daily_digest,
             index_cmds::rebuild_index,
             index_cmds::search_notes,
             models_cmds::model_status,
