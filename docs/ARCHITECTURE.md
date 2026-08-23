@@ -447,6 +447,46 @@ are reported beside the group rather than failing the gesture, because a sweep o
 drew a moment ago will always race something. A bulk untrack is a person's own judgement like the
 single verb, so it stamps `untracked_via: manual` and survives a later re-track.
 
+**Once a day, the ledger comes to you.** The triage strip still requires opening the Commitments
+view, and overdue, stale and needs-review commitments are exactly the ones a person stops opening it
+to see. So the Inbox — the view the app opens on — carries a digest card: up to five ranked
+*transitions* since the last digest, plus a note written into `Digests/` so the same computation is
+searchable, part of the record, and readable over MCP with no new tool surface. Four kinds qualify:
+a due date crossed, an entry parked in needs-review, an aging tier reaching stale, and a commitment
+of *theirs* passing the gone-quiet threshold (prep ammunition, and the one threshold that is its own
+setting rather than reusing aging's). Newly enrolled commitments are deliberately absent: the triage
+strip owns those, and reporting an event on two surfaces makes it read as two events.
+
+**The digest is news, not a filtered list, and that distinction is the whole design.** An item
+appears when it *crosses* a boundary and never while it merely sits past one. Nothing in the ledger
+is written when a tier turns or a due date passes (both are derived at read time, the same choice
+`Snoozed` makes about expiry), so there is no transition log to read and the digest reconstructs
+one: each rule evaluates the same pure derivation at two dates, the day the last digest ran and
+today, and reports the entries whose answer changed. The whole computation is therefore a function
+of a ledger row plus two dates, with no state of its own beyond a `digest_last_run` marker in
+`ledger_meta` — the same device-local home, and the same reasoning, as the triage marker beside it.
+The digest it produced is stored alongside it so the card shows one day's list all day rather than
+emptying the moment the marker advances.
+
+**There is no scheduler, and no notification.** OS toasts were considered and rejected rather than
+deferred: a toast you swipe away is worse than a card waiting where you already look. The trigger is
+that a surface asked — `daily_digest` computes if the marker's local day is behind today, and
+otherwise serves what it already computed — so the card's ordinary refetch on the vault bus is the
+whole mechanism, and it covers the case a startup hook would miss, since the app hides to the tray
+and a process can cross midnight. A process-wide gate serializes the check-compute-write-store
+window, so concurrent refetches cannot both find the day due and both write a note. Nothing polls.
+
+**The digest note must never enrol its own contents, and that shapes how it is rendered.** It is a
+`type: note`, and the plain-checkbox grammar takes every `- [ ]` line in such a body as one of the
+user's own commitments wherever it sits — no heading required, and `tracking: context-only` does not
+gate it, because the items it mints are self-owned. A digest listing commitments as checkboxes would
+therefore re-enrol them on the next reconcile, every day, compounding. So the renderer emits plain
+bullets, escapes a description that would compose into a checkbox by accident, and collapses any
+newline that could open a line of its own; a core test round-trips a rendered digest through the
+real extraction path and asserts zero action items, and the indexing path drops any that appear
+anyway rather than trusting the renderer twice. Retention needs no exemption: the sweep reads only
+`sessions/`, so a note under `Digests/` is outside it by construction.
+
 Clearing a commitment is the one gesture in the app whose **motion is optimistic while its state is
 not**. Ticking a Mine card draws the check on, holds a beat, then plays `ledger::view`'s Vanish, all
 without waiting on the round trip; the write underneath is still note-first, and a failure withdraws

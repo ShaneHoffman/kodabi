@@ -23,10 +23,11 @@ const ITEM_META = "mt-0.5 font-data text-[10px] text-ink-faint tabular-nums";
  * this panel is the separate question of what the ledger follows. It sits in
  * the rail rather than beside the checkboxes in the body for a mechanical
  * reason as much as a compositional one: rendered task rows carry no item
- * identity, and only the lines under `## Action items` are extracted at all, so
- * anything keyed on body order would drift the moment a note has a task list
- * elsewhere. The rail also keeps the header's one-cluster budget intact
- * (docs/UI_CONVENTIONS.md, Composition).
+ * identity, and which lines are extracted depends on the note's type (a
+ * meeting or chat body is read only under `## Action items`, while a plain
+ * note's checkboxes count wherever they sit), so anything keyed on body order
+ * would drift the moment a note has a task list elsewhere. The rail also keeps
+ * the header's one-cluster budget intact (docs/UI_CONVENTIONS.md, Composition).
  *
  * Renders nothing at all for a note with no extracted lines and no override,
  * which is most notes: a panel that says "no commitments" on a shopping list is

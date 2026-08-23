@@ -1449,3 +1449,127 @@ fn a_quick_captures_checkbox_becomes_a_commitment_the_user_owns() {
         "closing is a person's judgement, not the parser's"
     );
 }
+
+/// The daily digest's note, taken all the way round the loop it must not close.
+///
+/// The digest lists commitments, and it is written as a `type: note` — the type
+/// whose grammar takes *every* checkbox line in a body, under any heading or
+/// none, as one of the user's own firm commitments. So the composition that
+/// would break is exactly this chain: the digest renders, the writer writes,
+/// the reconcile derives facts, and the ledger enrols them. Tomorrow it renders
+/// those too, and the ledger grows a copy of itself every day.
+///
+/// The unit tests in `ledger::digest` assert the renderer emits no checkbox.
+/// This asserts the thing that actually matters, which is one stage further on
+/// and in a different crate module: that a digest note *on disk*, read back by
+/// the same path a reconcile uses, mints nothing in a real ledger.
+#[test]
+fn a_digest_note_never_enrols_the_commitments_it_reports() {
+    use kodabi_core::ledger::digest::{self, Digest, DigestItem, DigestKind};
+
+    let vault = two_project_vault();
+    let root = vault.path();
+
+    // A digest carrying one of every kind, including the two adversarial
+    // descriptions: one that would compose into a checkbox, one carrying a
+    // newline that would open a line of its own.
+    let item = |entry_id: &str, kind: DigestKind, description: &str, owner: &str| DigestItem {
+        entry_id: entry_id.to_string(),
+        kind,
+        description: description.to_string(),
+        owner: owner.to_string(),
+        project: "Briarwood Golf".to_string(),
+        note_id: Some("n_a1b2c3".to_string()),
+        note_title: Some("Briarwood weekly sync".to_string()),
+        due_date: Some("2026-08-10".to_string()),
+        last_mention: Some("2026-07-12T09:00:00Z".to_string()),
+        quiet_days: Some(12),
+        review_reason: Some("a conversation reported this done".to_string()),
+    };
+    let today = "2026-08-11";
+    let rendered = Digest {
+        date: today.to_string(),
+        since: "2026-08-10".to_string(),
+        items: vec![
+            item(
+                "le_1",
+                DigestKind::NewlyOverdue,
+                "send the revised quote",
+                "You",
+            ),
+            item(
+                "le_2",
+                DigestKind::ParkedInReview,
+                "[ ] confirm the audit hand-off",
+                "You",
+            ),
+            item(
+                "le_3",
+                DigestKind::WentStale,
+                "draft the Q4 brief\n- [ ] injected",
+                "You",
+            ),
+            item(
+                "le_4",
+                DigestKind::TheirsQuiet,
+                "the vendor shortlist",
+                "Priya",
+            ),
+        ],
+        more: 2,
+    };
+
+    let (note, title) = digest::build_note(&rendered).expect("the digest note validates");
+    let path = kodabi_core::note::write_note(root, &note, Some(title.as_str()))
+        .expect("the digest note writes");
+    assert!(
+        path.starts_with(root.join(digest::DIGESTS_PROJECT)),
+        "digests file in their own folder, which is a real project so the \
+         reconcile and the watcher both walk it: {path:?}"
+    );
+
+    // Read back off disk, exactly as a reconcile does, and derive facts the way
+    // the index caches them. Nothing about this path knows it is a digest.
+    let markdown = std::fs::read_to_string(&path).unwrap();
+    let reread = Note::from_markdown(&markdown).expect("the digest note parses back");
+    let facts = meeting::meeting_facts_for(&reread, root)
+        .expect("a plain note is a type that carries facts");
+    assert!(
+        facts.action_items.is_empty(),
+        "the digest note derived commitments from its own contents: {:?}",
+        facts.action_items
+    );
+    assert!(facts.decisions.is_empty(), "{:?}", facts.decisions);
+
+    // And the stage after that: a real ledger, synced with what the index would
+    // have cached. Zero entries is the whole promise.
+    let date_utc = normalize_date_to_utc(&reread.date).unwrap();
+    let mut ledger = Ledger::open_in_memory().unwrap();
+    let outcome = ledger
+        .sync_note_items(&NoteSync {
+            note_id: reread.id.as_str(),
+            project: digest::DIGESTS_PROJECT,
+            note_date_utc: &date_utc,
+            items: &facts.action_items,
+            link_hints: &[],
+            note_override: reread.tracking,
+            category_default: None,
+            identity: &kodabi_core::ledger::OwnerIdentity::default(),
+            now: "2026-08-11T12:00:00Z",
+        })
+        .unwrap();
+    assert!(outcome.created.is_empty(), "{:?}", outcome.created);
+    assert!(
+        ledger
+            .list_entries(&EntryFilter::default())
+            .unwrap()
+            .is_empty(),
+        "a digest note put entries in the ledger"
+    );
+
+    // The note is still a real, readable record: this passes by rendering the
+    // commitments as prose, not by rendering nothing.
+    assert!(reread.body.contains("send the revised quote"));
+    assert!(reread.body.contains("the vendor shortlist"));
+    assert!(reread.body.contains("2 further changes"));
+}

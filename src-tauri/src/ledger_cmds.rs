@@ -26,8 +26,8 @@ use chrono::{Duration, Local, SecondsFormat, Utc};
 use kodabi_core::index::ActionItemStatus;
 use kodabi_core::ledger::view::{self, Commitment};
 use kodabi_core::ledger::{
-    AgingConfig, ClosedVia, Direction, EntryDetail, EntryFilter, EntryState, Evidence, LedgerEntry,
-    NoteContext,
+    digest, AgingConfig, ClosedVia, Digest, Direction, EntryDetail, EntryFilter, EntryState,
+    Evidence, LedgerEntry, NoteContext,
 };
 use kodabi_core::ledger::{EnrollmentMode, RetroSource};
 use kodabi_core::meeting;
@@ -43,6 +43,28 @@ use crate::ledger_state::{
 use crate::settings_cmds::SettingsState;
 use crate::transcribe::knowledge_base_dir;
 use crate::user_errors::{note_error, reported, user_sentence};
+
+/// Serializes the daily digest's compute-if-due window.
+///
+/// The digest decides whether the day is due, then writes a note and advances
+/// the marker; two callers interleaving inside that window would both see the
+/// day as due and both write. Refetches make concurrent callers ordinary
+/// rather than exotic: the card's hook re-runs on every vault-bus event, and
+/// more than one window may be open.
+///
+/// A `Mutex` rather than an atomic flag because the section is a whole
+/// read-write cycle across two stores, and it must be held for all of it.
+/// Managed by the app so the single instance outlives any one call.
+#[derive(Clone, Default)]
+pub struct DigestGate(std::sync::Arc<std::sync::Mutex<()>>);
+
+impl std::ops::Deref for DigestGate {
+    type Target = std::sync::Mutex<()>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 /// The states a live commitments list shows.
 const LIVE_STATES: [EntryState; 3] = [
@@ -401,7 +423,13 @@ const LEDGER_READ_REFUSED: &str =
 /// the Commitments view is mounted, and the ledger event that follows sends it
 /// straight back here.
 pub(crate) fn aging_config(app: &AppHandle) -> AgingConfig {
-    let ledger = app.state::<SettingsState>().snapshot().ledger;
+    aging_config_from(&app.state::<SettingsState>())
+}
+
+/// The same, from a `SettingsState` already in hand — for the one caller that
+/// reaches it through `try_state` and so cannot take it twice.
+fn aging_config_from(settings: &SettingsState) -> AgingConfig {
+    let ledger = settings.snapshot().ledger;
     AgingConfig {
         aging_after_days: ledger.aging_after_days.get(),
         stale_after_days: ledger.stale_after_days.get(),
@@ -431,6 +459,24 @@ fn handles(app: &AppHandle) -> (LedgerClient, Option<IndexReadHandle>) {
     let client = app.state::<LedgerState>().client();
     let index = app.state::<IndexState>().read_handle();
     (client, index)
+}
+
+/// [`handles`], but `None` rather than a panic when the setup hook has not
+/// installed them yet.
+///
+/// The webview begins loading alongside the setup closure, so a command the
+/// shell fires on mount can genuinely arrive before `app.manage` has run, and
+/// `Manager::state` panics rather than waiting. Every command that a *person*
+/// triggers is past that window by definition, which is why the plain
+/// [`handles`] is right for them; a read that fires on mount is not, and the
+/// digest's whole failure posture is to show nothing rather than to take the
+/// view down with it.
+fn try_handles(app: &AppHandle) -> Option<(LedgerClient, Option<IndexReadHandle>)> {
+    let client = app.try_state::<LedgerState>()?.client();
+    let index = app
+        .try_state::<IndexState>()
+        .and_then(|state| state.read_handle());
+    Some((client, index))
 }
 
 /// Re-indexes a note the app just rewrote, then tells every window.
@@ -467,6 +513,280 @@ fn referenced_notes(details: &[EntryDetail]) -> BTreeSet<String> {
 // ---------------------------------------------------------------------------
 // Commands
 // ---------------------------------------------------------------------------
+
+/// The daily digest: what changed in the ledger since it last ran.
+///
+/// **Compute-if-due on read, not a scheduler.** The trigger is simply that a
+/// surface asked, and the marker in `ledger_meta` is what makes the answer
+/// happen once a day rather than once a mount. That covers the two cases a
+/// startup hook would not: the app hides to the tray rather than exiting, so a
+/// process can cross midnight and still owe a digest, and a refetch on the
+/// vault bus re-asks after any activity. Nothing is scheduled, nothing polls.
+///
+/// **Writes a note as a side effect, exactly once per digest.** The card and
+/// the note are two renderings of one computation, so the write belongs to the
+/// same call that computes it, guarded by `DigestGate` so two concurrent
+/// refetches cannot both decide the day is due.
+///
+/// Every failure below the marker degrades to an empty digest rather than an
+/// error: the card is a convenience mounted on the landing view, and a ledger
+/// that cannot answer must not stop the Inbox from rendering.
+#[tauri::command]
+pub async fn daily_digest(app: AppHandle) -> Result<Digest, String> {
+    // This one fires on the shell's mount, which can beat the setup hook that
+    // installs the state below, so every read here is the fallible kind. A
+    // digest that is not ready yet is simply no digest: the next refetch on
+    // the vault bus asks again, and the day is still due because nothing
+    // advanced the marker.
+    let (Some((client, index)), Some(settings), Some(gate)) = (
+        try_handles(&app),
+        app.try_state::<SettingsState>(),
+        app.try_state::<DigestGate>(),
+    ) else {
+        return Ok(Digest::empty(local_today(), local_today()));
+    };
+    let aging = aging_config_from(&settings);
+    let quiet_after_days = settings.snapshot().ledger.quiet_after_days.get();
+    let gate = gate.inner().clone();
+    let kb = knowledge_base_dir(&app).ok();
+
+    let run = tauri::async_runtime::spawn_blocking(move || {
+        // Held across check, compute, write and store, so exactly one caller
+        // can find the day due. A poisoned lock is not a reason to skip a
+        // digest, so the guard is taken through the poison either way.
+        let _guard = gate.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        compute_if_due(&client, index, kb.as_deref(), aging, quiet_after_days)
+    })
+    .await;
+
+    // Every degraded path lands on the same answer: no digest today. The card
+    // is a convenience on the landing view, and it must not be able to stop
+    // the Inbox rendering.
+    let run = match run {
+        Ok(run) => run,
+        Err(err) => {
+            eprintln!("daily_digest failed: {err:?}");
+            DigestRun::default()
+        }
+    };
+
+    // Indexing happens after the gate is released and back where the
+    // `AppHandle` lives, matching every other write-then-reindex command.
+    if let (Some(written), Ok(kb)) = (run.written, knowledge_base_dir(&app)) {
+        index_digest_note(&app, &written, &kb);
+    }
+    Ok(run.digest)
+}
+
+/// A digest run's two outputs: what to show, and the note it wrote (if any).
+struct DigestRun {
+    digest: Digest,
+    written: Option<WrittenDigest>,
+}
+
+impl Default for DigestRun {
+    fn default() -> Self {
+        let today = local_today();
+        DigestRun {
+            digest: Digest::empty(today, today),
+            written: None,
+        }
+    }
+}
+
+/// A digest note that reached the disk, waiting to be indexed.
+struct WrittenDigest {
+    note: note::Note,
+    path: std::path::PathBuf,
+}
+
+/// The digest for today, computing and writing one if the day is due.
+///
+/// Runs entirely on the blocking thread, under the gate.
+fn compute_if_due(
+    client: &LedgerClient,
+    index: Option<IndexReadHandle>,
+    kb: Option<&std::path::Path>,
+    aging: AgingConfig,
+    quiet_after_days: u32,
+) -> DigestRun {
+    let today = local_today();
+    let state = match client.digest_state() {
+        Ok(state) => state,
+        Err(err) => {
+            eprintln!("daily_digest could not read the digest marker: {err:?}");
+            return DigestRun::default();
+        }
+    };
+
+    let Some(last_run) = state.last_run else {
+        // First launch on this device. Seed the marker and show nothing: every
+        // transition in the ledger's history crossed before today, and greeting
+        // someone with all of them is the opposite of a digest. The same
+        // restraint `SeedTriageMarker` shows.
+        let digest = Digest::empty(today, today);
+        record(client, &digest);
+        return DigestRun {
+            digest,
+            written: None,
+        };
+    };
+
+    let baseline = local_day_of(&last_run).unwrap_or(today);
+    if baseline >= today {
+        // Already run today. Serve what it produced, so the card holds the same
+        // list all day instead of emptying the moment the marker is past.
+        return DigestRun {
+            digest: stored_digest(state.payload.as_deref(), today),
+            written: None,
+        };
+    }
+
+    // Ledger first, index second, never interleaved (see the module doc).
+    let live = match client.list_details(EntryFilter {
+        states: Some(LIVE_STATES.to_vec()),
+        ..EntryFilter::default()
+    }) {
+        Ok(live) => live,
+        Err(err) => {
+            eprintln!("daily_digest could not read the ledger: {err:?}");
+            return DigestRun::default();
+        }
+    };
+    let notes: HashMap<String, NoteContext> = index
+        .map(|index| index.note_contexts(&referenced_notes(&live)))
+        .unwrap_or_default();
+
+    let digest = digest::compute(
+        &live,
+        &notes,
+        baseline,
+        &last_run,
+        today,
+        aging,
+        quiet_after_days,
+    );
+    // A quiet day still counts as run: the marker advances and no note is
+    // written, so tomorrow measures from today rather than re-reporting a
+    // week of transitions at once.
+    let written = (!digest.is_empty())
+        .then(|| kb.and_then(|kb| write_digest_note(kb, &digest)))
+        .flatten();
+    record(client, &digest);
+    DigestRun { digest, written }
+}
+
+/// Records the run: the payload first, then the marker (see
+/// [`crate::ledger_state::LedgerJob::StoreDigest`]).
+///
+/// **The marker is the instant the digest ran, not the local day's midnight.**
+/// It has to be, in both directions. Stamping the local date's midnight *as
+/// UTC* would read back through [`local_day_of`] as the previous day for any
+/// negative offset, so "has it run today" would never be true west of UTC and
+/// every refetch would recompute and write another note. And the instant is
+/// what the needs-review rule wants anyway: "parked since the last digest"
+/// means since the moment it ran, not since that morning.
+///
+/// A failed store is logged and swallowed: the digest on screen is still true,
+/// and the cost is at worst recomputing it later today.
+fn record(client: &LedgerClient, digest: &Digest) {
+    let payload = match serde_json::to_string(digest) {
+        Ok(payload) => payload,
+        Err(err) => {
+            eprintln!("daily_digest could not serialize the digest: {err}");
+            return;
+        }
+    };
+    let run_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    if let Err(err) = client.store_digest(run_at, payload) {
+        eprintln!("daily_digest could not record the run: {err:?}");
+    }
+}
+
+/// Today's stored digest, or an empty one when it cannot be read.
+///
+/// The date check is what stops a payload from an earlier day being re-shown
+/// after the marker advanced past it, which is the one thing a digest of
+/// transitions must never do.
+fn stored_digest(payload: Option<&str>, today: chrono::NaiveDate) -> Digest {
+    payload
+        .and_then(|payload| match serde_json::from_str::<Digest>(payload) {
+            Ok(digest) => Some(digest),
+            Err(err) => {
+                eprintln!("daily_digest could not read the stored digest: {err}");
+                None
+            }
+        })
+        .filter(|digest| digest.date == today.to_string())
+        .unwrap_or_else(|| Digest::empty(today, today))
+}
+
+/// Writes the digest into the vault.
+///
+/// **Deliberately no retention hook.** The sweep reads only `<kb>/sessions/`,
+/// non-recursively, so a note under `Digests/` is outside it by construction
+/// rather than by exemption. Digests are derived and regenerable, but they are
+/// also the only record of what the ledger said on a given day, and being
+/// regenerable is not the same as being reproducible: yesterday's transitions
+/// cannot be recomputed once the state has moved on.
+///
+/// Best-effort: a failed write is logged, and the card still shows the digest.
+fn write_digest_note(kb: &std::path::Path, digest: &Digest) -> Option<WrittenDigest> {
+    let (note, title) = match digest::build_note(digest) {
+        Ok(built) => built,
+        Err(err) => {
+            eprintln!("daily_digest could not build the note: {err}");
+            return None;
+        }
+    };
+    match note::write_note(kb, &note, Some(title.as_str())) {
+        Ok(path) => Some(WrittenDigest { note, path }),
+        Err(err) => {
+            eprintln!("daily_digest could not write the note: {err}");
+            None
+        }
+    }
+}
+
+/// Indexes the digest note and tells every window, the same eager pair every
+/// in-app write makes.
+///
+/// The action-item guard is the belt to `ledger::digest`'s braces. That module
+/// renders plain bullets precisely so nothing here can be extracted, and its
+/// tests pin it; this is the boundary where a regression would turn into
+/// enrolled commitments, so it refuses to carry any across rather than
+/// trusting the renderer twice.
+fn index_digest_note(app: &AppHandle, written: &WrittenDigest, kb: &std::path::Path) {
+    let rel = written.path.strip_prefix(kb).unwrap_or(&written.path);
+    let mut indexed = kodabi_core::index::IndexedNote::from_note(
+        &written.note,
+        &vault::effective_title(&written.note, &written.path),
+        &rel.to_string_lossy().replace('\\', "/"),
+    );
+    indexed.meeting = meeting::meeting_facts_for(&written.note, kb);
+    if let Some(facts) = indexed.meeting.as_mut() {
+        if !facts.action_items.is_empty() {
+            eprintln!(
+                "daily_digest: the digest note derived {} action item(s); dropping them rather \
+                 than enrolling the digest's own contents",
+                facts.action_items.len()
+            );
+            facts.action_items.clear();
+        }
+    }
+    app.state::<IndexState>().index_note_best_effort(indexed);
+    broadcast_vault_changed(app);
+}
+
+/// The local calendar day an RFC 3339 instant falls on for this device.
+///
+/// Local rather than UTC for the same reason [`local_today`] is: the question
+/// is whether the digest has run on the day the person is living in.
+fn local_day_of(instant: &str) -> Option<chrono::NaiveDate> {
+    chrono::DateTime::parse_from_rfc3339(instant)
+        .ok()
+        .map(|parsed| parsed.with_timezone(&Local).date_naive())
+}
 
 /// The Commitments view's read: live entries plus the recently settled shelf,
 /// each joined to its source line.
@@ -568,7 +888,13 @@ pub async fn list_commitments(
 /// Whole-vault on purpose: the dock row navigates to the whole-vault view.
 #[tauri::command]
 pub async fn count_my_commitments(app: AppHandle) -> Result<u32, String> {
-    let (client, _) = handles(&app);
+    // Like the digest, this fires on the dock's mount rather than on a click,
+    // so it can beat the setup hook that manages the ledger. Zero is the
+    // honest answer for "not ready": the row already renders nothing at zero,
+    // and the next refetch on the vault bus asks again.
+    let Some((client, _)) = try_handles(&app) else {
+        return Ok(0);
+    };
     tauri::async_runtime::spawn_blocking(move || {
         let details = client
             .list_details(EntryFilter {

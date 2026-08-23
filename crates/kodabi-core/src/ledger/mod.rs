@@ -29,6 +29,7 @@
 //! disappear. [`sync`] is where a re-minted id is re-attached to its entry.
 
 pub mod commitments;
+pub mod digest;
 pub mod distill_apply;
 mod enrollment;
 mod migrations;
@@ -37,11 +38,16 @@ mod store;
 mod sync;
 pub mod view;
 
+pub use digest::{
+    Digest, DigestError, DigestItem, DigestKind, DEFAULT_QUIET_AFTER_DAYS, DIGESTS_PROJECT,
+    DIGEST_CAP,
+};
 pub use distill_apply::{apply_distill_follow_up, AppliedUpdates, AutoClose, DistillFollowUp};
 pub use enrollment::{DrainOutcome, NoteTrackingOutcome, OwnerResolutionOutcome, RetroSource};
 pub use snapshot::{ProjectSnapshot, RestoreReport, LEDGER_SNAPSHOT_FILE, LEDGER_SNAPSHOT_VERSION};
 pub use store::{
-    EntryDetail, EntryFilter, EntryLink, Evidence, ItemRef, LedgerEntry, TRIAGE_LAST_SEEN_KEY,
+    EntryDetail, EntryFilter, EntryLink, Evidence, ItemRef, LedgerEntry, DIGEST_LAST_RUN_KEY,
+    DIGEST_PAYLOAD_KEY, TRIAGE_LAST_SEEN_KEY,
 };
 pub use sync::{LinkHint, NoteSync, SyncOutcome};
 pub use view::{

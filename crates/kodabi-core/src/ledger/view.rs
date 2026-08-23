@@ -386,7 +386,7 @@ fn assemble_one(
 /// "Snoozed until Friday" resurfaces *on* Friday, so the comparison is
 /// inclusive. An unreadable date counts as lapsed: a surface that shows a
 /// commitment early is a smaller failure than one that hides it forever.
-fn snooze_lapsed(detail: &EntryDetail, today: NaiveDate) -> bool {
+pub(crate) fn snooze_lapsed(detail: &EntryDetail, today: NaiveDate) -> bool {
     if detail.entry.state != EntryState::Snoozed {
         return false;
     }
