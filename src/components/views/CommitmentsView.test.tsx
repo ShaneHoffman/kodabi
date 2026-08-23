@@ -1479,6 +1479,53 @@ describe("the settled shelf as a win surface", () => {
     expect(within(shelf).getByText(/91% confident/)).toBeInTheDocument();
   });
 
+  it("links the claim that closed it, not merely the first one on record", async () => {
+    const user = userEvent.setup();
+    serve({
+      settled: [
+        commitment({
+          entry_id: "le_auto",
+          state: "closed",
+          closed_via: "github",
+          item: item({ done: true }),
+          // Oldest first, the order the ledger returns them in: an earlier
+          // conversation claim that never cleared the threshold, then the PR
+          // that actually closed it.
+          evidence: [
+            {
+              evidence_id: "ev_talk",
+              source: "conversation",
+              reference: "n_standup",
+              confidence: 0.4,
+              observed_at: "2026-08-12T00:00:00Z",
+            },
+            {
+              evidence_id: "ev_pr",
+              source: "github",
+              reference: "https://example.com/pull/42",
+              confidence: 0.97,
+              observed_at: "2026-08-19T00:00:00Z",
+            },
+          ],
+        }),
+      ],
+    });
+
+    await openCommitments(user);
+    await user.click(await screen.findByTestId("show-settled-commitments"));
+    const shelf = await screen.findByTestId("settled-commitments");
+
+    // The sentence and the link have to cite the same claim, or the row
+    // explains itself with evidence it is not showing.
+    expect(
+      within(shelf).getByText(/closed itself from GitHub on/),
+    ).toBeInTheDocument();
+    expect(within(shelf).getByRole("link", { name: "evidence" })).toHaveAttribute(
+      "href",
+      "https://example.com/pull/42",
+    );
+  });
+
   it("says nothing about a week that cleared nothing", async () => {
     const user = userEvent.setup();
     serve({

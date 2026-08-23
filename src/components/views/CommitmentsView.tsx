@@ -5,6 +5,7 @@ import {
   arrangeCommitments,
   arrangeTriage,
   autoCloseConfidence,
+  closingClaim,
   commitmentOwner,
   commitmentText,
   formatConfidence,
@@ -854,7 +855,16 @@ export function CommitmentsView({ slug }: Props) {
                     ]
                       .filter(Boolean)
                       .join(" · ")}
-                    evidence={commitment.evidence[0]?.reference ?? null}
+                    // The claim that closed it, not merely the first one on
+                    // record: the meta above dates itself from that claim, and
+                    // a link citing a different one would contradict the
+                    // sentence it sits under. Falls back to the oldest claim
+                    // for a row nothing auto-closed, which is all a waived or
+                    // hand-closed row ever had.
+                    evidence={
+                      (closingClaim(commitment) ?? commitment.evidence[0])
+                        ?.reference ?? null
+                    }
                     actionLabel="Reopen"
                     busy={
                       pending?.entryId === commitment.entry_id &&
