@@ -666,13 +666,24 @@ fn compute_if_due(
         aging,
         quiet_after_days,
     );
+    // Recorded *before* the note is written, and the note only if that
+    // succeeded. The marker is the sole thing that stops a second run today,
+    // and writing the note is what makes this call broadcast `vault:changed`
+    // — which is the same bus the card refetches on. So a run whose marker
+    // never landed and whose note did would re-enter here on its own refetch,
+    // find the day due again, and write another note, for as long as the
+    // ledger keeps refusing the write; `write_note` disambiguates a colliding
+    // filename rather than failing, so nothing downstream stops it. Recording
+    // first costs at most a lost note if the process dies in between, and the
+    // digest is still on the card either way.
+    //
     // A quiet day still counts as run: the marker advances and no note is
     // written, so tomorrow measures from today rather than re-reporting a
     // week of transitions at once.
-    let written = (!digest.is_empty())
+    let recorded = record(client, &digest);
+    let written = (recorded && !digest.is_empty())
         .then(|| kb.and_then(|kb| write_digest_note(kb, &digest)))
         .flatten();
-    record(client, &digest);
     DigestRun { digest, written }
 }
 
@@ -687,19 +698,24 @@ fn compute_if_due(
 /// what the needs-review rule wants anyway: "parked since the last digest"
 /// means since the moment it ran, not since that morning.
 ///
-/// A failed store is logged and swallowed: the digest on screen is still true,
-/// and the cost is at worst recomputing it later today.
-fn record(client: &LedgerClient, digest: &Digest) {
+/// Returns whether the run was recorded. A failure is logged and swallowed —
+/// the digest on screen is still true — but the caller must not write the note
+/// without it, or the day stays due and the write repeats on every refetch.
+fn record(client: &LedgerClient, digest: &Digest) -> bool {
     let payload = match serde_json::to_string(digest) {
         Ok(payload) => payload,
         Err(err) => {
             eprintln!("daily_digest could not serialize the digest: {err}");
-            return;
+            return false;
         }
     };
     let run_at = Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true);
-    if let Err(err) = client.store_digest(run_at, payload) {
-        eprintln!("daily_digest could not record the run: {err:?}");
+    match client.store_digest(run_at, payload) {
+        Ok(()) => true,
+        Err(err) => {
+            eprintln!("daily_digest could not record the run: {err:?}");
+            false
+        }
     }
 }
 
@@ -774,7 +790,14 @@ fn index_digest_note(app: &AppHandle, written: &WrittenDigest, kb: &std::path::P
             facts.action_items.clear();
         }
     }
-    app.state::<IndexState>().index_note_best_effort(indexed);
+    // `try_state` for the same reason the rest of this command uses it: the
+    // shell can fire `daily_digest` before the setup hook has managed the
+    // index, and `Manager::state` panics rather than waiting. The note is
+    // already on disk, so the watcher's reconcile picks it up either way; the
+    // broadcast still runs, because the views should refresh regardless.
+    if let Some(index) = app.try_state::<IndexState>() {
+        index.index_note_best_effort(indexed);
+    }
     broadcast_vault_changed(app);
 }
 

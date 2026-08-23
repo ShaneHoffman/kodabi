@@ -974,7 +974,7 @@ describe("SettingsView About card", () => {
     await user.clear(aging);
     await user.type(aging, "7{Enter}");
 
-    // The three go together: the backend takes one struct, and the two day
+    // They go together: the backend takes one struct, and the two day
     // thresholds are read against each other.
     expect(invoke).toHaveBeenCalledWith("set_ledger_tuning", {
       ledger: { aging_after_days: 7, stale_after_days: 30, conversation_autoclose: 0.8, quiet_after_days: 10 },

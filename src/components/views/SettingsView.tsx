@@ -769,8 +769,8 @@ export function SettingsView() {
     </>
   );
 
-  // Every ledger field commits the whole group, because the backend takes the
-  // three together and the two day thresholds are read against each other.
+  // Every ledger field commits the whole group, because the backend takes them
+  // as one struct and the two day thresholds are read against each other.
   // `field` is only for where the outcome is reported; the values all come
   // from the fields themselves.
   const applyLedger = async (field: LedgerField) => {
