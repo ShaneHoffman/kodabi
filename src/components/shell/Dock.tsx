@@ -3,6 +3,7 @@ import { cva } from "class-variance-authority";
 import { clsx } from "clsx";
 import { DISTILL_STATE_EVENT } from "../../events";
 import type { DistillEvent } from "../../useDistillState";
+import { useMyCommitmentsCount } from "../../useCommitments";
 import { useNavigation } from "../../useNavigation";
 import {
   entryView,
@@ -165,30 +166,7 @@ export function Dock() {
         <ul aria-label="System" className="flex flex-col gap-0.5">
           {inboxEntry && renderRow(inboxEntry)}
           <NeedsAttentionRow />
-          <li>
-            <button
-              type="button"
-              data-testid="commitments-nav"
-              aria-current={
-                view.kind === "commitments" && view.slug === null
-                  ? "page"
-                  : undefined
-              }
-              onClick={() => navigate({ kind: "commitments", slug: null })}
-              className={clsx(
-                dockRow({
-                  selected: view.kind === "commitments" && view.slug === null,
-                }),
-                "pl-2.5",
-              )}
-            >
-              {/* No count yet. One would need a fetch mounted for the whole
-                  session, the way NeedsAttentionRow carries its own, and the
-                  ledger has no cheap count read until the evidence pass gives
-                  it a reason to. */}
-              <span className="min-w-0 flex-1 truncate">Commitments</span>
-            </button>
-          </li>
+          <CommitmentsRow />
           <li>
             <button
               type="button"
@@ -341,6 +319,56 @@ function NeedsAttentionRow() {
             )}
           >
             {activeCount}
+          </span>
+        )}
+      </button>
+    </li>
+  );
+}
+
+/**
+ * The Commitments row, carrying the count of what is on YOU, outstanding.
+ *
+ * Mine only, and that is the design rather than a filter: watching your own
+ * number come down is the point, and folding in what you are waiting on from
+ * other people would make it a number nobody can move.
+ *
+ * The fetch is mounted for the whole session, the way `NeedsAttentionRow`
+ * carries its own, so the number is current before the view is ever opened. It
+ * needs no subscription: both signals that can change it are already relayed
+ * onto the vault bus at the shell root.
+ *
+ * Zero is a DESIGNED state and it is quiet. The row stays (it is a
+ * destination, not a notice, which is why it does not disappear the way needs
+ * attention does) and simply carries no number. Nothing celebrates: an empty
+ * ledger is a fact, not an achievement to announce every time the dock paints.
+ * A failed or unfinished read reads the same way, because a nav row is the
+ * wrong place to apologise; the view itself says so when it cannot load.
+ */
+function CommitmentsRow() {
+  const count = useMyCommitmentsCount();
+  const { view, navigate } = useNavigation();
+  const selected = view.kind === "commitments" && view.slug === null;
+
+  return (
+    <li>
+      <button
+        type="button"
+        data-testid="commitments-nav"
+        aria-current={selected ? "page" : undefined}
+        onClick={() => navigate({ kind: "commitments", slug: null })}
+        className={clsx(dockRow({ selected }), "pl-2.5")}
+      >
+        <span className="min-w-0 flex-1 truncate">Commitments</span>
+        {count !== null && count > 0 && (
+          <span
+            data-testid="sidebar-commitments-count"
+            className={clsx(
+              "font-data text-[11px] tabular-nums",
+              selected ? "text-ink" : "text-ink-faint",
+            )}
+          >
+            {count}
           </span>
         )}
       </button>

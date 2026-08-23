@@ -26,7 +26,7 @@ use chrono::{Duration, Local, SecondsFormat, Utc};
 use kodabi_core::index::ActionItemStatus;
 use kodabi_core::ledger::view::{self, Commitment};
 use kodabi_core::ledger::{
-    AgingConfig, ClosedVia, EntryDetail, EntryFilter, EntryState, Evidence, LedgerEntry,
+    AgingConfig, ClosedVia, Direction, EntryDetail, EntryFilter, EntryState, Evidence, LedgerEntry,
     NoteContext,
 };
 use kodabi_core::ledger::{EnrollmentMode, RetroSource};
@@ -43,17 +43,6 @@ use crate::ledger_state::{
 use crate::settings_cmds::SettingsState;
 use crate::transcribe::knowledge_base_dir;
 use crate::user_errors::{note_error, reported, user_sentence};
-
-/// How far back the settled shelf reaches.
-///
-/// A closure reached by evidence has to be visible to be undoable, and a week
-/// is the span over which "wait, that is not done" is still a live thought.
-/// Older closures are history, and history is the note's job.
-const SETTLED_WINDOW_DAYS: i64 = 7;
-
-/// How many settled entries the shelf carries. A bound, not a page: a person
-/// undoing a mistake is looking for something they just saw.
-const SETTLED_CAP: usize = 20;
 
 /// The states a live commitments list shows.
 const LIVE_STATES: [EntryState; 3] = [
@@ -150,6 +139,15 @@ pub struct CommitmentEvidenceDto {
     observed_at: String,
 }
 
+/// What the settled shelf adds up to over its whole window.
+/// Mirrors [`kodabi_core::ledger::view::SettledSummary`].
+#[derive(serde::Serialize)]
+pub struct SettledSummaryDto {
+    cleared: u32,
+    closed_from_conversation: u32,
+    closed_from_github: u32,
+}
+
 /// The Commitments view's whole payload.
 #[derive(serde::Serialize)]
 pub struct CommitmentsDto {
@@ -157,6 +155,8 @@ pub struct CommitmentsDto {
     entries: Vec<CommitmentDto>,
     /// Recently closed or waived entries, newest first, for the undo shelf.
     settled: Vec<CommitmentDto>,
+    /// What the window cleared, counted before `settled` was capped.
+    settled_summary: SettledSummaryDto,
     /// When the user last reviewed newly enrolled commitments, RFC 3339 UTC.
     /// The triage strip lists entries whose `created_at` sorts above this.
     ///
@@ -519,12 +519,12 @@ pub async fn list_commitments(
             eprintln!("list_commitments could not read the triage marker: {err:?}");
             None
         });
-        let cutoff = (Utc::now() - Duration::days(SETTLED_WINDOW_DAYS))
+        let cutoff = (Utc::now() - Duration::days(view::SETTLED_WINDOW_DAYS))
             .to_rfc3339_opts(SecondsFormat::Secs, true);
-        let settled = view::recently_settled(settled, &cutoff, SETTLED_CAP);
+        let shelf = view::settled_shelf(settled, &cutoff, view::SETTLED_CAP);
 
         let mut wanted = referenced_notes(&live);
-        wanted.extend(referenced_notes(&settled));
+        wanted.extend(referenced_notes(&shelf.entries));
         let notes: HashMap<String, NoteContext> = index
             .map(|index| index.note_contexts(&wanted))
             .unwrap_or_default();
@@ -535,10 +535,15 @@ pub async fn list_commitments(
                 .into_iter()
                 .map(commitment_dto)
                 .collect(),
-            settled: view::assemble(settled, &notes, today, aging)
+            settled: view::assemble(shelf.entries, &notes, today, aging)
                 .into_iter()
                 .map(commitment_dto)
                 .collect(),
+            settled_summary: SettledSummaryDto {
+                cleared: shelf.summary.cleared,
+                closed_from_conversation: shelf.summary.closed_from_conversation,
+                closed_from_github: shelf.summary.closed_from_github,
+            },
             last_seen,
         })
     })
@@ -548,6 +553,46 @@ pub async fn list_commitments(
             "list_commitments",
             err,
             "Couldn't read your commitments. Reopen this view to try again.",
+        )
+    })?
+}
+
+/// The dock's count: how many commitments are on the user, outstanding.
+///
+/// Mine only, because the number a person watches go down is their own; what
+/// they are waiting on from someone else is a register, not a queue. The cut
+/// matches the Mine group the Commitments view draws (open, needs review, and
+/// snoozes whose day has arrived), so a snooze that is off the screen is also
+/// off the number.
+///
+/// Whole-vault on purpose: the dock row navigates to the whole-vault view.
+#[tauri::command]
+pub async fn count_my_commitments(app: AppHandle) -> Result<u32, String> {
+    let (client, _) = handles(&app);
+    tauri::async_runtime::spawn_blocking(move || {
+        let details = client
+            .list_details(EntryFilter {
+                states: Some(LIVE_STATES.to_vec()),
+                direction: Some(Direction::Mine),
+                ..EntryFilter::default()
+            })
+            .map_err(|err| {
+                ledger_error(
+                    "count_my_commitments",
+                    err,
+                    "The commitment ledger isn't available this session, so commitments can't \
+                     be counted. Restart Kodabi; your notes are untouched.",
+                )
+            })?;
+        Ok(view::outstanding_count(&details, local_today()) as u32)
+    })
+    .await
+    .map_err(|err| {
+        reported(
+            "count_my_commitments",
+            err,
+            "Couldn't count your commitments. The sidebar's number may be out of date; \
+             opening Commitments shows the current list.",
         )
     })?
 }

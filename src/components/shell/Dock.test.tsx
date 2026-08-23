@@ -8,6 +8,7 @@ import { NavigationProvider } from "../providers/NavigationProvider";
 import { DISTILL_STATE_EVENT } from "../../events";
 import type { FailedSession } from "../../useSessions";
 import { emitFromBackend, onCommand, resetTauriMocks } from "../../test/tauri";
+import { notifyVaultChanged } from "../../useVaultQuery";
 
 vi.mock("@tauri-apps/api/core", () => import("../../test/tauri"));
 vi.mock("@tauri-apps/api/event", () => import("../../test/tauri"));
@@ -33,7 +34,13 @@ function serveVault(sessions: FailedSession[] = []): void {
     phase: "idle",
     sources: { loopback: "off", microphone: "off" },
   }));
+  // Same reasoning as `capture_phase`: left unrouted this rejects, and the
+  // commitments row would read as a quiet zero forever.
+  onCommand("count_my_commitments", () => commitmentCount);
 }
+
+/** What the next `count_my_commitments` read answers. */
+let commitmentCount = 0;
 
 function renderShell() {
   return render(
@@ -49,6 +56,7 @@ function renderShell() {
 describe("Dock needs-attention row", () => {
   beforeEach(() => {
     resetTauriMocks();
+    commitmentCount = 0;
   });
 
   it("stays hidden while nothing has failed", async () => {
@@ -205,5 +213,67 @@ describe("Dock layout", () => {
     expect(destinations).toHaveClass("min-h-0", "flex-1", "overflow-y-auto");
     expect(destinations).not.toContainElement(tools);
     expect(tools.parentElement).not.toHaveClass("overflow-y-auto");
+  });
+});
+
+describe("Dock commitments row", () => {
+  beforeEach(() => {
+    resetTauriMocks();
+    commitmentCount = 0;
+  });
+
+  it("carries the count of what is on you", async () => {
+    commitmentCount = 4;
+    serveVault();
+
+    renderShell();
+
+    expect(await screen.findByTestId("sidebar-commitments-count")).toHaveTextContent(
+      "4",
+    );
+  });
+
+  it("goes quiet at zero rather than celebrating, and keeps its place", async () => {
+    serveVault();
+
+    renderShell();
+
+    // Wait for the read to land, so this asserts "counted, and nothing to say"
+    // rather than "has not counted yet".
+    await waitFor(() => {
+      expect(screen.getByTestId("commitments-nav")).toBeInTheDocument();
+    });
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      screen.queryByTestId("sidebar-commitments-count"),
+    ).not.toBeInTheDocument();
+    // The row is a destination, not a notice: it stays whatever the number is.
+    expect(screen.getByTestId("commitments-nav")).toBeInTheDocument();
+  });
+
+  it("comes down when a commitment settles", async () => {
+    commitmentCount = 2;
+    serveVault();
+
+    renderShell();
+    expect(await screen.findByTestId("sidebar-commitments-count")).toHaveTextContent(
+      "2",
+    );
+
+    // Both `ledger:changed` and `vault:changed` are relayed onto this one bus
+    // at the shell root, which is outside this harness, so it is driven
+    // directly here.
+    commitmentCount = 1;
+    act(() => {
+      notifyVaultChanged();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("sidebar-commitments-count")).toHaveTextContent(
+        "1",
+      );
+    });
   });
 });

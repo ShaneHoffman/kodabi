@@ -447,6 +447,24 @@ are reported beside the group rather than failing the gesture, because a sweep o
 drew a moment ago will always race something. A bulk untrack is a person's own judgement like the
 single verb, so it stamps `untracked_via: manual` and survives a later re-track.
 
+Clearing a commitment is the one gesture in the app whose **motion is optimistic while its state is
+not**. Ticking a Mine card draws the check on, holds a beat, then plays `ledger::view`'s Vanish, all
+without waiting on the round trip; the write underneath is still note-first, and a failure withdraws
+the departure and travels the row back rather than leaving a card that left on a lie. Because the
+local write announces itself almost immediately, the view keeps a snapshot of the ticked row and
+goes on rendering it after the refetch has dropped it — otherwise the card would unmount mid-beat
+and pop out of the list, which is the flatness the moment exists to fix. It lands on the settled
+shelf, whose summary (`view::settled_shelf`) is counted over the whole seven-day window *before* the
+cap, so "5 cleared this week" stays true on a week that settled more than the shelf can show.
+
+**Two counts of "mine" exist, and they answer different questions.** The dock row's
+(`view::outstanding_count`, behind `count_my_commitments`) is what is on you *and on screen*: Mine
+only, minus snoozes whose day has not arrived. The MCP summary's `mine`
+(`ledger::commitments::summarize`) is every live entry in that direction, quiet snoozes included,
+because a caller asking a project for its totals is asking what the ledger holds rather than what a
+view drew. A person who asks chat for a number and glances at the dock can legitimately see two;
+neither is stale, and the join beneath both is still the single one above.
+
 Two things age. A row's **tier** (`fresh` / `aging` / `stale`) is derived at read time by
 `ledger::view` from the later of `last_mention` and `last_evidence_check`, against a `today` the
 shell supplies and the day thresholds the user set in Settings. Nothing writes when a tier changes,

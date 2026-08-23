@@ -125,7 +125,18 @@ export function Checkbox({
             // in unrotated coordinates and land the glyph off-centre.
             "before:h-[0.3rem] before:w-[0.55rem] before:border-b-2 before:border-l-2 before:border-ground before:opacity-0 before:content-['']",
             "before:[transform:rotate(-45deg)_translate(1px,-1px)]",
-            "checked:before:opacity-100",
+            // The check DRAWS ON rather than appearing: it grows into the ink
+            // fill over the box's own clock, so a tick reads as a mark being
+            // made. `scale` is the independent property (it composes with the
+            // arbitrary transform above rather than replacing it), which is
+            // also why the transition has to name it — see the press above.
+            "before:scale-50 before:transition-[opacity,scale] before:duration-140 before:ease-out-strong",
+            "checked:before:opacity-100 checked:before:scale-100",
+            // The swap: under reduced motion the glyph is full size from the
+            // start and only its opacity resolves. Movement is the
+            // accessibility problem, life is not (DESIGN_SYSTEM §4), and what
+            // the user reads here is the end state, not the travel.
+            "motion-reduce:before:scale-100",
             // The box has no text to fade, so it dims instead — the one
             // sanctioned opacity fade in the system (DESIGN_SYSTEM §2).
             "disabled:cursor-not-allowed disabled:opacity-50",

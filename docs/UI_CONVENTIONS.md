@@ -123,7 +123,7 @@ Always the token utility, never the literal:
 | A glass surface | `glass-top`, `glass-dock`, `glass-panel`, `glass-card`, `glass-overlay`, `glass-dialog`, `glass-palette`, `glass-pill`, `glass-sheet`, `glass-scrim` |
 | A card that lifts under the pointer | `hover:-translate-y-[2px] hover:glass-card-lift` (DESIGN_SYSTEM §5) |
 | A well sunk into a panel | `glass-term` (the terminal's pane; DESIGN_SYSTEM §5) |
-| A row that enters or leaves a working list | the `motion` variant tables in [`src/components/views/InboxView.tsx`](../src/components/views/InboxView.tsx) — a slot that collapses its own height, a card that travels; see "When motion, when CSS" below |
+| A row that enters or leaves a working list | the `motion` variant tables in [`src/components/views/vanishMotion.ts`](../src/components/views/vanishMotion.ts) — a slot that collapses its own height, a card that travels; shared by the Inbox and Commitments, see "When motion, when CSS" below |
 | The focus ring | `focus-ring`, or `focus-ring-inset` where the control fills its container |
 
 Each recipe carries a whole surface — its fill, blur, lit edge, border, shadow and rung of the radius
@@ -215,6 +215,18 @@ Presses, hovers, crossfades, and surfaces materializing are transitions, and the
 even on a screen that also uses `motion` for something else. The Inbox is the live example: its list
 choreography is `motion`, and the stage crossfade three lines away is still a `transition-[opacity,filter]`.
 
+**A row leaving a working list is one move, in one table.** Doctrine treats a routed capture leaving
+the Inbox under the app's power and a checked commitment leaving under the user's as the same
+departure (DESIGN_SYSTEM §4), so both read from
+[`vanishMotion.ts`](../src/components/views/vanishMotion.ts) rather than each keeping its own dialect
+of it. A third list that needs one imports that table; it does not write a fourth set of variants.
+
+**A CSS entrance and a `motion` exit cannot share an element.** A filled (`both`) CSS animation holds
+its final keyframe at animation-origin priority, which outranks the inline styles `motion` writes — so
+`animate-rise-in` on a card whose exit `motion` drives paints the exit and then silently overrides it.
+Put the entrance on an inner element, below the two the choreography owns (Commitments' `MineSlot` is
+the worked example).
+
 Two things to know before writing any:
 
 **Variant tables are module constants, never built during render.** A variants object is part of a
@@ -239,7 +251,9 @@ also branch on the hook itself.
 Tests run with `MotionGlobalConfig.skipAnimations` on (`src/test/setup.ts`), which lands every value at
 its target immediately. An element `AnimatePresence` is holding open for an exit still unmounts a frame
 later, so a test asserting it is gone has to drive the frame loop — see `waitForRemoval` in
-`InboxView.test.tsx`.
+`InboxView.test.tsx` and `CommitmentsView.test.tsx`. A state-driven departure (no `AnimatePresence`)
+has the same problem for the same reason: the row unmounts when its own timers finish, not inside the
+click that started them.
 
 ---
 
@@ -390,7 +404,8 @@ pointer and keyboard) inside base-ui's dialog parts, which own the modal. Note w
 cmdk's own `Command.Dialog` wraps `@radix-ui/react-dialog`, and taking it would have put a second
 dialog implementation in the app beside base-ui's. And `motion` drives the Inbox's capture flow — the
 pipeline placeholder growing into the list, the routed card travelling out while its slot closes
-behind it — which is the case CSS genuinely cannot hold: an unmeasured height, an element that has to
+behind it, and, through the same shared tables, a checked commitment leaving the Commitments view —
+which is the case CSS genuinely cannot hold: an unmeasured height, an element that has to
 outlive its own removal, and both on one timeline that can be interrupted. **A library is worth
 adopting for the part of it you need, not the whole surface it offers.** Everything visible about all
 five is still ours.
@@ -445,8 +460,12 @@ The listening pill lives here for one reason: it is the app's on-air surface, an
 move. Below, in a dock that grows, it shared a rail with destinations and sat under a list whose
 length it depended on.
 
-The dock therefore holds destinations only, in three groups: the vault-wide three (Inbox, Needs
-attention, Search), the folders, and the two tools under a hairline (Chat, Terminal).
+The dock therefore holds destinations only, in three groups: the vault-wide four (Inbox, Needs
+attention, Commitments, Search), the folders, and the two tools under a hairline (Chat, Terminal).
+Three of the four carry a count, which is a fact about the destination rather than an action: a dock
+row still holds no verb. A count is omitted at zero rather than rendered as a nought, and Needs
+attention goes further and drops its whole row, because it is a notice where the other three are
+places.
 
 That is a decision, not an accident of what got built first. A region that some destinations have and
 others don't makes the main column's width depend on where you navigated, which reads as the layout

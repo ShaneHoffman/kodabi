@@ -18,7 +18,7 @@ use chrono::{DateTime, Duration, NaiveDate, SecondsFormat, Utc};
 
 use crate::index::{ActionItemRow, ActionItemStatus};
 
-use super::{Direction, EntryDetail, EntryState, UntrackedVia};
+use super::{ClosedVia, Direction, EntryDetail, EntryState, UntrackedVia};
 
 /// What the index knows about one note a commitment points at.
 ///
@@ -399,17 +399,64 @@ fn snooze_lapsed(detail: &EntryDetail, today: NaiveDate) -> bool {
     }
 }
 
-/// The most recently settled entries, newest first.
+/// How many of these entries are in the working set on `today`: everything
+/// live except a snooze whose day has not arrived.
+///
+/// The cut the commitments surface's live groups make, so a count taken here
+/// matches the rows a person is looking at rather than the rows the ledger
+/// holds. Filter by direction before calling to count one side of the ledger.
+pub fn outstanding_count(details: &[EntryDetail], today: NaiveDate) -> usize {
+    details
+        .iter()
+        .filter(|detail| detail.entry.state != EntryState::Snoozed || snooze_lapsed(detail, today))
+        .count()
+}
+
+/// How far back the settled shelf reaches.
+///
+/// A closure reached by evidence has to be visible to be undoable, and a week
+/// is the span over which "wait, that is not done" is still a live thought.
+/// Older closures are history, and history is the note's job.
+pub const SETTLED_WINDOW_DAYS: i64 = 7;
+
+/// How many settled entries the shelf carries. A bound, not a page: a person
+/// undoing a mistake is looking for something they just saw.
+pub const SETTLED_CAP: usize = 20;
+
+/// What the settled shelf says about itself.
+///
+/// Counted over the whole window and *before* the cap, so the sentence stays
+/// true on a week that settled more than the shelf can show.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SettledSummary {
+    /// Closed or waived inside the window. Untracked is excluded: leaving the
+    /// working set is a filing correction, not a win.
+    pub cleared: u32,
+    /// Of `cleared`, the closures a conversation evidence pass made on its own.
+    pub closed_from_conversation: u32,
+    /// Of `cleared`, the closures established from GitHub.
+    pub closed_from_github: u32,
+}
+
+/// The settled shelf: what just settled, and what that adds up to.
+pub struct SettledShelf {
+    /// The shelf's rows, newest first, windowed and capped.
+    pub entries: Vec<EntryDetail>,
+    pub summary: SettledSummary,
+}
+
+/// The most recently settled entries, newest first, with the window's totals.
 ///
 /// The undo shelf: a closure reached by evidence has to be visible to be
 /// undoable, so a surface shows what just settled rather than making the user
 /// trust that it was right. Bounded twice over, by age and by count, because
 /// this is a shelf and not a history view.
-pub fn recently_settled(
-    details: Vec<EntryDetail>,
-    cutoff_utc: &str,
-    cap: usize,
-) -> Vec<EntryDetail> {
+///
+/// The summary is computed here rather than by a caller so that every reader of
+/// the ledger counts a cleared week the same way. A shelf that showed twenty
+/// rows and a sentence that counted twenty-five would be two answers to one
+/// question.
+pub fn settled_shelf(details: Vec<EntryDetail>, cutoff_utc: &str, cap: usize) -> SettledShelf {
     let mut recent: Vec<EntryDetail> = details
         .into_iter()
         // Both sides are RFC 3339 UTC with a `Z` and seconds precision
@@ -417,6 +464,23 @@ pub fn recently_settled(
         // whose lexical order is its chronological order.
         .filter(|detail| detail.entry.updated_at.as_str() >= cutoff_utc)
         .collect();
+
+    let mut summary = SettledSummary::default();
+    for detail in &recent {
+        match detail.entry.state {
+            EntryState::Closed => {
+                summary.cleared += 1;
+                match detail.entry.closed_via {
+                    Some(ClosedVia::Conversation) => summary.closed_from_conversation += 1,
+                    Some(ClosedVia::Github) => summary.closed_from_github += 1,
+                    _ => {}
+                }
+            }
+            EntryState::Waived => summary.cleared += 1,
+            _ => {}
+        }
+    }
+
     recent.sort_by(|a, b| {
         b.entry
             .updated_at
@@ -424,7 +488,10 @@ pub fn recently_settled(
             .then_with(|| a.entry.entry_id.cmp(&b.entry.entry_id))
     });
     recent.truncate(cap);
-    recent
+    SettledShelf {
+        entries: recent,
+        summary,
+    }
 }
 
 #[cfg(test)]
@@ -877,7 +944,7 @@ mod tests {
     }
 
     #[test]
-    fn recently_settled_windows_sorts_and_caps() {
+    fn settled_shelf_windows_sorts_and_caps() {
         let (ledger, _) = seeded();
         let template = ledger.list_details(&Default::default()).unwrap()[0].clone();
         let stamped = |entry_id: &str, updated_at: &str| {
@@ -887,7 +954,7 @@ mod tests {
             detail
         };
 
-        let settled = recently_settled(
+        let shelf = settled_shelf(
             vec![
                 stamped("le_old", "2026-08-01T00:00:00Z"),
                 stamped("le_edge", "2026-08-10T00:00:00Z"),
@@ -900,7 +967,8 @@ mod tests {
 
         // Newest first, the pre-cutoff entry dropped, capped at two.
         assert_eq!(
-            settled
+            shelf
+                .entries
                 .iter()
                 .map(|detail| detail.entry.entry_id.as_str())
                 .collect::<Vec<_>>(),
@@ -908,12 +976,145 @@ mod tests {
         );
 
         // The cutoff is inclusive, so an entry settled exactly at it survives.
-        let settled = recently_settled(
+        let shelf = settled_shelf(
             vec![stamped("le_edge", "2026-08-10T00:00:00Z")],
             "2026-08-10T00:00:00Z",
             10,
         );
-        assert_eq!(settled.len(), 1);
+        assert_eq!(shelf.entries.len(), 1);
+    }
+
+    /// A settled detail with the state and provenance the summary reads.
+    fn settled_as(
+        template: &EntryDetail,
+        entry_id: &str,
+        state: EntryState,
+        closed_via: Option<ClosedVia>,
+    ) -> EntryDetail {
+        let mut detail = template.clone();
+        detail.entry.entry_id = entry_id.to_string();
+        detail.entry.updated_at = "2026-08-16T09:00:00Z".to_string();
+        detail.entry.state = state;
+        detail.entry.closed_via = closed_via;
+        detail
+    }
+
+    #[test]
+    fn settled_summary_counts_the_window_not_the_cap() {
+        let (ledger, _) = seeded();
+        let template = ledger.list_details(&Default::default()).unwrap()[0].clone();
+
+        let shelf = settled_shelf(
+            vec![
+                settled_as(
+                    &template,
+                    "le_a",
+                    EntryState::Closed,
+                    Some(ClosedVia::Manual),
+                ),
+                settled_as(
+                    &template,
+                    "le_b",
+                    EntryState::Closed,
+                    Some(ClosedVia::Manual),
+                ),
+                settled_as(
+                    &template,
+                    "le_c",
+                    EntryState::Closed,
+                    Some(ClosedVia::Manual),
+                ),
+            ],
+            "2026-08-10T00:00:00Z",
+            2,
+        );
+
+        // The shelf truncates; the sentence still counts the whole week.
+        assert_eq!(shelf.entries.len(), 2);
+        assert_eq!(shelf.summary.cleared, 3);
+    }
+
+    #[test]
+    fn settled_summary_excludes_untracked_and_buckets_auto_closes() {
+        let (ledger, _) = seeded();
+        let template = ledger.list_details(&Default::default()).unwrap()[0].clone();
+
+        // Older than the window: counted by neither.
+        let mut stale = settled_as(
+            &template,
+            "le_old",
+            EntryState::Closed,
+            Some(ClosedVia::Manual),
+        );
+        stale.entry.updated_at = "2026-08-01T00:00:00Z".to_string();
+
+        let shelf = settled_shelf(
+            vec![
+                settled_as(
+                    &template,
+                    "le_a",
+                    EntryState::Closed,
+                    Some(ClosedVia::Manual),
+                ),
+                settled_as(
+                    &template,
+                    "le_b",
+                    EntryState::Closed,
+                    Some(ClosedVia::Conversation),
+                ),
+                settled_as(
+                    &template,
+                    "le_c",
+                    EntryState::Closed,
+                    Some(ClosedVia::Github),
+                ),
+                settled_as(&template, "le_d", EntryState::Waived, None),
+                settled_as(&template, "le_e", EntryState::Untracked, None),
+                stale,
+            ],
+            "2026-08-10T00:00:00Z",
+            20,
+        );
+
+        // Untracked sits on the shelf but is a filing correction, not a win.
+        assert_eq!(shelf.entries.len(), 5);
+        assert_eq!(
+            shelf.summary,
+            SettledSummary {
+                cleared: 4,
+                closed_from_conversation: 1,
+                closed_from_github: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn outstanding_count_excludes_a_quiet_snooze_and_keeps_a_lapsed_one() {
+        let (ledger, _) = seeded();
+        let template = ledger.list_details(&Default::default()).unwrap()[0].clone();
+        let snoozed = |entry_id: &str, until: &str| {
+            let mut detail = template.clone();
+            detail.entry.entry_id = entry_id.to_string();
+            detail.entry.state = EntryState::Snoozed;
+            detail.entry.snoozed_until = Some(until.to_string());
+            detail
+        };
+        let live = |entry_id: &str, state: EntryState| {
+            let mut detail = template.clone();
+            detail.entry.entry_id = entry_id.to_string();
+            detail.entry.state = state;
+            detail
+        };
+
+        // `today()` is 2026-08-17.
+        let details = vec![
+            live("le_open", EntryState::Open),
+            live("le_review", EntryState::NeedsReview),
+            snoozed("le_quiet", "2026-08-18"),
+            snoozed("le_lapsed", "2026-08-16"),
+        ];
+
+        assert_eq!(outstanding_count(&details, today()), 3);
     }
 
     /// `today()` is 2026-08-17, so an anchor N days back is `17 - N` in August.

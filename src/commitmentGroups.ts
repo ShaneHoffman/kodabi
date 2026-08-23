@@ -1,4 +1,9 @@
-import type { Commitment, CommitmentDirection } from "./useCommitments";
+import type {
+  Commitment,
+  CommitmentDirection,
+  CommitmentEvidence,
+  SettledSummary,
+} from "./useCommitments";
 
 /*
  * How the Commitments view arranges what the ledger hands it: the me/them
@@ -362,21 +367,89 @@ export function formatConfidence(confidence: number): string {
   return `${Math.round(confidence * 100)}% confident`;
 }
 
+/** The claim that closed a commitment, or `null` where nothing did.
+ *
+ * The newest claim whose source matches `closed_via`: evidence arrives oldest
+ * first, and a commitment can carry several claims before one of them clears
+ * the auto-close threshold, so the last matching claim is the one that spoke.
+ */
+export function closingClaim(commitment: Commitment): CommitmentEvidence | null {
+  if (commitment.state !== "closed" || commitment.closed_via === null) {
+    return null;
+  }
+  for (let index = commitment.evidence.length - 1; index >= 0; index -= 1) {
+    const claim = commitment.evidence[index];
+    if (claim.source === commitment.closed_via) return claim;
+  }
+  return null;
+}
+
 /** How a settled row says what settled it. Never silent: an entry closed by an
- * evidence pass has to say so, or the undo beside it is unexplained. */
+ * evidence pass has to say so, or the undo beside it is unexplained.
+ *
+ * An auto-close says so in the active voice and dates itself from the claim's
+ * `observed_at`, which is the source note's own day. "Closed itself from the
+ * Aug 19 conversation" is the app showing its work; "closed from a
+ * conversation" was the app being modest about the best thing it does. */
 export function settledBy(commitment: Commitment): string {
   if (commitment.state === "waived") return "waived";
   // Untracked is not a closure and must not read as one: it says this was never
   // your business, where waived says it was and stopped mattering.
   if (commitment.state === "untracked") return "untracked";
+  const claim = closingClaim(commitment);
   switch (commitment.closed_via) {
     case "github":
-      return "closed from GitHub";
+      // A claim with no stored day degrades to the undated sentence rather
+      // than rendering an unreadable one.
+      return claim
+        ? `closed itself from GitHub on ${formatInstant(claim.observed_at)}`
+        : "closed itself from GitHub";
     case "conversation":
-      return "closed from a conversation";
+      return claim
+        ? `closed itself from the ${formatInstant(claim.observed_at)} conversation`
+        : "closed itself from a conversation";
     case "manual":
       return "closed by you";
     default:
       return "closed";
   }
+}
+
+/** How sure the pass was that closed this, or `null` where a person closed it.
+ *
+ * Held apart from `settledBy` because it is a different register: the sentence
+ * says what happened, the percentage is the evidence behind it. */
+export function autoCloseConfidence(commitment: Commitment): string | null {
+  if (commitment.closed_via === "manual") return null;
+  const claim = closingClaim(commitment);
+  return claim ? formatConfidence(claim.confidence) : null;
+}
+
+/** What the settled shelf leads with: the week's wins, and how many of them the
+ * app noticed on its own.
+ *
+ * `undefined` at zero, matching `ViewFrame`'s summary rule: a shelf with
+ * nothing cleared says nothing rather than reporting a nought. */
+export function settledSummaryLine(
+  summary: SettledSummary | null,
+): string | undefined {
+  if (summary === null || summary.cleared === 0) return undefined;
+  const parts = [`${summary.cleared} cleared this week`];
+  const conversation = summary.closed_from_conversation;
+  const github = summary.closed_from_github;
+  if (conversation > 0) {
+    parts.push(
+      `${conversation} closed ${conversation === 1 ? "itself" : "themselves"} from conversation`,
+    );
+  }
+  if (github > 0) {
+    // The verb is already spent when conversation said it, so GitHub joins the
+    // same sentence rather than repeating it.
+    parts.push(
+      conversation > 0
+        ? `${github} from GitHub`
+        : `${github} closed ${github === 1 ? "itself" : "themselves"} from GitHub`,
+    );
+  }
+  return parts.join(", ");
 }
