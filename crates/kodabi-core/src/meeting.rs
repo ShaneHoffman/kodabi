@@ -565,6 +565,22 @@ mod tests {
         assert_eq!(after.len(), 1, "the annotation minted no item");
     }
 
+    #[test]
+    fn a_waive_annotation_is_inert_to_the_grammar() {
+        // The waive sibling earns its inertness the same way, and matters more:
+        // it is the only annotation whose item still reads `- [ ]`, so a
+        // grammar that noticed it would re-mint a live item's id.
+        let plain = "## Action items\n\n- [ ] Priya to send the deck.\n";
+        let annotated =
+            "## Action items\n\n- [ ] Priya to send the deck.\n  - Waived 2026-08-22.\n";
+
+        let before = parse_meeting("n_aaaaaa", "2026-08-01", plain).1;
+        let after = parse_meeting("n_aaaaaa", "2026-08-01", annotated).1;
+        assert_eq!(before, after);
+        assert_eq!(after.len(), 1, "the annotation minted no item");
+        assert!(!after[0].done, "a waive never ticks the box");
+    }
+
     // --- the plain-note grammar -------------------------------------------
 
     #[test]
@@ -633,6 +649,18 @@ mod tests {
         // construction: `- Closed ` is neither checkbox marker.
         let plain = "- [ ] chase the wire\n";
         let annotated = "- [ ] chase the wire\n  - Closed 2026-08-17: paid.\n";
+
+        let before = parse_body(NOTE_ID, NoteType::Note, "2026-07-09", plain).1;
+        let after = parse_body(NOTE_ID, NoteType::Note, "2026-07-09", annotated).1;
+        assert_eq!(before, after, "ids and all");
+        assert_eq!(after.len(), 1, "the annotation minted no item");
+    }
+
+    #[test]
+    fn a_waive_annotation_is_inert_in_a_plain_note() {
+        // Same argument, same construction: `- Waived ` is neither marker.
+        let plain = "- [ ] chase the wire\n";
+        let annotated = "- [ ] chase the wire\n  - Waived 2026-08-22.\n";
 
         let before = parse_body(NOTE_ID, NoteType::Note, "2026-07-09", plain).1;
         let after = parse_body(NOTE_ID, NoteType::Note, "2026-07-09", annotated).1;

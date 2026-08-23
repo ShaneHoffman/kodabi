@@ -99,12 +99,13 @@ structurally:
 The durable architectural bet: **the Rust backend is a dumb, testable data layer, and the AI layer
 upgrades itself every time Claude Code ships.**
 
-`kodabi-mcp` exposes the knowledge base as an MCP server over stdio — ten tools, seven read and
-three write:
+`kodabi-mcp` exposes the knowledge base as an MCP server over stdio — eleven tools, seven read and
+four write:
 
 - **Read:** `search_notes`, `get_note`, `get_meeting_transcript`, `list_outstanding_items`,
   `list_commitments`, `list_projects`, `get_project_context`
-- **Write:** `file_note_to_project`, `add_glossary_term`, `update_action_item`
+- **Write:** `file_note_to_project`, `add_glossary_term`, `update_action_item`,
+  `waive_action_item`
 
 Their schemas are specified in [`MCP_TOOL_SURFACE.md`](MCP_TOOL_SURFACE.md) and mirrored verbatim as
 committed JSON under `crates/kodabi-mcp/schemas/`. The read tools are pre-approved for the CLI; the
@@ -409,12 +410,16 @@ The Commitments view reads it through `ledger_cmds`, whose organizing principle 
 filter. A row is a ledger entry joined to the index's row for its source line
 (`kodabi_core::ledger::view`), because the two stores own different halves — identity and judgement
 here, `done` and `due_date` in the note. That is also why ticking a box in the view writes the
-Markdown and records `closed_via: manual` beside it, while snoozing and waiving touch no note at
-all: waiving exists precisely so nobody has to edit a meeting note to pretend something was not
-said. Since the ledger worker owns the database single-threaded, commands reach it through a
-request/reply channel (`ledger_state::LedgerClient`) that reports an unavailable ledger rather than
-dropping a person's judgement silently, and mutations announce themselves on `ledger:changed` —
-distinct from `vault:changed`, which would be a lie for a write that touched no note.
+Markdown and records `closed_via: manual` beside it, while snoozing touches no note at all. Waiving
+sits between the two: it never ticks the box (waived is not done) but does append one date-only
+line, `- Waived <date>.`, under the item, so the note is a truthful record of the verdict and so a
+waive made from chat has a file write the watcher can carry into an open window. Nobody has to edit
+a meeting note to pretend something was not said; the line is appended beneath what was said, never
+instead of it. Since the ledger worker owns the database single-threaded, commands reach it through
+a request/reply channel (`ledger_state::LedgerClient`) that reports an unavailable ledger rather
+than dropping a person's judgement silently, and mutations announce themselves on `ledger:changed` —
+distinct from `vault:changed`, which would be a lie for a write that touched no note, and which the
+note-writing mutations emit as well.
 
 **A day's enrollments get a review moment, and it is deliberately not a gate.** The whole-vault view
 opens with a strip naming what enrolled since the last time anyone looked, grouped by the meeting
@@ -528,7 +533,7 @@ completion claim is recorded as `conversation` evidence that either closes the e
 the app ticks a checkbox the user did not: the box belongs to whichever *earlier* note recorded the
 promise, and it is written together with a `- Closed <date>: …` line naming the conversation that
 reported it, so a box nobody remembers ticking can be traced back
-(`docs/FRONTMATTER_SCHEMA.md`). Anything short of that threshold leaves every note untouched. A refresh naming one of
+(`docs/FRONTMATTER_SCHEMA.md`, which also carries that line's waive sibling). Anything short of that threshold leaves every note untouched. A refresh naming one of
 the new note's own lines is also the dedup mechanism — it is handed to the reconciler as a hint, so
 a paraphrase (`"send the slide deck"` for `"send the deck"`) links to the existing commitment rather
 than minting a second live entry for one promise. The classifications ride the shared

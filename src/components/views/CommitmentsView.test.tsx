@@ -373,12 +373,15 @@ describe("CommitmentsView", () => {
     const user = userEvent.setup();
     serve({ entries: [commitment({ entry_id: "le_mine", item: item() })] });
     onCommand("waive_commitment", () => ({
-      entry_id: "le_mine",
-      state: "waived",
-      snoozed_until: null,
-      closed_via: null,
-      review_reason: null,
-      updated_at: "2026-08-17T12:00:00Z",
+      entry: {
+        entry_id: "le_mine",
+        state: "waived",
+        snoozed_until: null,
+        closed_via: null,
+        review_reason: null,
+        updated_at: "2026-08-17T12:00:00Z",
+      },
+      note_annotated: true,
     }));
 
     await openCommitments(user);

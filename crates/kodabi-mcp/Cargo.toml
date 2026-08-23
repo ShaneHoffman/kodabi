@@ -1,6 +1,6 @@
 [package]
 name = "kodabi-mcp"
-description = "Kodabi's stdio MCP server — hand-rolled JSON-RPC 2.0 exposing the v1 tool surface (seven read, three write) over kodabi-core."
+description = "Kodabi's stdio MCP server — hand-rolled JSON-RPC 2.0 exposing the v1 tool surface (seven read, four write) over kodabi-core."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

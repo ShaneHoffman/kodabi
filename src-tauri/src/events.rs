@@ -30,8 +30,8 @@ pub const SESSIONS_CHANGED_EVENT: &str = "sessions:changed";
 /// snooze, reopen, untrack, an answered evidence claim, a manual track, or a
 /// change to a meeting's tracking mode. Distinct from
 /// [`VAULT_CHANGED_EVENT`] for the same reason [`SESSIONS_CHANGED_EVENT`] is:
-/// waiving or snoozing touches no note, so claiming the vault changed would be
-/// a lie, and a surface listening for vault writes would refetch for nothing.
-/// A ticked checkbox emits both, because it really does write Markdown.
-/// Payload: none.
+/// snoozing touches no note, so claiming the vault changed would be a lie, and
+/// a surface listening for vault writes would refetch for nothing. The
+/// mutations that *do* write Markdown emit both — a ticked checkbox, and a
+/// waive, which leaves a dated line under the item. Payload: none.
 pub const LEDGER_CHANGED_EVENT: &str = "ledger:changed";

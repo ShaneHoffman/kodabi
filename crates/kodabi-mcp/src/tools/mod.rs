@@ -1,4 +1,5 @@
-//! The `tools/call` router and the ten tool handlers (seven read, three write).
+//! The `tools/call` router and the eleven tool handlers (seven read, four
+//! write).
 //!
 //! Each handler deserializes its arguments into a kodabi-core param type, calls
 //! one core function, and wraps the result in the success/business-error
@@ -17,6 +18,7 @@ mod list_outstanding_items;
 mod list_projects;
 mod search_notes;
 mod update_action_item;
+mod waive_action_item;
 
 use std::path::Path;
 
@@ -58,6 +60,7 @@ pub fn call(server: &Server, params: Option<&Value>) -> Result<Value, RpcError> 
         "file_note_to_project" => file_note_to_project::call(server, arguments),
         "add_glossary_term" => add_glossary_term::call(server, arguments),
         "update_action_item" => update_action_item::call(server, arguments),
+        "waive_action_item" => waive_action_item::call(server, arguments),
         other => Err(RpcError::invalid_params(format!("unknown tool: {other}"))),
     }
 }

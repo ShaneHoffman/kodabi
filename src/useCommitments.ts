@@ -163,6 +163,12 @@ export type ConfirmEvidenceResult = {
   note_annotated: boolean;
 };
 
+/** Mirrors `ledger_cmds::WaiveCommitmentDto`. */
+export type WaiveCommitmentResult = {
+  entry: CommitmentEntry;
+  note_annotated: boolean;
+};
+
 export function listCommitments(
   project: string | null,
 ): Promise<CommitmentsPayload> {
@@ -194,10 +200,13 @@ export function snoozeCommitment(
   });
 }
 
-/** Marks a commitment as deliberately not happening. The note is untouched,
- * which is the whole point of the verb. */
-export function waiveCommitment(entryId: string): Promise<CommitmentEntry> {
-  return invoke<CommitmentEntry>("waive_commitment", {
+/** Marks a commitment as deliberately not happening, and writes a date-only
+ * line under the item saying so. The box is never ticked: waived is not done,
+ * and the line is the signal. */
+export function waiveCommitment(
+  entryId: string,
+): Promise<WaiveCommitmentResult> {
+  return invoke<WaiveCommitmentResult>("waive_commitment", {
     input: { entry_id: entryId },
   });
 }
@@ -206,8 +215,8 @@ export function waiveCommitment(entryId: string): Promise<CommitmentEntry> {
  *
  * The sibling of `waiveCommitment`, and the difference is what each is about.
  * Waiving is about the commitment (it was mine, it stopped mattering);
- * untracking is about the ledger (this was never my business). The note is
- * untouched either way. */
+ * untracking is about the ledger (this was never my business). Which is why
+ * only waiving writes to the note: this one leaves it untouched. */
 export function untrackCommitment(entryId: string): Promise<CommitmentEntry> {
   return invoke<CommitmentEntry>("untrack_commitment", {
     input: { entry_id: entryId },

@@ -258,6 +258,17 @@ pub struct ConfirmEvidenceDto {
     note_annotated: bool,
 }
 
+/// A waive's outcome: the settled ledger row, and whether the note got its
+/// dated line.
+#[derive(serde::Serialize)]
+pub struct WaiveCommitmentDto {
+    entry: CommitmentEntryDto,
+    /// `false` when the source line has moved on, or the entry was already
+    /// waived and its line already written. Both are ordinary answers: the
+    /// ledger holds the judgement either way.
+    note_annotated: bool,
+}
+
 fn entry_dto(entry: &LedgerEntry) -> CommitmentEntryDto {
     CommitmentEntryDto {
         entry_id: entry.entry_id.clone(),
@@ -1176,16 +1187,45 @@ Waiting on them.",
     }
 }
 
-/// Marks a commitment as deliberately not happening.
+/// Marks a commitment as deliberately not happening, and says so in the note.
 ///
-/// Ledger-only, and that is the whole point of the verb: waiving exists so a
-/// person never has to edit a meeting note to pretend something was not said.
+/// The judgement lives in the ledger, which stays the authority on what state
+/// the commitment is in. The note gets a one-line, date-only echo beneath the
+/// item — `- Waived <date>.` — so a person reading the Markdown sees the
+/// verdict the database is holding, and so a waive made anywhere converges
+/// everywhere: the file write is what the watcher notices, which is the only
+/// route a process without an `AppHandle` has into an open window.
+///
+/// **The box is never ticked.** Waived is not done, and the annotation is the
+/// signal precisely because the checkbox would be the wrong one.
+///
+/// The verb's original promise survives, amended: a waive still never edits
+/// what was said, it appends a dated verdict beneath it. Nobody has to rewrite
+/// a meeting note to pretend something was not said.
+///
+/// **The ledger moves first.** The transition table is the gate — a closed,
+/// superseded or untracked entry cannot be waived — and a refused waive must
+/// leave the Markdown untouched, because a line claiming a waive that did not
+/// happen is a lie in the file a person trusts most. This inverts
+/// [`set_commitment_done`]'s note-first order on purpose: there the box is the
+/// source of truth and a half-write is self-correcting, while here the note is
+/// narrative and the row is the fact. Mutating first is also what yields the
+/// live `(note_id, item_id)` needed to find the line.
 #[tauri::command]
 pub async fn waive_commitment(
     app: AppHandle,
     input: CommitmentEntryInput,
-) -> Result<CommitmentEntryDto, String> {
+) -> Result<WaiveCommitmentDto, String> {
+    let kb = knowledge_base_dir(&app)?;
     let (client, _) = handles(&app);
+    if !client.is_available() {
+        return Err(reported(
+            "waive_commitment",
+            "commitment ledger unavailable",
+            LEDGER_REFUSED,
+        ));
+    }
+
     let reply = mutate(
         &app,
         "waive_commitment",
@@ -1195,16 +1235,52 @@ pub async fn waive_commitment(
         },
     )
     .await?;
-    Ok(entry_dto(&reply.entry))
+
+    // Re-waiving something already waived is a silent success in the state
+    // machine, and stamping today under the item would misdate a judgement
+    // made long ago.
+    let moved = reply.previous_state != Some(EntryState::Waived);
+    let mut note_annotated = false;
+    if let (true, Some((note_id, item_id))) = (moved, reply.active_ref.clone()) {
+        let waived_on = Local::now().format("%Y-%m-%d").to_string();
+        let write_kb = kb.clone();
+        let written = tauri::async_runtime::spawn_blocking(move || {
+            // An unparseable id here is a corrupt ref rather than user input,
+            // and the ledger already holds the judgement, so it degrades to a
+            // note that simply says nothing.
+            let Ok(id) = NoteId::parse(&note_id) else {
+                return Ok(AnnotateOutcome::NoteMissing);
+            };
+            vault::annotate_action_item_waived(&write_kb, &id, &item_id, &waived_on)
+        })
+        .await;
+
+        match written {
+            Ok(Ok(AnnotateOutcome::Annotated(listed))) => {
+                note_annotated = true;
+                reindex_and_broadcast(&app, &listed, &kb);
+            }
+            Ok(Ok(_)) => {}
+            Ok(Err(err)) => eprintln!("waive_commitment: note write failed: {err}"),
+            Err(err) => eprintln!("waive_commitment: note write panicked: {err}"),
+        }
+    }
+
+    Ok(WaiveCommitmentDto {
+        entry: entry_dto(&reply.entry),
+        note_annotated,
+    })
 }
 
 /// Returns a commitment to open, whatever it was.
 ///
 /// The one undo behind every affordance: waking a snooze, taking back a waiver,
 /// and reversing a closure an evidence pass made on its own. The note is left
-/// exactly as it stands, including any closure annotation: annotate, never
-/// destroy. Unticking a box that a closure ticked is `set_commitment_done`'s
-/// job, which the caller runs instead of this one when a live line exists.
+/// exactly as it stands, including any closure or waive annotation: annotate,
+/// never destroy. Those lines record what was decided on the day it was
+/// decided, which a reopen does not make untrue. Unticking a box that a closure
+/// ticked is `set_commitment_done`'s job, which the caller runs instead of this
+/// one when a live line exists.
 #[tauri::command]
 pub async fn reopen_commitment(
     app: AppHandle,
@@ -1359,7 +1435,10 @@ pub async fn dismiss_commitment_evidence(
 /// The sibling of `waive_commitment`, and the distinction is worth keeping in
 /// the two sentences the UI shows. Waiving is about the commitment (it was
 /// mine, it stopped mattering); untracking is about the ledger (this was never
-/// my business). Ledger-only, and reversible through the same Reopen.
+/// my business). That difference is why only one of them writes to the note: a
+/// waive is a verdict on the commitment and says so under the item, while
+/// untracking is a statement about what this ledger is for and leaves the note
+/// alone. Reversible through the same Reopen.
 #[tauri::command]
 pub async fn untrack_commitment(
     app: AppHandle,

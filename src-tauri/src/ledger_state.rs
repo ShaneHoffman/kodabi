@@ -38,7 +38,7 @@ use chrono::{SecondsFormat, Utc};
 use kodabi_core::distill::LedgerUpdateDraft;
 use kodabi_core::ledger::{
     self, AppliedUpdates, ClosedVia, DistillFollowUp, EnrollmentMode, EntryDetail, EntryFilter,
-    Evidence, Ledger, LedgerEntry, NoteSync, NoteTrackingOutcome, OwnerIdentity,
+    EntryState, Evidence, Ledger, LedgerEntry, NoteSync, NoteTrackingOutcome, OwnerIdentity,
     OwnerResolutionOutcome, RetroSource, UntrackedVia, LEDGER_DB_FILE,
 };
 use kodabi_core::meeting::ActionItemFact;
@@ -156,6 +156,15 @@ pub struct MutateReply {
     /// caller needs it to tick the box or write the annotation, and neither is
     /// possible for an entry whose source line is gone.
     pub active_ref: Option<(String, String)>,
+    /// What the entry was *before* this mutation, when the row existed to be
+    /// read.
+    ///
+    /// The state machine treats a move to the state something is already in as
+    /// a silent success, so the reply alone cannot tell a real transition from
+    /// a no-op. A caller that echoes the transition into the note needs the
+    /// difference: re-waiving an entry waived last month must not stamp
+    /// today's date under the item as though the judgement were made today.
+    pub previous_state: Option<EntryState>,
 }
 
 /// What a batched gesture settled on: the entries it moved, and the ones it
@@ -1081,6 +1090,13 @@ fn apply_mutation(ledger: &mut Ledger, op: LedgerOp) -> ledger::Result<MutateRep
     let now = now_utc();
     let entry_id = op.entry_id().to_string();
 
+    // Read before the move, because afterwards it is unrecoverable: a
+    // transition into the state the entry already held leaves no trace of
+    // having been a no-op.
+    let previous_state = ledger
+        .get_entry(&entry_id)?
+        .map(|detail| detail.entry.state);
+
     let (entry, evidence) = match &op {
         LedgerOp::Close { entry_id, via } => (ledger.close(entry_id, *via, &now)?, None),
         LedgerOp::Waive { entry_id } => (ledger.waive(entry_id, &now)?, None),
@@ -1122,6 +1138,7 @@ fn apply_mutation(ledger: &mut Ledger, op: LedgerOp) -> ledger::Result<MutateRep
         entry: detail.map(|detail| detail.entry).unwrap_or(entry),
         evidence,
         active_ref,
+        previous_state,
     })
 }
 
@@ -1520,6 +1537,39 @@ mod tests {
             reply.entry.touched,
             "the reply carries the entry as it now is"
         );
+
+        drop(sender);
+        worker.join().unwrap();
+    }
+
+    /// The state machine calls a move to the state something already holds a
+    /// silent success, so the reply alone cannot tell a transition from a
+    /// no-op. `previous_state` is what a caller writing a note-side echo reads
+    /// to avoid re-dating an old judgement.
+    #[test]
+    fn a_reply_reports_the_state_the_entry_came_from() {
+        let vault = tempfile::tempdir().unwrap();
+        let (sender, worker) = spawn_worker(&vault);
+        let entry_id = seed_entry(&sender);
+
+        let waive = |reply| LedgerJob::Mutate {
+            op: LedgerOp::Waive {
+                entry_id: entry_id.clone(),
+            },
+            reply,
+        };
+
+        let first = request(&sender, waive).unwrap();
+        assert_eq!(first.previous_state, Some(EntryState::Open));
+        assert_eq!(first.entry.state, EntryState::Waived);
+
+        let second = request(&sender, waive).unwrap();
+        assert_eq!(
+            second.previous_state,
+            Some(EntryState::Waived),
+            "the second waive moved nothing, and says so"
+        );
+        assert_eq!(second.entry.state, EntryState::Waived);
 
         drop(sender);
         worker.join().unwrap();

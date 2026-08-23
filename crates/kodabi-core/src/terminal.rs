@@ -28,8 +28,9 @@ use serde::Serialize;
 pub const MCP_SERVER_KEY: &str = "kodabi";
 
 /// The read tools, pre-approved so chat-over-the-KB needs no per-tool
-/// permission prompt. The three write tools (`file_note_to_project`,
-/// `add_glossary_term`, `update_action_item`) are deliberately omitted, so
+/// permission prompt. The four write tools (`file_note_to_project`,
+/// `add_glossary_term`, `update_action_item`, `waive_action_item`) are
+/// deliberately omitted, so
 /// Claude Code still prompts for them — there is a real TTY in the terminal to
 /// answer.
 ///

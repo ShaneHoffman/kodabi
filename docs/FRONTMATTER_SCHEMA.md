@@ -344,27 +344,50 @@ construction, and the words `(tentative)` in it are just words.
 
 ---
 
-## Closure annotations under an action item
+## Resolution annotations under an action item
 
-A line may sit directly beneath an action item, recording how the commitment was resolved:
+One or more lines may sit directly beneath an action item, recording what became of the commitment
+it carries:
 
 ```markdown
 - [ ] Jane to send the signed budget memo to finance by 2026-07-11.
   - Closed 2026-07-09: memo acknowledged in the finance thread (evidence in n_a1b2c3).
+- [ ] You to book the venue.
+  - Waived 2026-08-22.
 ```
 
-The shape is fixed: two spaces, then `- Closed <YYYY-MM-DD>: `, then a sentence. The writer is
-`vault::annotate_action_item`, the seam the commitment ledger's evidence providers call when they
-close an entry. Two providers reach it today: a human confirming a parked claim
-(`confirm_commitment_evidence`), and the distill pass, when a later conversation reports a
+There are exactly two shapes, both fixed, both starting with two spaces:
+
+| Shape | Written by | Means |
+| --- | --- | --- |
+| `  - Closed <YYYY-MM-DD>: <sentence>` | `vault::annotate_action_item` | The commitment was resolved, and here is how. |
+| `  - Waived <YYYY-MM-DD>.` | `vault::annotate_action_item_waived` | It was deliberately set aside. Date only. |
+
+A closure has a story worth telling — what evidence resolved it, and where — so it carries a
+sentence. A waive does not: the person decided it is not happening, there is no reason field, and
+the line says only that and when. **A waive never ticks the box**, which is the whole reason it
+needs a line: waived is not done, so the checkbox would say the opposite of the truth, and the
+annotation is the only note-visible signal. The commitment ledger holds the operational state
+either way; these lines are what a person reading the Markdown sees.
+
+Four writers reach the two seams. Closures come from a human confirming a parked claim
+(`confirm_commitment_evidence`) and from the distill pass, when a later conversation reports a
 commitment already done confidently enough to close it without asking
 (`distill_follow_up::apply_after_distill`, whose confidence floor is the user's
-`ledger.conversation_autoclose` setting). The comparison is strict, so a claim *at or below* that
-floor parks the entry in `needs_review` with the evidence attached and writes nothing to the note.
+`ledger.conversation_autoclose` setting; the comparison is strict, so a claim *at or below* that
+floor parks the entry in `needs_review` with the evidence attached and writes nothing to the note).
+Waives come from the app's own Waive verb (`waive_commitment`) and from chat, over the MCP server's
+`waive_action_item`. For the second of those the line does double duty: a `.md` write is the only
+way a process without an `AppHandle` can reach an open app window, via the file watcher.
 
-The prefix is chosen to be **inert to the action-item grammar** by construction: the parser trims
-each line and then skips anything that is not `- [ ] ` or `- [x] `, so a body carrying any number of
-these re-derives byte-identical action items, ids included. That inertness is what makes the whole
+**Reopening a commitment leaves these lines alone.** Annotate, never destroy: they record what was
+decided on the day it was decided, which a later reversal does not make untrue. A commitment waived
+again later gets its own dated line rather than an edit to the old one.
+
+Both prefixes are chosen to be **inert to the action-item grammar** by construction: the parser
+trims each line and then skips anything that is not `- [ ] ` or `- [x] `, so a body carrying any
+number of these re-derives byte-identical action items, ids included. That matters most for the
+waive shape, whose item is still live and still reads `- [ ]`. That inertness is what makes the whole
 approach safe, and it is why an annotation is written alongside every automatic tick rather than
 instead of the story: the human-readable account of a commitment stays in the Markdown rather than
 living only in a database, so a box the app ticked says on the next line who reported it done and
