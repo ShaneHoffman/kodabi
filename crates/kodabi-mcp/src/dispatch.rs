@@ -1644,4 +1644,175 @@ mod tests {
             "nothing was written"
         );
     }
+
+    // --- waive_action_item -------------------------------------------------
+
+    #[test]
+    fn waiving_moves_the_ledger_and_writes_the_dated_line() {
+        let (server, vault) = seeded_server_with_ledger();
+        let item = seeded_item_id(&server, "n_meet01");
+
+        let response = call_tool(
+            &server,
+            "waive_action_item",
+            json!({ "note_id": "n_meet01", "item_id": item }),
+        );
+
+        let structured = &response["result"]["structuredContent"];
+        assert_eq!(response["result"]["isError"], false);
+        assert_eq!(structured["entry"]["state"], "waived");
+        assert!(
+            structured["entry"]["closed_via"].is_null(),
+            "a waive is not a closure"
+        );
+        assert_eq!(structured["note_outcome"], "annotated");
+        assert_eq!(structured["note_annotated"], true);
+
+        let body = read_note_body(vault.path(), "Growth");
+        assert!(body.contains("- Waived "), "the line is there: {body}");
+        assert!(
+            body.contains("- [ ]"),
+            "waived is not done, so the box stays empty: {body}"
+        );
+
+        // Gone from the live working set, which is the point of the verb.
+        let listed = call_tool(&server, "list_commitments", json!({}));
+        assert!(listed["result"]["structuredContent"]["commitments"]
+            .as_array()
+            .unwrap()
+            .is_empty());
+    }
+
+    /// Asking twice is a success. It deliberately writes nothing the second
+    /// time: the first line already records the day the judgement was made, and
+    /// re-dating it would misreport when.
+    #[test]
+    fn waiving_twice_is_an_idempotent_success_that_writes_nothing_new() {
+        let (server, vault) = seeded_server_with_ledger();
+        let item = seeded_item_id(&server, "n_meet01");
+        let args = json!({ "note_id": "n_meet01", "item_id": item });
+
+        call_tool(&server, "waive_action_item", args.clone());
+        let response = call_tool(&server, "waive_action_item", args);
+
+        let structured = &response["result"]["structuredContent"];
+        assert_eq!(response["result"]["isError"], false);
+        assert_eq!(structured["note_outcome"], "already_waived");
+        assert_eq!(structured["note_annotated"], false);
+        assert_eq!(structured["entry"]["state"], "waived");
+        assert_eq!(
+            read_note_body(vault.path(), "Growth")
+                .matches("- Waived ")
+                .count(),
+            1
+        );
+    }
+
+    /// A reopen takes the state back and leaves the line: annotate, never
+    /// destroy. The record of the day the waive was made stays true.
+    #[test]
+    fn reopening_a_waived_commitment_leaves_the_waive_line() {
+        let (server, vault) = seeded_server_with_ledger();
+        let item = seeded_item_id(&server, "n_meet01");
+
+        call_tool(
+            &server,
+            "waive_action_item",
+            json!({ "note_id": "n_meet01", "item_id": item }),
+        );
+        let response = call_tool(
+            &server,
+            "update_action_item",
+            json!({ "note_id": "n_meet01", "item_id": item, "done": false }),
+        );
+
+        assert_eq!(
+            response["result"]["structuredContent"]["entry"]["state"],
+            "open"
+        );
+        assert!(read_note_body(vault.path(), "Growth").contains("- Waived "));
+    }
+
+    /// A forbidden transition is something the model can act on (reopen first),
+    /// so it comes back as a business answer naming both states — and the note
+    /// is never written, because the waive did not happen.
+    #[test]
+    fn waiving_a_closed_commitment_is_refused_in_the_callers_terms() {
+        let (server, vault) = seeded_server_with_ledger();
+        let item = seeded_item_id(&server, "n_meet01");
+        call_tool(
+            &server,
+            "update_action_item",
+            json!({ "note_id": "n_meet01", "item_id": item, "done": true }),
+        );
+
+        let response = call_tool(
+            &server,
+            "waive_action_item",
+            json!({ "note_id": "n_meet01", "item_id": item }),
+        );
+
+        assert_eq!(response["result"]["isError"], true);
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("closed"), "names where it is: {text}");
+        assert!(text.contains("waived"), "names where it would go: {text}");
+        assert!(!read_note_body(vault.path(), "Growth").contains("- Waived "));
+    }
+
+    /// Unlike a tick, a waive has no half it can perform against an item the
+    /// ledger does not track: there is no note-side fact to record on its own.
+    #[test]
+    fn waiving_an_untracked_item_is_a_business_error() {
+        let (server, vault) = seeded_server_with_ledger();
+        let item = seeded_item_id(&server, "n_chat01");
+
+        let response = call_tool(
+            &server,
+            "waive_action_item",
+            json!({ "note_id": "n_chat01", "item_id": item }),
+        );
+
+        assert_eq!(response["result"]["isError"], true);
+        let text = response["result"]["content"][0]["text"].as_str().unwrap();
+        assert!(text.contains("cannot move commitment"), "{text}");
+        assert!(!read_note_body(vault.path(), "Ops").contains("- Waived "));
+    }
+
+    #[test]
+    fn waiving_an_unenrolled_item_is_a_business_error() {
+        let (server, vault) = seeded_server_with_ledger();
+
+        let response = call_tool(
+            &server,
+            "waive_action_item",
+            json!({ "note_id": "n_meet01", "item_id": "a_notreal" }),
+        );
+
+        assert_eq!(response["result"]["isError"], true);
+        assert!(response["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("no tracked commitment"));
+        assert!(!read_note_body(vault.path(), "Growth").contains("- Waived "));
+    }
+
+    #[test]
+    fn waiving_without_a_configured_ledger_leaves_the_note_untouched() {
+        let (server, vault) = seeded_ledger_server(false);
+        let item = seeded_item_id(&server, "n_meet01");
+        let before = read_note_body(vault.path(), "Growth");
+
+        let response = call_tool(
+            &server,
+            "waive_action_item",
+            json!({ "note_id": "n_meet01", "item_id": item }),
+        );
+
+        assert_eq!(response["error"]["code"], -32603);
+        assert!(response["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("KODABI_LEDGER_DB"));
+        assert_eq!(before, read_note_body(vault.path(), "Growth"));
+    }
 }

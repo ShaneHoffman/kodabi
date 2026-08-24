@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "source",
+    "entry",
+    "note_annotated",
+    "note_outcome"
+  ],
+  "properties": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "item_id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/NoteId"
+        },
+        "item_id": {
+          "type": "string",
+          "description": "The action item that was targeted."
+        }
+      },
+      "description": "What the call acted on, echoed back."
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "entry_id",
+        "state",
+        "closed_via",
+        "updated_at"
+      ],
+      "properties": {
+        "entry_id": {
+          "$ref": "#/$defs/EntryId"
+        },
+        "state": {
+          "$ref": "#/$defs/EntryState"
+        },
+        "closed_via": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "manual",
+            "conversation",
+            "github",
+            null
+          ],
+          "description": "Null for a waive. A waive is not a closure, so nothing established one."
+        },
+        "updated_at": {
+          "$ref": "#/$defs/IsoDateTime"
+        }
+      },
+      "description": "The commitment as it now stands. Never null: an item the ledger does not track cannot be waived, and is reported as a business error instead."
+    },
+    "note_annotated": {
+      "type": "boolean",
+      "description": "Whether this call wrote the line into the note. False is an ordinary outcome, not a failure: the ledger holds the judgement either way."
+    },
+    "note_outcome": {
+      "type": "string",
+      "enum": [
+        "annotated",
+        "already_annotated",
+        "already_waived",
+        "note_missing",
+        "item_missing",
+        "failed"
+      ],
+      "description": "What happened to the note file. 'annotated' wrote the line. 'already_annotated' found today's line already there, which is a success. 'already_waived' means the commitment was waived before this call, so nothing was written at all: the earlier line already records the day the judgement was made, and re-dating it would misreport when. 'note_missing' and 'item_missing' mean the source line moved on; the waive still stands. 'failed' means the file write errored after the ledger had committed, which is reported rather than raised for the same reason."
+    }
+  },
+  "$defs": {
+    "EntryId": {
+      "type": "string",
+      "pattern": "^le_[0-9a-z]{6,}$",
+      "description": "Stable commitment-ledger entry identifier, e.g. \"le_7fq2k9\". Minted when the ledger first enrolls a commitment and never rewritten, unlike the action-item id, which is a content hash and is re-minted whenever the source line is edited."
+    },
+    "EntryState": {
+      "type": "string",
+      "enum": [
+        "open",
+        "needs_review",
+        "closed",
+        "superseded",
+        "waived",
+        "snoozed",
+        "untracked"
+      ],
+      "description": "Where a tracked commitment stands. Deliberately not a done/not-done axis: the note's checkbox owns that, and these are the states a checkbox cannot spell. 'open' is live; 'needs_review' lost its source line; 'closed' was resolved; 'superseded' was replaced by a later commitment; 'waived' is deliberately not happening; 'snoozed' is hidden until a date; 'untracked' was removed from the working set while its source line stays."
+    },
+    "IsoDateTime": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Timestamp, RFC 3339 date-time with offset (\"Z\" or numeric), e.g. \"2026-07-11T14:03:00Z\" or \"2026-07-09T14:00:00-07:00\"."
+    },
+    "NoteId": {
+      "type": "string",
+      "pattern": "^n_[0-9a-z]{6,}$",
+      "description": "Stable note identifier, e.g. \"n_a1b2c3\". Generated at creation, never rewritten on move/re-route. This is the write handle."
+    }
+  }
+}

@@ -269,9 +269,10 @@ function pruneIds(
  *
  * The checkbox writes the note, not the ledger: the Markdown owns done/not-done
  * and always has (`kodabi_core::ledger`). What the ledger records is the
- * judgement beside it, which is why snooze and waive live here and never touch
- * a note. Waiving exists precisely so nobody has to edit a meeting note to
- * pretend something was not said.
+ * judgement beside it, which is why snooze lives here and never touches a note.
+ * Waiving is the judgement that also gets said out loud: it leaves a dated line
+ * under the item and never ticks the box, so nobody has to edit a meeting note
+ * to pretend something was not said.
  */
 export function CommitmentsView({ slug }: Props) {
   const { navigate } = useNavigation();
@@ -1361,9 +1362,10 @@ function CommitmentRow({
                 </>
               )}
               <Menu.Separator />
-              {/* No confirmation on either: each writes one ledger row, touches
-                  no note, and Reopen on the shelf below takes it straight back.
-                  A confirm here would teach a danger that is not there. */}
+              {/* No confirmation on either: Reopen on the shelf below takes
+                  each straight back, and a confirm would teach a danger that is
+                  not there. Waive does append a dated line to the note, which
+                  a reopen leaves standing: a record of the day, not damage. */}
               <Menu.Item onClick={() => onWaive(commitment)}>Waive</Menu.Item>
               {/* The two ways out of the working set, together, because the
                   choice between them is what the reader is making: waive says

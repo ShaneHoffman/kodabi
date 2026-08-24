@@ -1,10 +1,10 @@
-//! The ten tools' static metadata and their committed JSON Schemas.
+//! The eleven tools' static metadata and their committed JSON Schemas.
 //!
 //! Seven read tools (`search_notes`, `get_note`, `get_meeting_transcript`,
 //! `list_outstanding_items`, `list_commitments`, `list_projects`,
-//! `get_project_context`) and three write tools (`file_note_to_project`,
-//! `add_glossary_term`, `update_action_item`); the write tools differ only in
-//! carrying `readOnlyHint: false`.
+//! `get_project_context`) and four write tools (`file_note_to_project`,
+//! `add_glossary_term`, `update_action_item`, `waive_action_item`); the write
+//! tools differ only in carrying `readOnlyHint: false`.
 //!
 //! Each schema is a verbatim copy of the matching block in
 //! `docs/MCP_TOOL_SURFACE.md` (one file per tool per direction, under
@@ -29,6 +29,7 @@ const GET_PROJECT_CONTEXT_DESCRIPTION: &str = "Aggregate context for one project
 const FILE_NOTE_TO_PROJECT_DESCRIPTION: &str = "Route or re-route a note to a project (the human correction loop). Moves the file, updates its frontmatter project + confidence, preserves the stable id, and returns the new path. Mutating but reversible.";
 const ADD_GLOSSARY_TERM_DESCRIPTION: &str = "Add or update a glossary term (term, definition, aliases) for a project. Upsert by normalized term. Used for transcription biasing and post-pass cleanup.";
 const UPDATE_ACTION_ITEM_DESCRIPTION: &str = "Mark an action item done, or reopen it. Ticks the checkbox in its source note and records the matching judgement in the commitment ledger, so chat and the app's Commitments view agree. Identify the item by note_id + item_id from list_outstanding_items, get_note, or list_commitments. Reversible: call again with done=false.";
+const WAIVE_ACTION_ITEM_DESCRIPTION: &str = "Waive a tracked commitment: mark it deliberately not happening, without ticking its checkbox. Records the judgement in the commitment ledger and writes a date-only line under the item in its source note (\"- Waived <date>.\"). Use for a commitment that was real and stopped mattering, not for one that was done (use update_action_item) or one that was never yours to track. Identify the item by note_id + item_id from list_commitments, list_outstanding_items, or get_note. Undo with update_action_item done=false, which reopens the commitment; the note line stays as a dated record.";
 
 const _: () = assert!(SEARCH_NOTES_DESCRIPTION.len() < 2048);
 const _: () = assert!(GET_NOTE_DESCRIPTION.len() < 2048);
@@ -40,6 +41,7 @@ const _: () = assert!(FILE_NOTE_TO_PROJECT_DESCRIPTION.len() < 2048);
 const _: () = assert!(ADD_GLOSSARY_TERM_DESCRIPTION.len() < 2048);
 const _: () = assert!(LIST_COMMITMENTS_DESCRIPTION.len() < 2048);
 const _: () = assert!(UPDATE_ACTION_ITEM_DESCRIPTION.len() < 2048);
+const _: () = assert!(WAIVE_ACTION_ITEM_DESCRIPTION.len() < 2048);
 
 /// One tool's immutable definition.
 struct ToolSpec {
@@ -49,8 +51,8 @@ struct ToolSpec {
     input_schema: &'static str,
     output_schema: &'static str,
     /// Drives the `readOnlyHint` annotation: `true` for the read tools, `false`
-    /// for the three write tools (`file_note_to_project`, `add_glossary_term`,
-    /// `update_action_item`).
+    /// for the four write tools (`file_note_to_project`, `add_glossary_term`,
+    /// `update_action_item`, `waive_action_item`).
     read_only: bool,
 }
 
@@ -135,13 +137,24 @@ const TOOLS: &[ToolSpec] = &[
         output_schema: include_str!("../schemas/update_action_item.output.json"),
         read_only: false,
     },
+    ToolSpec {
+        name: "waive_action_item",
+        title: "Waive action item",
+        description: WAIVE_ACTION_ITEM_DESCRIPTION,
+        input_schema: include_str!("../schemas/waive_action_item.input.json"),
+        output_schema: include_str!("../schemas/waive_action_item.output.json"),
+        read_only: false,
+    },
 ];
 
 /// The `readOnlyHint`/`destructiveHint`/`idempotentHint`/`openWorldHint` block.
 /// `readOnlyHint` tracks the tool's `read_only` flag; the other three hints are
-/// uniform across all ten tools (every write is a reversible upsert or a state
-/// transition that can be asked for again the other way, so none is destructive
-/// — see `docs/MCP_TOOL_SURFACE.md` §8/§9/§10).
+/// uniform across all eleven tools (every write is a reversible upsert or a
+/// state transition that can be asked for again the other way, so none is
+/// destructive — see `docs/MCP_TOOL_SURFACE.md` §8/§9/§10/§11). Note what
+/// `destructiveHint: false` claims for `waive_action_item`: the ledger state is
+/// reversible, while the dated line it leaves in the note deliberately is not
+/// removed by the reverse call. Annotate, never destroy.
 fn tool_annotations(read_only: bool) -> Value {
     json!({
         "readOnlyHint": read_only,
@@ -324,15 +337,17 @@ mod tests {
                 "file_note_to_project",
                 "add_glossary_term",
                 "update_action_item",
+                "waive_action_item",
             ]
         );
 
-        // The three write tools carry readOnlyHint: false; the reads carry
-        // true. Every other hint is uniform across the ten.
+        // The four write tools carry readOnlyHint: false; the reads carry
+        // true. Every other hint is uniform across the eleven.
         let write_tools = [
             "file_note_to_project",
             "add_glossary_term",
             "update_action_item",
+            "waive_action_item",
         ];
         for tool in tools {
             let name = tool["name"].as_str().unwrap();

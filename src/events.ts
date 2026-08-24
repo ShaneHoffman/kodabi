@@ -34,9 +34,9 @@ export const SESSIONS_CHANGED_EVENT = "sessions:changed";
 /** A commitment-ledger mutation a person made: a close, waive, snooze, reopen,
  * untrack, an answered evidence claim, a manual track, or a change to a
  * meeting's tracking mode. Distinct from `vault:changed` for the same
- * reason `sessions:changed` is: waiving or snoozing touches no note. A ticked
- * checkbox emits both, because it really does write Markdown. Mirrors
- * `events::LEDGER_CHANGED_EVENT`. */
+ * reason `sessions:changed` is: snoozing touches no note. The mutations that do
+ * write Markdown emit both, a ticked checkbox and a waive (which leaves a dated
+ * line under the item). Mirrors `events::LEDGER_CHANGED_EVENT`. */
 export const LEDGER_CHANGED_EVENT = "ledger:changed";
 
 /** Post-capture transcription progress, as a tagged-status payload: `queued`

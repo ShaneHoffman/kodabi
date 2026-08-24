@@ -242,7 +242,7 @@
         },
         "source": {
           "type": "string",
-          "description": "Frontmatter source: a capture keyword (transcript | quick-capture | chat | import | manual) or a repo-relative path to the raw artifact. Disambiguation: a value exactly equal to a keyword is that keyword; anything else is the path."
+          "description": "Frontmatter source: a capture keyword (transcript | quick-capture | chat | import | manual | digest) or a repo-relative path to the raw artifact. Disambiguation: a value exactly equal to a keyword is that keyword; anything else is the path."
         },
         "confidence": {
           "type": [

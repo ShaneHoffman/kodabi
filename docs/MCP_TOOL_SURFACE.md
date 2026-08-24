@@ -75,7 +75,7 @@ Claude Code MCP reference (`code.claude.com/docs/en/mcp`) and the MCP tool speci
   `READ_TOOL_PERMISSIONS` in `crates/kodabi-core/src/terminal.rs` — a read tool added to the server
   must be added there too, or it will prompt), and the write tools
   (`"mcp__kodabi__file_note_to_project"`, `"mcp__kodabi__add_glossary_term"`,
-  `"mcp__kodabi__update_action_item"`) are deliberately left off the allow-list, so approval stays meaningful per-tool. The server performs no confirmation of
+  `"mcp__kodabi__update_action_item"`, `"mcp__kodabi__waive_action_item"`) are deliberately left off the allow-list, so approval stays meaningful per-tool. The server performs no confirmation of
   its own; approval is entirely Claude Code's permission model — and how the prompt reaches the user
   depends on the consumer (below).
 - **Two in-app consumers share this wiring**, both spawned against the same generated `.mcp.json`
@@ -147,13 +147,14 @@ Claude Code MCP reference (`code.claude.com/docs/en/mcp`) and the MCP tool speci
 | `file_note_to_project` | File note to project | **write** | Route/re-route a note (the correction loop) |
 | `add_glossary_term` | Add glossary term | **write** | Upsert a project glossary term |
 | `update_action_item` | Update action item | **write** | Tick/untick an item and move its commitment |
+| `waive_action_item` | Waive action item | **write** | Set a commitment aside, leaving a dated line in the note |
 
 `get_note` is not in the ticket's §3.2 candidate list; it closes a gap the seven candidates leave
 open (see [What this hands downstream](#what-this-hands-downstream) and the milestone walkthrough
 below) — `search_notes` returns only snippets, and Phase 3 chat needs to quote full note content.
 
 All `annotations` objects use the four MCP tool-annotation hints: `readOnlyHint`, `destructiveHint`,
-`idempotentHint`, `openWorldHint`. The seven reads set `readOnlyHint: true`; all three writes set
+`idempotentHint`, `openWorldHint`. The seven reads set `readOnlyHint: true`; all four writes set
 `readOnlyHint: false` and `destructiveHint: false` (mutating, but reversible with no data loss).
 
 ---
@@ -771,6 +772,116 @@ ticking an already-ticked box is a no-op success. Local-only.
 Needs `KODABI_LEDGER_DB` (see [Server & wiring](#server--wiring)). Unset, this tool refuses
 **before touching the vault**, so a configuration fault can never leave a ticked box with nothing
 recorded against it.
+
+---
+
+### 11. `waive_action_item` — *write*
+
+Set a tracked commitment aside as deliberately not happening.
+
+The third judgement a checkbox cannot spell, beside closed and untracked. Waiving is for a
+commitment that was real and stopped mattering; ticking claims it was done, and untracking claims it
+was never this ledger's business. **The checkbox is never touched** — waived is not done, and a tick
+would say the opposite of the verdict. Instead the note gets a date-only line beneath the item,
+`  - Waived <YYYY-MM-DD>.`, the waive sibling of the closure annotation in
+[`FRONTMATTER_SCHEMA.md`](FRONTMATTER_SCHEMA.md). There is no reason field, by design: the person
+decided, and the note records the decision and the day, not an argument for it.
+
+**The ledger moves first, then the note** — the reverse of §10, and the inversion is the point.
+There the note's `- [x]` *is* the source of truth, so writing it first leaves a partial failure
+self-correcting. Here the ledger row is the fact and the line is its echo, while the transition
+table is a real gate: a closed, superseded or untracked entry cannot be waived. Writing the note
+first would risk a line announcing a waive the ledger then refused, which is a lie in the file the
+person trusts most. Convergence still rides the note write exactly as it does for a tick: the `.md`
+change is what an open app's watcher sees, and its reconcile — which never reads these lines, they
+are inert to the grammar — emits `vault:changed`, at which point every window refetches and sees the
+row this process committed. When the annotation is skipped or fails, no file event fires and an open
+window converges on its next one; the database is the durable record either way.
+
+Waiving something already waived is an ordinary success that writes nothing at all
+(`note_outcome: "already_waived"`). It deliberately does **not** backfill a missing line: stamping
+today's date onto a judgement made last month would misreport when it was made, so an annotation
+lost to a failed write stays lost and the ledger remains the record.
+
+Two things are business errors rather than half-actions, because unlike a tick a waive has no
+note-side fact it can record on its own: an item the ledger does not track at all, and a state the
+transition table refuses (which covers closed, superseded and untracked alike, naming both states so
+the caller can reopen first). Neither writes to the note. One asymmetry is shared with §10: a
+commitment whose source line has been edited away has no `note_id` + `item_id` to name it by, and
+can only be waived in the app, by entry id.
+
+- **title:** `Waive action item`
+- **description:** `Waive a tracked commitment: mark it deliberately not happening, without ticking its checkbox. Records the judgement in the commitment ledger and writes a date-only line under the item in its source note ("- Waived <date>."). Use for a commitment that was real and stopped mattering, not for one that was done (use update_action_item) or one that was never yours to track. Identify the item by note_id + item_id from list_commitments, list_outstanding_items, or get_note. Undo with update_action_item done=false, which reopens the commitment; the note line stays as a dated record.`
+
+**inputSchema**
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["note_id", "item_id"],
+  "properties": {
+    "note_id": { "$ref": "#/$defs/NoteId", "description": "The note holding the action item's source line." },
+    "item_id": { "type": "string", "minLength": 1, "description": "The action item's id, as list_outstanding_items, get_note, or list_commitments report it." }
+  }
+}
+```
+
+**outputSchema**
+```json
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["source", "entry", "note_annotated", "note_outcome"],
+  "properties": {
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "item_id"],
+      "properties": {
+        "id": { "$ref": "#/$defs/NoteId" },
+        "item_id": { "type": "string", "description": "The action item that was targeted." }
+      },
+      "description": "What the call acted on, echoed back."
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["entry_id", "state", "closed_via", "updated_at"],
+      "properties": {
+        "entry_id": { "$ref": "#/$defs/EntryId" },
+        "state": { "$ref": "#/$defs/EntryState" },
+        "closed_via": {
+          "type": ["string", "null"],
+          "enum": ["manual", "conversation", "github", null],
+          "description": "Null for a waive. A waive is not a closure, so nothing established one."
+        },
+        "updated_at": { "$ref": "#/$defs/IsoDateTime" }
+      },
+      "description": "The commitment as it now stands. Never null: an item the ledger does not track cannot be waived, and is reported as a business error instead."
+    },
+    "note_annotated": { "type": "boolean", "description": "Whether this call wrote the line into the note. False is an ordinary outcome, not a failure: the ledger holds the judgement either way." },
+    "note_outcome": {
+      "type": "string",
+      "enum": ["annotated", "already_annotated", "already_waived", "note_missing", "item_missing", "failed"],
+      "description": "What happened to the note file. 'annotated' wrote the line. 'already_annotated' found today's line already there, which is a success. 'already_waived' means the commitment was waived before this call, so nothing was written at all: the earlier line already records the day the judgement was made, and re-dating it would misreport when. 'note_missing' and 'item_missing' mean the source line moved on; the waive still stands. 'failed' means the file write errored after the ledger had committed, which is reported rather than raised for the same reason."
+    }
+  }
+}
+```
+
+**annotations**
+```json
+{ "readOnlyHint": false, "destructiveHint": false, "idempotentHint": true, "openWorldHint": false }
+```
+Mutating but non-destructive, with one honest caveat: the *ledger state* is what is reversible, by
+reopening. The dated line the waive leaves in the note is deliberately **not** removed by that
+reopen — annotate, never destroy — because it records what was decided on the day it was decided,
+which the reversal does not make untrue. Idempotent: a second waive is a no-op success. Local-only.
+
+Needs `KODABI_LEDGER_DB` (see [Server & wiring](#server--wiring)). Unset, this tool refuses before
+anything happens, which here is trivially true: the ledger is the first thing it touches.
 
 ---
 

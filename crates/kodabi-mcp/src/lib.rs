@@ -2,10 +2,11 @@
 //! tool surface of `docs/MCP_TOOL_SURFACE.md` over `kodabi-core`.
 //!
 //! The server name is `kodabi`; it speaks newline-delimited JSON-RPC on
-//! stdin/stdout and exposes ten tools: seven read (`search_notes`, `get_note`,
-//! `get_meeting_transcript`, `list_outstanding_items`, `list_commitments`,
-//! `list_projects`, `get_project_context`) and three write
-//! (`file_note_to_project`, `add_glossary_term`, `update_action_item`). Tool
+//! stdin/stdout and exposes eleven tools: seven read (`search_notes`,
+//! `get_note`, `get_meeting_transcript`, `list_outstanding_items`,
+//! `list_commitments`, `list_projects`, `get_project_context`) and four write
+//! (`file_note_to_project`, `add_glossary_term`, `update_action_item`,
+//! `waive_action_item`). Tool
 //! logic lives in `kodabi-core` (the core-vs-shell rule); this crate is protocol
 //! plumbing plus per-tool schema/envelope handling.
 //!

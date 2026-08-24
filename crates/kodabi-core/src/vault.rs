@@ -427,6 +427,24 @@ const CHECKED_MARKER: &str = "- [x] ";
 /// literal to recognize and skip.
 pub const ANNOTATION_PREFIX: &str = "- Closed ";
 
+/// The waive sibling of [`ANNOTATION_PREFIX`], carried by every line
+/// [`annotate_action_item_waived`] writes.
+///
+/// Inert for exactly the same reason: a line starting `- Waived ` can never
+/// start `- [ ] ` or `- [x] `, so the grammar skips it and the item's id is
+/// unchanged. It is a *second* fixed literal rather than a free-form one so the
+/// widened parser this comment anticipates still has a closed list to skip —
+/// that list is [`ANNOTATION_PREFIXES`].
+pub const WAIVED_ANNOTATION_PREFIX: &str = "- Waived ";
+
+/// Every prefix this module writes, and so the definition of an *annotation
+/// run*: the block of machine-written lines sitting directly under an item.
+///
+/// [`insert_annotation`] scans the run to decide whether it has already said
+/// what it is about to say. Keeping the list closed is what lets that scan stop
+/// at the first line a person wrote.
+const ANNOTATION_PREFIXES: [&str; 2] = [ANNOTATION_PREFIX, WAIVED_ANNOTATION_PREFIX];
+
 /// Indentation that renders the annotation as a sub-bullet of the item it
 /// belongs to. Purely cosmetic to the parser (which trims), load-bearing to the
 /// reader.
@@ -472,6 +490,73 @@ pub fn annotate_action_item(
     closed_on: &str,
     annotation: &str,
 ) -> Result<AnnotateOutcome> {
+    insert_annotation(
+        vault_root,
+        id,
+        action_item_id,
+        format!("{ANNOTATION_INDENT}{ANNOTATION_PREFIX}{closed_on}: {annotation}"),
+    )
+}
+
+/// Records, beneath an action item, that the commitment it carries was waived.
+///
+/// The waive sibling of [`annotate_action_item`], and deliberately a plainer
+/// line: `  - Waived <YYYY-MM-DD>.`, a date and nothing else. A closure has a
+/// story worth telling (what evidence closed it, and where); a waive is a
+/// judgement, and there is no reason field to render — the person decided it is
+/// not happening, and the note says only that, and when.
+///
+/// **The checkbox is never ticked**, here least of all: waived is not done, and
+/// a tick would claim the opposite of what the line says. The ledger row is the
+/// operational truth about the commitment's state; this line is the echo that
+/// makes that truth visible to someone reading the Markdown, and — because it
+/// is a file write — the event that lets a waive made outside the app converge
+/// into it.
+///
+/// **Reopening leaves the line.** Annotate, never destroy: the line records
+/// that a waive was made on that day, which stays true afterwards. A commitment
+/// waived again later gets its own dated line rather than an edit to this one.
+///
+/// Same inertness and the same best-effort contract as
+/// [`annotate_action_item`].
+pub fn annotate_action_item_waived(
+    vault_root: &Path,
+    id: &NoteId,
+    action_item_id: &str,
+    waived_on: &str,
+) -> Result<AnnotateOutcome> {
+    insert_annotation(
+        vault_root,
+        id,
+        action_item_id,
+        format!("{ANNOTATION_INDENT}{WAIVED_ANNOTATION_PREFIX}{waived_on}."),
+    )
+}
+
+/// Locates an item and inserts one already-rendered annotation line under it.
+///
+/// The shared body behind both public annotators; they differ only in the line
+/// they hand it.
+///
+/// **Idempotency is a scan of the whole annotation run, not just the next
+/// line.** The run is the contiguous block of lines below the item whose
+/// content starts with one of [`ANNOTATION_PREFIXES`]; the first line that does
+/// not — blank, prose, a sub-bullet a person wrote, another checkbox — ends it.
+/// Scanning the run rather than position `+1` is what makes a retry safe once
+/// the two shapes can interleave: a `- Waived` line inserted above an older
+/// `- Closed` line would otherwise hide it, and the closure provider's next
+/// retry would stack a duplicate. Deciding the run by known prefixes is what
+/// keeps the scan from ever reading, or writing past, a person's own text.
+///
+/// The match is on the **exact line**, so a re-waive on a later day appends a
+/// second, truthful entry while a same-day retry writes nothing. New lines go
+/// at the top of the run, nearest the item.
+fn insert_annotation(
+    vault_root: &Path,
+    id: &NoteId,
+    action_item_id: &str,
+    annotation_line: String,
+) -> Result<AnnotateOutcome> {
     // Located vault-wide, not by a stored project: a note the ledger linked
     // last month may have been re-filed since, and the id is what never moves.
     let Some((_, listed)) = find_note_anywhere(vault_root, id)? else {
@@ -486,15 +571,19 @@ pub fn annotate_action_item(
         return Ok(AnnotateOutcome::ItemMissing);
     };
 
-    let annotation_line =
-        format!("{ANNOTATION_INDENT}{ANNOTATION_PREFIX}{closed_on}: {annotation}");
     let mut lines: Vec<&str> = listed.note.body.lines().collect();
     // Idempotent: a provider that retries after a crash must not stack
     // duplicate lines under one item.
-    if lines
-        .get(line_index + 1)
-        .is_some_and(|next| next.trim() == annotation_line.trim())
-    {
+    let already_said = lines[(line_index + 1).min(lines.len())..]
+        .iter()
+        .take_while(|line| {
+            let trimmed = line.trim_start();
+            ANNOTATION_PREFIXES
+                .iter()
+                .any(|prefix| trimmed.starts_with(prefix))
+        })
+        .any(|line| line.trim() == annotation_line.trim());
+    if already_said {
         return Ok(AnnotateOutcome::AlreadyAnnotated);
     }
     lines.insert(line_index + 1, &annotation_line);
@@ -3371,6 +3460,173 @@ mod tests {
             listed.note.body.matches("- Closed 2026-08-17").count(),
             1,
             "a retry must not stack duplicate lines"
+        );
+    }
+
+    #[test]
+    fn waived_annotation_writes_a_date_only_line_and_leaves_the_box() {
+        let vault = tempdir().unwrap();
+        let items = meeting_with_items(vault.path(), "Ops", "n_aaaaaa");
+        let id = NoteId::parse("n_aaaaaa").unwrap();
+        let target = &items[1];
+        let before = meeting::meeting_facts_for(
+            &find_note_anywhere(vault.path(), &id)
+                .unwrap()
+                .unwrap()
+                .1
+                .note,
+            vault.path(),
+        )
+        .unwrap()
+        .action_items;
+
+        let outcome =
+            annotate_action_item_waived(vault.path(), &id, &target.id, "2026-08-22").unwrap();
+
+        assert!(matches!(outcome, AnnotateOutcome::Annotated(_)));
+        let (_, listed) = find_note_anywhere(vault.path(), &id).unwrap().unwrap();
+        let lines: Vec<&str> = listed.note.body.lines().collect();
+        let item_line = lines
+            .iter()
+            .position(|line| line.contains("book the venue"))
+            .unwrap();
+        assert_eq!(
+            lines[item_line + 1],
+            "  - Waived 2026-08-22.",
+            "the line is a date and nothing else, directly under its item"
+        );
+        assert!(
+            lines[item_line].starts_with("- [ ] "),
+            "waived is not done, so the box must stay empty"
+        );
+        // Inert to the grammar: same items, same ids.
+        let after = meeting::meeting_facts_for(&listed.note, vault.path())
+            .unwrap()
+            .action_items;
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn waived_annotation_is_idempotent_for_the_same_day() {
+        let vault = tempdir().unwrap();
+        let items = meeting_with_items(vault.path(), "Ops", "n_aaaaaa");
+        let id = NoteId::parse("n_aaaaaa").unwrap();
+
+        annotate_action_item_waived(vault.path(), &id, &items[0].id, "2026-08-22").unwrap();
+        let second =
+            annotate_action_item_waived(vault.path(), &id, &items[0].id, "2026-08-22").unwrap();
+
+        assert_eq!(second, AnnotateOutcome::AlreadyAnnotated);
+        let (_, listed) = find_note_anywhere(vault.path(), &id).unwrap().unwrap();
+        assert_eq!(listed.note.body.matches("- Waived ").count(), 1);
+    }
+
+    #[test]
+    fn a_rewaive_on_a_later_day_appends_a_second_line() {
+        // Dedup is on the exact line, so a waive made again after a reopen is a
+        // new, truthful entry rather than a silent no-op.
+        let vault = tempdir().unwrap();
+        let items = meeting_with_items(vault.path(), "Ops", "n_aaaaaa");
+        let id = NoteId::parse("n_aaaaaa").unwrap();
+
+        annotate_action_item_waived(vault.path(), &id, &items[0].id, "2026-08-22").unwrap();
+        let later =
+            annotate_action_item_waived(vault.path(), &id, &items[0].id, "2026-09-04").unwrap();
+
+        assert!(matches!(later, AnnotateOutcome::Annotated(_)));
+        let (_, listed) = find_note_anywhere(vault.path(), &id).unwrap().unwrap();
+        assert_eq!(listed.note.body.matches("- Waived ").count(), 2);
+    }
+
+    #[test]
+    fn the_dedup_scan_covers_the_whole_annotation_run() {
+        // The two shapes interleave, and each new line lands at the top of the
+        // run — so a retry has to scan past its sibling to find itself.
+        let vault = tempdir().unwrap();
+        let items = meeting_with_items(vault.path(), "Ops", "n_aaaaaa");
+        let id = NoteId::parse("n_aaaaaa").unwrap();
+        let item = &items[0];
+
+        annotate_action_item(vault.path(), &id, &item.id, "2026-08-17", "done.").unwrap();
+        annotate_action_item_waived(vault.path(), &id, &item.id, "2026-08-22").unwrap();
+
+        assert_eq!(
+            annotate_action_item(vault.path(), &id, &item.id, "2026-08-17", "done.").unwrap(),
+            AnnotateOutcome::AlreadyAnnotated,
+            "the closure line is still there, one row further down"
+        );
+        assert_eq!(
+            annotate_action_item_waived(vault.path(), &id, &item.id, "2026-08-22").unwrap(),
+            AnnotateOutcome::AlreadyAnnotated
+        );
+        let (_, listed) = find_note_anywhere(vault.path(), &id).unwrap().unwrap();
+        assert_eq!(listed.note.body.matches("- Closed ").count(), 1);
+        assert_eq!(listed.note.body.matches("- Waived ").count(), 1);
+    }
+
+    #[test]
+    fn the_annotation_run_stops_at_a_line_a_person_wrote() {
+        // Once somebody has put their own sub-bullet under the item, the writer
+        // no longer owns the layout below it: it appends rather than reaching
+        // past their text to dedup.
+        let vault = tempdir().unwrap();
+        let note = Note::new(
+            NoteId::parse("n_aaaaaa").unwrap(),
+            NoteType::Meeting,
+            Routing::Manual {
+                project: "Ops".to_string(),
+            },
+            "2026-08-01",
+            vec![Tag::parse("fixture").unwrap()],
+            Source::parse("manual").unwrap(),
+            "# Summary\n\nWe met.\n\n## Action items\n\n\
+             - [ ] You to book the venue.\n\
+             \x20 - checked three places, all booked out\n\
+             \x20 - Waived 2026-08-22.\n",
+        )
+        .unwrap();
+        note::write_note(vault.path(), &note, Some("kickoff")).unwrap();
+        let id = NoteId::parse("n_aaaaaa").unwrap();
+        let item = &meeting::meeting_facts_for(&note, vault.path())
+            .unwrap()
+            .action_items[0];
+
+        let outcome =
+            annotate_action_item_waived(vault.path(), &id, &item.id, "2026-08-22").unwrap();
+
+        assert!(matches!(outcome, AnnotateOutcome::Annotated(_)));
+        let (_, listed) = find_note_anywhere(vault.path(), &id).unwrap().unwrap();
+        assert_eq!(
+            listed.note.body.matches("- Waived 2026-08-22.").count(),
+            2,
+            "the stale line beyond the person's own is out of the run's reach"
+        );
+    }
+
+    #[test]
+    fn waived_annotation_reports_a_missing_note_or_item() {
+        let vault = tempdir().unwrap();
+        meeting_with_items(vault.path(), "Ops", "n_aaaaaa");
+
+        assert_eq!(
+            annotate_action_item_waived(
+                vault.path(),
+                &NoteId::parse("n_zzzzzz").unwrap(),
+                "a_111111",
+                "2026-08-22",
+            )
+            .unwrap(),
+            AnnotateOutcome::NoteMissing
+        );
+        assert_eq!(
+            annotate_action_item_waived(
+                vault.path(),
+                &NoteId::parse("n_aaaaaa").unwrap(),
+                "a_notreal",
+                "2026-08-22",
+            )
+            .unwrap(),
+            AnnotateOutcome::ItemMissing
         );
     }
 
